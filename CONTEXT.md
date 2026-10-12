@@ -20,6 +20,10 @@ Hyperlocal commerce platform connecting customers with local shops within roughl
 **Bargain**: A customer's offer of a price per unit for a chosen quantity on a bargain-enabled product, matched instantly against the shop's hidden floor price.
 **Floor price**: The Owner's hidden minimum price per unit for a bargain-enabled product. Never shown to customers.
 **Slot**: An owner-defined delivery time window with a maximum order capacity, used by Scheduled delivery.
+**Commission**: The platform's share of a delivered order's eligible product value. Delivered orders only; pickup orders and counter bills carry none.
+**Booking fee**: A fee on a completed self-pickup order, charged to the customer and optionally to the shop. Never called a delivery fee.
+**Contribution floor**: The minimum platform contribution an order must produce to be placeable. Configured per fulfilment route.
+**Statement**: A shop's weekly record of what it owes the platform. Money flows from shop to platform, never the reverse except by authorised manual adjustment.
 **Shopkeeper app**: The mobile surface for Owner and Staff. "Shopkeeper" is only a surface name.
 
 ## Retired and banned terms
@@ -74,16 +78,41 @@ An admin-managed global mapping of typed terms to catalog terms, applied to cust
 
 An append-only record of **admin actions** is written from day one. There is no UI for it in Phase 1. Scope is admin actions only; whether shop-side actions by an Owner or Staff are recorded is not decided.
 
+## Money
+
+Customers pay by **cash or UPI at delivery**. UPI uses the shop's own VPA, shown as a QR at handover, so the money lands in the shop's account and the platform never touches customer funds. There is no online prepaid gateway in Phase 1. Staff record the collected method per order.
+
+**The shop collects and the shop owes.** Every rupee the customer pays reaches the shop. The platform invoices what it earned and the shop pays the net on a weekly statement. "Shop payout" means the amount the shop retains, never a transfer from the platform. A period that nets in the shop's favour is settled by an authorised manual adjustment and an offline transfer.
+
+Unpaid platform earnings accrue as a balance visible to the shop and to Admin, warning at 80% of the shop's limit and auto-pausing new orders at 100%. The limit is unset and auto-pause is off until an admin sets it.
+
+Settlement runs weekly on Monday for the preceding Monday-to-Sunday period, aggregating an **immutable pricing snapshot** written at each order's placement. Adjustments are new ledger entries; a snapshot is never rewritten. The shop pays manually and an admin records the payment.
+
+Because nothing is prepaid and UPI is collected at handover, **there is no refund flow**. Cancellation is free before acceptance and allowed until the shop marks the order ready. A refusal at the door marks the order undelivered and charges no commission. Anything owed after delivery is an admin adjustment on the next statement, with the shop returning cash directly.
+
+Area Managers are paid a configurable share of the commission **actually collected** in their Area, in the weekly run but as a separate platform expense, never netted into a shop's statement.
+
+## Pricing engine
+
+`docs/product/revenue-system-spec.md` is authoritative for pricing and settlement mechanics and governs where it and a mockup disagree. In Phase 1 the data model is complete while the admin UI is reduced to global, category and shop scopes.
+
+Commission is computed per line on delivered orders, with the configured default base being eligible product value after shop-funded discounts and after any accepted bargain price, before platform-funded promotion value, excluding fees and taxes. **Pickup earns no product commission** — only an optional disclosed customer booking fee and an optional fixed shop booking fee, both on completed pickup, both shipping disabled, under pickup's own contribution rule. **Counter bills earn no commission** and carry no per-bill charge during the pilot, because charging per bill would give a shop reason to omit sales and corrupt the inventory the feature exists to keep accurate; a flat subscription is the preferred later alternative.
+
+The contribution floor is the ordinary viability guard, with a configurable minimum commission governing Bargain orders so an accepted offer is always honoured. When an order is not viable the published order is: reject an ineligible platform-funded promotion, apply only eligible disclosed fees within caps, offer a larger basket or pickup, then disable delivery checkout with a clear reason. Any exception below the floor is explicitly authorised and recorded with a reason.
+
+Delivery fees carry configurable platform and shop shares. Both a minimum cart and a small-cart fee exist, disclosed before checkout. Coupons are funded by the platform, the shop or an explicit split, one per order, with platform funding capped at the contribution surplus above the floor. There is no fines engine; Admin applies manual statement adjustments instead.
+
+**No rate, fee, floor, split, limit or booking fee is hardcoded.** An admin must configure the required values before a shop can receive orders; a shop with incomplete pricing configuration stays out of the customer feed and cannot accept orders, while its counter billing, inventory and catalog tools keep working.
+
 ## Downstream obligations
 
 These are unresolved and belong to named tickets. Do not invent rules for them here.
 
 - **Stock reservation** for scheduled slots and for bargain-pinned cart lines: Order lifecycle (#9) and Inventory and counter billing (#11). A slot booked at night holds stock the shop may sell over the counter by morning.
-- **Commission base on a bargained price**, and the **Area Manager payout formula**: Commission, fees and coupon funding (#15).
-- **Area Manager payouts in the weekly settlement run**: Money direction and settlement (#14).
 - **Per-product bargain toggle and floor price** in the data model: Catalog model (#10).
-- **Delivery fee structure**: Commission, fees and coupon funding (#15).
+- **Free-cancellation window** after a partial acceptance, and the cancellation state machine: Order lifecycle (#9).
 - **Maximum permitted service radius** per shop: a config value, not yet set.
+- **Every pricing rate, fee, floor, delivery split, credit limit and booking fee**: deliberately unset, to be configured per shop after testing real baskets during the pilot.
 - **Re-inviting a deactivated staff phone number**: Login and handover OTP (#18).
 - **Whether shop-side actions are recorded** (which staff member rejected an order or edited stock), and where. The admin action record covers admin actions only, so a shop currently has no internal accountability trail.
 - **Whether Complaints needs its own decision ticket** beyond the triage that put the admin module in Phase 1.
