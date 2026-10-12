@@ -1,4 +1,9 @@
-# Reference repositories: keep locally, don't track in YGo
+# Reference material: keep locally, never track in YGo.
+# Blanket rule — References/ holds third-party repositories, confidential documents
+# and .env files. Nothing in it belongs in a public repository.
+/References/
+
+# Kept for clarity; the blanket rule above already covers these.
 /References/Usthaan/usthaan-lekha/
 /References/Usthaan/usthaan-media-ingestion-service/
 /References/Usthaan/usthaan-sthaan/
