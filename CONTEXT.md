@@ -42,6 +42,24 @@ Hyperlocal commerce platform connecting customers with local shops within roughl
 
 Customer Mobile, Shopkeeper Mobile and Admin Web. Shopkeeper Web and a separate Delivery Staff app are deferred; the delivery screens are a tab inside the Shopkeeper app.
 
+## Platforms, devices, language and themes
+
+**Both Android and iOS are in scope from day one, from one codebase.** Nothing in the design, the component layer or the native surface may assume Android only. The two platforms differ only in their release gates: the **Google Play release gates the soft launch** because of the fourteen-day closed test, while the **Apple submission does not** and goes in as soon as the Apple account clears. The Apple individual enrolment is the one unverified item, costs 99 USD a year, has been reported to fail at the payment step from India, and should be started early so it is a known cost or a known problem rather than a surprise.
+
+iOS limits background audio, so the repeating acceptance alarm cannot behave the same way there: it degrades to a time-sensitive push with a custom sound plus the in-app alarm while the app is open, with the founder phoning the shop as the stage-one backstop. **Pilot shops are therefore advised to run the Shopkeeper app on an Android phone.** iOS is supported at the counter, not recommended. The Customer app is unaffected.
+
+**Every surface is English only in Phase 1**, with no Devanagari in the interface and **every string externalised from day one** so that Hindi is later a translation pass and never a hunt for hardcoded text. The search layer is separate and already matches Hindi typed in English letters through the synonym table.
+
+**Android 10 is the floor**, covering roughly 95% of Indian Android traffic by web-traffic sampling, which skews new; the real figure is lower and wants a sanity check against the phones seen on the shop visits. The iOS minimum follows whatever the chosen cross-platform toolchain sets. Mobile is **phone and portrait only** on entry-level hardware, 2 GB RAM and slow storage assumed, with no tablet layout and no landscape. **Admin Web is desktop-first** on an evergreen browser, usable down to tablet width, with no phone layout.
+
+A shop needs **no dedicated device, no device binding and no install limit**: Owner and Staff each sign in on their own phone, each with its own offline cache and queue. The one documented expectation, not an enforced rule, is that the phone kept at the counter permits notifications and sound, because that is the device the acceptance alarm must reach.
+
+**Light and dark both ship**, following the system setting with a per-account override and no pinning to light. Colour is expressed **only** through semantic tokens, with no literal colour value in any screen. Every surface is checked in both themes, including the ones easily missed: maps, delivery proof photos, the capture screen, empty states, the alarm screen and every error state. **The counter bill and order receipt PDFs stay light in both themes** — a shared, saved and sometimes printed document is not a screen, and the theme stops at the app's edge.
+
+Formats are fixed: **Indian digit grouping** (1,00,000), **two decimals on every money amount without exception** because measured units produce genuine paise, **dd/mm/yyyy** dates, **12-hour time with am/pm**, and **Asia/Kolkata as the only display timezone with everything stored in UTC**. System font scaling is honoured to **130%** and tested there; nothing pins its own font size.
+
+Accessibility commits to **AA text contrast and 48 x 48 dp minimum tap targets, in both themes**, verified during design and again during implementation. Systematic screen-reader and TalkBack testing, a full audit and any certification are **deferred, and stated as deferred**. **No claim of full WCAG 2.1 AA conformance is made anywhere without the verification that would support it**, whatever the reference PRD's wording implies.
+
 ## Roles and permissions
 
 Two roles per shop: **Owner** and **Staff**.
@@ -130,7 +148,7 @@ In Phase 1: a plain expiry date per listing with no automatic pricing behaviour,
 
 ## Counter billing and offline
 
-A **counter bill** records catalog lines or a manual line, a bill-level discount, an optional customer name and phone, and a payment mode of **cash or UPI only**. Output is a PDF through the phone's share sheet; there is no printer. There is no unpaid mode and no customer credit ledger. Owner and Staff may bill; **only the Owner voids a bill**, within a configurable 24 hours, with a reason, as a new movement that returns stock and never edits the original. There is no partial return and no line edit. A manual line's text is checked against a small admin denylist that **flags the bill for review and never blocks it**.
+A **counter bill** records catalog lines or a manual line, a bill-level discount, an optional customer name and phone, an optional **"customer agreed to receive offers from YGo"** consent tick stamped with the bill, date and shop, and a payment mode of **cash or UPI only**. Output is a PDF through the phone's share sheet, carrying a YGo download QR and short link; there is no printer. There is no unpaid mode and no customer credit ledger. Owner and Staff may bill; **only the Owner voids a bill**, within a configurable 24 hours, with a reason, as a new movement that returns stock and never edits the original. There is no partial return and no line edit. A manual line's text is checked against a small admin denylist that **flags the bill for review and never blocks it**.
 
 Offline: **counter billing, stock adjustment, marking out of stock, and the delivery screens**. Online only: accepting, rejecting or partially accepting an order, marking ready, price and catalog edits, and anything about money owed. The device caches its own listings, stock and today's accepted orders, queues up to a configurable 500 actions or 72 hours, and then blocks new billing until it syncs.
 
@@ -152,7 +170,21 @@ The login OTP is 6 digits, valid 5 minutes, 5 wrong attempts then a 15-minute lo
 
 The **handover OTP** is 4 digits, generated at acceptance and carried with the order, revealed in the customer app at Items OK or when the check timer ends, 3 attempts then a cooldown and 6 in total. Offline it verifies against a per-order salted hash, and **the server re-validates every queued delivery on sync**, flagging a mismatch for Admin. The same OTP completes a self-pickup at the counter, without the timer or photo. The only fallback is **a photo plus a required reason**, which delivers the order but flags it as a **proof exception**, counted per shop and per deliverer.
 
-Because the soft launch ships as a public Play release, **Play review is on the critical path**: the reviewer demo account, now keyed to an email address, in-app account deletion (#26) with the publicly reachable deletion-request URL beside it, a published privacy policy and a completed Data safety declaration. DLT and SMS-provider onboarding is a blocker for the official launch, not the soft launch.
+Because the soft launch ships as a public Play release, **Play review is on the critical path**: the reviewer demo account, now keyed to an email address, in-app account deletion with the publicly reachable deletion-request page beside it, a published privacy policy and a completed Data safety declaration. DLT and SMS-provider onboarding is a blocker for the official launch, not the soft launch.
+
+## Account deletion and data retention
+
+A **Customer deletes their own account** from Settings, in two taps, with no reason required. An **Owner or Staff member requests deletion in the app and Admin processes it**; an Owner is blocked while the shop is Live or a statement is outstanding, and the app names which of the two is blocking. Staff deletion removes the person's identity and leaves the deactivated actor on their past transitions and bills.
+
+**Deletion is blocked while any order is in a non-terminal status**, with that stated as the reason; where cancellation is still allowed the flow offers cancel-then-delete. There is no scheduled deletion that fires later.
+
+**Access ends immediately** — sessions revoked and refresh tokens invalidated — with **no self-service undo**, an **Admin restore available within 7 days**, and anonymisation at the 30-day bound. **Hard-deleted**: phone, email, name, saved addresses and map pins, push tokens, waitlist captures, search history, bargain offer history, delivery proof photos and handover OTP hashes. **Anonymised in place**: order rows, keeping the order id, the placement snapshot's lines and amounts, the shop, the timestamps and the commission basis against a **stable opaque pseudonym**. Those anonymised financial records are retained **eight years**, covering both the income-tax and GST windows.
+
+A **deleted phone number may sign up again immediately**, as a new account with no history; anonymised orders never reattach. The shop keeps every past order, with the customer shown as **"Deleted customer"**, name, phone and full address removed, and only the Area and distance band kept for reporting.
+
+The walk-in name and phone on a counter bill belongs to someone who usually holds no account, so an account deletion never touches it. It is kept as the shop's own record; **only numbers carrying the consent tick are ever marketable**, and **no platform messaging reaches them before stage two**, when it goes out DLT-registered, DND-scrubbed and consent-only with an opt-out. The consent tick is built in Phase 1 because consent cannot be obtained retroactively.
+
+A **public deletion-request page** on the marketing domain takes a phone number, the email on file and the request type, **deletes nothing directly**, verifies by emailing a code, and feeds an Admin queue worked inside the 30-day window. A number with no account gets the same neutral response, so the page cannot be used to discover who is a customer, and it accepts a free-text request from someone with no account at all. It must exist **before Play review**.
 
 ## Launch stages and tax posture
 
@@ -205,8 +237,9 @@ These are unresolved and belong to named tickets. Do not invent rules for them h
 - **Offline sync transport, idempotency and replay**: Offline sync approach (#20). The policy — what works offline, the queue limits and the conflict rules — is settled in Counter billing and offline above.
 - **The SMS or WhatsApp OTP provider**: not chosen. Its onboarding blocks the official launch, not the soft launch.
 - **Account recovery when a customer loses access to their email**: derivable as an Admin email change with a recorded reason and no self-service path until SMS is live, but it has not been separately confirmed.
-- **Customer account deletion and data retention**: Account deletion and data retention (#26), now a soft-launch blocker because of the public Play release.
+- **Retention rules for shop data**, as distinct from customer data: still unowned. Customer deletion and retention is settled in Account deletion and data retention above.
 - **Maximum permitted service radius** per shop: a config value, not yet set.
+- **The Apple individual developer enrolment**: not started. It is the only platform item that cannot be solved by writing code, it has been reported to fail at the payment step from India, and it gates the iOS submission rather than the soft launch.
 - **A food-regulatory adviser's review of the excluded-goods list**, and the platform's own FSSAI Central licence as an e-commerce food business: both belong to stage two, and neither exists yet. The seller-level FSSAI requirement for shops selling through an operator is unsettled across sources.
 - **Caps on the shop-wide discount**: Commission, fees and coupon funding (#15) owns the rule; nothing is set.
 - **Notification events and recipients**: derivable from the #9 state machine, but no ticket owns them.
