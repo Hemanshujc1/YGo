@@ -31,9 +31,10 @@ Every control below can be enabled, disabled, scheduled, changed, and scoped. No
 | Other customer fees | Named fee, trigger, formula, cap, recipient split, tax handling, display text; avoid overlapping fees for the same purpose |
 | Minimum cart | Minimum eligible product value for checkout or delivery, with exclusions and alternatives |
 | Promotions | Issuer, funding source and split, eligibility, expiry, usage limit, stacking order, discount formula and cap, applicable lines and fees |
+| Shop-wide discount | Owner-configured and shop-funded, in one of two forms only: a percentage with an optional maximum amount, or a flat amount with a required minimum order value. Bounded by the maximum effective shop-funded discount percentage below. See the dedicated section |
 | Operating costs | Estimated payment, support, refund allowance, and other variable costs by applicable payment and fulfilment route |
 | Shop terms | Commission overrides, delivery responsibility, payout schedule, campaign participation, negotiated caps |
-| Guardrails | Maximum customer charges, minimum shop payout or merchant margin where agreed, exception handling, subsidy budget |
+| Guardrails | Maximum customer charges, minimum shop payout or merchant margin where agreed, exception handling, subsidy budget, and the **maximum effective shop-funded discount percentage** — global default 20 per cent, with per-shop overrides |
 
 The administrator should be able to preview and publish a rule, see its effective scope, schedule its start and end, and inspect its change history. A published rule applies to new quotes; existing placed orders retain their pricing snapshot.
 
@@ -77,6 +78,51 @@ Shop payout = shop product proceeds after shop-funded discounts
 "Shop payout" names the amount the shop **retains** from money it has already collected, not a transfer from the platform. The shop collects every rupee the customer pays, in cash or by UPI direct to its own account, and the periodic statement shows what it therefore owes the platform. An exceptional period in which the platform owes the shop is settled by an explicitly authorised manual adjustment and an offline transfer; the promotion budget rule below makes that rare but must not be assumed to make it impossible.
 
 The platform's *gross receipts*, *contribution*, and *accounting profit* are different measures. The floor above governs contribution. Do not count taxes collected for remittance or the shop's share of a fee as platform earnings. Configure who bears refunds, cancellations, payment charges, and promotional costs; post later adjustments to the ledger rather than rewriting the original order snapshot.
+
+## Shop-funded discount forms and the effective-discount cap
+
+The shop-wide discount is an Owner-configured, shop-funded reduction on eligible product value. It takes **two forms**, and no other.
+
+**Percentage with an optional maximum amount.** `d = min(round_half_up(pct × base), max_amount)`, where `max_amount` is optional. "10% off up to ₹20" is this form. The maximum amount only ever reduces the discount, never raises it.
+
+**Flat amount with a required minimum order value.** `d = flat` when `base >= min_order_value`, and the rule is simply not applicable otherwise. "₹200 off on orders of ₹1,000 or more" is this form. The minimum order value is **required** on this form, not optional, because a flat amount without one has no bounded effective percentage.
+
+In both, `base` is the **pre-discount eligible product value**: line totals for eligible lines, each already rounded half-up to two decimals, excluding negotiated lines and any excluded category or product. The base **never** includes delivery, booking, small-cart or other fees, and never includes taxes. A flat rule's minimum order value is tested against that same pre-discount base, so fees can never qualify a basket for a discount. The configured minimum cart is likewise tested pre-discount, so a discount can never push an order below the minimum that let it check out.
+
+**At most one shop-wide discount applies to an order.** Where several are eligible, the one producing the largest customer benefit wins, with a deterministic tie-break. Two percentage rules must never compound.
+
+### The effective-discount cap
+
+`effective discount percentage = d / base`. A configurable **maximum effective shop-funded discount percentage** bounds it, with a **20 per cent default**, a global scope and per-shop overrides, resolved by the ordinary precedence above.
+
+This is the one number in this document stated as a default rather than a symbol, and it does not breach the rule above: a guardrail default bounds what an Owner may configure and earns nobody anything, where a rate would. The rupee figures in this section are illustrations of each form, not configured amounts.
+
+The cap is enforced at **configuration time**, on each form's worst case, so an invalid rule cannot be published:
+
+- Percentage form: the worst case is `pct` itself. Require `pct <= cap`.
+- Flat form: the worst case is at exactly the minimum order value. Require `flat / min_order_value <= cap`, equivalently `min_order_value >= flat / cap`. At a 20 per cent cap, a ₹200 flat discount needs a minimum order value of at least ₹1,000 — which is why that example is well formed.
+
+At **order time** the engine asserts `d <= cap × base`. Given the validation above this is unreachable, which is the point: it is a money invariant and a breach is a defect, so the quote fails loudly rather than silently clamping to the cap. Silent clamping would quote a customer a different number from the one the shop advertised.
+
+**Lowering the cap does not retro-clamp.** When an admin lowers it, existing rules are re-validated and those that now breach it are **paused and their Owner notified**, naming the rule. A paused rule stops being offered; it is never quietly reduced.
+
+### Separation of funding sources
+
+Shop-funded and platform-funded discounts are **separate amounts at every stage** — in the quote, in the ledger, and in the immutable placement snapshot — each carrying the rule id and rule version that produced it. There is no single `discount` field anywhere.
+
+This is load-bearing rather than tidy. The commission base is eligible product value **after** shop-funded discounts and **before** platform-funded promotion value. Merging the two would shrink the base by the platform's own promotional spend, and the platform would under-bill itself on every promoted order.
+
+Because commission is computed per line, an order-level shop-funded discount is **apportioned across eligible lines pro rata by line total**, in paise, with the rounding remainder assigned to the largest eligible line and a deterministic tie-break. The apportioned parts must sum exactly to the order-level amount; a discount that does not reconcile to its parts is the defect that makes a settlement unarguable only until someone checks it.
+
+### What this protects, and what it does not
+
+Stated plainly because the distinction is easy to lose: **this is platform-loss prevention, not shop-profit protection.**
+
+What is protected: the platform's contribution, by the floor; the platform's promotional spend, bounded by the contribution surplus above that floor; and the commission base, by the separation above. The effective-discount cap protects against a **misconfiguration** — a 90 entered where 9 was meant — and against a discount quietly collapsing the commission base.
+
+What is **not** protected, and must not be claimed anywhere in the product, the admin surface or the documentation: that a shop is selling profitably. The platform holds **no cost-of-goods data and no selling-price floor**. MRP is captured, but MRP is a ceiling set by a manufacturer, not a cost. Nothing in the engine can therefore distinguish a shop discounting its margin from a shop selling below what it paid, and the engine must not imply otherwise. A shop's own margin is the Owner's responsibility.
+
+Real shop-profit protection would require a per-pack cost price, a selling-price floor derived from it, and shops willing to disclose purchase prices — commercially sensitive information a kirana shop has good reason to withhold. That is why it is out of Phase 1: not effort, but a data dependency that may never be obtainable. If it is ever added, the floor becomes a hard checkout gate and this section is superseded.
 
 ## Fulfilment-route revenue treatment
 
