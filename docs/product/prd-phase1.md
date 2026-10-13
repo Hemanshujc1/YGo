@@ -1,6 +1,6 @@
 # YGo Phase 1 — Product Requirements
 
-- **Status**: Draft 5, the Phase 1 specification, for the owner's approval, 13 Oct 2026. Draft 4 plus the three parts a build specification needs and the PRD did not have: user stories (section 10), implementation decisions (section 11) and testing decisions (section 12). No requirement in sections 1 to 8 changed except ADM-11, which now lists two things ACC-3 and ACC-14 already required. No owner decision is open: D-15, on what an Area Manager may do, was settled the same day (ADM-12). Section 9 lists what changed.
+- **Status**: Approved by the owner on 13 Oct 2026 as the Phase 1 specification (Draft 5). Draft 4 plus the three parts a build specification needs and the PRD did not have: user stories (section 10), implementation decisions (section 11) and testing decisions (section 12). No requirement in sections 1 to 8 changed except ADM-11, which now lists two things ACC-3 and ACC-14 already required. No owner decision is open: D-15, on what an Area Manager may do, was settled the same day (ADM-12). Section 9 lists what changed.
 - **Owner**: Hemanshu (founder, sole developer)
 - **Decision map**: [YGo Phase 1 decision map](https://github.com/Hemanshujc1/YGo/issues/1)
 
