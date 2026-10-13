@@ -62,3 +62,16 @@ The storage substrate is fixed by [ADR-0001](0001-mobile-app-framework.md): `exp
 **libSQL embedded replicas.** Flagged as a candidate while closing [#22](https://github.com/Hemanshujc1/YGo/issues/22), since `expo-sqlite` ships a real `syncLibSQL()`. Rejected because it replicates a whole database: it cannot express per-shop scoping, and server-assigned bill numbers are not a replication concept.
 
 **Realtime subscriptions for the pull side.** Rejected for Phase 1 as a second transport with its own reconnect and authentication story, for data a shopkeeper reads a few times an hour.
+
+## Amendment, 13 Oct 2026: the bill reference is permanent, the bill number is added
+
+This record says an offline bill "carries a provisional number" which the server's number later replaces. The PRD consistency review found that a number which is replaced cannot be on a bill the shop has already shared with its customer.
+
+**A counter bill has two identifiers, and neither replaces the other** (PRD BIL-5).
+
+- The **bill reference** is generated on the device at the moment of sale. It is unique, permanent, printed on every copy, and is the outbox row's client action id or derived from it.
+- The **bill number** is the gapless per-shop sequence. It is still allocated server-side at apply time from the locked counter row (ADR-0002) and still returned in the result array. The device stores it beside the reference.
+
+A bill shared before sync shows the reference and "number pending". A quarantined bill has no number until it is resolved. Replaying an action returns the same number. Numbers follow the order in which bills reach the server, so two devices syncing in either order leave an unbroken sequence but not necessarily the same number on the same bill.
+
+Everything else in this record stands.

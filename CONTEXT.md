@@ -81,7 +81,7 @@ One staff account belongs to exactly one shop. The Owner invites staff by phone 
 
 **The staff-to-shop link is its own record carrying its own active flag, never a column on the account.** That single choice settles re-invitation. Re-inviting a deactivated phone number reactivates the existing link, so the person's past status transitions and counter bills keep pointing at the same actor — which is the whole reason deactivation exists instead of deletion. Only the Owner can do it; a deactivated person cannot re-enrol themselves. And a person deactivated at one shop may be invited by another: the first shop's history keeps its deactivated link while the second gets a fresh active one, which is only possible because the link is a record. Were it a column, that move would either corrupt the first shop's history or need a second account on the same phone, which the identity rule forbids. The one case nothing can undo is **staff deletion**, which removes the person's identity: a later invitation is a genuinely new account with no history, and the app says so rather than appearing to restore someone.
 
-Admin web has a separate **Area Manager** role scoped to one Area.
+Admin web has a separate **Area Manager** role scoped to one Area. Inside that Area an Area Manager may see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting; only Admin moves a shop to Live.
 
 ## Fulfilment modes
 

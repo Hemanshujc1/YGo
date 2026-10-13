@@ -1,6 +1,6 @@
 # YGo Phase 1 — Product Requirements
 
-- **Status**: Draft 4 for the owner's review, 13 Oct 2026. Corrected after a consistency review against `CONTEXT.md`, the revenue specification and ADR-0001 to ADR-0008, updated with the owner's answers to D-1 to D-14, then brought into line with `CONTEXT.md` on five points that changed no decision (the last five rows of section 9). Section 8 holds the decisions and section 9 lists what changed.
+- **Status**: Draft 5, the Phase 1 specification, for the owner's approval, 13 Oct 2026. Draft 4 plus the three parts a build specification needs and the PRD did not have: user stories (section 10), implementation decisions (section 11) and testing decisions (section 12). No requirement in sections 1 to 8 changed except ADM-11, which now lists two things ACC-3 and ACC-14 already required. No owner decision is open: D-15, on what an Area Manager may do, was settled the same day (ADM-12). Section 9 lists what changed.
 - **Owner**: Hemanshu (founder, sole developer)
 - **Decision map**: [YGo Phase 1 decision map](https://github.com/Hemanshujc1/YGo/issues/1)
 
@@ -21,6 +21,18 @@ Three conventions:
 - Each requirement carries an id (`ORD-3`) and its section links the ticket that decided it.
 - **"Configurable" always means an admin setting with no value hardcoded.**
 - **"(D-n)"** after a rule points to the owner decision in section 8 that set it. No owner decision is open in this draft.
+
+This document is also the **Phase 1 specification** that implementation tickets are cut from. Its parts sit here:
+
+| Part of a specification | Where |
+|---|---|
+| Problem and solution | Section 1 |
+| User stories | Section 10 |
+| Requirements the stories point to | Section 5 and section 6 |
+| Implementation decisions | Section 11 |
+| Testing decisions | Section 12 |
+| Out of scope | Section 4.2 |
+| Risks, unchecked facts and owner decisions | Sections 7 and 8 |
 
 Work that has to happen before launch but is not something the software does — the domain, the pilot Area, the legal pages, Play testing — lives in the **launch checklist** in 3.3 and nowhere else.
 
@@ -281,8 +293,9 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ADM-7** Queues: complaints, repayments disputed or overdue, orders that went ahead below the contribution floor, product requests, deletion requests with their age, flagged counter bills, flagged product requests, proof exceptions, flagged customers, orders unanswered at 120 seconds, and sync actions that failed.
 - **ADM-8** A dashboard of tiles and nothing more: orders today by status, live shops, outstanding balances, open queue counts, and the four launch measures G-1 to G-4.
 - **ADM-9** Area Managers and their payouts, as a share of commission actually collected in their Area.
+- **ADM-12** An Area Manager works only inside their own Area (D-15). There they may see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting, because each of those moves money or removes someone from the platform. Only Admin moves a shop to Live (ONB-1).
 - **ADM-10** Every admin action is recorded from day one. There is no screen for the record in Phase 1.
-- **ADM-11** Customers: look up, block and unblock, change an email for recovery, restore a deleted account inside its window.
+- **ADM-11** Customers: look up, see the state of the phone number (ACC-14), block and unblock, change an email for recovery, restore a deleted account inside its window. The switch that stops new customer sign-ups (ACC-3) is here.
 
 Shop reports in the Shopkeeper app: sales today and this week split online and counter, top items, the balance statement, rejected bargain offers.
 
@@ -417,7 +430,15 @@ Four narrower questions came out of the answers above. The owner answered all fo
 | D-13 | Is a split-funded coupon a shop offer or a platform offer beside a shop-wide discount? | A shop offer: the better of the two applies | CRT-3 |
 | D-14 | Is a repayment left unpaid past seven days a ground for suspension? | Yes, as an Admin judgement with a recorded reason. Never automatic | TRU-4, R-14 |
 
-**No owner decision is open.** Still the owner's, already known, and not blockers for the build: every value on the first rate card (L-9), and the balance limit for each shop.
+Still the owner's, already known, and not blockers for the build: every value on the first rate card (L-9), and the balance limit for each shop.
+
+### 8.4 Found while writing the user stories, settled on 13 Oct 2026
+
+| # | Question | Decision | Requirement |
+|---|---|---|---|
+| D-15 | What may an Area Manager see and do in the Admin web? | Inside their own Area only: see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. Nothing that moves money or removes someone from the platform | ADM-12 |
+
+**No owner decision is open.**
 
 ## 9. What changed in this revision
 
@@ -441,3 +462,282 @@ Four narrower questions came out of the answers above. The owner answered all fo
 | Phone number states | "Unverified" was the only state named, though an Owner's number is confirmed in person and SMS will verify all of them later | Three named states (ACC-14) |
 | Shop records and pickup payment | Both were in `CONTEXT.md` only. "At the door" left pickup payment unstated | DEL-10 to DEL-13; MNY-1, FUL-7 |
 | Suspension, auto-pause and email | The grounds for suspension and the onboarding-fee auto-pause were in `CONTEXT.md` only. "No email except the sign-in code" overlooked the deletion-page code and the recovery notice | ONB-6, ONB-7, NOT-1, NOT-6 |
+| Specification parts | The PRD had requirements and no user stories, no list of what is built, and no statement of where tests attach | Sections 10, 11 and 12 |
+| Sign-in in the ADRs | ADR-0004 said sessions come from an emailed code only, while ACC-1 also requires Google and Apple | ADR-0004 amended. All three methods end in the same session |
+| Offline bill number in the ADRs | ADR-0003 still said a "provisional number" is replaced by the server's, against BIL-5 | ADR-0003 amended: a permanent reference, and a number added to it |
+| Background jobs in the ADRs | ADR-0004 runs jobs from systemd timers and rejects scheduling inside the service. ADR-0008 said "in-process scheduling" | ADR-0008 amended to follow ADR-0004 |
+| What tests need to replace | Only file storage and email had a stand-in for tests. Sign-in tokens, push, SMS and time had none, and the product is full of deadlines | Four more interfaces (11.3; ADR-0004 amended) |
+| Admin's customer screen | The phone-number state and the sign-up switch were required by ACC-14 and ACC-3 and missing from the list of Admin screens | ADM-11 |
+| Area Manager permissions | "Onboards and supports the shops" is the whole of what was decided. No list of screens exists | Settled as D-15 (ADM-12) |
+
+## 10. User stories
+
+Each story names the requirement that holds its rule. A story adds no rule of its own: where a story and a requirement differ, the requirement wins. "The shop" means the Owner or a Staff member.
+
+### 10.1 Customer
+
+1. As a Customer, I want to sign in with Google, with Apple on an iPhone, or with a code emailed to me, so that I never need a password (ACC-1).
+2. As a Customer, I want to give my phone number once after my first sign-in, so that the shop and the deliverer can reach me (ACC-2).
+3. As a Customer, I want to be told plainly when my phone number is already in use and where to write for help, so that I am not left stuck (ACC-3).
+4. As a Customer, I want to see only the shops that can serve my location, so that I never build a cart I cannot order (DSC-1).
+5. As a Customer outside every active Area, I want to be told "not serviceable yet" and to leave my number, so that I know why I see no shops (DSC-5).
+6. As a Customer, I want each shop card to show its rating, estimated time and delivery fee, so that I can choose between shops (DSC-2).
+7. As a Customer, I want the shop page to show opening hours, the minimum order and the FSSAI number, so that I know the terms before I start (DSC-2).
+8. As a Customer, I want to search products and shops with Hindi words typed in English letters, so that "kanda" finds onion (DSC-3).
+9. As a Customer, I want an out-of-stock item shown and marked, so that I know the shop sells it (DSC-4).
+10. As a Customer, I want to choose a pack or one of the shop's quantity-price options, so that I can buy "2 for ₹6" (CAT-2).
+11. As a Customer, I want to buy loose goods in the shop's minimum and step, so that I can order 250 g (CAT-4).
+12. As a Customer, I want a separate cart for each shop, so that one order is always one shop (CRT-1).
+13. As a Customer, I want every fee and the total shown before I check out, so that nothing is added at the door (CRT-2).
+14. As a Customer, I want to be asked to accept a total that changed between my cart and my order, so that I never pay a price I did not see (CRT-2).
+15. As a Customer, I want to apply one coupon to an order, so that I can use an offer (CRT-3).
+16. As a Customer, I want to be told which shop offer was applied when two qualify, and to keep the coupon that was not, so that I do not lose it (CRT-3).
+17. As a Customer, I want to be told why an order cannot be placed and what to do about it, so that I can fix it (CRT-4).
+18. As a Customer, I want every price to include tax, so that the price I see is the price I pay (CRT-5).
+19. As a Customer, I want to offer a price on a pack that allows Bargain and get an answer at once, so that I do not wait for a shopkeeper (BRG-2).
+20. As a Customer who has used three offers on a pack today, I want to be told that I can offer again tomorrow, so that I understand the refusal (BRG-3).
+21. As a Customer, I want an accepted price held for 30 minutes and honoured at checkout, so that the bargain is real (BRG-4, BRG-6).
+22. As a Customer with a bargained line and a coupon, I want to be told to remove one of them, so that I understand why the coupon does not apply (BRG-5).
+23. As a Customer, I want to choose instant delivery, a scheduled slot or pickup, from what the shop offers, so that the order suits my day (FUL-1).
+24. As a Customer, I want to see only the slots for today and tomorrow that still have a place, so that I cannot pick a full one (FUL-2).
+25. As a Customer, I want a scheduled order confirmed at once or refused with the reason, so that I know where I stand (FUL-3).
+26. As a Customer, I want to see until when I can cancel a scheduled order freely, on the slot and on the order, so that there is no surprise (FUL-5).
+27. As a Customer, I want to follow my order's status, so that I know what is happening (ORD-1, NOT-6).
+28. As a Customer, I want to cancel freely before the shop accepts and to ask the shop after that, so that a mistake is cheap to undo (ORD-5).
+29. As a Customer, I want an order the shop never answers to expire at no cost, so that I can order elsewhere (ORD-2).
+30. As a Customer, I want a loud notification and a banner that stays when the shop changes my order, so that I do not miss the deadline to confirm (ORD-4, NOT-3).
+31. As a Customer, I want to see the new total and why it changed before I confirm, so that I agree to what I will pay (ORD-4).
+32. As a Customer who does not confirm in time, I want the order cancelled at no cost, so that silence never commits me (ORD-4, FUL-5).
+33. As a Customer, I want a call-the-shop button on every order, so that I can always reach a person (ORD-8).
+34. As a Customer, I want my handover code to appear after I have checked the items, so that I give it only for the right goods (DLV-2).
+35. As a Customer, I want to pay the shop in cash or by UPI at the door, so that I pay nothing before I have the goods (MNY-1, DLV-6).
+36. As a Customer collecting an order, I want to pay at the counter and give my code, so that pickup works like delivery (FUL-7, MNY-1).
+37. As a Customer who never collects a pickup order, I want it to expire and cost me nothing (FUL-7).
+38. As a Customer, I want to give a shop 1 to 5 stars after delivery or pickup, so that others can judge it (TRU-1).
+39. As a Customer, I want to raise a complaint from the order screen within three days, with a category and an optional photo, and to see at once that it was received (TRU-2).
+40. As a Customer, I want to be told when my complaint is resolved (TRU-3, NOT-6).
+41. As a Customer who is owed money, I want to see the amount, the due date and the status, and to confirm or dispute the shop's payment, so that I am not left chasing it alone (TRU-4).
+42. As a Customer, I want one support email address shown in the app, so that I know where to write (TRU-6).
+43. As a blocked Customer, I want to see the support email and to have my order in progress finish, so that I know what has happened (TRU-5).
+44. As a Customer, I want a list of my notifications in the app, so that a push I missed is not lost (NOT-1, NOT-2).
+45. As a Customer, I want to delete my account in two taps, or be told exactly why I cannot yet (DEL-1, DEL-2).
+46. As a Customer who deleted by mistake, I want Admin to be able to restore my account for seven days (DEL-4).
+47. As a former Customer, I want to sign up again with the same number as a new account (DEL-7).
+48. As a person without the app, I want to request deletion on a public web page, so that I do not need to install anything (DEL-9).
+49. As a Customer who lost access to my email, I want Admin to recover my account after checking it is mine (ACC-12).
+50. As a Customer, I want light and dark themes and Indian number, date and time formats (Q-3, Q-4).
+51. As a Customer on an old version, I want the app to keep working or tell me plainly to update (Q-7).
+52. As a visitor, I want to read the privacy policy, the terms and the support contact on the website (L-2).
+
+### 10.2 Owner
+
+53. As an Owner, I want to start my shop's application in the Shopkeeper app by entering details and numbers only, so that I upload no identity document (ONB-1, ONB-3).
+54. As an Owner, I want to see what state my application is in, so that I know what is left (ONB-1).
+55. As an Owner, I want to read and accept an agreement that shows my rate card, so that I know what I will be charged before I go Live (ONB-5).
+56. As an Owner, I want counter billing and stock to work before my shop is in the customer feed, so that the app is useful from the first day (ONB-4).
+57. As an Owner, I want to choose which packs I stock and set each one's online price, counter price, MRP, stock, low-stock level and availability (CAT-1).
+58. As an Owner, I want to add my own quantity-price options, so that my usual counter deals are online (CAT-2).
+59. As an Owner, I want to request a product that is not in the catalog and sell it at my counter at once (CAT-3).
+60. As an Owner, I want to be told when a product request is approved or rejected, with the reason (CAT-3, NOT-6).
+61. As an Owner, I want to find products by scanning a barcode (CAT-6).
+62. As an Owner, I want to switch instant delivery, scheduled delivery and pickup on or off for my shop (FUL-1).
+63. As an Owner, I want to set my daily delivery slots and the most orders each can take, and to edit them without cancelling orders already booked (FUL-2).
+64. As an Owner, I want to switch Bargain on for a pack and set a floor price no customer can see (BRG-1).
+65. As an Owner, I want to see the offers that were rejected, so that I can judge my floor (BRG-6).
+66. As an Owner, I want to run one shop-wide discount and to be stopped when it is above the maximum, at the moment I save it (MNY-5).
+67. As an Owner, I want to create a coupon my shop pays for, under the same maximum (CRT-3, MNY-5).
+68. As an Owner, I want to be told when my discount or coupon is paused because the maximum was lowered (NOT-6).
+69. As an Owner, I want to invite Staff by phone number and show them a one-time join code, so that a number alone lets nobody into my shop (ACC-6).
+70. As an Owner, I want to mark which Staff can deliver (DLV-1).
+71. As an Owner, I want a Staff member I deactivate to lose access within minutes (ACC-11).
+72. As an Owner, I want to re-invite someone who left and have their history stay attached (ACC-7).
+73. As an Owner, I want prices, money views, staff and settings kept to me, with Staff limited to orders, stock and counter billing (section 2).
+74. As an Owner, I want to void a counter bill within 24 hours with a reason, leaving the original unchanged (BIL-6).
+75. As an Owner, I want to see my running balance and be warned at 80% of my limit, so that a pause never surprises me (MNY-9).
+76. As an Owner, I want a statement every Monday showing what I owe for the week, and saying that it is not a tax invoice (MNY-8, MNY-12).
+77. As an Owner, I want to be told of a rate-card change before it applies, and for it never to touch an order already placed (MNY-14).
+78. As an Owner, I want to see sales today and this week, split online and counter, and my top items (5.14).
+79. As an Owner, I want to be told when my shop is suspended or reinstated and to see the reason, and to keep my counter tools meanwhile (ONB-7).
+80. As an Owner, I want an auto-pause to lift by itself when its cause is gone (ONB-6).
+81. As an Owner, I want to be told when a complaint is upheld against my shop and a repayment recorded, and to mark it paid (TRU-4, NOT-6).
+82. As an Owner, I want to request deletion of my account and be told what stands in the way (DEL-1, DEL-2).
+83. As an Owner who also shops, I want to switch between the Customer side and the Shopkeeper side of one account (ACC-4).
+
+### 10.3 The shop: Owner or Staff
+
+84. As a Staff member, I want to join a shop by entering the join code the Owner shows me (ACC-6).
+85. As the shop, I want a new order to ring as loudly as the phone allows, and again at 120 seconds, so that I do not miss it (ORD-2, NOT-3, NOT-5).
+86. As the shop, I want to accept an order, reject it, or accept it in part by reducing a quantity or removing a line (ORD-3).
+87. As the shop, I want to review a scheduled order and reject it before the cutoff, and to cancel it with a reason after (FUL-4).
+88. As the shop, I want to agree or refuse when a customer asks to cancel an accepted order (ORD-5).
+89. As the shop, I want to mark an order ready and assign it to a Staff member who can deliver (DLV-1).
+90. As the shop, I want to complete a pickup with the customer's code at the counter and record cash or UPI (FUL-7, MNY-1).
+91. As the shop, I want to make a counter bill from catalog lines or a typed line, with a discount, an optional customer name and phone, and cash or UPI (BIL-1).
+92. As the shop, I want to share the bill as a PDF from my phone (BIL-2).
+93. As the shop, I want billing, stock changes and marking out of stock to work with no internet (BIL-3).
+94. As the shop, I want every bill to carry a permanent reference at once and its bill number when the phone has synced (BIL-5).
+95. As the shop, I want a counter sale never blocked by stock held for an online order, and to be told which online orders it affects and fix each in two taps (BIL-4, FUL-6).
+96. As the shop, I want every stock change to take a reason from a fixed list (BIL-7).
+97. As the shop, I want to be told when a queued bill needs attention, so that no sale is silently lost (BIL-5).
+98. As the shop, I want to be told plainly when the offline limit is reached and that I must reconnect before billing again, so that I know why billing stopped (BIL-3).
+99. As an Owner or Staff member, I want to be stopped from placing a customer order with my own shop (ACC-9).
+
+### 10.4 Staff who deliver
+
+100. As a deliverer, I want my assigned orders under "My deliveries" (DLV-1).
+101. As a deliverer, I want the customer's phone number for that order and no other (DLV-7).
+102. As a deliverer, I want to take a proof photo and then enter the customer's code (DLV-2).
+103. As a deliverer, I want the delivery screens to work without internet (DLV-3).
+104. As a deliverer, I want to complete a delivery with a photo and a reason when the code cannot be used (DLV-4).
+105. As a deliverer, I want to record a failed delivery after a call attempt, a wait, a photo and a reason (DLV-5).
+106. As a deliverer, I want to show the shop's UPI QR or take cash, and record which (DLV-6).
+
+### 10.5 Admin
+
+107. As an Admin, I want to build Areas from pincodes and pause an Area (ADM-1).
+108. As an Admin, I want to review a shop's application and correct any field (ONB-1).
+109. As an Admin, I want to record the visit with a geotagged shop-front photo and confirm the Owner's phone and email in person (ONB-2, ACC-5).
+110. As an Admin, I want to be the only one who moves a shop to Live, and to be stopped when its rate card is incomplete (ONB-1, MNY-13).
+111. As an Admin, I want to waive the onboarding fee with a reason (ONB-2).
+112. As an Admin, I want to set every rate, fee, floor, split and limit globally, per category or per shop, and see which level a value came from (MNY-3).
+113. As an Admin, I want a rate-card change to a Live shop to start with the next statement week and never earlier (MNY-14).
+114. As an Admin, I want a price simulator that runs the real calculation and can try a draft rule without saving it (MNY-10).
+115. As an Admin, I want to create coupons paid for by the platform, by a shop, or split (ADM-5, CRT-3).
+116. As an Admin, I want to manage master products, packs, categories, search terms and the denylist, and to import the catalog by CSV (ADM-3).
+117. As an Admin, I want to approve a product request, map it to an existing product, or reject it with a reason (CAT-3).
+118. As an Admin, I want a request rejected as an excluded good removed from that shop's counter list, with its past records kept (CAT-8).
+119. As an Admin, I want denylist matches flagged to me without blocking the shop (CAT-8).
+120. As an Admin, I want to watch live orders and force a transition with a reason (ADM-4).
+121. As an Admin, I want to force a fulfilment mode off for a shop (FUL-1).
+122. As an Admin, I want one place for every queue that needs me (ADM-7).
+123. As an Admin, I want statements produced every Monday, and to record payments, make adjustments and set balance limits (ADM-6, MNY-8, MNY-9).
+124. As an Admin, I want to resolve a complaint with a reason and reverse the commission on the affected lines (TRU-3).
+125. As an Admin, I want to record what a shop owes a customer and see repayments that are disputed or overdue (TRU-4).
+126. As an Admin, I want to open a late complaint for a serious safety issue, with the reason recorded (TRU-2).
+127. As an Admin, I want to suspend and reinstate a shop with a recorded reason (ONB-7).
+128. As an Admin, I want to look up a customer, see the state of their phone number, and block or unblock them with a reason (ADM-11, ACC-14, TRU-5).
+129. As an Admin, I want a block to survive the customer deleting their account, without keeping anything readable (TRU-5).
+130. As an Admin, I want to change an account's email after the recovery checks, with the checks recorded, every session revoked and a notice sent to the old address (ACC-12).
+131. As an Admin, I want to restore a deleted account inside its seven days (DEL-4).
+132. As an Admin, I want deletion requests listed with their age, so that I act inside 23 days (DEL-6, ADM-7).
+133. As an Admin, I want a switch that stops new customer sign-ups (ACC-3).
+134. As an Admin, I want to see orders that went ahead below the contribution floor (ORD-4, ADM-7).
+135. As an Admin, I want counter bills whose total the server disagrees with, and sync actions that failed, flagged to me (BIL-9, ADM-7).
+136. As an Admin, I want a dashboard of tiles including the four launch measures (ADM-8).
+137. As an Admin, I want to create Admin and Area Manager accounts (ACC-8).
+138. As an Admin, I want each Area Manager's payout worked out from the commission actually collected in their Area (ADM-9).
+139. As an Admin, I want every admin action recorded from the first day (ADM-10).
+140. As an Admin, I want sign-in by SMS and the tax outputs built and switched off, so that stage two needs no new release for them (ACC-10, MNY-12).
+
+### 10.6 Others
+
+141. As an Area Manager, I want to sign in to the Admin web and work only inside my own Area: see its shops and applications, correct an application, record a visit, watch its orders and queues, and see my payout (ADM-12).
+142. As a store reviewer at Google or Apple, I want a demo account that lets me see the app working (ACC-13).
+
+## 11. Implementation decisions
+
+The ADRs hold the stack and are not repeated. This section says what is built on it. Nothing here names a file, because none exists yet.
+
+### 11.1 What is built
+
+Five deployables and seven shared packages, as ADR-0007 lists them: the Customer app, the Shopkeeper app, the Admin web, the public website and one server. The shared contract package holds the shape of every message between them.
+
+### 11.2 Server modules
+
+One service, split by domain. Each module below hides a lot of behaviour behind a small interface, and the rest of the server reaches it only through that interface.
+
+| Module | What it owns | What the rest of the server asks of it |
+|---|---|---|
+| **Pricing engine** | Every money amount on an order: line prices, discounts, coupons, fees, commission, contribution, the floors, and what each side keeps. One implementation, in the database (MNY-15) | "Price this basket, for this shop, route and promotion, under the rules as of this moment." The cart, order placement, the recalculation after a partial acceptance, the simulator and the statement all ask the same question |
+| **Rate cards** | Every configurable value, at global, category and shop level; which level a value came from; versions; completeness (MNY-13); the next-statement-week start (MNY-14) | "What are this shop's rules as of this moment, and where did each come from?" |
+| **Order lifecycle** | The seventeen statuses and every allowed transition, who may make each, the reason, the record of each change (ORD-7), and the deadlines | "Move this order to this status, as this actor, for this reason." It refuses anything not allowed |
+| **Stock ledger** | The movement log, the on-hand figure, reservation at acceptance, release, and the reconciliation check | "Record this movement." "What is on hand?" |
+| **Counter billing** | Bills, the bill reference and bill number (BIL-5), voids, the server's check of the phone's total (BIL-9) | Reached only through sync |
+| **Sync** | Applying a batch of queued actions once each, in order, with a result per action; quarantine; the changes a phone must pull (ADR-0003) | "Apply this batch." "What changed since this marker?" |
+| **Statements and ledger** | The weekly statement, payments, adjustments, the running balance, the limit and its auto-pause, Area Manager payouts | "What does this shop owe?" "Record this adjustment." |
+| **Accounts and sessions** | Sign-in by all three methods, phone number states (ACC-14), roles, the one shop link, join codes, session revocation, recovery | "Who is this, in what role, for which shop?" |
+| **Shops** | The application states, the visit record, agreement acceptance, auto-pause and suspension, and whether a shop is in the feed | "May this shop take an order now, and if not, why?" |
+| **Catalog and search** | Master products, packs, shop listings, quantity-price options, product requests, the denylist, CSV import, the search-term list | Listings for a shop; search results |
+| **Serviceability** | Areas, pincodes, the two tests of DSC-1 | "Which shops can serve this location?" |
+| **Promotions** | Shop-wide discounts and coupons, their funding, limits and the maximum (MNY-5). It decides which offers are eligible; the pricing engine does the arithmetic | "Which offers may apply to this basket?" |
+| **Bargain** | Floors, offers, the daily limit, the 30-minute hold | "Answer this offer." |
+| **Slots** | Daily slots, places, cutoffs (FUL-2 to FUL-5) | "Take a place." "Give it back." |
+| **Delivery and proof** | Assignment, handover codes, proof photos, proof exceptions, failed deliveries | "Complete this handover." |
+| **Trust** | Ratings, complaints, repayments, refusal counts, blocks and their unreadable markers | Queues for Admin; "is this customer blocked?" |
+| **Deletion and retention** | Closing, sealing, restoring, erasing and anonymising accounts on their clocks; shop record clocks (DEL-10) | "Delete this account." The rest runs as timed jobs |
+| **Notifications** | The in-app list and the push that reports it. It only ever reports something another module has already recorded (NOT-2) | "This happened; tell whoever should know." |
+| **Admin record** | The append-only record of admin actions (ADM-10) | Written by every admin action |
+
+Rules that cut across modules:
+
+- **Every money amount is produced in the database**, never in the service's own code and never on a phone, the counter-bill total excepted (MNY-15, BIL-9).
+- **Every deadline reads time through one clock interface** (11.3), in the service and in the jobs.
+- **Timed work runs as jobs**, each started by a timer outside the service and leaving a record of its run (ADR-0004): order expiry and the re-alert, confirmation timeouts, pickup expiry, the bargain hold, the Monday statement, the balance check, FSSAI expiry, the deletion steps, stock reconciliation.
+- **A placed order's prices, rules and amounts are written once and never rewritten** (MNY-7). A correction is a new record.
+- **The server sends codes, never display text.** Every piece of text lives in the apps (Q-2).
+- **Every request is scoped to the caller's role and shop** in the service, and an Area Manager's to their Area.
+- **The first Admin account is created by a command run at deployment**, because no Admin exists yet to create it (ACC-8).
+
+### 11.3 Things the server reaches, each behind one interface
+
+Each has a real implementation and a local one. The local ones are what make the tests run with no account, no credentials and no cost.
+
+| Interface | Real | Local |
+|---|---|---|
+| File storage | Cloud object storage | The filesystem |
+| Mailer | The cloud email service | A local mail catcher |
+| Identity verifier | Checks Google and Apple sign-in tokens | Accepts tokens the test made |
+| Push sender | The push service | Records what would have been sent |
+| SMS sender | None in stage one; the flow is built and switched off (ACC-10) | Records the code |
+| Clock | The system's time | Set and moved forward by the test |
+
+The first two are ADR-0008's. The other four were added by an amendment to ADR-0004.
+
+### 11.4 The apps
+
+- **Both mobile apps show what the server returned.** Neither works out an order total, a fee or a discount.
+- **The Shopkeeper app has one offline module**: the queue of actions waiting to sync, the local copy of the shop's catalog and stock, the two limits (BIL-3), and counter-bill arithmetic in whole paise. Counter billing, stock and delivery screens are built on it and on nothing else for their writes.
+- **The Customer app has no offline writes.** It needs a connection to order.
+- **Role decides what the Shopkeeper app shows**: Owner, Staff, and the delivery tab for Staff who can deliver.
+- **The Admin web and the public website** are static pages calling the same server. The public deletion page calls an endpoint that answers the same way whether or not an account exists (DEL-9).
+- **Each app sends its version with every request**, and the server can tell a too-old app to update (Q-7).
+
+### 11.5 What comes first
+
+Money and the order journey are built first (R-2): rate cards, the pricing engine with the simulator, then placing, accepting and delivering an order, then the statement. The simulator is built with the engine and not after it, because it is how the first rate card is made (L-9) and how the engine is checked by eye.
+
+## 12. Testing decisions
+
+"How this is tested" in section 6 says **what** must be proven. This section says **where** the tests attach and what a good one looks like.
+
+### 12.1 What a good test is
+
+- **It tests what the product does, through the same door a real user's app uses**, and not how the code inside is arranged. A test that would still pass after the inside is rewritten is a good one. A test that breaks when a function is renamed is not.
+- **It reads like a requirement.** Each test names the requirement id it proves.
+- **It uses the real database.** The money rules and the stock rules live in the database, so a test that replaces the database tests nothing.
+- **It never waits for real time.** It moves the clock.
+- **It needs no account, key or network.** The local implementations in 11.3 are used throughout.
+
+### 12.2 Where tests attach
+
+Two places, plus a checklist run by hand.
+
+| Seam | What goes through it | What is replaced |
+|---|---|---|
+| **The server's public API**, called exactly as the apps call it, against a real database | Everything in section 5 that the server decides: sign-in and roles, serviceability, the cart quote and every worked money example, order transitions and deadlines, slots, Bargain, sync and bill numbers, statements, complaints and repayments, deletion and retention, every Admin action. Timed jobs are started the way the timer starts them | Only the six interfaces in 11.3 |
+| **The Shopkeeper app's offline module**, with its sync pointed at a real test server | Counter-bill arithmetic against the shared examples; the queue's order, limits and retry; the same bill sent twice; two phones syncing in either order | Nothing on the server side |
+| **The device checklist**, by hand | Screens, themes, the alarm, the camera, the barcode scanner, a real bill shared as a PDF, on an entry-level Android phone and an iPhone | — |
+
+No test attaches below these. In particular the pricing engine is tested through the quote that the cart and the simulator use, not by calling it directly, so that the examples prove what a customer would actually be charged.
+
+### 12.3 The examples are written once
+
+Every worked example in the revenue specification is written once as inputs and expected amounts, and the same file is used by the server's tests. The counter-bill examples are written once and used by both the phone's arithmetic and the server's check of it. A new money rule arrives with its example or it does not arrive.
+
+### 12.4 Prior work to follow
+
+There is none. The repository holds no code, and the reference projects have no tests worth copying and may not be copied from. The first tests written through each seam set the pattern for the rest, so the first ticket through each seam builds the test setup with it: a database made fresh for each run, the local implementations, and the clock.
+
+### 12.5 What runs before anything merges
+
+One command runs the checks, the type check, the tests and the builds for everything (ADR-0007). A change that fails it does not merge.

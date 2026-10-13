@@ -67,3 +67,11 @@ The test, stated as a number so it can be argued with: **a move to another provi
 **Deciding the provider later and building against nothing.** Rejected because it does not avoid the work, it defers it into the launch window, and the long-lead items — SES production access, the sending domain's authentication records — are exactly the ones that would be discovered late. Choosing AWS now and keeping the seams thin gets the same flexibility at a fraction of the risk.
 
 **Multi-provider from the start.** Two bills, two sets of credentials and two monitoring setups for one developer, to hedge a risk that one to two days of work already covers.
+
+## Amendment, 13 Oct 2026: background jobs follow ADR-0004
+
+The Background jobs row above says "in-process scheduling". ADR-0004 decided the opposite, with its reasons: **a one-shot job command invoked by systemd timers, with a `job_runs` row per run**, so that a long job does not compete with requests and a crash does not take the schedule with it. ADR-0004 is the record that owns that decision and it stands. The row should be read as "a job command run by systemd timers, with state in PostgreSQL".
+
+The portability conclusion is unchanged: a systemd timer exists on every Linux machine, and there is still no managed queue or scheduler to leave behind.
+
+The four interfaces added by the amendment to ADR-0004 (`IdentityVerifier`, `PushSender`, `SmsSender`, `Clock`) are not provider seams and do not change the count of two in this record.

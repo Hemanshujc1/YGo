@@ -81,3 +81,20 @@ Constraints fixed before this decision:
 ## Amendment, 13 Oct 2026: one pricing engine
 
 "Money arithmetic happens in SQL" is tightened by the amendment to [ADR-0007](0007-monorepo-and-shared-packages.md): the pricing engine is a single SQL implementation called by the quote endpoint, order placement, partial-acceptance recomputation, the simulator and the statement job. No client computes a quote. The one exception is a counter bill's total, computed on the phone in integer paise for offline use and checked, never rewritten, by the server on sync. An earlier ticket's note that money is "stored as integer paise" is superseded by ADR-0002's `NUMERIC(12,2)`; integer paise is the phone's representation only.
+
+## Amendment, 13 Oct 2026: sign-in methods, and four more interfaces at the edge
+
+**Sign-in is not email OTP alone.** The Sessions row was written before [#18](https://github.com/Hemanshujc1/YGo/issues/18) was amended. Every role signs in with Google, with Apple on iOS, or with a 6-digit emailed code (PRD ACC-1). All three end in the same place: the service has a proven email address, and issues the short access token and the rotating server-side refresh token this record already describes. Google and Apple sign-in are the verification of a signed identity token inside the service. No managed identity provider is adopted, so ADR-0008's Sessions row is unchanged.
+
+**Four interfaces sit beside `FileStorage` and `Mailer`.** ADR-0008 counts two adapter seams because two AWS services are used. The service also reaches four other things that a test must be able to replace, and each gets one interface with a real and a local implementation:
+
+| Interface | Real implementation | Local implementation |
+| --- | --- | --- |
+| `IdentityVerifier` | Verifies Google and Apple identity tokens | Accepts tokens minted by the test |
+| `PushSender` | Expo's push service (ADR-0001) | Records what would have been sent |
+| `SmsSender` | None in stage one. The SMS sign-in flow is built and switched off (PRD ACC-10) | Records the code |
+| `Clock` | System time | Set and advanced by the test |
+
+`Clock` exists because the product is full of deadlines: the 120-second re-alert, the 600-second expiry, the five- and ten-minute confirmations, slot cutoffs, the 24-hour void, the 7-, 30- and 90-day deletion steps and the Monday statement. Every one of them reads time through it, in the service and in the jobs.
+
+None of these is an AWS dependency, so the lint rule and the one-to-two-day portability budget in ADR-0008 are untouched.
