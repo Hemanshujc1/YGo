@@ -47,7 +47,7 @@ YGo lets a customer order from local shops within roughly 2 to 3 km and have the
 | Role | Surface | What they do |
 |---|---|---|
 | **Customer** | Customer app | Finds nearby shops, orders, pays the shop at the door |
-| **Owner** | Shopkeeper app | Everything in the shop, including prices, money views, staff and settings |
+| **Owner** | Shopkeeper app | Everything in the shop, including prices, money views, staff and settings; may deliver the shop's own orders |
 | **Staff** | Shopkeeper app | Orders, stock, counter billing; delivers when flagged `can deliver` |
 | **Admin** | Admin web | Runs the platform. In stage one this is the founder |
 | **Area Manager** | Admin web, scoped to one Area | Onboards and supports shops in that Area. First item cut if time runs short |
@@ -132,7 +132,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ACC-2** An account is created at first sign-in. Signing in proves the email; the app then requires a phone number before anything else. One account per phone number and one per email.
 - **ACC-3** **In stage one the phone number is claimed, not verified**, and the account records it as unverified. A number already in use is refused and the person is pointed to support. **This is accepted for customers in stage one only** (D-1), within these limits: an unverified number never grants access to a shop, never proves on its own who someone is, and never moves an account or its history to another person; Admin sees the state of every number (ACC-14); and the acceptance lapses at the stage-two review. If SMS is not ready at that review, whether ordering on unverified numbers continues is decided there and recorded; the app has no default, and Admin has a switch that stops new customer sign-ups (D-11).
 - **ACC-4** Every account starts as a Customer and may carry more roles, with a switch between the Customer and Shopkeeper sides. An account holds at most one active shop link at a time, as Owner or as Staff.
-- **ACC-5** The Owner role is attached when the account starts a shop application and carries no power until Admin moves that shop to Live. Admin confirms at the visit that the account's phone and email belong to the person in the shop, which makes the Owner's number **visit-confirmed** (ACC-14).
+- **ACC-5** The Owner role is attached when the account starts a shop application and carries no power until Admin moves that shop to Live, with one exception: from Approved the Owner may set up listings, prices and opening stock, so the shop is ready the moment it goes Live. Counter sales and every other stock operation open at Live. Admin confirms at the visit that the account's phone and email belong to the person in the shop, which makes the Owner's number **visit-confirmed** (ACC-14).
 - **ACC-6** The Owner invites Staff by phone number. The invited person completes the link by entering a one-time **join code** shown in the Owner's app. A phone number alone never grants access to a shop.
 - **ACC-7** Re-inviting a deactivated person reactivates the same link, so their history stays attached. Only the Owner can do it.
 - **ACC-8** Admin and Area Manager accounts are created by an Admin and are never open to sign-up.
@@ -156,7 +156,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ONB-1** A shop moves Draft → Submitted → Under Review → Approved → Live → Suspended → Closed. The Owner starts the application in the Shopkeeper app; Admin may correct any field. Only Admin moves a shop to Live.
 - **ONB-2** Live requires: details complete, a recorded visit in person with a geotagged shop-front photo, the onboarding fee paid or waived with a reason, and a complete rate card (MNY-13). The fee is waived for the whole pilot.
 - **ONB-3** Collected: PAN (required), entity type, FSSAI number **and its expiry date**, shop name, address, pincode, map pin, owner name, phone, email, service radius, UPI id. **Numbers only — no photo or scan of any identity document is stored.** No bank details.
-- **ONB-4** A shop with an incomplete rate card stays out of the customer feed. Its counter billing and stock tools still work.
+- **ONB-4** Counter billing and stock tools open when the shop goes Live, not before. A Live shop whose rate card becomes incomplete stays out of the customer feed, and its counter billing and stock tools still work. A Suspended shop keeps them (ONB-7); a Closed shop does not (DEL-11).
 - **ONB-5** The Owner accepts an onboarding agreement that names the excluded goods, states suspension as the consequence, and shows the shop's rate card. Acceptance is stored with the agreement version, the rate card version and the time.
 - **ONB-6** Auto-pause is mechanical and clears by itself when its cause does. Its causes are an expired FSSAI, an onboarding fee expired past its grace period, and the balance limit reached (MNY-9). The fee cause cannot arise in the pilot, where the fee is waived.
 - **ONB-7** Suspension is an Admin judgement with a recorded reason, never automatic, on these grounds: selling an excluded category; diverting payment or disputing money a customer has paid; materially false listings or prices; upheld safety or expiry complaints; repeated unresponsiveness to accepted orders; a statement unpaid past its grace period; a repayment to a customer unpaid past its seven days (TRU-4); KYC details found invalid. A suspended shop leaves the feed, takes no new orders, finishes its in-flight orders, and **keeps its counter billing, stock and catalog tools**. Its statement stays due. The Owner is told and sees the reason. Suspension attaches to the shop, not to the Owner's account. Only Admin reinstates, with a reason.
@@ -184,7 +184,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 - **CRT-1** One cart per shop. One order is one shop. Checkout is one shop at a time.
 - **CRT-2** Every figure in the cart comes from the server; the phone never works out a total. Every fee is shown before checkout. The server calculates again when the order is placed, and a changed total must be accepted by the customer.
-- **CRT-3** One coupon per order. At most one shop-wide discount per order. **At most one shop-funded offer per order** (D-7): where a shop-funded coupon and the shop-wide discount both qualify, the one that takes more rupees off this order applies, the shop-wide discount on a tie; the customer is told which, and a coupon that was not applied is not counted as used. A platform-funded coupon follows its own rule and may sit on top of a shop-wide discount. A split-funded coupon counts as a shop-funded offer for this rule (D-13). The maximum in MNY-5 also binds a coupon an Owner creates (D-12).
+- **CRT-3** One coupon per order. At most one shop-wide discount per order. **At most one promotion applies to an order: the shop-wide discount or one coupon, never both, whatever the coupon's funding** (D-7): where a coupon and the shop-wide discount both qualify, the one that takes more rupees off this order applies, the shop-wide discount on a tie; the customer is told which, and a coupon that was not applied is not counted as used. This holds for platform-funded, shop-funded and split-funded coupons alike (D-13). The maximum in MNY-5 also binds a coupon an Owner creates (D-12).
 - **CRT-4** When an order cannot be placed, the customer is told why and what to do: add items, choose pickup, drop a promotion, or pick another slot.
 - **CRT-5** All prices include tax. No tax breakdown is shown anywhere.
 - **CRT-6** The minimum cart is tested on product value before any discount, and counts bargained lines at their accepted price.
@@ -221,7 +221,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 ### 5.9 Delivery and proof — [Login and handover OTP](https://github.com/Hemanshujc1/YGo/issues/18)
 
-- **DLV-1** A flagged Staff member is assigned to a ready order and sees it under "My deliveries".
+- **DLV-1** The Owner, or a Staff member flagged `can deliver`, is assigned to a ready order and sees it under "My deliveries". The Owner needs no flag and no Staff account.
 - **DLV-2** At the door: a proof photo, then the customer's 4-digit handover code, which is generated when the order is accepted and appears in the customer app after the item check.
 - **DLV-3** The delivery screens work without internet. The server rechecks every offline delivery when the phone reconnects.
 - **DLV-4** If the code cannot be used, a photo and a reason complete the delivery and mark it a **proof exception**, counted per shop and per deliverer.
@@ -278,7 +278,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **TRU-1** After delivery or pickup the customer may give the shop 1 to 5 stars. **No written comment.** The average covers 90 days and shows after three ratings.
 - **TRU-2** A customer raises a complaint from the screen of a **delivered or picked-up** order, **until the end of the third calendar day after the delivery or pickup**, with an optional photo and one of seven categories: missing item, wrong item, damaged, expired or unsafe, overcharged, behaviour, other (D-8). After that the app points to the support email, and Admin may open a late complaint for a serious safety issue with the reason recorded. The customer sees at once that it was received. It lands in an Admin queue. The shop is not told until it is upheld and has no reply in the app; Admin speaks to the shop outside the app before upholding anything that costs it money.
 - **TRU-3** Admin resolves a complaint with a reason. An upheld complaint may reverse the commission on the affected lines, as a statement adjustment. **That adjustment is between the shop and the platform and pays the customer nothing.**
-- **TRU-4** When a customer is owed money after an upheld complaint, Admin records the amount and **the shop pays the customer directly within seven calendar days** (D-10). Both sides see the amount, the due date and the status: owed, marked paid by the shop, confirmed by the customer, or disputed. A dispute or a missed date puts it in an Admin queue. The platform never holds or passes on the money, and nothing happens to the shop automatically. A repayment left unpaid past its date is a ground on which Admin may suspend the shop, as a judgement with a recorded reason (D-14).
+- **TRU-4** When a customer is owed money after an upheld complaint, Admin records the amount and **the shop pays the customer directly within seven calendar days** (D-10). Both sides see the amount, the due date and the status: owed, marked paid by the shop, confirmed by the customer, or disputed. A dispute or a missed date puts it in an Admin queue. The platform never holds or passes on the money, and nothing happens to the shop automatically. A repayment left unpaid past its date is a ground on which Admin may suspend the shop, as a judgement with a recorded reason (D-14). A repayment owed to a customer who deletes their account stays owed and stays in the Admin queue (DEL-2).
 - **TRU-5** Refusals and failed deliveries are counted per customer. Two in 30 days flags the customer for Admin. Admin blocks or unblocks with a reason; nothing blocks automatically. A blocked customer cannot place a new order and sees the support email; an order in progress finishes. **A block survives account deletion** (D-2): while a block is active, a keyed hash of the phone number and of the email is kept, which cannot be read back, and a new sign-up matching either starts blocked. Unblocking destroys both. Nothing is kept for a customer who is not blocked.
 - **TRU-6** Support is one email address on the brand domain, shown in both apps and on the website. There is no platform phone number.
 
@@ -302,7 +302,7 @@ Shop reports in the Shopkeeper app: sales today and this week split online and c
 ### 5.15 Account deletion — [Account deletion and data retention](https://github.com/Hemanshujc1/YGo/issues/26)
 
 - **DEL-1** A Customer deletes their account in two taps. An Owner or Staff member requests it and Admin processes it.
-- **DEL-2** Deletion is refused while an order is in progress, or for an Owner while the shop is Live or a statement is unpaid. The app says which.
+- **DEL-2** Deletion is refused while an order is in progress, or for an Owner while the shop is Live or a statement is unpaid. The app says which. **An outstanding repayment (TRU-4) does not refuse a Customer's deletion**: the debt and its record are kept, are never marked settled because of the deletion, and are anonymised with the order on the clocks in DEL-5.
 - **DEL-3** **Day 0, the account is closed.** The person cannot sign in, shops see "Deleted customer", and the personal details are sealed where only an Admin restore can reach them.
 - **DEL-4** **For 7 days Admin can restore it**, with its addresses and order history. A restore is refused if the phone number or email has been used for a new account since.
 - **DEL-5** **When the 7 days end the personal details are erased and the orders anonymised, for good.** The one thing that outlives it is the unreadable marker of an active block (TRU-5). Order and money records are kept without identity for eight years.
@@ -399,7 +399,7 @@ The ten questions raised by the consistency review were answered by the owner. E
 | D-4 | Cancelling a scheduled order, and confirming a changed total on one | Free until the published reject cutoff. Ten minutes to confirm a changed total, then the order is cancelled and its stock and slot place released | FUL-5 |
 | D-5 | A partial acceptance leaves the order below the contribution floor | It proceeds as a recorded exception while the platform's contribution is not negative. A platform-funded discount never exceeds what the platform earns on the order | ORD-4 |
 | D-6 | A coupon on an order that contains a bargained line | None, of any funding | BRG-5 |
-| D-7 | A shop-funded coupon together with a shop-wide discount | Only the better of the two applies. Platform-funded coupons keep their own rule | CRT-3 |
+| D-7 | A coupon together with a shop-wide discount | Only the better of the two applies, the shop-wide discount on a tie, whatever the coupon's funding. Widened on 13 Oct 2026 from shop-funded coupons to every coupon | CRT-3 |
 | D-8 | Complaint categories, time limit, pickup | Seven categories; three calendar days from delivery or pickup; pickup included; a recorded Admin exception for a serious safety issue reported late | TRU-2 |
 | D-9 | A product request rejected as an excluded good | Removed from the shop's counter list from then on; past records untouched | CAT-8 |
 | D-10 | Compensation after an upheld complaint | The shop pays the customer directly within seven calendar days. The app tracks the amount and its status. The platform handles no money and nothing is penalised automatically | TRU-4 |
@@ -415,7 +415,7 @@ None of these was overridden silently. Each is recorded here with how it was rec
 | D-5 recorded exception | "Any exception below the floor is explicitly authorised and recorded with a reason" | This answer is the standing authorisation. Each case is recorded on the order automatically and listed for Admin, with no approval per order |
 | D-5 "never exceed platform earnings" | The revenue specification lets Admin fund a deliberate, budgeted subsidy below the floor | Read as a rule for what the engine does on its own. The Admin-approved subsidy in the specification is left as written and is not used by anything in Phase 1 |
 | D-6 no coupon on a bargained order | The earlier rule was per line: a bargained line takes no coupon, the other lines could | Tightened to the whole order for coupons. The shop-wide discount still applies to the other lines, as the specification's discount base already said |
-| D-7 the better one applies | "One coupon per order" and "at most one shop-wide discount per order" each allowed one of the other | Both limits stand, and a third is added: at most one shop-funded offer per order |
+| D-7 the better one applies | "One coupon per order" and "at most one shop-wide discount per order" each allowed one of the other | Both limits stand, and a third is added: at most one promotion per order, the shop-wide discount or one coupon |
 | D-8 pickup included | Complaints were written as being "against a delivered order" | Widened to delivered and picked-up orders. An order that never reached the customer has nothing to complain of in the app; support email covers it |
 | D-10 no automatic penalties | The draft said an unpaid repayment was a ground for suspension, which is not on the accepted list of grounds | The owner then added it to the list as a ground for Admin's judgement (D-14). Nothing about it is automatic |
 
@@ -427,7 +427,7 @@ Four narrower questions came out of the answers above. The owner answered all fo
 |---|---|---|---|
 | D-11 | If SMS is not ready when stage one is reviewed, do customers keep ordering on unverified numbers? | Decided at that review and recorded. The app has no default; Admin has a switch that stops new customer sign-ups, so either answer needs no new release | ACC-3 |
 | D-12 | Does the 20% maximum also bind a coupon an Owner creates? | Yes, the same maximum, checked when the coupon is saved | CRT-3, MNY-5 |
-| D-13 | Is a split-funded coupon a shop offer or a platform offer beside a shop-wide discount? | A shop offer: the better of the two applies | CRT-3 |
+| D-13 | Is a split-funded coupon a shop offer or a platform offer beside a shop-wide discount? | Neither: no coupon of any funding sits beside a shop-wide discount, so the better of the two applies | CRT-3 |
 | D-14 | Is a repayment left unpaid past seven days a ground for suspension? | Yes, as an Admin judgement with a recorded reason. Never automatic | TRU-4, R-14 |
 
 Still the owner's, already known, and not blockers for the build: every value on the first rate card (L-9), and the balance limit for each shop.
@@ -534,7 +534,7 @@ Each story names the requirement that holds its rule. A story adds no rule of it
 53. As an Owner, I want to start my shop's application in the Shopkeeper app by entering details and numbers only, so that I upload no identity document (ONB-1, ONB-3).
 54. As an Owner, I want to see what state my application is in, so that I know what is left (ONB-1).
 55. As an Owner, I want to read and accept an agreement that shows my rate card, so that I know what I will be charged before I go Live (ONB-5).
-56. As an Owner, I want counter billing and stock to work before my shop is in the customer feed, so that the app is useful from the first day (ONB-4).
+56. As an Owner, I want to set up my listings, prices and opening stock once my shop is Approved, and to have counter billing and stock from the day it goes Live even when it is out of the customer feed (ACC-5, ONB-4).
 57. As an Owner, I want to choose which packs I stock and set each one's online price, counter price, MRP, stock, low-stock level and availability (CAT-1).
 58. As an Owner, I want to add my own quantity-price options, so that my usual counter deals are online (CAT-2).
 59. As an Owner, I want to request a product that is not in the catalog and sell it at my counter at once (CAT-3).
@@ -570,7 +570,7 @@ Each story names the requirement that holds its rule. A story adds no rule of it
 86. As the shop, I want to accept an order, reject it, or accept it in part by reducing a quantity or removing a line (ORD-3).
 87. As the shop, I want to review a scheduled order and reject it before the cutoff, and to cancel it with a reason after (FUL-4).
 88. As the shop, I want to agree or refuse when a customer asks to cancel an accepted order (ORD-5).
-89. As the shop, I want to mark an order ready and assign it to a Staff member who can deliver (DLV-1).
+89. As the shop, I want to mark an order ready and assign it to the Owner or to a Staff member who can deliver (DLV-1).
 90. As the shop, I want to complete a pickup with the customer's code at the counter and record cash or UPI (FUL-7, MNY-1).
 91. As the shop, I want to make a counter bill from catalog lines or a typed line, with a discount, an optional customer name and phone, and cash or UPI (BIL-1).
 92. As the shop, I want to share the bill as a PDF from my phone (BIL-2).
@@ -698,7 +698,7 @@ The first two are ADR-0008's. The other four were added by an amendment to ADR-0
 - **Both mobile apps show what the server returned.** Neither works out an order total, a fee or a discount.
 - **The Shopkeeper app has one offline module**: the queue of actions waiting to sync, the local copy of the shop's catalog and stock, the two limits (BIL-3), and counter-bill arithmetic in whole paise. Counter billing, stock and delivery screens are built on it and on nothing else for their writes.
 - **The Customer app has no offline writes.** It needs a connection to order.
-- **Role decides what the Shopkeeper app shows**: Owner, Staff, and the delivery tab for Staff who can deliver.
+- **Role decides what the Shopkeeper app shows**: Owner, Staff, and the delivery tab for the Owner and for Staff who can deliver.
 - **The Admin web and the public website** are static pages calling the same server. The public deletion page calls an endpoint that answers the same way whether or not an account exists (DEL-9).
 - **Each app sends its version with every request**, and the server can tell a too-old app to update (Q-7).
 
