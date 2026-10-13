@@ -77,3 +77,7 @@ Constraints fixed before this decision:
 **Prisma.** Rejected on PostGIS: raw SQL is a second-class citizen in exactly the two queries that matter most here, and its connection handling has its own opinions on a connection budget this tight.
 
 **EventBridge plus Lambda for scheduled jobs.** Rejected as a second runtime and a second deployment artifact needing VPC access to a private database, to do work on an instance that is already paid for and running.
+
+## Amendment, 13 Oct 2026: one pricing engine
+
+"Money arithmetic happens in SQL" is tightened by the amendment to [ADR-0007](0007-monorepo-and-shared-packages.md): the pricing engine is a single SQL implementation called by the quote endpoint, order placement, partial-acceptance recomputation, the simulator and the statement job. No client computes a quote. The one exception is a counter bill's total, computed on the phone in integer paise for offline use and checked, never rewritten, by the server on sync. An earlier ticket's note that money is "stored as integer paise" is superseded by ADR-0002's `NUMERIC(12,2)`; integer paise is the phone's representation only.

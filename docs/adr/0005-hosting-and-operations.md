@@ -145,3 +145,7 @@ Checked against the registries on 13 Oct 2026 — the `.in` registry at `whois.n
 **A separate staging instance.** Rejected on cost: it roughly doubles the bill to remove a contention risk that fifty to eighty shops will not generate.
 
 **Infrastructure as code (Terraform or CDK).** Honestly rejected on effort: for about a dozen resources created once by one person, writing it is slower than the console, and the real reproducibility need in Phase 1 is the documented restore drill rather than a re-creatable VPC.
+
+## Amendment, 13 Oct 2026: backups and account deletion
+
+Account deletion erases personal data seven days after the request, and every backup layer above still holds it at that moment. Two rules reconcile the two. **Backups that contain personal data age out within 90 days**: nightly dumps are kept 30 days, weekly snapshots five weeks, and no more than two monthly off-AWS copies exist at once. **A deletion ledger**, holding only the opaque account pseudonym and the erasure time, is replayed after any restore and before the restored database serves a request, so a restore cannot bring a deleted person back. The ledger also records each removal of a block marker (the keyed hash of a blocked customer's phone number and email, kept only while the block is active), so a restore cannot bring back the marker of someone who has since been unblocked. The privacy policy states the 90 days. The eight-year financial records live in the database itself and do not depend on old backups.

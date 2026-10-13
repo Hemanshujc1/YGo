@@ -73,3 +73,19 @@ Constraints fixed before this decision:
 **Pre-built internal packages.** The conventional shape, and necessary if anything were ever published. Rejected as adding a build graph and a class of stale-output bug to solve a problem this repository does not have.
 
 **Turborepo remote caching.** Rejected for Phase 1: it means an account with a third party and artifacts leaving the machine, for a shared-cache benefit that is meaningless with one developer.
+
+## Amendment, 13 Oct 2026: what `@ygo/pricing` holds
+
+The PRD consistency review found this record and ADR-0004 pulling in opposite directions. ADR-0004 puts money arithmetic in SQL and forbids it in JavaScript on the server; this record gave `@ygo/pricing` "the pricing, fee and coupon calculators" and had the server import them. Two implementations of the pricing engine, one in SQL and one in TypeScript, are two chances for a customer's cart to disagree with their order, and agreement between them was only ever as good as the fixtures.
+
+**The engine exists once, in SQL, on the server.** The cart quote, order placement, the recomputation after a partial acceptance, the admin simulator and the weekly statement all call it. Choosing which rule applies may be written in TypeScript; every operation that produces or combines a money amount runs in PostgreSQL on `NUMERIC`. The customer app shows the last quote the server returned and never computes one, which costs nothing because that app needs a connection to order anyway.
+
+**`@ygo/pricing` is narrowed to three things:**
+
+- **Counter-bill arithmetic**, the one money calculation that must work offline: line totals rounded once per line half-up, the bill-level discount and the bill total, done in **integer paise and integer thousandths of a unit, never floating point**.
+- **The worked examples as data**: every scenario in `docs/product/revenue-system-spec.md` expressed as inputs and expected amounts. The server's tests run them through the SQL engine. They are the acceptance test for the pricing engine.
+- **Counter-bill fixtures**, run against both the phone's arithmetic and the server's check of it.
+
+The server imports the fixtures in its tests and executes none of the package's arithmetic. On sync it recomputes each counter bill in SQL; a disagreement flags the bill for Admin and changes nothing, because the customer has already paid the amount the phone showed.
+
+Everything else in this record stands, including the lint ban on numeric coercion in money paths, which now also covers the paise arithmetic in this package.
