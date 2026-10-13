@@ -1,6 +1,6 @@
 # YGo Phase 1 — Product Requirements
 
-- **Status**: Draft 3 for the owner's review, 13 Oct 2026. Corrected after a consistency review against `CONTEXT.md`, the revenue specification and ADR-0001 to ADR-0008, then updated with the owner's answers to D-1 to D-14. Section 8 holds the decisions and section 9 lists what changed.
+- **Status**: Draft 4 for the owner's review, 13 Oct 2026. Corrected after a consistency review against `CONTEXT.md`, the revenue specification and ADR-0001 to ADR-0008, updated with the owner's answers to D-1 to D-14, then brought into line with `CONTEXT.md` on five points that changed no decision (the last five rows of section 9). Section 8 holds the decisions and section 9 lists what changed.
 - **Owner**: Hemanshu (founder, sole developer)
 - **Decision map**: [YGo Phase 1 decision map](https://github.com/Hemanshujc1/YGo/issues/1)
 
@@ -55,11 +55,11 @@ Judged at the end of week two. All four must hold. There is no revenue target, b
 | # | Measure | Bar |
 |---|---|---|
 | G-1 | Placed orders that end delivered or picked up | at least 80% |
-| G-2 | Time from placement to shop acceptance, median, **instant and pickup orders only** | under 2 minutes |
+| G-2 | Placed **instant and pickup** orders that the shop accepts within 2 minutes of placement | at least half |
 | G-3 | Shops paying their first weekly statement within the grace period | at least 80% |
 | G-4 | Money disputes caused by the app's own arithmetic | none |
 
-Scheduled orders are left out of G-2 because they are approved automatically and would flatter the figure. G-3 needs the statement grace period to be set, which is why it is one of the values a shop cannot go Live without (MNY-13).
+Scheduled orders are left out of G-2 because they are approved automatically and would flatter the figure. G-2 is counted over every placed instant and pickup order, so one that the shop rejects or lets expire counts as not accepted in time. G-3 needs the statement grace period to be set, which is why it is one of the values a shop cannot go Live without (MNY-13).
 
 The soft launch **ends at two weeks with a decision**: continue to stage two, fix and rerun, or stop. It is not allowed to drift, because each extra week as an unregistered platform adds exposure for less new information.
 
@@ -118,17 +118,26 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 - **ACC-1** Every role signs in with Google or a 6-digit emailed code. On iOS, Sign in with Apple is offered beside Google, because Apple requires it. No passwords.
 - **ACC-2** An account is created at first sign-in. Signing in proves the email; the app then requires a phone number before anything else. One account per phone number and one per email.
-- **ACC-3** **In stage one the phone number is claimed, not verified**, and the account records it as unverified. A number already in use is refused and the person is pointed to support. **This is accepted for customers in stage one only** (D-1), within these limits: an unverified number never grants access to a shop, never proves on its own who someone is, and never moves an account or its history to another person; Admin sees which numbers are unverified; and the acceptance lapses at the stage-two review. If SMS is not ready at that review, whether ordering on unverified numbers continues is decided there and recorded; the app has no default, and Admin has a switch that stops new customer sign-ups (D-11).
+- **ACC-3** **In stage one the phone number is claimed, not verified**, and the account records it as unverified. A number already in use is refused and the person is pointed to support. **This is accepted for customers in stage one only** (D-1), within these limits: an unverified number never grants access to a shop, never proves on its own who someone is, and never moves an account or its history to another person; Admin sees the state of every number (ACC-14); and the acceptance lapses at the stage-two review. If SMS is not ready at that review, whether ordering on unverified numbers continues is decided there and recorded; the app has no default, and Admin has a switch that stops new customer sign-ups (D-11).
 - **ACC-4** Every account starts as a Customer and may carry more roles, with a switch between the Customer and Shopkeeper sides. An account holds at most one active shop link at a time, as Owner or as Staff.
-- **ACC-5** The Owner role is attached when the account starts a shop application and carries no power until Admin moves that shop to Live. Admin confirms at the visit that the account's phone and email belong to the person in the shop.
+- **ACC-5** The Owner role is attached when the account starts a shop application and carries no power until Admin moves that shop to Live. Admin confirms at the visit that the account's phone and email belong to the person in the shop, which makes the Owner's number **visit-confirmed** (ACC-14).
 - **ACC-6** The Owner invites Staff by phone number. The invited person completes the link by entering a one-time **join code** shown in the Owner's app. A phone number alone never grants access to a shop.
 - **ACC-7** Re-inviting a deactivated person reactivates the same link, so their history stays attached. Only the Owner can do it.
 - **ACC-8** Admin and Area Manager accounts are created by an Admin and are never open to sign-up.
 - **ACC-9** An Owner or Staff member cannot place a customer order with their own shop.
-- **ACC-10** Sign-in by SMS is built behind a switch and stays off until stage two. When it is switched on, every account confirms its phone number at next sign-in, and a number its holder cannot confirm is released.
+- **ACC-10** Sign-in by SMS is built behind a switch and stays off until stage two. When it is switched on, every account, Owners included, confirms its phone number by SMS at next sign-in and the number becomes **SMS-verified** (ACC-14). A number its holder cannot confirm is released.
 - **ACC-11** A deactivated Staff member loses access within minutes.
 - **ACC-12** A lost email is recovered only by Admin. For an Owner: a PAN, FSSAI or visit-record match. For a Customer, because the phone number is unverified, a call is not enough (D-1): Admin calls the number on file **and** the caller gives two details from the account's own order history; a notice goes to the old email address; and the checks made are recorded. An account with no completed order cannot be recovered; Admin releases its phone number and the person signs up again. Every session is revoked. This is a known weak point until SMS arrives.
 - **ACC-13** A reviewer demo account exists for Play and App Store review.
+- **ACC-14** Every phone number is in one of three states, recorded on the account and visible to Admin. They are never treated as the same thing.
+
+  | State | Who has it | What it rests on | What it is good for |
+  |---|---|---|---|
+  | **Unverified** | Every Customer and Staff member in stage one, and an Owner before the visit | The person typed it. Nobody checked | Reaching the person, and one account per number. Nothing else (ACC-3) |
+  | **Visit-confirmed** | An Owner whose shop has had its visit | Admin confirmed in person that the number belongs to the person in the shop, recorded with the visit (L-10) | The Owner role. It is a person's word and a record, not a code sent to the phone |
+  | **SMS-verified** | Nobody in stage one. Every account once SMS is switched on | A code sent to the number and entered | Signing in by phone, and retiring the weak points in ACC-12 and R-13 |
+
+  A Staff member's access rests on the join code (ACC-6), not on the state of their number.
 
 ### 5.2 Shop onboarding — [Shop KYC and regulated goods](https://github.com/Hemanshujc1/YGo/issues/17)
 
@@ -137,7 +146,8 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ONB-3** Collected: PAN (required), entity type, FSSAI number **and its expiry date**, shop name, address, pincode, map pin, owner name, phone, email, service radius, UPI id. **Numbers only — no photo or scan of any identity document is stored.** No bank details.
 - **ONB-4** A shop with an incomplete rate card stays out of the customer feed. Its counter billing and stock tools still work.
 - **ONB-5** The Owner accepts an onboarding agreement that names the excluded goods, states suspension as the consequence, and shows the shop's rate card. Acceptance is stored with the agreement version, the rate card version and the time.
-- **ONB-6** Auto-pause (expired FSSAI, balance limit reached) clears by itself when its cause does. Suspension is an Admin decision with a reason. A suspended shop leaves the feed, finishes its in-flight orders, and **keeps its counter billing**.
+- **ONB-6** Auto-pause is mechanical and clears by itself when its cause does. Its causes are an expired FSSAI, an onboarding fee expired past its grace period, and the balance limit reached (MNY-9). The fee cause cannot arise in the pilot, where the fee is waived.
+- **ONB-7** Suspension is an Admin judgement with a recorded reason, never automatic, on these grounds: selling an excluded category; diverting payment or disputing money a customer has paid; materially false listings or prices; upheld safety or expiry complaints; repeated unresponsiveness to accepted orders; a statement unpaid past its grace period; a repayment to a customer unpaid past its seven days (TRU-4); KYC details found invalid. A suspended shop leaves the feed, takes no new orders, finishes its in-flight orders, and **keeps its counter billing, stock and catalog tools**. Its statement stays due. The Owner is told and sees the reason. Suspension attaches to the shop, not to the Owner's account. Only Admin reinstates, with a reason.
 
 ### 5.3 Catalog — [Catalog model](https://github.com/Hemanshujc1/YGo/issues/10)
 
@@ -152,11 +162,11 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 ### 5.4 Finding shops and products — [Service area](https://github.com/Hemanshujc1/YGo/issues/6)
 
-- **DSC-1** A customer sees a shop only when they are inside that shop's own service radius. This rule covers all three fulfilment modes. The platform maximum is 5 km.
+- **DSC-1** A customer sees a shop, and can order from it, only when **both** are true: the customer's location is in an active Area, and it is inside that shop's own service radius. The Area is found from the pincode of the customer's location. The radius test is the same for all three fulfilment modes. The platform maximum radius is 5 km. The customer's Area and the shop's Area do not have to be the same one.
 - **DSC-2** Shop cards show rating, estimated time and delivery fee. The shop page shows opening hours, minimum order and FSSAI number.
 - **DSC-3** Search covers products and shops and matches Hindi typed in English letters ("kanda" finds onion) through one admin-managed list for the whole platform.
 - **DSC-4** An out-of-stock item is shown but cannot be ordered. It is never hidden.
-- **DSC-5** A customer outside every active Area sees "not serviceable yet" and can leave a phone number.
+- **DSC-5** A customer whose location is in no active Area sees "not serviceable yet" and can leave a phone number, **even if a Live shop is within range**. This is the known cost of building Areas from pincodes, accepted when the service area was decided.
 
 ### 5.5 Cart and checkout — [Order shape](https://github.com/Hemanshujc1/YGo/issues/3)
 
@@ -195,7 +205,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **FUL-4** The shop is asked to review a scheduled order and may reject it until a configurable cutoff before the slot. Doing nothing leaves it confirmed. After the cutoff the shop can only cancel with a reason, which counts against its reliability.
 - **FUL-5** The customer cancels a scheduled order freely until the same cutoff, which is shown on the slot and on the order. From then until the order is ready the shop must agree, and after that it cannot be cancelled in the app. **A changed total on a scheduled order must be confirmed within ten minutes**, configurable separately from the five minutes of other orders; silence cancels the order and releases its stock and its place in the slot (D-4).
 - **FUL-6** Stock held for a scheduled order can still be sold at the counter (BIL-4). The shop then partially accepts the scheduled order like any other.
-- **FUL-7** Self-pickup has no delivery fee and is completed with the same 4-digit code.
+- **FUL-7** Self-pickup has no delivery fee and is completed with the same 4-digit code, at the counter, with no proof photo. It is paid for at the counter when collected (MNY-1). A pickup order that is never collected expires at a configurable cutoff, and nobody pays or is charged anything for it.
 
 ### 5.9 Delivery and proof — [Login and handover OTP](https://github.com/Hemanshujc1/YGo/issues/18)
 
@@ -226,7 +236,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 ### 5.11 Money — [Phase 1 payments](https://github.com/Hemanshujc1/YGo/issues/13), [Money direction and settlement](https://github.com/Hemanshujc1/YGo/issues/14), [Commission, fees and coupon funding](https://github.com/Hemanshujc1/YGo/issues/15)
 
-- **MNY-1** The customer pays the shop, in cash or by UPI to the shop's own account, at the door. The platform never touches customer money. There is no refund flow, and the platform pays no customer anything.
+- **MNY-1** The customer pays the shop, in cash or by UPI to the shop's own account, **at the handover: at the door for a delivery, at the shop's counter for a pickup**. Nothing is paid in advance on any route. For a pickup, Staff show the shop's UPI QR from the Shopkeeper app or take cash, and record which, exactly as a deliverer does (DLV-6). A pickup booking fee, where one is switched on, is part of the total the shop collects and is owed to the platform on the statement. The platform never touches customer money. There is no refund flow, and the platform pays no customer anything.
 - **MNY-2** Commission is charged on delivered orders only, worked out per line. Pickup and counter bills carry none.
 - **MNY-3** **No rate, fee, floor, split or limit is built in.** Admin sets every one, at global, category or shop level, and can see which level a value came from. A value set globally covers every shop without its own. Area-level settings exist in the data and have no screen in Phase 1.
 - **MNY-4** An order must produce a minimum platform contribution to be placeable, set separately for delivery and pickup.
@@ -244,12 +254,12 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 
 ### 5.12 Notifications
 
-- **NOT-1** Two channels: push and an in-app list. No SMS. No email except the sign-in code.
+- **NOT-1** Two channels: push and an in-app list. No SMS. No email except three about access to the account itself: the sign-in code, the code that confirms a request made on the public deletion page (DEL-9), and the notice sent to the old address when Admin changes an account's email (ACC-12).
 - **NOT-2** A notification only reports something already recorded. Missing one never changes an outcome.
 - **NOT-3** Two are loud: a new order for the shop, and the changed-total confirmation for the customer, which also shows as a banner that will not go away.
 - **NOT-4** Admin receives no push. Admin works queues.
 - **NOT-5** The new-order alarm rings as loudly as each phone allows. Shops are advised to keep an Android phone at the counter, and the founder phones the shop as the backstop.
-- **NOT-6** The full list of who is told what is in `CONTEXT.md` under Notifications. It includes: the customer when a complaint is resolved, when a repayment is recorded as owed to them and when the shop marks it paid; the shop when a repayment is recorded against it, when a rate-card change is scheduled, when a complaint is upheld against it, when a discount rule is paused because the cap was lowered, and when a product request is approved or rejected.
+- **NOT-6** The full list of who is told what is in `CONTEXT.md` under Notifications. It includes: the customer when a complaint is resolved, when a repayment is recorded as owed to them and when the shop marks it paid; the shop when a repayment is recorded against it, when a rate-card change is scheduled, when a complaint is upheld against it, when a shop-wide discount or a coupon it funds is paused because the cap was lowered, when it is suspended or reinstated, and when a product request is approved or rejected.
 
 ### 5.13 Ratings, complaints, refusals, support
 
@@ -287,6 +297,17 @@ Shop reports in the Shopkeeper app: sales today and this week split online and c
 - **DEL-7** A deleted phone number may sign up again at once, as a new account with no history. Doing so inside the 7 days gives up the restore.
 - **DEL-8** Copies inside backups age out within 90 days, and a restored backup has later deletions applied again before use.
 - **DEL-9** A public web page accepts deletion requests and reveals nothing about who has an account.
+- **DEL-10** **Shop records are kept on their own clocks**, counted from the shop's last financial record and not from the day it closed.
+
+  | Class | What is in it | Kept |
+  |---|---|---|
+  | Mandatory | Commission invoices, weekly statements, ledger entries and adjustments; each order's frozen lines, amounts and commission basis; and the shop's **invoice identity**: legal name, address, entity type, PAN number, FSSAI number | Eight years |
+  | The shop's own business record | Counter bills, the stock movement log, and the record that the visit happened, with its date and who made it | Eight years, on the same clock |
+  | Removable | The Owner's and Staff's name, phone, email and push tokens; the UPI id; the shop-front photo; rejected bargain offers; search history; device and sync details | Personal details go on account deletion, as a customer's do. The photo goes one year after closure. The visit record stays |
+
+- **DEL-11** A Closed shop is never purged while a statement, invoice or commission record exists. It leaves the feed, its listings stop selling, its counter billing stops, and anything outstanding stays due.
+- **DEL-12** An Owner's deletion removes the Owner's personal details and **never the shop's invoice identity** inside the eight years, because an invoice has to name who it was issued to. A Staff member's deletion leaves a nameless deactivated actor on their past bills and status changes, and a later invitation is a new account.
+- **DEL-13** The walk-in name and phone on a counter bill are the shop's own record and are untouched by any account deletion. Only numbers carrying the consent tick (BIL-1) may ever be messaged, and none before stage two.
 
 ## 6. Qualities the product must have
 
@@ -415,3 +436,8 @@ Four narrower questions came out of the answers above. The owner answered all fo
 | Customer compensation | "If money is owed, a statement adjustment" read as though the customer were paid by it | Stated that it pays the customer nothing; the shop repays directly within seven days, tracked in the app (TRU-3, TRU-4) |
 | Launch tasks | Mixed into the requirements and the open-items table | One checklist, 3.3 |
 | Owner decisions D-1 to D-10 | Ten rules were recommendations only | All ten answered and written in, and the four follow-up questions D-11 to D-14 after them (section 8) |
+| Launch measure G-2 | "Median time under 2 minutes" here, "half of all orders accepted within two minutes" in `CONTEXT.md`: two different sums when some orders are never accepted | One wording in both, counted over every placed instant and pickup order (3.2) |
+| Area and radius | DSC-1 read as though the radius were the only test, and a glossary line said serviceability was "not Area membership", while DSC-5 turned away anyone outside an active Area | Both tests are required and said so, as the service-area decision always had it (DSC-1, DSC-5) |
+| Phone number states | "Unverified" was the only state named, though an Owner's number is confirmed in person and SMS will verify all of them later | Three named states (ACC-14) |
+| Shop records and pickup payment | Both were in `CONTEXT.md` only. "At the door" left pickup payment unstated | DEL-10 to DEL-13; MNY-1, FUL-7 |
+| Suspension, auto-pause and email | The grounds for suspension and the onboarding-fee auto-pause were in `CONTEXT.md` only. "No email except the sign-in code" overlooked the deletion-page code and the recovery notice | ONB-6, ONB-7, NOT-1, NOT-6 |

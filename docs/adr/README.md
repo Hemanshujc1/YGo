@@ -13,6 +13,7 @@ The resolution comment on the ticket is the record of *reasoning* — the questi
 - Filename: `NNNN-short-kebab-title.md`, numbers never reused.
 - Status is one of `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, or `Deprecated`. `Proposed` means the technical content is decided but something in it still needs the owner's confirmation — a spending commitment, a date, or an accepted risk — and it names what. Records are **never edited to change a decision** — a new ADR supersedes an old one and the old one's Status line is updated to point at it.
 - Every ADR links back to the ticket whose resolution comment holds its reasoning.
+- **Reading the pilot size in a Context section.** Several records open with "a one-month pilot of fifty to eighty shops". That was the launch shape when they were written. The launch is now two stages: a soft launch of one to two weeks with 12 to 20 shops, then an official launch growing toward 50 to 80 (`CONTEXT.md`, Launch stages). Fifty to eighty remains the size the system is built for, so no decision in any record changes, and the records are left as written.
 
 ## Template
 
