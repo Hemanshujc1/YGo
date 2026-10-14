@@ -3,10 +3,10 @@
 ## Status
 
 - [x] Draft
-- [ ] Sent to Claude Design
+- [x] Sent to Claude Design
 - [ ] Design complete
 
-Last updated: 13 Oct 2026 | Author: AI-assisted, for Hemanshu (owner) | Related: [Phase 1 PRD](prd-phase1.md), [`CONTEXT.md`](../../CONTEXT.md), [ADR-0001](../adr/0001-mobile-app-framework.md), [ADR-0007](../adr/0007-monorepo-and-shared-packages.md)
+Last updated: 14 Oct 2026 | Author: AI-assisted, for Hemanshu (owner) | Related: [Phase 1 PRD](prd-phase1.md), [`CONTEXT.md`](../../CONTEXT.md), [ADR-0001](../adr/0001-mobile-app-framework.md), [ADR-0007](../adr/0007-monorepo-and-shared-packages.md)
 
 **The first deliverable is a design system, not screens.** Tokens, components and their states come first, for light and dark. Screens follow and are built only from those components.
 
