@@ -31,7 +31,7 @@ Every screen in every state is drawn in light and dark. Phones grow to fit their
 | Shopkeeper app | 45 | 174 | S01–S45 |
 | Admin web | 31 | each in all its states, 350 pages counting light and dark | A01–A31 |
 
-All 100 screens are **Ready** (the status column the skill template asks for). Six screens still carry a wording marker (see the open questions). A marker holds back only the wording of a reason list, never the layout or the behaviour.
+All 100 screens are **Ready** (the status column the skill template asks for). Six screens carry a "wording to confirm" marker in the exports. The owner settled that wording on 14 Oct 2026 (see [Reason lists](#reason-lists)), so the lists below replace whatever the exports show.
 
 Screen ids follow the order in which screens were drawn, not the order in which they are used. The tables below are in journey order.
 
@@ -312,7 +312,7 @@ These are decisions that differ from, or extend, the PRD or the brief. The PRD h
 
 | Decision | Reason | Impact on dev |
 |---|---|---|
-| **The customer gives a name** at first sign-in, with the phone number (D-16, `ACC-2`, `DLV-7`) | The owner wants the shop and the deliverer to know whom they serve | C02 has a name field, C23 has "change name", and S27 and A15 show the name. GitHub issues #34 and #56 still describe sign-in without a name and need a line added |
+| **The customer gives a name** at first sign-in, with the phone number (D-16, `ACC-2`, `DLV-7`) | The owner wants the shop and the deliverer to know whom they serve | C02 has a name field, C23 has "change name", and S27 and A15 show the name. GitHub issues #34 and #56 carry the name in their acceptance criteria |
 | **The Owner enters a renewed FSSAI expiry** in the app, and the auto-pause lifts on save. Admin can correct it (D-17, `ONB-6`) | No one owned this update before | S35 has the date field and A09 has the correction |
 | **Area Manager payouts are weekly**, on the statement week (D-18, `ADM-9`) | Matches the statement cycle | A24 groups payouts by statement week |
 | **Admin settles a disputed repayment as paid or still owed**, with a reason both sides see. Suspension stays a separate step (D-19, `TRU-4`) | Admin needs a way to close a dispute without the app holding money | A27 has the outcome radio and a pre-filled link to suspension. C21 shows Admin's reason |
@@ -320,8 +320,23 @@ These are decisions that differ from, or extend, the PRD or the brief. The PRD h
 | **CSV import is all or nothing** (A12) | A partly imported catalog is harder to fix than a refused file | Validate every row first. Import inside one transaction. Offer the problem rows for download |
 | **The visit photo is uploaded, and its location is read from the file** (A08) | The Admin web runs on a desktop and cannot take the photo itself | Read the photo's location metadata on the server and refuse a photo without it. Keep the coordinates with the visit record |
 | **Order status wording** is the designer's, and differs between the Customer and Shopkeeper apps (design system section 6) | The wording describes who acts, from each person's view | It is display text and lives outside the code (`Q-2`) |
-| **The dark-theme brand colour is `#A9BBF5`**, not indigo | Indigo is 1.71:1 on the dark background | Use the `brand` role. The owner still has to confirm this (design system item 6) |
+| **The dark-theme brand colour is `#A9BBF5`**, not indigo | Indigo is 1.71:1 on the dark background | Use the `brand` role. The owner confirmed this on 14 Oct 2026 |
 | **C12 and C13 were removed** during review, and the ids are not reused | Removed at the owner's request | None. The gap in the numbering is deliberate |
+
+## Reason lists
+
+The owner settled these on 14 Oct 2026. They replace the drafts marked "wording to confirm" in the exports. They are display text and live outside the code (`Q-2`). In every list, choosing "Other" opens a required text field.
+
+| Screen | List | Final wording |
+|---|---|---|
+| S19 | Goods the shop may not sell (agreement) | As drawn. It matches the excluded list in `CONTEXT.md` word for word, and the legal text (`L-3`) uses the same list |
+| S37 | Why the bill is voided | Wrong item billed · Wrong price or quantity · Billed twice · Customer did not take the goods · Other |
+| S22 | Why the shop rejects a scheduled order, or cancels it after the cutoff | Items not in stock · Cannot deliver in this slot · Shop closed at that time · Other |
+| S29 | Why the code cannot be used | Customer cannot open the app · Customer's phone is not with them · Someone else is receiving the order · Other. There is deliberately no "code does not match" reason: a wrong code never lets the deliverer skip the check (`R-8`) |
+| S30 | Why the delivery failed | No one at the address · Customer refused · Address not found · Other |
+| A13 | Starting denylist (Admin edits it later; a match only flags) | **Alcohol:** daru, sharab, beer, whisky, rum, vodka, wine. **Tobacco and nicotine:** cigarette, bidi, tambaku, gutkha, gutka, pan masala, vape, hookah. **Medicine:** tablet, syrup, cough syrup, paracetamol, dolo, crocin, dawai. **Raw meat, fish and poultry:** chicken, mutton, fish, machhi, prawns. **Fireworks:** crackers, fatake, patakhe. **Fuel and gas:** LPG, gas cylinder, petrol, kerosene, rockel. **Pesticides:** pesticide, keetnashak. **Lottery:** lottery. **Infant milk:** infant formula, Lactogen, Nan Pro, feeding bottle |
+
+Eggs and condoms are **allowed**: eggs do not count as poultry, and condoms do not count as adult products. Neither is on the denylist.
 
 ## Component inventory
 
@@ -340,19 +355,19 @@ The full list, with states, is in the [design system](../design/design-system.md
 | Web button, input, reason field, table, tile, source chip, scope notice, side nav, modal | New | Yes, web | Section 7 of the design system |
 | Filter chips with counts, queue item page, Area Manager shell, Go-Live blocker, Now-versus-Draft table, three-step import, forced transition modal | New, from the screens | Yes, web | Section 7.1 of the design system |
 | Google and Apple sign-in buttons | Existing (vendor kits) | — | Use each vendor's own button. Do not redraw them |
-| Lucide icons | Existing library | Yes, both | Not yet in an ADR (design system item 5) |
+| Lucide icons | Existing library | Yes, both | Recorded in ADR-0001. Import each icon on its own |
 
 ## Open questions for dev and PM
 
 | Question | Raised by | Status |
 |---|---|---|
-| **Wording of six reason and legal lists**, which carry a dashed marker in the exports: void reasons (S37), reject reasons (S22, against #8), excluded-goods text (S19, against the legal text, `L-3`), reasons the code cannot be used (S29, against #18), failed-delivery reasons (S30, against #18), and denylist words (A13, against the legal text) | Claude Design | Open. The owner settles the wording, against the tickets and the legal text. This does not block layout or building |
-| **12 px** used for tab labels, tags and badges, while the type rule reserves 12 for captions | Design system review | Open, for the owner (design system item 1) |
-| **Lucide** as the icon set, which no ADR covers yet | Design system review | Open, for the owner (design system item 5) |
-| **Dark `brand` `#A9BBF5`** | Claude Design | Open, for the owner (design system item 6) |
-| **Inter** remains provisional until it has been reviewed on a phone, in the Admin web and in a PDF bill (S07 is the specimen) | Brief | Open, for the owner (design system section 10) |
+| **Wording of six reason and legal lists**, which carry a dashed marker in the exports (S19, S22, S29, S30, S37, A13) | Claude Design | Settled, 14 Oct 2026. See [Reason lists](#reason-lists) |
+| **12 px** used for tab labels, tags and badges, while the type rule reserves 12 for captions | Design system review | Settled, 14 Oct 2026. They use a new Small label style, 13 / 18 at weight 500 (design system section 3) |
+| **Lucide** as the icon set, which no ADR covers yet | Design system review | Settled, 14 Oct 2026. Recorded in ADR-0001 |
+| **Dark `brand` `#A9BBF5`** | Claude Design | Settled, 14 Oct 2026. The owner confirmed it |
+| **Inter** remains provisional until it has been reviewed on a phone, in the Admin web and in a PDF bill (S07 is the specimen) | Brief | Moved to build, 14 Oct 2026. The checks are acceptance criteria on #30, #37 and #53. Fallback: Noto Sans |
 | **Brand name, logo and app icon** | Brief | Blocked on [#27](https://github.com/Hemanshujc1/YGo/issues/27) |
-| **Issues #34 and #56** need the customer name added (D-16) | Design review | Open. The issues still need the edit |
+| **Issues #34 and #56** need the customer name added (D-16) | Design review | Settled, 14 Oct 2026. Both issues now include the name |
 | **The real UPI QR** is generated from the shop's UPI id. The QR in the exports is a placeholder | Claude Design | Settled. This is build work |
 
 ## Next step

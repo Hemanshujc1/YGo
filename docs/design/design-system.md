@@ -4,7 +4,7 @@
 
 - [x] Draft
 - [ ] Owner approved
-- [ ] Reviewed on representative mobile, web and PDF output (Inter stays provisional until this is ticked)
+- [ ] Reviewed on representative mobile, web and PDF output (Inter stays provisional until this is ticked; the checks run at build, in #30, #37 and #53)
 
 Last updated: 14 Oct 2026 | Author: AI-assisted, for Hemanshu (owner) | Related: [Design Brief](../product/design-brief-phase1.md), [Specs UI](../product/specs-ui-phase1.md), [Phase 1 PRD](../product/prd-phase1.md), [ADR-0001](../adr/0001-mobile-app-framework.md), [ADR-0007](../adr/0007-monorepo-and-shared-packages.md)
 
@@ -124,6 +124,7 @@ No WCAG level is claimed (`Q-5`). The floor is 4.5:1 for body text.
 | Body | 16 / 24 | 400 | Default text, rows |
 | Label | 16 or 14 | 500 | Buttons, field labels |
 | Secondary | 14 / 21 | 400 | Supporting text |
+| Small label | 13 / 18 | 500 | Tab-bar labels, tags, badges |
 | Caption | 12 / 18 | 400 | Captions only |
 
 Admin web uses a desktop density: body 14 / 20, page title 24 / 32 (600), section title 16 / 24 (600), tile figure 28 / 36 (600).
@@ -131,7 +132,7 @@ Admin web uses a desktop density: body 14 / 20, page title 24 / 32 (600), sectio
 Rules:
 
 - Money, quantities, codes and timers use **tabular figures** (`tnum`), so columns and countdowns do not shift.
-- Money totals are never below 16. 12 is for captions only, never for an action or a price.
+- Money totals are never below 16. 12 is for captions only, never for an action, a price, a tab label, a tag or a badge. Those use Small label (13 / 18, 500), even where the exports draw them at 12.
 - Line heights are at least 1.4 times the size up to 20. This leaves room for Devanagari marks. Noto Sans Devanagari is the later Hindi companion.
 - No second display family and no brand typeface until #27 closes.
 
@@ -236,14 +237,14 @@ These patterns are built from the components above. Each is used on more than on
 - **Readiness checklist with locked areas** (S14): what is done and what is outstanding, one line each. A locked area is shown with "Opens when you are Live" and "Waiting for: shop visit, rate card". It is never a bare disabled control.
 - **Permission fix panel** (S03): one row per permission (notifications, ringing sound, show over lock screen). Each row says whether that permission is on, has one button to fix it, and the panel ends with "Test the alert". The panel uses calm copy, and an order that is still waiting stays pinned above it.
 - **Notification row** (C22, S41): an icon, a one-line fact, the time, and the word "New" while unread. A tint alone is never enough. The list shows only what the server has already recorded.
-- **Reason picker** (S05, S13, S22, S29, S30, S37): a bottom sheet with a fixed list of radio options. "Other" opens a required text field. The confirm button stays disabled until a reason is chosen. The reason lists are display text from outside the code, and five of them still wait for wording (see the Specs UI).
+- **Reason picker** (S05, S13, S22, S29, S30, S37): a bottom sheet with a fixed list of radio options. "Other" opens a required text field. The confirm button stays disabled until a reason is chosen. The reason lists are display text from outside the code. Their final wording is in the Specs UI, under "Reason lists".
 - **Shop state banner** (S35): paused or suspended, with the reason, what still works (counter billing, stock, catalog), and the one action that lifts the pause when there is one (for example, entering a new FSSAI expiry). A pause uses warning. A suspension uses danger.
 - **Sync queue view** (S08): three sections in this order: Needs attention, Waiting to sync, Synced today. An "Offline room used" meter reads "3 of 500 · 68 h left" (`BIL-3`). Only a held-back bill uses warning.
 - **Scanner and camera viewfinder** (S28, S44): the viewfinder stays dark in both themes, and the controls around it follow the theme. A result shows as a row under the viewfinder ("On the bill · 2", "In stock 24"), so the person can keep scanning. If camera access is refused, a state points to the phone's settings.
 - **Join code display** (S16, S20) and **join code entry** (S21): the code uses tabular figures in the Display style. The display says the code works once and only on the invited person's own phone. Entry has these states: wrong code, expired code, joined.
 - **Owner-only field groups** (S12 and S13): for Staff, price fields, the Bargain floor and quantity-price options are left out of the layout. Prices that Staff need for billing appear as read-only price rows.
 - **Discount and coupon editor** (S34, S45): the type comes first (percentage with an optional cap, or flat amount with a required minimum order). The maximum effective percentage is shown next to the value and checked when saving. A coupon or discount paused by a lowered maximum shows a "Paused" tag and the reason.
-- **Design-only marker:** a dashed outline in the exports means "wording to confirm". It marks copy that is still open and is not a component. Never build it.
+- **Design-only marker:** a dashed outline in the exports means "wording to confirm". It is not a component. Never build it. All six marked lists were settled on 14 Oct 2026, and the Specs UI holds their final wording.
 
 ## 6. Order status treatments (`ORD-1`)
 
@@ -326,24 +327,25 @@ Not decided, or the design disagrees with itself. None changes the PRD.
 
 | # | Item | Why it matters | Who |
 |---|---|---|---|
-| 1 | **12 px is used for tab labels, tags and badges**, but the type rule says 12 is for captions only, never for an action or a price. Tab labels are navigation. "Low stock · 3" and "Number pending" are information | Readability on small screens, the owner's main concern | Owner to decide: raise to 13/14 or accept for non-action text |
+| 1 | ~~12 px is used for tab labels, tags and badges.~~ **Closed 14 Oct 2026.** The owner chose a new Small label style, 13 / 18 at weight 500, for tab labels, tags and badges. 12 stays for captions only | Readability on small screens, the owner's main concern | Done. Build from the type table, not from the exports |
 | 2 | **48 hit area** is stated for chips (40 visual), checkbox and radio (24 visual), but the export only draws the visual size | Must be built as padding or hit-slop, and tested with a thumb | Developer, at build |
 | 3 | **Rupee glyph in the bundled font.** The export loads Inter from Google Fonts, whose `latin` subset leaves out ₹ (U+20B9). The `latin-ext` subset includes it | A subset that drops it shows a fallback glyph on money. The app must bundle Inter with U+20B9, not use a CDN | Developer, then verify on a low-end Android |
 | 4 | **Tabular figures** (`tnum`) must be switched on in the bundled font and in the PDF font | Money columns and countdowns | Developer, then verify |
-| 5 | **Lucide** is not in an ADR. Using `lucide-react-native` and `lucide-react` adds two dependencies | ADR-0001 and ADR-0007 are silent on icons | Owner to approve, then note in ADR-0001 |
-| 6 | **Dark `brand` is `#A9BBF5`**, not the approved indigo, because indigo is 1.71:1 on the dark background | A deliberate palette adjustment. The designer flagged it | Owner to confirm |
+| 5 | ~~Lucide is not in an ADR.~~ **Closed 14 Oct 2026.** Recorded in the ADR-0001 decision table, with `lucide-react-native` on mobile and `lucide-react` on the web | ADR-0001 now covers icons | Done |
+| 6 | ~~Dark `brand` is `#A9BBF5`, not the approved indigo.~~ **Closed 14 Oct 2026.** The owner confirmed `#A9BBF5` for dark theme, since indigo is 1.71:1 on the dark background. Light theme keeps `#1E3A8A`. Revisit with the palette when #27 closes | A deliberate palette adjustment | Done |
 | 7 | **Disabled text is 2.90:1 light and 3.48:1 dark.** Below 4.5 by design | Acceptable only on disabled controls, never for information | Rule 5 covers it |
 | 8 | **QR is a placeholder**, and the Hindi line (प्याज़) is a space check only | Real QR comes from the shop's UPI id. Hindi is a later translation | None now |
 | 9 | **Brand name** is plain text "YGo" until #27 closes | No logo, wordmark or app icon | Blocked on #27 |
 | 10 | ~~Coverage is incomplete.~~ **Closed 14 Oct 2026.** Every journey in section 6 of the brief is drawn: Customer 24 screens, 84 states; Shopkeeper 45 screens, 174 states; Admin 31 screens, each in all its states | Listed in the [Specs UI](../product/specs-ui-phase1.md) | Done |
-| 11 | **Inter review not done.** Needs real specimens on a phone, in the Admin web and in a PDF bill | Owner's condition for approving Inter | Owner |
+| 11 | **Inter review moved to build, 14 Oct 2026.** Build with Inter from the start. The section 10 checks are acceptance criteria on the tickets that first produce real output: phone in [#30](https://github.com/Hemanshujc1/YGo/issues/30), Admin web in [#37](https://github.com/Hemanshujc1/YGo/issues/37), PDF bill in [#53](https://github.com/Hemanshujc1/YGo/issues/53). If Inter fails a check, the fallback is Noto Sans, by changing one token | Owner's condition for approving Inter | Developer, at build |
 
 ## 10. Review checklist for Inter
 
-Tick these on real output before marking Inter as final.
+Tick these on real output before marking Inter as final. They are acceptance criteria on #30 (phone), #37 (Admin web) and #53 (PDF bill). If Inter fails one, switch the font token to Noto Sans.
 
 - [ ] ₹ renders in Inter on a low-end Android phone, an iPhone and the PDF bill
 - [ ] Tabular figures line up in a price column and a countdown
-- [ ] 14 px secondary text and 12 px captions are readable on a small, low-density screen
+- [ ] 14 px secondary text, 13 px Small labels and 12 px captions are readable on a small, low-density screen
+- [ ] Five tab labels at 13 px fit a 360-wide screen without being cut off, including "Deliveries"
 - [ ] Line heights hold Noto Sans Devanagari without clipping
 - [ ] The three weights (400, 500, 600) are the only ones bundled, and the app size is acceptable on the 2 GB Android 10 floor
