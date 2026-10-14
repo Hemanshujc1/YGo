@@ -129,7 +129,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 ### 5.1 Accounts and sign-in — [Login and handover OTP](https://github.com/Hemanshujc1/YGo/issues/18), [Roles and staff](https://github.com/Hemanshujc1/YGo/issues/5)
 
 - **ACC-1** Every role signs in with Google or a 6-digit emailed code. On iOS, Sign in with Apple is offered beside Google, because Apple requires it. No passwords.
-- **ACC-2** An account is created at first sign-in. Signing in proves the email; the app then requires a phone number before anything else. One account per phone number and one per email.
+- **ACC-2** An account is created at first sign-in. Signing in proves the email; the app then requires a name and a phone number before anything else. The name is the person's own, typed once, shown to the shop and the deliverer on that person's orders, and the customer can change it in Account. One account per phone number and one per email.
 - **ACC-3** **In stage one the phone number is claimed, not verified**, and the account records it as unverified. A number already in use is refused and the person is pointed to support. **This is accepted for customers in stage one only** (D-1), within these limits: an unverified number never grants access to a shop, never proves on its own who someone is, and never moves an account or its history to another person; Admin sees the state of every number (ACC-14); and the acceptance lapses at the stage-two review. If SMS is not ready at that review, whether ordering on unverified numbers continues is decided there and recorded; the app has no default, and Admin has a switch that stops new customer sign-ups (D-11).
 - **ACC-4** Every account starts as a Customer and may carry more roles, with a switch between the Customer and Shopkeeper sides. An account holds at most one active shop link at a time, as Owner or as Staff.
 - **ACC-5** The Owner role is attached when the account starts a shop application and carries no power until Admin moves that shop to Live, with one exception: from Approved the Owner may set up listings, prices and opening stock, so the shop is ready the moment it goes Live. Counter sales and every other stock operation open at Live. Admin confirms at the visit that the account's phone and email belong to the person in the shop, which makes the Owner's number **visit-confirmed** (ACC-14).
@@ -158,7 +158,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ONB-3** Collected: PAN (required), entity type, FSSAI number **and its expiry date**, shop name, address, pincode, map pin, owner name, phone, email, service radius, UPI id. **Numbers only — no photo or scan of any identity document is stored.** No bank details.
 - **ONB-4** Counter billing and stock tools open when the shop goes Live, not before. A Live shop whose rate card becomes incomplete stays out of the customer feed, and its counter billing and stock tools still work. A Suspended shop keeps them (ONB-7); a Closed shop does not (DEL-11).
 - **ONB-5** The Owner accepts an onboarding agreement that names the excluded goods, states suspension as the consequence, and shows the shop's rate card. Acceptance is stored with the agreement version, the rate card version and the time.
-- **ONB-6** Auto-pause is mechanical and clears by itself when its cause does. Its causes are an expired FSSAI, an onboarding fee expired past its grace period, and the balance limit reached (MNY-9). The fee cause cannot arise in the pilot, where the fee is waived.
+- **ONB-6** Auto-pause is mechanical and clears by itself when its cause does. Its causes are an expired FSSAI, an onboarding fee expired past its grace period, and the balance limit reached (MNY-9). The fee cause cannot arise in the pilot, where the fee is waived. The Owner enters a renewed FSSAI expiry date in the Shopkeeper app; the pause lifts as soon as it is saved, and Admin can correct the date (D-17).
 - **ONB-7** Suspension is an Admin judgement with a recorded reason, never automatic, on these grounds: selling an excluded category; diverting payment or disputing money a customer has paid; materially false listings or prices; upheld safety or expiry complaints; repeated unresponsiveness to accepted orders; a statement unpaid past its grace period; a repayment to a customer unpaid past its seven days (TRU-4); KYC details found invalid. A suspended shop leaves the feed, takes no new orders, finishes its in-flight orders, and **keeps its counter billing, stock and catalog tools**. Its statement stays due. The Owner is told and sees the reason. Suspension attaches to the shop, not to the Owner's account. Only Admin reinstates, with a reason.
 
 ### 5.3 Catalog — [Catalog model](https://github.com/Hemanshujc1/YGo/issues/10)
@@ -227,7 +227,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **DLV-4** If the code cannot be used, a photo and a reason complete the delivery and mark it a **proof exception**, counted per shop and per deliverer.
 - **DLV-5** A failed delivery needs one call attempt, a wait, a photo and a reason. It is final, and the goods go back into stock.
 - **DLV-6** The deliverer shows the shop's UPI QR from the Shopkeeper app, or takes cash, and records which.
-- **DLV-7** The assigned deliverer sees the customer's phone number for that order only.
+- **DLV-7** The assigned deliverer sees the customer's name and phone number for that order only.
 
 ### 5.10 Counter billing and stock — [Inventory and counter billing](https://github.com/Hemanshujc1/YGo/issues/11), [Tax and invoicing](https://github.com/Hemanshujc1/YGo/issues/16)
 
@@ -241,6 +241,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
   - Numbers follow the order bills reach the server, not always the order of sale. Each bill keeps its sale time.
   - A bill shared before sync shows the reference and "number pending". Shared again later it shows both. Either one finds the bill.
   - A bill held back for attention has no number until it is resolved. Sending the same bill twice returns the same number.
+  - A bill is held back only when the server cannot apply it as recorded: it names a product or pack no longer on the shop's list (removed, or rejected as an excluded good, while the phone was offline), it fails validation, it is older than the server's limit, or it depends on another held action, such as the void of a held bill. A total that disagrees (BIL-9), a suspect clock or a denylist match only flags the bill; it still gets its number. The sale stands either way, and Admin resolves a held bill by giving it the next number with a note.
 - **BIL-6** Only the Owner voids a bill, within 24 hours, with a reason. The original is never edited and keeps its reference and number.
 - **BIL-7** Every stock change needs a reason from a fixed list.
 - **BIL-8** Counter bills carry no commission and no charge of any kind.
@@ -278,7 +279,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **TRU-1** After delivery or pickup the customer may give the shop 1 to 5 stars. **No written comment.** The average covers 90 days and shows after three ratings.
 - **TRU-2** A customer raises a complaint from the screen of a **delivered or picked-up** order, **until the end of the third calendar day after the delivery or pickup**, with an optional photo and one of seven categories: missing item, wrong item, damaged, expired or unsafe, overcharged, behaviour, other (D-8). After that the app points to the support email, and Admin may open a late complaint for a serious safety issue with the reason recorded. The customer sees at once that it was received. It lands in an Admin queue. The shop is not told until it is upheld and has no reply in the app; Admin speaks to the shop outside the app before upholding anything that costs it money.
 - **TRU-3** Admin resolves a complaint with a reason. An upheld complaint may reverse the commission on the affected lines, as a statement adjustment. **That adjustment is between the shop and the platform and pays the customer nothing.**
-- **TRU-4** When a customer is owed money after an upheld complaint, Admin records the amount and **the shop pays the customer directly within seven calendar days** (D-10). Both sides see the amount, the due date and the status: owed, marked paid by the shop, confirmed by the customer, or disputed. A dispute or a missed date puts it in an Admin queue. The platform never holds or passes on the money, and nothing happens to the shop automatically. A repayment left unpaid past its date is a ground on which Admin may suspend the shop, as a judgement with a recorded reason (D-14). A repayment owed to a customer who deletes their account stays owed and stays in the Admin queue (DEL-2).
+- **TRU-4** When a customer is owed money after an upheld complaint, Admin records the amount and **the shop pays the customer directly within seven calendar days** (D-10). Both sides see the amount, the due date and the status: owed, marked paid by the shop, confirmed by the customer, or disputed. A dispute or a missed date puts it in an Admin queue. Admin settles a dispute after speaking to both sides outside the app, as either paid or still owed, with a reason both sides see. Still owed keeps the original due date (D-19). The platform never holds or passes on the money, and nothing happens to the shop automatically. A repayment left unpaid past its date is a ground on which Admin may suspend the shop, as a judgement with a recorded reason (D-14). A repayment owed to a customer who deletes their account stays owed and stays in the Admin queue (DEL-2).
 - **TRU-5** Refusals and failed deliveries are counted per customer. Two in 30 days flags the customer for Admin. Admin blocks or unblocks with a reason; nothing blocks automatically. A blocked customer cannot place a new order and sees the support email; an order in progress finishes. **A block survives account deletion** (D-2): while a block is active, a keyed hash of the phone number and of the email is kept, which cannot be read back, and a new sign-up matching either starts blocked. Unblocking destroys both. Nothing is kept for a customer who is not blocked.
 - **TRU-6** Support is one email address on the brand domain, shown in both apps and on the website. There is no platform phone number.
 
@@ -292,7 +293,7 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ADM-6** Statements, payments received, manual adjustments, shop balances and limits.
 - **ADM-7** Queues: complaints, repayments disputed or overdue, orders that went ahead below the contribution floor, product requests, deletion requests with their age, flagged counter bills, flagged product requests, proof exceptions, flagged customers, orders unanswered at 120 seconds, and sync actions that failed.
 - **ADM-8** A dashboard of tiles and nothing more: orders today by status, live shops, outstanding balances, open queue counts, and the four launch measures G-1 to G-4.
-- **ADM-9** Area Managers and their payouts, as a share of commission actually collected in their Area.
+- **ADM-9** Area Managers and their payouts, as a share of commission actually collected in their Area, worked out weekly on the same Monday-to-Sunday week as statements (D-18).
 - **ADM-12** An Area Manager works only inside their own Area (D-15). There they may see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting, because each of those moves money or removes someone from the platform. Only Admin moves a shop to Live (ONB-1).
 - **ADM-10** Every admin action is recorded from day one. There is no screen for the record in Phase 1.
 - **ADM-11** Customers: look up, see the state of the phone number (ACC-14), block and unblock, change an email for recovery, restore a deleted account inside its window. The switch that stops new customer sign-ups (ACC-3) is here.
@@ -438,6 +439,15 @@ Still the owner's, already known, and not blockers for the build: every value on
 |---|---|---|---|
 | D-15 | What may an Area Manager see and do in the Admin web? | Inside their own Area only: see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. Nothing that moves money or removes someone from the platform | ADM-12 |
 
+### 8.5 Found while reviewing the designs, settled on 14 Oct 2026
+
+| # | Question | Decision | Requirement |
+|---|---|---|---|
+| D-16 | Does the customer give a name? | Yes, with the phone number at first sign-in. Shown to the shop and the deliverer on that person's orders; the customer can change it | ACC-2, DLV-7 |
+| D-17 | Who updates an FSSAI expiry date after Live? | The Owner, in the app. An auto-pause for an expired FSSAI lifts when the new date is saved. Admin can correct it | ONB-6 |
+| D-18 | How often are Area Manager payouts worked out? | Weekly, on the statement week | ADM-9 |
+| D-19 | How does Admin settle a disputed repayment? | Paid or still owed, with a reason both sides see, after speaking to both outside the app. Still owed keeps its original due date. Suspension stays a separate judgement | TRU-4 |
+
 **No owner decision is open.**
 
 ## 9. What changed in this revision
@@ -467,6 +477,7 @@ Still the owner's, already known, and not blockers for the build: every value on
 | Offline bill number in the ADRs | ADR-0003 still said a "provisional number" is replaced by the server's, against BIL-5 | ADR-0003 amended: a permanent reference, and a number added to it |
 | Background jobs in the ADRs | ADR-0004 runs jobs from systemd timers and rejects scheduling inside the service. ADR-0008 said "in-process scheduling" | ADR-0008 amended to follow ADR-0004 |
 | What tests need to replace | Only file storage and email had a stand-in for tests. Sign-in tokens, push, SMS and time had none, and the product is full of deadlines | Four more interfaces (11.3; ADR-0004 amended) |
+| Customer name | The approved specification collected no customer name, though the shop and the deliverer need to know who is at the door and DEL-3 already removes a name on deletion | A name is collected with the phone number at first sign-in and shown on that person's orders (ACC-2, DLV-7). Owner decision, 14 Oct 2026, while reviewing the Customer designs |
 | Admin's customer screen | The phone-number state and the sign-up switch were required by ACC-14 and ACC-3 and missing from the list of Admin screens | ADM-11 |
 | Area Manager permissions | "Onboards and supports the shops" is the whole of what was decided. No list of screens exists | Settled as D-15 (ADM-12) |
 
@@ -477,7 +488,7 @@ Each story names the requirement that holds its rule. A story adds no rule of it
 ### 10.1 Customer
 
 1. As a Customer, I want to sign in with Google, with Apple on an iPhone, or with a code emailed to me, so that I never need a password (ACC-1).
-2. As a Customer, I want to give my phone number once after my first sign-in, so that the shop and the deliverer can reach me (ACC-2).
+2. As a Customer, I want to give my name and phone number once after my first sign-in, so that the shop and the deliverer know who I am and can reach me (ACC-2).
 3. As a Customer, I want to be told plainly when my phone number is already in use and where to write for help, so that I am not left stuck (ACC-3).
 4. As a Customer, I want to see only the shops that can serve my location, so that I never build a cart I cannot order (DSC-1).
 5. As a Customer outside every active Area, I want to be told "not serviceable yet" and to leave my number, so that I know why I see no shops (DSC-5).
@@ -585,7 +596,7 @@ Each story names the requirement that holds its rule. A story adds no rule of it
 ### 10.4 Staff who deliver
 
 100. As a deliverer, I want my assigned orders under "My deliveries" (DLV-1).
-101. As a deliverer, I want the customer's phone number for that order and no other (DLV-7).
+101. As a deliverer, I want the customer's name and phone number for that order and no other (DLV-7).
 102. As a deliverer, I want to take a proof photo and then enter the customer's code (DLV-2).
 103. As a deliverer, I want the delivery screens to work without internet (DLV-3).
 104. As a deliverer, I want to complete a delivery with a photo and a reason when the code cannot be used (DLV-4).

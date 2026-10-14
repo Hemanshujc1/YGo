@@ -39,6 +39,7 @@ The decisions this record commits:
 | Alarm | Notification floor on both platforms; Notifee full-screen intent as an Android enhancement only |
 | Builds | Local Android builds; EAS Build (Free) for iOS and every submission |
 | Updates | EAS Update, JavaScript and assets only |
+| Icons | Lucide: `lucide-react-native` (over `react-native-svg`) on mobile, `lucide-react` on the web apps. Icons are imported one by one, so only the icons used are shipped. Added 14 Oct 2026, from the design system |
 
 ## Consequences
 
