@@ -4,7 +4,7 @@
 
 - [x] Draft
 - [x] Sent to Claude Design
-- [ ] Design complete
+- [x] Design complete (14 Oct 2026, see the [Specs UI](specs-ui-phase1.md))
 
 Last updated: 14 Oct 2026 | Author: AI-assisted, for Hemanshu (owner) | Related: [Phase 1 PRD](prd-phase1.md), [`CONTEXT.md`](../../CONTEXT.md), [ADR-0001](../adr/0001-mobile-app-framework.md), [ADR-0007](../adr/0007-monorepo-and-shared-packages.md)
 
@@ -120,7 +120,7 @@ There is no tagline.
 
 Button (primary, secondary, destructive, text), text input, code input (4-digit handover, 6-digit email), search field, quantity stepper (counted, and measured with minimum and step), toggle, chip and filter, badge and status pill, card, list row, price row and totals block, bottom sheet, dialog, toast, persistent banner, tab bar, top bar, empty state, skeleton, offline and sync indicator, countdown timer, star rating input, photo capture tile, QR display.
 
-**Existing mockups:** the images in `References/Images/` are loose visual inspiration only and will be deleted once this system exists. Take **no screen, flow, feature, label or copy** from them. They show a retired brand name and several features that are out of Phase 1. The PRD and the GitHub issues are the only source for what a screen contains.
+**Existing mockups:** the images that were in `References/Images/` were loose visual inspiration only. They were deleted on 14 Oct 2026, once this system existed. Take **no screen, flow, feature, label or copy** from them. They show a retired brand name and several features that are out of Phase 1. The PRD and the GitHub issues are the only source for what a screen contains.
 
 ## 6. Screens and flows in scope
 
@@ -130,7 +130,7 @@ Every screen covers these states where they apply: **loading, empty, error, succ
 
 | Journey | Screens | States and rules to cover |
 |---|---|---|
-| Sign-in | Sign in (Google, Apple on iOS, emailed 6-digit code), enter code, enter phone number | Phone number already in use, pointing to support (`ACC-3`). No passwords |
+| Sign-in | Sign in (Google, Apple on iOS, emailed 6-digit code), enter code, enter name and phone number | Phone number already in use, pointing to support (`ACC-3`). No passwords |
 | Location | Set location, not serviceable yet with leave-your-number | Location outside every active Area (`DSC-5`) |
 | Discover | Home, search, shop list, shop page | Shop card shows rating, estimated time, delivery fee. Shop page shows hours, minimum order, FSSAI number (`DSC-2`). No results. Shop closed |
 | Product | Product and pack choice, quantity-price options, measured goods | Out of stock is shown and marked, never hidden (`DSC-4`) |

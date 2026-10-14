@@ -150,6 +150,8 @@ Trade-off [I]: strong contract versioning and non-TS consumers supported, but he
 
 ## 4. UI inspiration (Images/)
 
+> **Removed on 14 Oct 2026.** These images were deleted once the Phase 1 design system and screens existed ([design system](../design/design-system.md), [Specs UI](../product/specs-ui-phase1.md)). The notes below are kept as a historical record only. Do not build from them.
+
 All 24 per-screen PNGs plus 2 showcase boards are AI-generated mock-ups (file names `ChatGPT Image Oct 5, 2026 ...`) [V], so they express intent, not implemented behaviour.
 
 **Shared design language [V from images]**: deep teal/green primary with a bright cyan/mint accent in dark mode, white or near-black surfaces, rounded cards, pill chips and status badges, soft pastel tinted icon tiles (orange/blue/green/purple), consistent light and dark variants of every screen, bold sans-serif headings with the green "UGO" wordmark treatment, Rupee pricing, Indian context (Kirana, COD, UPI). `VaayuGO/client/ColorPalette.md` is a different palette (black + electric cyan) - the two do not agree.

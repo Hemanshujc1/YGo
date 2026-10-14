@@ -9,3 +9,8 @@
 /References/Usthaan/usthaan-sthaan/
 /References/Usthaan/usthaan-ts-types/
 /References/VaayuGO/
+
+# Claude Design exports: large and kept locally by the owner, never tracked.
+/docs/design/*.html
+/docs/design/*.pdf
+/docs/design/*.code-workspace
