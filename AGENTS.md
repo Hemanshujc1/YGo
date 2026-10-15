@@ -3,7 +3,7 @@
 Hyperlocal quick-commerce platform connecting customers with local shops within a 2–3 km radius.
 `References/` holds read-only reference repos and UI inspiration. Research them, never modify them.
 
-This file is the rulebook for every coding agent and every developer. Claude Code reads it through `CLAUDE.md`; Codex, Cursor and other agents read it directly.
+This file is the rulebook for every coding agent and every developer. Claude Code (v2.1.277 or later), Codex, Cursor and other agents read it directly.
 
 Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, branched, sized and reviewed when several agents and developers work in parallel.
 
