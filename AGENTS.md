@@ -37,6 +37,14 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 
 `CONTEXT.md`, `docs/adr/`, `docs/product/` and `docs/design/design-system.md` win over any installed skill.
 
+`expo-native-ui` (`.agents/skills/`) is written for generic Expo apps, and three of its rules conflict with YGo:
+
+- Style with NativeWind classes over `@ygo/tokens` (ADR-0001), in place of its inline styles and platform semantic colours. Inline `style` is for values that change at runtime, such as animated or measured sizes.
+- Use Lucide icons (`lucide-react-native`), in place of SF Symbols.
+- Build one YGo design for iOS and Android from the design system, in place of separate Apple HIG and Material looks.
+
+Use it for safe areas, keyboard handling, lists, screen states and running in Expo Go.
+
 ## Agent skills
 
 ### Issue tracker
