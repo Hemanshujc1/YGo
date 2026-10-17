@@ -41,6 +41,16 @@ describe("health", () => {
     expect(await client.health()).toEqual({ ok: false, status: 503, code: "UNAVAILABLE" });
   });
 
+  it("passes on the fields a VALIDATION_FAILED names", async () => {
+    const { client } = answering(400, '{"error":{"code":"VALIDATION_FAILED","fields":["phone"]}}');
+    expect(await client.health()).toEqual({
+      ok: false,
+      status: 400,
+      code: "VALIDATION_FAILED",
+      fields: ["phone"],
+    });
+  });
+
   it("treats a code it does not know as INTERNAL", async () => {
     const { client } = answering(503, '{"error":{"code":"TEAPOT"}}');
     expect(await client.health()).toEqual({ ok: false, status: 503, code: "INTERNAL" });

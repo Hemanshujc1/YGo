@@ -12,6 +12,11 @@ describe("ErrorEnvelope", () => {
     expect(ErrorEnvelope.safeParse({ error: { code: "TEAPOT" } }).success).toBe(false);
   });
 
+  it("carries the fields that failed validation", () => {
+    const body = { error: { code: "VALIDATION_FAILED", fields: ["phone", "address.pincode"] } };
+    expect(ErrorEnvelope.parse(body)).toEqual(body);
+  });
+
   it("drops display text instead of passing it on", () => {
     const parsed = ErrorEnvelope.parse({ error: { code: "INTERNAL", message: "Something broke" } });
     expect(parsed).toEqual({ error: { code: "INTERNAL" } });

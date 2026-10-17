@@ -5,6 +5,7 @@ import tseslint from "typescript-eslint";
 
 import { noNumericCoercion } from "./rules/no-numeric-coercion.js";
 import { noProviderSdk } from "./rules/no-provider-sdk.js";
+import { noZod } from "./rules/no-zod.js";
 
 /** The repository's own rules, registered under the `ygo/` prefix. */
 export const plugin = {
@@ -12,6 +13,7 @@ export const plugin = {
   rules: {
     "no-numeric-coercion": noNumericCoercion,
     "no-provider-sdk": noProviderSdk,
+    "no-zod": noZod,
   },
 };
 
@@ -60,12 +62,22 @@ export const base = defineConfig(
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "ygo/no-provider-sdk": "error",
+      "ygo/no-zod": "error",
     },
   },
   moneyPaths(MONEY_PATH_GLOBS),
 );
 
-/** apps/server: Node globals, and the AWS SDK allowed in src/adapters/ only. */
+/** packages/contracts: the one place zod schemas are written. */
+export const contracts = defineConfig(base, {
+  name: "ygo/contracts",
+  rules: { "ygo/no-zod": "off" },
+});
+
+/**
+ * apps/server: Node globals, the AWS SDK allowed in src/adapters/ only, and
+ * zod in the Fastify glue and the environment check only.
+ */
 export const server = defineConfig(base, {
   name: "ygo/server",
   languageOptions: { globals: globals.node },
@@ -73,6 +85,10 @@ export const server = defineConfig(base, {
   name: "ygo/server-adapters",
   files: ["src/adapters/**"],
   rules: { "ygo/no-provider-sdk": "off" },
+}, {
+  name: "ygo/server-zod",
+  files: ["src/zod.ts", "src/config.ts"],
+  rules: { "ygo/no-zod": "off" },
 });
 
 /** Tooling packages that run under Node, such as this one. */

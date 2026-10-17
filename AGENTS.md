@@ -23,6 +23,7 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 | What | Home |
 | --- | --- |
 | Request and response shapes, error codes | `@ygo/contracts` |
+| Field rules: phone, name, email, codes, pincode, PAN and the like | `@ygo/contracts` (`src/fields.ts`) |
 | Calling the API, retries, token refresh | `@ygo/api-client` |
 | Prices, fees, coupons | `@ygo/pricing` |
 | Money, number, date and time display | `@ygo/format` |
@@ -32,6 +33,7 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 
 - Extract on the second use, not the first: the second copy inside one app moves to that app's `components/` or `lib/`.
 - Code two apps need moves into the matching package above. A new package needs an ADR first.
+- Forms check input with the `@ygo/contracts` schema the server uses, and show each field's message from the app's own strings. A rule not there yet is added there, citing where it was decided. Only `@ygo/contracts` writes zod schemas, apart from the server's Fastify glue (`src/zod.ts`) and environment check (`src/config.ts`); the gate (`ygo/no-zod`) fails a `zod` import anywhere else. It cannot see a hand-written check such as a regex in a form, so review looks for one.
 - Mobile and web keep separate UI components; there is no shared UI package (ADR-0001, ADR-0007).
 - Add a dependency only after checking that no installed one does the job, and say why in the PR.
 

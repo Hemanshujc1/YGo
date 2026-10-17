@@ -3,7 +3,7 @@ import path from "node:path";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
-import { base, moneyPaths, server } from "../src/index.js";
+import { base, contracts, moneyPaths, server } from "../src/index.js";
 
 // A package root that does not exist on disk: ESLint matches globs against the
 // path given, so the presets can be checked without fixture files.
@@ -81,5 +81,30 @@ describe("the numeric-coercion ban in money paths (ADR-0004, ADR-0007)", () => {
     expect(await ygoRulesAt(pricing, "src/counter-bill.ts", coercion)).toEqual(
       ["ygo/no-numeric-coercion"],
     );
+  });
+});
+
+describe("zod outside @ygo/contracts (AGENTS.md, ADR-0004)", () => {
+  const zodImport = 'import { z } from "zod";\nz;\n';
+
+  it("is banned in apps and packages", async () => {
+    expect(await ygoRulesAt(base, "src/sign-up/form.tsx", zodImport)).toEqual([
+      "ygo/no-zod",
+    ]);
+  });
+
+  it("is banned in the server outside its zod glue and config", async () => {
+    expect(await ygoRulesAt(server, "src/routes/sign-up.ts", zodImport)).toEqual(
+      ["ygo/no-zod"],
+    );
+  });
+
+  it("is allowed in the server's zod glue and config", async () => {
+    expect(await ygoRulesAt(server, "src/zod.ts", zodImport)).toEqual([]);
+    expect(await ygoRulesAt(server, "src/config.ts", zodImport)).toEqual([]);
+  });
+
+  it("is allowed in @ygo/contracts", async () => {
+    expect(await ygoRulesAt(contracts, "src/fields.ts", zodImport)).toEqual([]);
   });
 });

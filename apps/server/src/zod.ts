@@ -1,9 +1,11 @@
+import { invalidFields } from "@ygo/contracts";
 import type {
+  FastifyError,
   FastifySchemaCompiler,
   FastifySerializerCompiler,
   FastifyTypeProvider,
 } from "fastify";
-import type { z, ZodType } from "zod";
+import { ZodError, type z, type ZodType } from "zod";
 
 // Lets a route's `schema` hold @ygo/contracts schemas directly: requests are
 // parsed by them on the way in and responses on the way out, and the handler's
@@ -25,3 +27,10 @@ export const serializerCompiler: FastifySerializerCompiler<ZodType> =
   ({ schema }) =>
   (data) =>
     JSON.stringify(schema.parse(data));
+
+/** The request-body fields a validation error names, for the error envelope. */
+export function bodyFields(error: FastifyError): string[] | undefined {
+  if (error.validationContext !== "body" || !(error instanceof ZodError)) return undefined;
+  const fields = invalidFields(error);
+  return fields.length > 0 ? fields : undefined;
+}

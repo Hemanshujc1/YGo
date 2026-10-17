@@ -1,3 +1,3 @@
-import { base } from "@ygo/eslint-config";
+import { contracts } from "@ygo/eslint-config";
 
-export default base;
+export default contracts;

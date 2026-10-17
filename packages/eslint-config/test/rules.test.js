@@ -4,6 +4,7 @@ import { describe, it } from "vitest";
 
 import { noNumericCoercion } from "../src/rules/no-numeric-coercion.js";
 import { noProviderSdk } from "../src/rules/no-provider-sdk.js";
+import { noZod } from "../src/rules/no-zod.js";
 
 RuleTester.describe = describe;
 RuleTester.it = it;
@@ -101,5 +102,24 @@ ruleTester.run("no-provider-sdk", noProviderSdk, {
       code: 'let client: import("@aws-sdk/client-s3").S3Client;',
       errors: [providerSdk("@aws-sdk/client-s3")],
     },
+  ],
+});
+
+const zod = (/** @type {string} */ source) => ({ messageId: "zod", data: { source } });
+
+ruleTester.run("no-zod", noZod, {
+  valid: [
+    'import { Phone, invalidFields } from "@ygo/contracts";',
+    // Not zod, just similarly named.
+    'import x from "zod-like";',
+  ],
+  invalid: [
+    { code: 'import { z } from "zod";', errors: [zod("zod")] },
+    { code: 'import type { ZodType } from "zod";', errors: [zod("zod")] },
+    { code: 'import { z } from "zod/mini";', errors: [zod("zod/mini")] },
+    { code: 'export { z } from "zod";', errors: [zod("zod")] },
+    { code: 'const { z } = await import("zod");', errors: [zod("zod")] },
+    { code: 'const { z } = require("zod");', errors: [zod("zod")] },
+    { code: 'let s: import("zod").ZodType;', errors: [zod("zod")] },
   ],
 });
