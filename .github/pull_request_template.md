@@ -6,7 +6,7 @@ Closes #
 <!-- The test, typecheck or reproduction that proves the ticket is done, and that it passes. -->
 
 ## Assumptions
-<!-- Technical decisions made without asking. -->
+<!-- Each open choice and the answer the owner agreed before coding. -->
 
 ## Reuse
 - [ ] Searched the shared packages and this app before adding any component, helper or type: <!-- what you searched for -->

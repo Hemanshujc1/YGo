@@ -13,8 +13,8 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
 
 - Write the minimum the ticket asks for. One caller gets inline code; handle only the errors that can actually occur.
 - Keep each diff surgical: every changed line traces to the ticket and matches the surrounding style. Report unrelated problems in the PR description, and remove only what your own change made unused.
-- Decide technical trade-offs yourself and state your assumptions in the PR. Ask the owner only about money, time, risk or user-visible behaviour.
-- Before writing code, name the check that proves the ticket is done (a test, a typecheck, a reproduction), and finish when it passes.
+- Settle every assumption with the owner before writing code. After claiming the ticket, list each choice the ticket and the docs leave open, in plain words, in the rounds of the `grilling` skill (the owner can also start it with `/grill-me`): numbered questions, each with your recommended answer and its one-line reason, worded so "yes" accepts it. Put a deep technical choice as your decision, what it costs and why, so a "yes" is an informed one. Look facts up yourself and ask only for decisions; a choice the docs already settle needs no question. Wait for the answers, build what was agreed, and record them in the PR's Assumptions section. An open question found mid-work stops the work until it is answered.
+- Before writing code, name the check that proves the ticket is done (a test, a typecheck, a reproduction), and finish when it passes. Put it in the first round of questions.
 
 ## Where code lives
 

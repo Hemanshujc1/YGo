@@ -11,6 +11,7 @@ Several coding agents and developers work on YGo at once. These rules keep their
   3. Push it at once (`git push -u origin <n>-<slug>`), then `gh issue edit <n> --add-assignee @me` so people can see it.
 - Every agent uses the same GitHub account, so the pushed branch, not the assignee, shows that an issue is taken.
 - Each agent works only in its own worktree. Never edit files in a folder another agent is using.
+- After claiming, and before writing code, settle the ticket's assumptions and its done check with the owner (AGENTS.md, Writing code).
 - The PR body starts with `Closes #<n>` and follows `.github/pull_request_template.md`.
 
 ## 2. Slice vertically
