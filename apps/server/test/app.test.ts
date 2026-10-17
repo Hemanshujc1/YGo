@@ -58,6 +58,75 @@ describe("a request body that breaks its schema", () => {
   });
 });
 
+describe("the app version check", () => {
+  const minAppVersions = { customer: "1.4.0", shopkeeper: "2.0.0" };
+
+  function appWithRoute() {
+    const app = buildApp({ checkDatabase: async () => {}, minAppVersions });
+    app.get("/v1/ping", async () => ({}));
+    return app;
+  }
+
+  const ping = (headers: Record<string, string>) =>
+    appWithRoute().inject({ method: "GET", url: "/v1/ping", headers });
+
+  it.each([
+    ["customer", "1.3.9"],
+    ["customer", "0.9.0"],
+    ["shopkeeper", "1.9.9"],
+  ])("answers a too-old %s app %s with 426 UPDATE_REQUIRED", async (name, version) => {
+    const res = await ping({ "x-ygo-app-name": name, "x-ygo-app-version": version });
+    expect(res.statusCode).toBe(426);
+    expect(res.json()).toEqual({ error: { code: "UPDATE_REQUIRED" } });
+  });
+
+  it.each([
+    ["customer", "1.4.0"],
+    ["customer", "1.10.0"],
+    ["shopkeeper", "2.0.0"],
+    ["shopkeeper", "10.0.0"],
+  ])("serves %s app %s", async (name, version) => {
+    const res = await ping({ "x-ygo-app-name": name, "x-ygo-app-version": version });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("serves a request with no app headers", async () => {
+    const res = await ping({});
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("serves healthz to a too-old app", async () => {
+    const res = await appWithRoute().inject({
+      method: "GET",
+      url: "/v1/healthz",
+      headers: { "x-ygo-app-name": "customer", "x-ygo-app-version": "0.0.1" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it.each([
+    [{ "x-ygo-app-name": "customer", "x-ygo-app-version": "abc" }],
+    [{ "x-ygo-app-name": "admin", "x-ygo-app-version": "9.0.0" }],
+    [{ "x-ygo-app-name": "customer" }],
+    [{ "x-ygo-app-version": "1.4.0" }],
+  ])("answers broken app headers %o with 400 VALIDATION_FAILED", async (headers) => {
+    const res = await ping(headers);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: { code: "VALIDATION_FAILED" } });
+  });
+
+  it("refuses none by default", async () => {
+    const app = buildApp({ checkDatabase: async () => {} });
+    app.get("/v1/ping", async () => ({}));
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/ping",
+      headers: { "x-ygo-app-name": "shopkeeper", "x-ygo-app-version": "0.0.0" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
 describe("the test database", () => {
   it("has the migrations applied", async () => {
     const { rows } = await database.pool.query("select postgis_version()");

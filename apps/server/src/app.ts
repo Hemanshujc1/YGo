@@ -1,10 +1,21 @@
-import { ErrorEnvelope, HealthResponse, type ErrorCode } from "@ygo/contracts";
+import {
+  APP_NAME_HEADER,
+  APP_VERSION_HEADER,
+  AppIdentity,
+  ErrorEnvelope,
+  HealthResponse,
+  type AppName,
+  type AppVersion,
+  type ErrorCode,
+} from "@ygo/contracts";
 import Fastify, { type FastifyError, type FastifyServerOptions } from "fastify";
 import { bodyFields, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "./zod";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
   checkDatabase: () => Promise<void>;
+  /** The oldest version of each app still served (Q-7); older ones are told to update. */
+  minAppVersions?: Record<AppName, AppVersion>;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -12,7 +23,21 @@ const envelope = (code: ErrorCode, fields?: string[]): ErrorEnvelope => ({
   error: fields ? { code, fields } : { code },
 });
 
-export function buildApp({ checkDatabase, logger = false }: AppOptions) {
+/** Whether `version` comes before `min`, comparing major, minor and patch as numbers. */
+function isOlder(version: AppVersion, min: AppVersion): boolean {
+  const minParts = min.split(".").map(Number);
+  for (const [i, part] of version.split(".").map(Number).entries()) {
+    const minPart = minParts[i] ?? 0;
+    if (part !== minPart) return part < minPart;
+  }
+  return false;
+}
+
+export function buildApp({
+  checkDatabase,
+  minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
+  logger = false,
+}: AppOptions) {
   const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -26,6 +51,19 @@ export function buildApp({ checkDatabase, logger = false }: AppOptions) {
     const code: ErrorCode =
       status === 404 ? "NOT_FOUND" : status === 500 ? "INTERNAL" : "VALIDATION_FAILED";
     return reply.code(status).send(envelope(code, bodyFields(error)));
+  });
+
+  // Requests without app headers (Admin, the website) and health checks are never refused.
+  app.addHook("onRequest", async (request, reply) => {
+    const name = request.headers[APP_NAME_HEADER];
+    const version = request.headers[APP_VERSION_HEADER];
+    if (name === undefined && version === undefined) return;
+    if (request.routeOptions.url === "/v1/healthz") return;
+    const identity = AppIdentity.safeParse({ name, version });
+    if (!identity.success) return reply.code(400).send(envelope("VALIDATION_FAILED"));
+    if (isOlder(identity.data.version, minAppVersions[identity.data.name])) {
+      return reply.code(426).send(envelope("UPDATE_REQUIRED"));
+    }
   });
 
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(envelope("NOT_FOUND")));
