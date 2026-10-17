@@ -125,9 +125,14 @@ describe("the Expo apps' config files", () => {
   });
 
   it("skip the generated native projects", async () => {
-    expect(await rulesAt(expo, "ios/Pods/x/index.js", commonJs)).toEqual([
-      null,
-    ]);
+    const eslint = new ESLint({
+      cwd: root,
+      overrideConfigFile: true,
+      overrideConfig: expo,
+    });
+    for (const file of ["ios/Pods/x/index.js", "android/app/x.js"]) {
+      expect(await eslint.isPathIgnored(path.join(root, file))).toBe(true);
+    }
   });
 
   it("stay CommonJS only at the app root", async () => {
