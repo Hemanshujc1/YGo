@@ -64,11 +64,17 @@ describe("PersonName", () => {
       "Mary-Ann": "Mary-Ann",
       "K. Ramesh": "K. Ramesh",
       "A": "A",
-      [`${"a".repeat(60)}`]: "a".repeat(60),
+      [`${"ab".repeat(30)}`]: "ab".repeat(30),
       "सूर्\u200Dया": "सूर्\u200Dया",
       "അൻ\u200Dവർ": "അൻ\u200Dവർ",
       // 40 letters, each with a vowel sign: 80 code units, 40 characters.
       [`${"कि".repeat(40)}`]: "कि".repeat(40),
+      // Two of a letter, or three climbing letters, are fine.
+      "Aaron": "Aaron",
+      "Anna": "Anna",
+      "Stuart": "Stuart",
+      "Abc": "Abc",
+      "कखग": "कखग",
     },
     [
       "",
@@ -76,10 +82,18 @@ describe("PersonName", () => {
       "Asha2",
       "Asha 🙂",
       "...",
-      "a".repeat(61),
+      `${"ab".repeat(30)}a`,
       "कि".repeat(61),
       `a${"\u0301".repeat(300)}`,
       "Asha@home",
+      "Aaa",
+      "Shreee",
+      "AAAsha",
+      "Abcd",
+      "aBcDe",
+      "Asha Mnop",
+      "Asha wxyz",
+      "कखगघ",
     ],
   );
 });

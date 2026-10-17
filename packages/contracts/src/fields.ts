@@ -40,6 +40,11 @@ export const Phone = z
  *
  * Vowel signs, viramas and joiners don't count towards the 60, so a name in
  * an Indian script gets the same room as one in English.
+ *
+ * To turn away typed junk (owner decision on #111), a name may not hold the
+ * same letter three times in a row (`aaa`, any case) or four letters in a
+ * row that climb the alphabet one by one (`abcd`, any case; in an Indian
+ * script, letters next to each other in Unicode, such as `कखगघ`).
  */
 export const PersonName = z
   .string()
@@ -48,7 +53,22 @@ export const PersonName = z
   .max(240)
   .regex(/^(?:[\p{L}\p{M} .'’-]|\u200C|\u200D)+$/u)
   .regex(/\p{L}/u)
-  .refine((value) => [...value.replace(/\p{M}|\u200C|\u200D/gu, "")].length <= 60);
+  .refine((value) => [...value.replace(/\p{M}|\u200C|\u200D/gu, "")].length <= 60)
+  .refine((value) => !/(\p{L})\1\1/iu.test(value))
+  .refine((value) => !climbsFourLetters(value));
+
+/** True when four letters in a row each come one after the last, ignoring case. */
+function climbsFourLetters(value: string): boolean {
+  let run = 0;
+  let last = Number.NaN;
+  for (const char of value.toLowerCase()) {
+    const point = /\p{L}/u.test(char) ? (char.codePointAt(0) ?? Number.NaN) : Number.NaN;
+    run = point === last + 1 ? run + 1 : 1;
+    if (run === 4) return true;
+    last = point;
+  }
+  return false;
+}
 
 /** An email address, trimmed and lowercased so one inbox is one account (CONTEXT.md, Accounts and sign-in). */
 export const Email = z.string().trim().toLowerCase().pipe(z.email().max(254));
