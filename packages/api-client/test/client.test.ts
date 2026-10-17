@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/index";
 
-const answering = (status: number, body: BodyInit, baseUrl = "https://api.test") => {
+const answering = (status: number, body: BodyInit | null, baseUrl = "https://api.test") => {
   const requested: string[] = [];
   const requestHeaders: Headers[] = [];
   const client = createApiClient({
@@ -124,5 +124,30 @@ describe("health", () => {
     const client = createApiClient({ baseUrl: "https://api.test", app: { name: "customer", version: "1.2.3" } });
     vi.stubGlobal("fetch", () => Promise.resolve(new Response('{"status":"ok"}')));
     expect(await client.health()).toEqual({ ok: true, data: { status: "ok" } });
+  });
+});
+
+describe("versionCheck", () => {
+  it("is ok when the server serves this version", async () => {
+    const { client, requested, requestHeaders } = answering(204, null);
+    expect(await client.versionCheck()).toEqual({ ok: true, data: undefined });
+    expect(requested).toEqual(["https://api.test/v1/version-check"]);
+    expect(requestHeaders[0]?.get("x-ygo-app-name")).toBe("customer");
+    expect(requestHeaders[0]?.get("x-ygo-app-version")).toBe("1.2.3");
+  });
+
+  it("returns UPDATE_REQUIRED when the version is too old", async () => {
+    const { client } = answering(426, '{"error":{"code":"UPDATE_REQUIRED"}}');
+    expect(await client.versionCheck()).toEqual({ ok: false, status: 426, code: "UPDATE_REQUIRED" });
+  });
+
+  it("treats another success status as INTERNAL", async () => {
+    const { client } = answering(200, '{"status":"ok"}');
+    expect(await client.versionCheck()).toEqual({ ok: false, status: 200, code: "INTERNAL" });
+  });
+
+  it("treats an error body that is not the envelope as INTERNAL", async () => {
+    const { client } = answering(502, "<html>Bad Gateway</html>");
+    expect(await client.versionCheck()).toEqual({ ok: false, status: 502, code: "INTERNAL" });
   });
 });
