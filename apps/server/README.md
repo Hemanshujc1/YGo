@@ -49,6 +49,25 @@ You need Docker (Docker Desktop or OrbStack) for the database.
 
 The process refuses to start when one is missing or malformed.
 
+## Tests
+
+`pnpm --filter @ygo/server test` (and `pnpm gate`) needs the database from step 1 running. Each run creates its own database, `ygo_test_<random>`, applies the migrations to it and drops it at the end, so runs never share data and two worktrees can test at once. A run that is killed can leave its database behind; drop it by hand.
+
+The tests connect to `postgres://ygo:ygo@localhost:5432/ygo`, the container above, to create that database. Point them elsewhere with `TEST_DATABASE_URL`, which must be a user allowed to create databases. CI sets it to its own PostGIS service. With no database reachable, the run stops at once with an error naming the address.
+
+The outside services are interfaces in `src/adapters/`, each with a local implementation for the tests: `FileStorage`, `Mailer`, `IdentityVerifier`, `PushSender`, `SmsSender` and `Clock`. The local `Clock` stands still until a test sets or advances it. Only `src/adapters/` may import `@aws-sdk/*` (ADR-0008).
+
+## Migrations
+
+Forward-only SQL in `migrations/`, written by drizzle-kit from `src/schema.ts` (ADR-0004):
+
+```sh
+pnpm --filter @ygo/server exec drizzle-kit generate            # from a schema change
+pnpm --filter @ygo/server exec drizzle-kit generate --custom   # an empty file for hand-written SQL
+```
+
+The server never applies them on boot; the tests apply them to each run's database.
+
 ## Build
 
 `pnpm --filter @ygo/server build` writes one bundled file, `dist/main.js`, with workspace packages and npm dependencies inside it. `pnpm --filter @ygo/server start` runs it.
