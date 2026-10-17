@@ -1,5 +1,5 @@
 {
-  "$schema": "https://turborepo.com/schema.json",
+  "$schema": "https://turborepo.dev/schema.json",
   "ui": "stream",
   // Agent instructions live in CLAUDE.md, which already points at turbo's
   // bundled docs; stop turbo from writing its own AGENTS.md.

@@ -13,6 +13,7 @@
 # Secrets: the repository is public (PRD Q-9). Configuration is environment
 # variables only (ADR-0008); CI also runs a secret scan on every pull request.
 .env*
+!.env.example
 
 # Dependencies and build output.
 node_modules/
