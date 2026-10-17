@@ -94,9 +94,10 @@ export const server = defineConfig(base, {
 /**
  * apps/customer and apps/shopkeeper. Babel, Metro and Tailwind load their
  * config files (`babel.config.js` and the like) as CommonJS under Node, so
- * those files get Node globals and `require`.
+ * those files get Node globals and `require`. The native projects that
+ * `expo prebuild` and `expo run` generate are not linted.
  */
-export const expo = defineConfig(base, {
+export const expo = defineConfig(base, globalIgnores(["android/", "ios/"]), {
   name: "ygo/expo-config-files",
   files: ["*.config.js"],
   languageOptions: { sourceType: "commonjs", globals: globals.node },

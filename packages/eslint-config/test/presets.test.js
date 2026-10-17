@@ -124,6 +124,12 @@ describe("the Expo apps' config files", () => {
     expect(await rulesAt(expo, "metro.config.js", commonJs)).toEqual([]);
   });
 
+  it("skip the generated native projects", async () => {
+    expect(await rulesAt(expo, "ios/Pods/x/index.js", commonJs)).toEqual([
+      null,
+    ]);
+  });
+
   it("stay CommonJS only at the app root", async () => {
     expect(await rulesAt(expo, "src/app/index.js", commonJs)).toContain(
       "@typescript-eslint/no-require-imports",
