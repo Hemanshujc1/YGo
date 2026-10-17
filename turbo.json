@@ -1,0 +1,34 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  // Agent instructions live in CLAUDE.md, which already points at turbo's
+  // bundled docs; stop turbo from writing its own AGENTS.md.
+  "agentGuidance": false,
+  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml"],
+  "tasks": {
+    // Internal packages ship TypeScript source with no build (ADR-0007), so no
+    // task waits on a dependency's output. Depending on this no-op task instead
+    // folds each dependency's source hash into the consumer's cache key: editing
+    // @ygo/contracts re-runs every consumer's typecheck rather than replaying a
+    // stale pass.
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "lint": {
+      "dependsOn": ["^transit"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^transit"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^transit"],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": ["^transit"],
+      "outputs": ["dist/**"]
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@ygo/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@eslint/js": "10.0.1",
+    "globals": "17.13.0",
+    "typescript-eslint": "8.71.0"
+  },
+  "peerDependencies": {
+    "eslint": "^10.11.0"
+  },
+  "devDependencies": {
+    "@types/estree": "1.0.9",
+    "@types/node": "26.6.4",
+    "@ygo/tsconfig": "workspace:*",
+    "eslint": "10.11.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

@@ -31,7 +31,7 @@ A PR is small enough to review in one sitting: about 400 changed lines, not coun
 ## 5. Done
 
 - Rebase on `main` before opening the PR.
-- The CI gate `turbo run lint typecheck test build` is green (ADR-0007).
+- The CI gate `pnpm gate` (lint, typecheck, test, build) is green (ADR-0007).
 - The ticket's done check, named before coding, passes and is recorded in the PR.
 
 ## 6. Review
