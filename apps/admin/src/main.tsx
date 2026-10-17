@@ -1,28 +1,41 @@
 import { createApiClient } from "@ygo/api-client";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, useLoaderData } from "react-router";
+import { createBrowserRouter, isRouteErrorResponse, useLoaderData, useRouteError } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import "./index.css";
 import { strings } from "./strings";
 
 const api = createApiClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? "" });
 
-const healthLoader = () => api.health();
+// health() rejects only when no answer came back: offline, refused or timed out.
+const healthLoader = () => api.health().catch(() => "unreachable" as const);
 
-function Page({ answer }: { answer: string }) {
+function Page({ children }: { children: ReactNode }) {
   return (
     <main className="min-h-screen bg-bg p-10 text-text">
       <h1 className="text-2xl font-semibold text-brand">{strings.title}</h1>
-      <p className="mt-6 text-muted">{strings.health}</p>
-      <p className="mt-1 text-text">{answer}</p>
+      <div className="mt-6">{children}</div>
     </main>
   );
 }
 
 function Health() {
   const result = useLoaderData<typeof healthLoader>();
-  return <Page answer={result.ok ? strings.ok : `${result.status} ${result.code}`} />;
+  const answer =
+    result === "unreachable" ? strings.unreachable : result.ok ? strings.ok : strings.errors[result.code];
+  return (
+    <Page>
+      <p className="text-muted">{strings.health}</p>
+      <p className="mt-1">{answer}</p>
+    </Page>
+  );
+}
+
+function RouteError() {
+  const error = useRouteError();
+  const notFound = isRouteErrorResponse(error) && error.status === 404;
+  return <Page>{notFound ? strings.notFound : strings.failed}</Page>;
 }
 
 const router = createBrowserRouter([
@@ -30,8 +43,8 @@ const router = createBrowserRouter([
     path: "/",
     loader: healthLoader,
     Component: Health,
-    HydrateFallback: () => <Page answer={strings.checking} />,
-    ErrorBoundary: () => <Page answer={strings.unreachable} />,
+    HydrateFallback: () => <Page>{strings.checking}</Page>,
+    ErrorBoundary: RouteError,
   },
 ]);
 

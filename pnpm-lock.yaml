@@ -175,6 +175,9 @@ importers:
       '@ygo/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@ygo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens

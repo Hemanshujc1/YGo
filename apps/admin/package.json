@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ygo/api-client": "workspace:*",
+    "@ygo/contracts": "workspace:*",
     "@ygo/tokens": "workspace:*",
     "react": "19.3.0",
     "react-dom": "19.3.0",
