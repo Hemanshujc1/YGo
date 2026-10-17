@@ -23,7 +23,7 @@ Constraints fixed before this decision:
 | Concern | Decision |
 | --- | --- |
 | Repository | **One**, holding both mobile apps, both web apps, the server and the packages |
-| Package manager | **pnpm 12**, pinned in `packageManager`, enabled by Corepack |
+| Package manager | **pnpm 12**, pinned in `packageManager`, enabled by Corepack (no longer bundled from Node 25: install it with `npm i -g corepack`, then `corepack enable pnpm`) |
 | Node | **26 LTS**, pinned in `.nvmrc` and `engines` |
 | Task runner | **Turborepo 2.11** |
 | Remote cache | **Off.** Local cache only |

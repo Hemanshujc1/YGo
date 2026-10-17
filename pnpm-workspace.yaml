@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Refuse an install on a Node or pnpm outside the pinned range (ADR-0007).
+engineStrict: true
+
+# Resolve only versions published at least a week ago, so a hijacked release
+# is usually caught and pulled before it can reach the lockfile. Add a package
+# to minimumReleaseAgeExclude only for an urgent security fix.
+minimumReleaseAge: 10080

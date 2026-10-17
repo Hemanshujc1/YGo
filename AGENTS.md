@@ -35,6 +35,12 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 - Mobile and web keep separate UI components; there is no shared UI package (ADR-0001, ADR-0007).
 - Add a dependency only after checking that no installed one does the job, and say why in the PR.
 
+## The gate
+
+`pnpm gate` runs lint, typecheck, test and build across the workspace (ADR-0007). Run it before pushing; CI runs the same command on every pull request and a failure blocks the merge.
+
+Turborepo may differ from what you remember: read `docs/` inside the installed `turbo` package (`node_modules/.pnpm/turbo@*/node_modules/turbo/docs/`) before changing `turbo.json`.
+
 ## Project docs outrank skills
 
 `CONTEXT.md`, `docs/adr/`, `docs/product/` and `docs/design/design-system.md` win over any installed skill.

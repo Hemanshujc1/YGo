@@ -1,0 +1,82 @@
+import js from "@eslint/js";
+import { defineConfig, globalIgnores } from "eslint/config";
+import globals from "globals";
+import tseslint from "typescript-eslint";
+
+import { noNumericCoercion } from "./rules/no-numeric-coercion.js";
+import { noProviderSdk } from "./rules/no-provider-sdk.js";
+
+/** The repository's own rules, registered under the `ygo/` prefix. */
+export const plugin = {
+  meta: { name: "@ygo/eslint-plugin" },
+  rules: {
+    "no-numeric-coercion": noNumericCoercion,
+    "no-provider-sdk": noProviderSdk,
+  },
+};
+
+/**
+ * Files that hold money arithmetic by convention, in any package: anything
+ * under a `money/` directory, or named `*.money.ts`. A package that is money
+ * throughout, such as @ygo/pricing, adds its whole source with `moneyPaths`.
+ */
+export const MONEY_PATH_GLOBS = [
+  "**/money/**/*.{js,mjs,ts,mts,tsx}",
+  "**/*.money.{js,mjs,ts,mts,tsx}",
+];
+
+/**
+ * Applies the numeric-coercion ban to more files.
+ *
+ * @param {string[]} files globs relative to the package's eslint.config.js
+ */
+export function moneyPaths(files) {
+  return defineConfig({
+    name: "ygo/money-paths",
+    files,
+    plugins: { ygo: plugin },
+    rules: { "ygo/no-numeric-coercion": "error" },
+  });
+}
+
+/** Every package and app starts from this. */
+export const base = defineConfig(
+  globalIgnores([
+    "**/dist/",
+    "**/build/",
+    "**/coverage/",
+    "**/.turbo/",
+    "**/.expo/",
+  ]),
+  {
+    name: "ygo/files",
+    files: ["**/*.{js,mjs,cjs,ts,mts,cts,tsx}"],
+  },
+  js.configs.recommended,
+  tseslint.configs.strict,
+  {
+    name: "ygo/base",
+    plugins: { ygo: plugin },
+    linterOptions: { reportUnusedDisableDirectives: "error" },
+    rules: {
+      "ygo/no-provider-sdk": "error",
+    },
+  },
+  moneyPaths(MONEY_PATH_GLOBS),
+);
+
+/** apps/server: Node globals, and the AWS SDK allowed in src/adapters/ only. */
+export const server = defineConfig(base, {
+  name: "ygo/server",
+  languageOptions: { globals: globals.node },
+}, {
+  name: "ygo/server-adapters",
+  files: ["src/adapters/**"],
+  rules: { "ygo/no-provider-sdk": "off" },
+});
+
+/** Tooling packages that run under Node, such as this one. */
+export const node = defineConfig(base, {
+  name: "ygo/node",
+  languageOptions: { globals: globals.node },
+});
