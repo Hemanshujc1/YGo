@@ -1,0 +1,4 @@
+{
+  "extends": "@ygo/tsconfig/base.json",
+  "include": ["src", "test"]
+}
