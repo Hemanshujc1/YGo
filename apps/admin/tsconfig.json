@@ -1,0 +1,4 @@
+{
+  "extends": "@ygo/tsconfig/web.json",
+  "include": ["src", "vite.config.ts"]
+}
