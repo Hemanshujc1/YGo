@@ -1,6 +1,6 @@
 # @ygo/web
 
-The public website (ADR-0006): Vite, React and Tailwind over `@ygo/tokens`, built to static files. For now it is one placeholder page; the landing, privacy policy, terms, account-deletion and support pages come with their own tickets.
+The public website (ADR-0006): Vite, React and Tailwind over `@ygo/tokens`, built to static files. It has the landing, privacy policy, terms and support pages, routed client-side by React Router; the account-deletion request page comes with #94. The privacy policy and terms show a marked placeholder until the launch checklist supplies the legal text (L-3), and `strings.supportEmail` is a placeholder until the domain is chosen (#27).
 
 ```sh
 pnpm --filter @ygo/web dev     # local server
