@@ -1,0 +1,32 @@
+{
+  "name": "@ygo/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "build": "node scripts/build.js",
+    "start": "node --enable-source-maps dist/main.js",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ygo/contracts": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "fastify": "5.12.5",
+    "pg": "8.23.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "@types/pg": "8.23.1",
+    "@ygo/eslint-config": "workspace:*",
+    "@ygo/tsconfig": "workspace:*",
+    "esbuild": "0.28.2",
+    "eslint": "10.11.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

@@ -9,3 +9,8 @@ engineStrict: true
 # is usually caught and pulled before it can reach the lockfile. Add a package
 # to minimumReleaseAgeExclude only for an urgent security fix.
 minimumReleaseAge: 10080
+
+# Dependency install scripts stay off. esbuild's only checks its binary, which
+# arrives as an ordinary optional dependency, so it is denied, not allowed.
+allowBuilds:
+  esbuild: false
