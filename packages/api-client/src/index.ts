@@ -48,7 +48,12 @@ export function createApiClient({ baseUrl, fetch: fetchFn, timeoutMs = 10_000 }:
       }
       const envelope = ErrorEnvelope.safeParse(body);
       return envelope.success
-        ? { ok: false, status: response.status, ...envelope.data.error }
+        ? {
+            ok: false,
+            status: response.status,
+            code: envelope.data.error.code,
+            fields: envelope.data.error.fields,
+          }
         : { ok: false, status: response.status, code: "INTERNAL" };
     },
   };

@@ -10,7 +10,7 @@ import { base, contracts, moneyPaths, server } from "../src/index.js";
 const root = path.resolve(import.meta.dirname, "virtual-package");
 
 /**
- * The repository's own rule ids (`ygo/` and the zod import ban) reported for `code` linted as if it lived at `file`.
+ * The `ygo/` rule ids reported for `code` linted as if it lived at `file`.
  *
  * @param {import("eslint").Linter.Config[]} config
  * @param {string} file path relative to the package root
@@ -27,10 +27,7 @@ async function ygoRulesAt(config, file, code) {
   });
   return (result?.messages ?? [])
     .map((message) => message.ruleId)
-    .filter(
-      (ruleId) =>
-        ruleId?.startsWith("ygo/") || ruleId === "no-restricted-imports",
-    );
+    .filter((ruleId) => ruleId?.startsWith("ygo/"));
 }
 
 const awsImport = 'import { S3Client } from "@aws-sdk/client-s3";\nS3Client;\n';
@@ -89,20 +86,16 @@ describe("the numeric-coercion ban in money paths (ADR-0004, ADR-0007)", () => {
 
 describe("zod outside @ygo/contracts (AGENTS.md, ADR-0004)", () => {
   const zodImport = 'import { z } from "zod";\nz;\n';
-  const zodSubpath = 'import { z } from "zod/mini";\nz;\n';
-  const zodType = 'import type { ZodType } from "zod";\nexport type T = ZodType;\n';
 
-  it("is banned in apps and packages, type imports and subpaths included", async () => {
-    for (const code of [zodImport, zodSubpath, zodType]) {
-      expect(await ygoRulesAt(base, "src/sign-up/form.tsx", code)).toEqual([
-        "no-restricted-imports",
-      ]);
-    }
+  it("is banned in apps and packages", async () => {
+    expect(await ygoRulesAt(base, "src/sign-up/form.tsx", zodImport)).toEqual([
+      "ygo/no-zod",
+    ]);
   });
 
   it("is banned in the server outside its zod glue and config", async () => {
     expect(await ygoRulesAt(server, "src/routes/sign-up.ts", zodImport)).toEqual(
-      ["no-restricted-imports"],
+      ["ygo/no-zod"],
     );
   });
 

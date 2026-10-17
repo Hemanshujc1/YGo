@@ -14,13 +14,16 @@ const withoutSpaces = (value: string) => value.replace(/\s/g, "");
 
 /**
  * An Indian mobile number, sent as `+91` and 10 digits starting 6 to 9
- * (C02, FR-ACC-02; the format SmsSender takes). Accepts what people type:
- * spaces, dashes, brackets, and a leading `0`, `91` or `+91`.
+ * (C02, FR-ACC-02; the format SmsSender takes). Accepts what people type or
+ * paste: spaces, dashes, dots, brackets, the invisible marks a number copied
+ * from Contacts carries, and a leading `0`, `91`, `+91` or `0091`. Letters
+ * are kept, so they fail.
  */
 export const Phone = z
   .string()
   .overwrite((value) => {
-    const digits = value.replace(/[\s()-]/g, "");
+    let digits = value.replace(/[\s\p{Pd}\p{Cf}().]/gu, "");
+    if (digits.startsWith("00")) digits = `+${digits.slice(2)}`;
     if (digits.startsWith("+91")) return digits;
     if (/^91\d{10}$/.test(digits)) return `+${digits}`;
     if (/^0\d{10}$/.test(digits)) return `+91${digits.slice(1)}`;
@@ -30,17 +33,22 @@ export const Phone = z
 
 /**
  * A person's name, shown to a shop and its deliverer on orders (owner
- * decision on #111). Letters in any script with their marks, spaces, and
+ * decision on #111). Letters in any script with their marks and the
+ * zero-width joiners Indian-language keyboards insert, spaces, and
  * `.` `'` `’` `-`; at least one letter; 1 to 60 characters once trimmed and
  * inner spaces are collapsed. Digits and emoji are refused.
+ *
+ * Vowel signs, viramas and joiners don't count towards the 60, so a name in
+ * an Indian script gets the same room as one in English.
  */
 export const PersonName = z
   .string()
   .overwrite((value) => value.normalize("NFC").trim().replace(/\s+/g, " "))
   .min(1)
-  .max(60)
-  .regex(/^[\p{L}\p{M} .'’-]+$/u)
-  .regex(/\p{L}/u);
+  .max(240)
+  .regex(/^(?:[\p{L}\p{M} .'’-]|\u200C|\u200D)+$/u)
+  .regex(/\p{L}/u)
+  .refine((value) => [...value.replace(/\p{M}|\u200C|\u200D/gu, "")].length <= 60);
 
 /** An email address, trimmed and lowercased so one inbox is one account (CONTEXT.md, Accounts and sign-in). */
 export const Email = z.string().trim().toLowerCase().pipe(z.email().max(254));
@@ -63,9 +71,14 @@ export const Pan = z
 /** An FSSAI licence or registration number: 14 digits (ONB-3). */
 export const FssaiNumber = z.string().overwrite(withoutSpaces).regex(/^\d{14}$/);
 
-/** A UPI id such as `asha.k@okhdfcbank`, stored in lower case (ONB-3). */
+/**
+ * A UPI id such as `asha.k@okhdfcbank`, stored in lower case (ONB-3). Kept
+ * loose on purpose: the payout setup checks the id itself, and a rule
+ * stricter than the banks' would block a shop's payouts.
+ */
 export const UpiId = z
   .string()
   .trim()
   .toLowerCase()
-  .regex(/^[a-z0-9._-]{2,256}@[a-z][a-z0-9]{1,63}$/);
+  .max(255)
+  .regex(/^[a-z0-9._-]+@[a-z][a-z0-9.-]*$/);

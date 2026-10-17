@@ -5,6 +5,7 @@ import tseslint from "typescript-eslint";
 
 import { noNumericCoercion } from "./rules/no-numeric-coercion.js";
 import { noProviderSdk } from "./rules/no-provider-sdk.js";
+import { noZod } from "./rules/no-zod.js";
 
 /** The repository's own rules, registered under the `ygo/` prefix. */
 export const plugin = {
@@ -12,6 +13,7 @@ export const plugin = {
   rules: {
     "no-numeric-coercion": noNumericCoercion,
     "no-provider-sdk": noProviderSdk,
+    "no-zod": noZod,
   },
 };
 
@@ -39,9 +41,6 @@ export function moneyPaths(files) {
   });
 }
 
-const ZOD_MESSAGE =
-  "Schemas and field rules live in @ygo/contracts (AGENTS.md, ADR-0004): import the rule from there, or add it there.";
-
 /** Every package and app starts from this. */
 export const base = defineConfig(
   globalIgnores([
@@ -63,20 +62,7 @@ export const base = defineConfig(
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "ygo/no-provider-sdk": "error",
-    },
-  },
-  {
-    // One copy of every rule: apps and packages take schemas from
-    // @ygo/contracts instead of writing their own with zod.
-    name: "ygo/zod-in-contracts",
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [{ name: "zod", message: ZOD_MESSAGE }],
-          patterns: [{ group: ["zod/*"], message: ZOD_MESSAGE }],
-        },
-      ],
+      "ygo/no-zod": "error",
     },
   },
   moneyPaths(MONEY_PATH_GLOBS),
@@ -85,7 +71,7 @@ export const base = defineConfig(
 /** packages/contracts: the one place zod schemas are written. */
 export const contracts = defineConfig(base, {
   name: "ygo/contracts",
-  rules: { "no-restricted-imports": "off" },
+  rules: { "ygo/no-zod": "off" },
 });
 
 /**
@@ -102,7 +88,7 @@ export const server = defineConfig(base, {
 }, {
   name: "ygo/server-zod",
   files: ["src/zod.ts", "src/config.ts"],
-  rules: { "no-restricted-imports": "off" },
+  rules: { "ygo/no-zod": "off" },
 });
 
 /** Tooling packages that run under Node, such as this one. */

@@ -30,11 +30,16 @@ export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;
 /**
  * The fields a failed parse names, once each, as dot paths such as
  * `address.pincode`. A form and the server both use it, so a field has the
- * same name on both sides. A problem with the whole value names no field.
+ * same name on both sides. An unexpected key is named too; any other problem
+ * with the whole value names no field.
  */
 export function invalidFields(error: z.ZodError): string[] {
-  const paths = error.issues
-    .filter((issue) => issue.path.length > 0)
-    .map((issue) => issue.path.map(String).join("."));
-  return [...new Set(paths)];
+  const paths = error.issues.flatMap((issue) =>
+    issue.code === "unrecognized_keys"
+      ? issue.keys.map((key) => [...issue.path, key])
+      : [issue.path],
+  );
+  return [
+    ...new Set(paths.filter((path) => path.length > 0).map((path) => path.map(String).join("."))),
+  ];
 }

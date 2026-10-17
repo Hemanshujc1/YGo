@@ -42,6 +42,11 @@ describe("Phone", () => {
       "09876543210": "+919876543210",
       "(987) 654 3210": "+919876543210",
       "6000000000": "+916000000000",
+      "\u202A+91 98765 43210\u202C": "+919876543210",
+      "0091 98765 43210": "+919876543210",
+      "98765.43210": "+919876543210",
+      "98765\u201143210": "+919876543210",
+      "98765\u00A043210": "+919876543210",
     },
     ["", "5876543210", "987654321", "98765432101", "+1 2025550123", "98765abcde", "+9198765432"],
   );
@@ -60,8 +65,22 @@ describe("PersonName", () => {
       "K. Ramesh": "K. Ramesh",
       "A": "A",
       [`${"a".repeat(60)}`]: "a".repeat(60),
+      "सूर्\u200Dया": "सूर्\u200Dया",
+      "അൻ\u200Dവർ": "അൻ\u200Dവർ",
+      // 40 letters, each with a vowel sign: 80 code units, 40 characters.
+      [`${"कि".repeat(40)}`]: "कि".repeat(40),
     },
-    ["", "   ", "Asha2", "Asha 🙂", "...", "a".repeat(61), "Asha@home"],
+    [
+      "",
+      "   ",
+      "Asha2",
+      "Asha 🙂",
+      "...",
+      "a".repeat(61),
+      "कि".repeat(61),
+      `a${"\u0301".repeat(300)}`,
+      "Asha@home",
+    ],
   );
 });
 
@@ -96,8 +115,12 @@ describe("FssaiNumber", () => {
 describe("UpiId", () => {
   rule(
     UpiId,
-    { "Asha.K@OKHDFCBANK": "asha.k@okhdfcbank", "9876543210@ybl": "9876543210@ybl" },
-    ["", "asha", "asha@", "a@ybl", "asha@1bank", "asha k@ybl"],
+    {
+      "Asha.K@OKHDFCBANK": "asha.k@okhdfcbank",
+      "9876543210@ybl": "9876543210@ybl",
+      "a@ybl": "a@ybl",
+    },
+    ["", "asha", "asha@", "@ybl", "asha@1bank", "asha k@ybl"],
   );
 });
 
@@ -114,6 +137,12 @@ describe("invalidFields", () => {
       "name",
       "address.pincode",
     ]);
+  });
+
+  it("names an unexpected key", () => {
+    const result = z.strictObject({ name: PersonName }).safeParse({ name: "Asha", extra: 1 });
+    if (result.success) throw new Error("expected the parse to fail");
+    expect(invalidFields(result.error)).toEqual(["extra"]);
   });
 
   it("names no field when the whole value is wrong", () => {
