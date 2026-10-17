@@ -46,6 +46,8 @@ You need Docker (Docker Desktop or OrbStack) for the database.
 | `HOST` | no | `127.0.0.1` |
 | `PORT` | no | `3000` |
 | `LOG_LEVEL` | no | `info` |
+| `MIN_CUSTOMER_VERSION` | no | `0.0.0`; an older Customer app gets `426 UPDATE_REQUIRED` |
+| `MIN_SHOPKEEPER_VERSION` | no | `0.0.0`; an older Shopkeeper app gets `426 UPDATE_REQUIRED` |
 
 The process refuses to start when one is missing or malformed.
 
