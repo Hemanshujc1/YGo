@@ -22,7 +22,7 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
    The first run asks for an iOS bundle identifier or Android package name. Use a throwaway one and do not commit it: the store ticket picks the real ones, which cannot change after the first upload.
 
-The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds.
+The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds. Without `EXPO_PUBLIC_API_BASE_URL` the app stops at start with an error naming it.
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 

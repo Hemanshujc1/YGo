@@ -5,7 +5,11 @@ import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { strings } from "../strings";
 
-const api = createApiClient({ baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "" });
+// A phone has no page origin to fall back on, so a missing URL is a setup
+// mistake, not an unreachable server. See README.md.
+const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+if (!baseUrl) throw new Error("EXPO_PUBLIC_API_BASE_URL is not set");
+const api = createApiClient({ baseUrl });
 
 export default function Health() {
   const insets = useSafeAreaInsets();
