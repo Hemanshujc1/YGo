@@ -12,6 +12,14 @@ import { z } from "zod";
 
 const withoutSpaces = (value: string) => value.replace(/\s/g, "");
 
+/** The caller identity sent with each app request (Q-7). */
+export const AppName = z.enum(["customer", "shopkeeper", "admin", "web"]);
+export type AppName = z.infer<typeof AppName>;
+
+/** The three-part application version sent with each app request (Q-7). */
+export const AppVersion = z.string().regex(/^\d+\.\d+\.\d+$/);
+export type AppVersion = z.infer<typeof AppVersion>;
+
 /**
  * An Indian mobile number, sent as `+91` and 10 digits starting 6 to 9
  * (C02, FR-ACC-02; the format SmsSender takes). Accepts what people type or
