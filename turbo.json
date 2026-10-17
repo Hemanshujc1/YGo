@@ -31,6 +31,9 @@
     },
     "build": {
       "dependsOn": ["^transit"],
+      // Vite and Expo read an app's git-ignored .env at build time, so a
+      // changed value must miss the cache rather than replay an old bundle.
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": ["dist/**"]
     }
   }

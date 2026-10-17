@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "YGo Shopkeeper",
+    "slug": "ygo-shopkeeper",
+    "scheme": "ygo-shopkeeper",
+    "version": "0.0.0",
+    "platforms": ["android", "ios"],
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": { "supportsTablet": false },
+    "plugins": ["expo-router"]
+  }
+}

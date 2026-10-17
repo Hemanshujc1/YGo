@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "YGo",
+    "slug": "ygo-customer",
+    "scheme": "ygo-customer",
+    "version": "0.0.0",
+    "platforms": ["android", "ios"],
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": { "supportsTablet": false },
+    "plugins": ["expo-router"]
+  }
+}
