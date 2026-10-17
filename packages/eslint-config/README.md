@@ -9,6 +9,7 @@ Shared ESLint flat config for every app and package. Written in JavaScript rathe
 | `base` | client apps and shared packages | `@eslint/js` recommended, `typescript-eslint` strict, the three `ygo/` rules |
 | `contracts` | `packages/contracts` | `ygo/no-zod` off |
 | `server` | `apps/server` | Node globals; the AWS SDK allowed in `src/adapters/**` only; `ygo/no-zod` off in `src/zod.ts` and `src/config.ts` |
+| `expo` | `apps/customer`, `apps/shopkeeper` | CommonJS, Node globals and `require` in the root `*.config.js` files that Babel, Metro and Tailwind load |
 | `node` | Node tooling packages | Node globals |
 | `moneyPaths(globs)` | a package that is money throughout | the numeric-coercion ban on more files |
 

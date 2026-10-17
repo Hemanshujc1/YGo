@@ -3,20 +3,20 @@ import path from "node:path";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
-import { base, contracts, moneyPaths, server } from "../src/index.js";
+import { base, contracts, expo, moneyPaths, server } from "../src/index.js";
 
 // A package root that does not exist on disk: ESLint matches globs against the
 // path given, so the presets can be checked without fixture files.
 const root = path.resolve(import.meta.dirname, "virtual-package");
 
 /**
- * The `ygo/` rule ids reported for `code` linted as if it lived at `file`.
+ * The rule ids reported for `code` linted as if it lived at `file`.
  *
  * @param {import("eslint").Linter.Config[]} config
  * @param {string} file path relative to the package root
  * @param {string} code
  */
-async function ygoRulesAt(config, file, code) {
+async function rulesAt(config, file, code) {
   const eslint = new ESLint({
     cwd: root,
     overrideConfigFile: true,
@@ -25,9 +25,16 @@ async function ygoRulesAt(config, file, code) {
   const [result] = await eslint.lintText(code, {
     filePath: path.join(root, file),
   });
-  return (result?.messages ?? [])
-    .map((message) => message.ruleId)
-    .filter((ruleId) => ruleId?.startsWith("ygo/"));
+  return (result?.messages ?? []).map((message) => message.ruleId);
+}
+
+/**
+ * The `ygo/` rule ids among {@link rulesAt}.
+ *
+ * @param {Parameters<typeof rulesAt>} args
+ */
+async function ygoRulesAt(...args) {
+  return (await rulesAt(...args)).filter((ruleId) => ruleId?.startsWith("ygo/"));
 }
 
 const awsImport = 'import { S3Client } from "@aws-sdk/client-s3";\nS3Client;\n';
@@ -106,5 +113,20 @@ describe("zod outside @ygo/contracts (AGENTS.md, ADR-0004)", () => {
 
   it("is allowed in @ygo/contracts", async () => {
     expect(await ygoRulesAt(contracts, "src/fields.ts", zodImport)).toEqual([]);
+  });
+});
+
+describe("the Expo apps' config files", () => {
+  const commonJs =
+    'const { getDefaultConfig } = require("expo/metro-config");\nmodule.exports = getDefaultConfig(__dirname);\n';
+
+  it("may use require and Node globals", async () => {
+    expect(await rulesAt(expo, "metro.config.js", commonJs)).toEqual([]);
+  });
+
+  it("stay CommonJS only at the app root", async () => {
+    expect(await rulesAt(expo, "src/app/index.js", commonJs)).toContain(
+      "@typescript-eslint/no-require-imports",
+    );
   });
 });

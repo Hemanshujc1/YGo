@@ -91,6 +91,18 @@ export const server = defineConfig(base, {
   rules: { "ygo/no-zod": "off" },
 });
 
+/**
+ * apps/customer and apps/shopkeeper. Babel, Metro and Tailwind load their
+ * config files (`babel.config.js` and the like) as CommonJS under Node, so
+ * those files get Node globals and `require`.
+ */
+export const expo = defineConfig(base, {
+  name: "ygo/expo-config-files",
+  files: ["*.config.js"],
+  languageOptions: { sourceType: "commonjs", globals: globals.node },
+  rules: { "@typescript-eslint/no-require-imports": "off" },
+});
+
 /** Tooling packages that run under Node, such as this one. */
 export const node = defineConfig(base, {
   name: "ygo/node",
