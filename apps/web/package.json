@@ -13,7 +13,8 @@
   "dependencies": {
     "@ygo/tokens": "workspace:*",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-router": "8.4.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
