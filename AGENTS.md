@@ -3,7 +3,9 @@
 Hyperlocal quick-commerce platform connecting customers with local shops within a 2–3 km radius.
 `References/` holds read-only reference repos and UI inspiration. Research them, never modify them.
 
-This file is the rulebook for every coding agent and every developer. Claude Code (v2.1.277 or later), Codex, Cursor and other agents read it directly.
+This file is the rulebook for every coding agent and every developer. Codex, Cursor and other agents read it directly; Claude Code reads it through `CLAUDE.md`, which only imports it. Put new rules here, never in `CLAUDE.md`.
+
+Write the brand as "YGo" everywhere: code, copy, docs and commits. Never "YUGO" or "YGO".
 
 Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, branched, sized and reviewed when several agents and developers work in parallel.
 
@@ -37,11 +39,14 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 
 `CONTEXT.md`, `docs/adr/`, `docs/product/` and `docs/design/design-system.md` win over any installed skill.
 
-`expo-native-ui` (`.agents/skills/`) is written for generic Expo apps, and three of its rules conflict with YGo:
+`expo-native-ui` (`.agents/skills/`) is written for generic Expo apps, and four of its rules conflict with YGo:
 
 - Style with NativeWind classes over `@ygo/tokens` (ADR-0001), in place of its inline styles and platform semantic colours. Inline `style` is for values that change at runtime, such as animated or measured sizes.
 - Use Lucide icons (`lucide-react-native`), in place of SF Symbols.
 - Build one YGo design for iOS and Android from the design system, in place of separate Apple HIG and Material looks.
+- Build sheets, pickers, switches and menus from React Native and NativeWind in the YGo design, in place of reaching for `@expo/ui` (native SwiftUI and Jetpack Compose) first.
+
+It also points to other Expo skills (`expo-router`, `expo-animation`, `expo-ui`, `expo-data-fetching`) that are not installed here; follow the project docs instead.
 
 Use it for safe areas, keyboard handling, lists, screen states and running in Expo Go.
 
@@ -58,3 +63,7 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one root `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
+
+### Skills outside the repo
+
+The repo installs only the skills in `.agents/skills/`, pinned by `skills-lock.json`. Others named in these docs, such as `/code-review`, are installed per user in Claude Code; an agent without them follows the written step by hand.

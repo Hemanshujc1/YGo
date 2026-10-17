@@ -5,8 +5,13 @@ Several coding agents and developers work on YGo at once. These rules keep their
 ## 1. One ticket, one owner, one branch
 
 - Work starts from a GitHub issue labelled `ready-for-agent` (fully specified, an agent can finish it alone) or `ready-for-human` (needs a device, a store console, an AWS or payment account, or a judgement call).
-- Claim the issue before writing code: `gh issue edit <n> --add-assignee @me`. An issue with an assignee belongs to that person or agent; pick another.
-- Branch from a fresh `main` as `<issue-number>-<short-slug>`. The PR body starts with `Closes #<n>` and follows `.github/pull_request_template.md`.
+- Claim the issue before writing code, by pushing its branch:
+  1. `git fetch origin` and check `git ls-remote --heads origin '<n>-*'`. If a branch exists, the issue is taken; pick another.
+  2. Create the branch from a fresh `origin/main` as `<issue-number>-<short-slug>` in its own worktree: `git worktree add ../YGo-<n> -b <n>-<slug> origin/main`.
+  3. Push it at once (`git push -u origin <n>-<slug>`), then `gh issue edit <n> --add-assignee @me` so people can see it.
+- Every agent uses the same GitHub account, so the pushed branch, not the assignee, shows that an issue is taken.
+- Each agent works only in its own worktree. Never edit files in a folder another agent is using.
+- The PR body starts with `Closes #<n>` and follows `.github/pull_request_template.md`.
 
 ## 2. Slice vertically
 
