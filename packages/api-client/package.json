@@ -1,0 +1,24 @@
+{
+  "name": "@ygo/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ygo/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@ygo/eslint-config": "workspace:*",
+    "@ygo/tsconfig": "workspace:*",
+    "eslint": "10.11.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}
