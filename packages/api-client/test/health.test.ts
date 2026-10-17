@@ -3,14 +3,17 @@ import { createApiClient } from "../src/index";
 
 const answering = (status: number, body: BodyInit, baseUrl = "https://api.test") => {
   const requested: string[] = [];
+  const requestHeaders: Headers[] = [];
   const client = createApiClient({
     baseUrl,
-    fetch: (input) => {
+    app: { name: "customer", version: "1.2.3" },
+    fetch: (input, init) => {
       requested.push(String(input));
+      requestHeaders.push(new Headers(init?.headers));
       return Promise.resolve(new Response(body, { status }));
     },
   });
-  return { client, requested };
+  return { client, requested, requestHeaders };
 };
 
 afterEach(() => {
@@ -34,6 +37,27 @@ describe("health", () => {
     const { client, requested } = answering(200, '{"status":"ok"}', "  ");
     await client.health();
     expect(requested).toEqual(["/v1/healthz"]);
+  });
+
+  it("sends the application name and version with the request", async () => {
+    const { client, requestHeaders } = answering(200, '{"status":"ok"}');
+    await client.health();
+    expect(requestHeaders[0]?.get("x-ygo-app-name")).toBe("customer");
+    expect(requestHeaders[0]?.get("x-ygo-app-version")).toBe("1.2.3");
+  });
+
+  it("keeps existing callers working until they supply app identity", async () => {
+    let headers: Headers | undefined;
+    const client = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: (_input, init) => {
+        headers = new Headers(init?.headers);
+        return Promise.resolve(new Response('{"status":"ok"}'));
+      },
+    });
+    expect(await client.health()).toEqual({ ok: true, data: { status: "ok" } });
+    expect(headers?.has("x-ygo-app-name")).toBe(false);
+    expect(headers?.has("x-ygo-app-version")).toBe(false);
   });
 
   it("returns the machine code from the error envelope", async () => {
@@ -77,6 +101,7 @@ describe("health", () => {
   it("rejects when the server cannot be reached", async () => {
     const client = createApiClient({
       baseUrl: "https://api.test",
+      app: { name: "customer", version: "1.2.3" },
       fetch: () => Promise.reject(new TypeError("fetch failed")),
     });
     await expect(client.health()).rejects.toThrow("fetch failed");
@@ -85,6 +110,7 @@ describe("health", () => {
   it("rejects when the server does not answer in time", async () => {
     const client = createApiClient({
       baseUrl: "https://api.test",
+      app: { name: "customer", version: "1.2.3" },
       timeoutMs: 10,
       fetch: (_input, init) =>
         new Promise((_resolve, reject) => {
@@ -95,7 +121,7 @@ describe("health", () => {
   });
 
   it("uses the global fetch as it is at call time", async () => {
-    const client = createApiClient({ baseUrl: "https://api.test" });
+    const client = createApiClient({ baseUrl: "https://api.test", app: { name: "customer", version: "1.2.3" } });
     vi.stubGlobal("fetch", () => Promise.resolve(new Response('{"status":"ok"}')));
     expect(await client.health()).toEqual({ ok: true, data: { status: "ok" } });
   });

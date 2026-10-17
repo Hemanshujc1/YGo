@@ -1,4 +1,11 @@
-import { ErrorEnvelope, HealthResponse, type ErrorCode } from "@ygo/contracts";
+import {
+  APP_NAME_HEADER,
+  APP_VERSION_HEADER,
+  ErrorEnvelope,
+  HealthResponse,
+  type AppIdentity,
+  type ErrorCode,
+} from "@ygo/contracts";
 
 /**
  * What a call returns once the server has answered. With VALIDATION_FAILED,
@@ -17,16 +24,26 @@ export interface ApiClientOptions {
   fetch?: typeof fetch;
   /** How long a call waits, including reading the body, before it rejects. */
   timeoutMs?: number;
+  /** Sent with each request when the caller supplies its app identity. */
+  app?: AppIdentity;
 }
 
-export function createApiClient({ baseUrl, fetch: fetchFn, timeoutMs = 10_000 }: ApiClientOptions) {
+export function createApiClient({
+  baseUrl,
+  fetch: fetchFn,
+  timeoutMs = 10_000,
+  app,
+}: ApiClientOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
   return {
     /** `GET /v1/healthz`: whether the server and its database both answer. */
     async health(): Promise<ApiResult<HealthResponse>> {
       const response = await (fetchFn ?? fetch)(`${origin}/v1/healthz`, {
-        headers: { accept: "application/json" },
+        headers: {
+          accept: "application/json",
+          ...(app && { [APP_NAME_HEADER]: app.name, [APP_VERSION_HEADER]: app.version }),
+        },
         signal: AbortSignal.timeout(timeoutMs),
       });
 
