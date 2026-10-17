@@ -35,6 +35,29 @@ describe("errors", () => {
   });
 });
 
+describe("a request body that breaks its schema", () => {
+  it("answers 400 VALIDATION_FAILED naming the fields", async () => {
+    const app = buildApp({ checkDatabase: async () => {} });
+    app.post("/v1/echo", { schema: { body: HealthResponse } }, async () => ({}));
+    const res = await app.inject({ method: "POST", url: "/v1/echo", payload: { status: "no" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["status"] } });
+  });
+
+  it("names no field when the body is not JSON", async () => {
+    const app = buildApp({ checkDatabase: async () => {} });
+    app.post("/v1/echo", { schema: { body: HealthResponse } }, async () => ({}));
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/echo",
+      payload: "{",
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: { code: "VALIDATION_FAILED" } });
+  });
+});
+
 describe("the test database", () => {
   it("has the migrations applied", async () => {
     const { rows } = await database.pool.query("select postgis_version()");

@@ -1,6 +1,6 @@
 import { ErrorEnvelope, HealthResponse, type ErrorCode } from "@ygo/contracts";
 import Fastify, { type FastifyError, type FastifyServerOptions } from "fastify";
-import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "./zod";
+import { bodyFields, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "./zod";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
@@ -8,7 +8,9 @@ export interface AppOptions {
   logger?: FastifyServerOptions["logger"];
 }
 
-const envelope = (code: ErrorCode): ErrorEnvelope => ({ error: { code } });
+const envelope = (code: ErrorCode, fields?: string[]): ErrorEnvelope => ({
+  error: fields ? { code, fields } : { code },
+});
 
 export function buildApp({ checkDatabase, logger = false }: AppOptions) {
   const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
@@ -23,7 +25,7 @@ export function buildApp({ checkDatabase, logger = false }: AppOptions) {
     if (status === 500) request.log.error({ err: error }, "request failed");
     const code: ErrorCode =
       status === 404 ? "NOT_FOUND" : status === 500 ? "INTERNAL" : "VALIDATION_FAILED";
-    return reply.code(status).send(envelope(code));
+    return reply.code(status).send(envelope(code, bodyFields(error)));
   });
 
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(envelope("NOT_FOUND")));

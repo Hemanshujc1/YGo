@@ -1,13 +1,14 @@
 import { ErrorEnvelope, HealthResponse, type ErrorCode } from "@ygo/contracts";
 
 /**
- * What a call returns once the server has answered. A failed fetch (the
+ * What a call returns once the server has answered. With VALIDATION_FAILED,
+ * `fields` names the request fields that broke their rule. A failed fetch (the
  * network is down, the server is unreachable, the call timed out) rejects
  * instead.
  */
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: number; code: ErrorCode };
+  | { ok: false; status: number; code: ErrorCode; fields?: string[] };
 
 export interface ApiClientOptions {
   /** The API's origin, such as `https://api.example.com`; `""` for the page's own origin. */
@@ -46,11 +47,9 @@ export function createApiClient({ baseUrl, fetch: fetchFn, timeoutMs = 10_000 }:
           : { ok: false, status: response.status, code: "INTERNAL" };
       }
       const envelope = ErrorEnvelope.safeParse(body);
-      return {
-        ok: false,
-        status: response.status,
-        code: envelope.success ? envelope.data.error.code : "INTERNAL",
-      };
+      return envelope.success
+        ? { ok: false, status: response.status, ...envelope.data.error }
+        : { ok: false, status: response.status, code: "INTERNAL" };
     },
   };
 }

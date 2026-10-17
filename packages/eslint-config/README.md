@@ -6,8 +6,9 @@ Shared ESLint flat config for every app and package. Written in JavaScript rathe
 
 | Export | Use in | Adds |
 | --- | --- | --- |
-| `base` | client apps and shared packages | `@eslint/js` recommended, `typescript-eslint` strict, both `ygo/` rules |
-| `server` | `apps/server` | Node globals; the AWS SDK allowed in `src/adapters/**` only |
+| `base` | client apps and shared packages | `@eslint/js` recommended, `typescript-eslint` strict, both `ygo/` rules, the zod import ban |
+| `contracts` | `packages/contracts` | zod allowed |
+| `server` | `apps/server` | Node globals; the AWS SDK allowed in `src/adapters/**` only; zod allowed in `src/zod.ts` and `src/config.ts` only |
 | `node` | Node tooling packages | Node globals |
 | `moneyPaths(globs)` | a package that is money throughout | the numeric-coercion ban on more files |
 
@@ -27,6 +28,10 @@ export default server;
 
 The rule catches the common ways a value becomes a float, not every one (`price * 1` gets through). Review still matters; the rule makes the easy mistakes impossible.
 
+## The zod import ban
+
+[ADR-0004](../../docs/adr/0004-backend-shape-and-api-contract.md) and `AGENTS.md`. ESLint's `no-restricted-imports` bans `zod` and `zod/*`, type imports included, everywhere except `@ygo/contracts` and the server's Fastify glue and environment check. A form or route takes its schema and field rules from `@ygo/contracts`, so every rule has one copy and the server and the apps cannot disagree.
+
 ## Extending a preset
 
-Add config objects after the preset; don't redefine its rules. Setting `ygo/no-provider-sdk` or `ygo/no-numeric-coercion` to `off` anywhere other than the server's adapters needs an ADR amendment.
+Add config objects after the preset; don't redefine its rules. Setting `ygo/no-provider-sdk` or `ygo/no-numeric-coercion` to `off` anywhere other than the server's adapters needs an ADR amendment. Lifting the zod import ban for another file needs a reason in the PR.

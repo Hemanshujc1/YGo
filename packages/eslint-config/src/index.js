@@ -39,6 +39,9 @@ export function moneyPaths(files) {
   });
 }
 
+const ZOD_MESSAGE =
+  "Schemas and field rules live in @ygo/contracts (AGENTS.md, ADR-0004): import the rule from there, or add it there.";
+
 /** Every package and app starts from this. */
 export const base = defineConfig(
   globalIgnores([
@@ -62,10 +65,33 @@ export const base = defineConfig(
       "ygo/no-provider-sdk": "error",
     },
   },
+  {
+    // One copy of every rule: apps and packages take schemas from
+    // @ygo/contracts instead of writing their own with zod.
+    name: "ygo/zod-in-contracts",
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [{ name: "zod", message: ZOD_MESSAGE }],
+          patterns: [{ group: ["zod/*"], message: ZOD_MESSAGE }],
+        },
+      ],
+    },
+  },
   moneyPaths(MONEY_PATH_GLOBS),
 );
 
-/** apps/server: Node globals, and the AWS SDK allowed in src/adapters/ only. */
+/** packages/contracts: the one place zod schemas are written. */
+export const contracts = defineConfig(base, {
+  name: "ygo/contracts",
+  rules: { "no-restricted-imports": "off" },
+});
+
+/**
+ * apps/server: Node globals, the AWS SDK allowed in src/adapters/ only, and
+ * zod in the Fastify glue and the environment check only.
+ */
 export const server = defineConfig(base, {
   name: "ygo/server",
   languageOptions: { globals: globals.node },
@@ -73,6 +99,10 @@ export const server = defineConfig(base, {
   name: "ygo/server-adapters",
   files: ["src/adapters/**"],
   rules: { "ygo/no-provider-sdk": "off" },
+}, {
+  name: "ygo/server-zod",
+  files: ["src/zod.ts", "src/config.ts"],
+  rules: { "no-restricted-imports": "off" },
 });
 
 /** Tooling packages that run under Node, such as this one. */

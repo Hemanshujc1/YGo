@@ -3,14 +3,14 @@ import path from "node:path";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
-import { base, moneyPaths, server } from "../src/index.js";
+import { base, contracts, moneyPaths, server } from "../src/index.js";
 
 // A package root that does not exist on disk: ESLint matches globs against the
 // path given, so the presets can be checked without fixture files.
 const root = path.resolve(import.meta.dirname, "virtual-package");
 
 /**
- * The `ygo/` rule ids reported for `code` linted as if it lived at `file`.
+ * The repository's own rule ids (`ygo/` and the zod import ban) reported for `code` linted as if it lived at `file`.
  *
  * @param {import("eslint").Linter.Config[]} config
  * @param {string} file path relative to the package root
@@ -27,7 +27,10 @@ async function ygoRulesAt(config, file, code) {
   });
   return (result?.messages ?? [])
     .map((message) => message.ruleId)
-    .filter((ruleId) => ruleId?.startsWith("ygo/"));
+    .filter(
+      (ruleId) =>
+        ruleId?.startsWith("ygo/") || ruleId === "no-restricted-imports",
+    );
 }
 
 const awsImport = 'import { S3Client } from "@aws-sdk/client-s3";\nS3Client;\n';
@@ -81,5 +84,34 @@ describe("the numeric-coercion ban in money paths (ADR-0004, ADR-0007)", () => {
     expect(await ygoRulesAt(pricing, "src/counter-bill.ts", coercion)).toEqual(
       ["ygo/no-numeric-coercion"],
     );
+  });
+});
+
+describe("zod outside @ygo/contracts (AGENTS.md, ADR-0004)", () => {
+  const zodImport = 'import { z } from "zod";\nz;\n';
+  const zodSubpath = 'import { z } from "zod/mini";\nz;\n';
+  const zodType = 'import type { ZodType } from "zod";\nexport type T = ZodType;\n';
+
+  it("is banned in apps and packages, type imports and subpaths included", async () => {
+    for (const code of [zodImport, zodSubpath, zodType]) {
+      expect(await ygoRulesAt(base, "src/sign-up/form.tsx", code)).toEqual([
+        "no-restricted-imports",
+      ]);
+    }
+  });
+
+  it("is banned in the server outside its zod glue and config", async () => {
+    expect(await ygoRulesAt(server, "src/routes/sign-up.ts", zodImport)).toEqual(
+      ["no-restricted-imports"],
+    );
+  });
+
+  it("is allowed in the server's zod glue and config", async () => {
+    expect(await ygoRulesAt(server, "src/zod.ts", zodImport)).toEqual([]);
+    expect(await ygoRulesAt(server, "src/config.ts", zodImport)).toEqual([]);
+  });
+
+  it("is allowed in @ygo/contracts", async () => {
+    expect(await ygoRulesAt(contracts, "src/fields.ts", zodImport)).toEqual([]);
   });
 });
