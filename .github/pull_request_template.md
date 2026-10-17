@@ -1,0 +1,14 @@
+Closes #
+
+## What changed
+
+## Done check
+<!-- The test, typecheck or reproduction that proves the ticket is done, and that it passes. -->
+
+## Assumptions
+<!-- Technical decisions made without asking. -->
+
+## Reuse
+- [ ] Searched the shared packages and this app before adding any component, helper or type: <!-- what you searched for -->
+- [ ] Every changed line traces to the ticket
+- [ ] New dependencies, if any, are justified above
