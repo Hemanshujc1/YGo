@@ -1,5 +1,5 @@
 import { colors, type ColorRoleName } from "./colors";
-import { radii, spacing } from "./layout";
+import { radii } from "./layout";
 import { fontFamily, fontSizes, fontWeights } from "./typography";
 
 const roles = Object.keys(colors) as ColorRoleName[];
@@ -35,7 +35,6 @@ export default {
         fontFamily: { sans: [fontFamily, "ui-sans-serif", "system-ui", "sans-serif"] },
         fontWeight: fontWeights,
         fontSize: fontSizes,
-        spacing: pixels(spacing),
         borderRadius: pixels(radii),
       },
     },

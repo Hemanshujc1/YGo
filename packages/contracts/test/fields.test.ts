@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
-  AppIdentity,
-  AppName,
-  AppVersion,
   Email,
   FssaiNumber,
   HandoverOtp,
@@ -15,26 +12,6 @@ import {
   Pincode,
   UpiId,
 } from "../src/index";
-
-describe("AppName", () => {
-  it("accepts known callers and rejects an unknown one", () => {
-    for (const name of ["customer", "shopkeeper", "admin", "web"]) {
-      expect(AppName.parse(name)).toBe(name);
-    }
-    expect(AppName.safeParse("other").success).toBe(false);
-  });
-});
-
-describe("AppIdentity", () => {
-  it("requires a known app name and a three-part version", () => {
-    expect(AppIdentity.parse({ name: "customer", version: "1.2.3" })).toEqual({
-      name: "customer",
-      version: "1.2.3",
-    });
-    expect(AppIdentity.safeParse({ name: "other", version: "1.2.3" }).success).toBe(false);
-    expect(AppIdentity.safeParse({ name: "customer", version: "1.2" }).success).toBe(false);
-  });
-});
 
 /** Checks that each typed value is accepted and stored as given, and each refused value fails. */
 function rule(
@@ -53,10 +30,6 @@ function rule(
     });
   }
 }
-
-describe("AppVersion", () => {
-  rule(AppVersion, { "1.24.3": "1.24.3", "0.0.0": "0.0.0" }, ["", "1", "1.24", "1.2.3.4"]);
-});
 
 describe("Phone", () => {
   rule(

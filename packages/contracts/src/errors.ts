@@ -11,6 +11,7 @@ export const ErrorCode = z.enum([
   "NOT_FOUND",
   "UNAVAILABLE",
   "INTERNAL",
+  "UPDATE_REQUIRED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

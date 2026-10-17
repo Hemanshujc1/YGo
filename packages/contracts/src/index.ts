@@ -1,11 +1,5 @@
+export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";
 export {
-  ErrorCode,
-  ErrorEnvelope,
-  invalidFields,
-} from "./errors";
-export {
-  AppName,
-  AppVersion,
   Email,
   FssaiNumber,
   HandoverOtp,
@@ -16,5 +10,5 @@ export {
   Pincode,
   UpiId,
 } from "./fields";
-export { APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity } from "./headers";
+export { APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity, AppName, AppVersion } from "./headers";
 export { HealthResponse } from "./health";
