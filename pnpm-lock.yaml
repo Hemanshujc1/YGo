@@ -219,6 +219,28 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15))
 
+  packages/api-client:
+    dependencies:
+      '@ygo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@ygo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@ygo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      eslint:
+        specifier: 10.11.0
+        version: 10.11.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15))
+
   packages/contracts:
     dependencies:
       zod:
@@ -271,6 +293,51 @@ importers:
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/format:
+    devDependencies:
+      '@ygo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@ygo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      eslint:
+        specifier: 10.11.0
+        version: 10.11.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
+  packages/pricing:
+    devDependencies:
+      '@ygo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@ygo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      eslint:
+        specifier: 10.11.0
+        version: 10.11.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
+  packages/tokens:
+    devDependencies:
+      '@ygo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@ygo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      eslint:
+        specifier: 10.11.0
+        version: 10.11.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/tsconfig: {}
 
