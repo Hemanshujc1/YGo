@@ -24,7 +24,10 @@
     },
     "test": {
       "dependsOn": ["^transit"],
-      "outputs": []
+      "outputs": [],
+      // apps/server's tests create their own database on this server. Where it
+      // runs changes no result, so it reaches the task without joining the hash.
+      "passThroughEnv": ["TEST_DATABASE_URL"]
     },
     "build": {
       "dependsOn": ["^transit"],

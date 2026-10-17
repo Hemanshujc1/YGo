@@ -22,6 +22,24 @@ jobs:
     name: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # apps/server's tests create a fresh database on this server for each run.
+    # The image is pinned to a digest for the same reason as the actions.
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
+        env:
+          POSTGRES_USER: ygo
+          POSTGRES_PASSWORD: ygo
+          POSTGRES_DB: ygo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h localhost -U ygo -d ygo"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://ygo:ygo@localhost:5432/ygo
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
