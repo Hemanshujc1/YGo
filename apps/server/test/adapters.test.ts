@@ -53,4 +53,9 @@ describe("local FileStorage", () => {
     );
     expect(await storage.downloadUrl("proofs/a.jpg")).toBe("file:///tmp/ygo-files/proofs/a.jpg");
   });
+
+  it("refuses a key that escapes its directory", async () => {
+    const storage = createLocalFileStorage("/tmp/ygo-files");
+    await expect(storage.downloadUrl("../etc/passwd")).rejects.toThrow("escapes");
+  });
 });

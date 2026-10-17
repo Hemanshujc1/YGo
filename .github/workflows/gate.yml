@@ -34,7 +34,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U ygo -d ygo"
+          --health-cmd "pg_isready -h localhost -U ygo -d ygo"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 30

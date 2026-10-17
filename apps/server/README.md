@@ -53,7 +53,7 @@ The process refuses to start when one is missing or malformed.
 
 `pnpm --filter @ygo/server test` (and `pnpm gate`) needs the database from step 1 running. Each run creates its own database, `ygo_test_<random>`, applies the migrations to it and drops it at the end, so runs never share data and two worktrees can test at once. A run that is killed can leave its database behind; drop it by hand.
 
-The tests connect to `postgres://ygo:ygo@localhost:5432/ygo`, the container above, to create that database. Point them elsewhere with `TEST_DATABASE_URL`, which must be a user allowed to create databases. CI sets it to its own PostGIS service. With no database reachable, the run stops at once with an error naming the address.
+The tests connect to `postgres://ygo:ygo@localhost:5432/ygo`, the container above, to create that database. Point them elsewhere with `TEST_DATABASE_URL`. Its role must be able to create databases and the `postgis` extension, which is not a trusted extension: in practice a superuser, as the container's `ygo` is. CI sets it to its own PostGIS service. With no database reachable, the run stops within seconds with an error naming the address and the reason.
 
 The outside services are interfaces in `src/adapters/`, each with a local implementation for the tests: `FileStorage`, `Mailer`, `IdentityVerifier`, `PushSender`, `SmsSender` and `Clock`. The local `Clock` stands still until a test sets or advances it. Only `src/adapters/` may import `@aws-sdk/*` (ADR-0008).
 

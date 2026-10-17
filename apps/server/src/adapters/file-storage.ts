@@ -11,8 +11,16 @@ export interface FileStorage {
   downloadUrl(key: string): Promise<string>;
 }
 
-/** Files under a local directory, addressed by plain `file:` URLs with no signature. */
+/**
+ * Files under a local directory, addressed by plain `file:` URLs with no
+ * signature. The content type is ignored: nothing here enforces it.
+ */
 export function createLocalFileStorage(root: string): FileStorage {
-  const url = async (key: string) => pathToFileURL(path.join(root, key)).href;
+  const base = path.resolve(root);
+  const url = async (key: string) => {
+    const file = path.resolve(base, key);
+    if (!file.startsWith(base + path.sep)) throw new Error(`key escapes the storage root: ${key}`);
+    return pathToFileURL(file).href;
+  };
   return { uploadUrl: url, downloadUrl: url };
 }
