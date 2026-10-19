@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/index";
 
-const answering = (status: number, body: BodyInit | null, baseUrl = "https://api.test") => {
+const answering = (
+  status: number,
+  body: BodyInit | null,
+  baseUrl = "https://api.test",
+  onUpdateRequired?: () => void,
+) => {
   const requested: string[] = [];
   const requestHeaders: Headers[] = [];
   const client = createApiClient({
     baseUrl,
     app: { name: "customer", version: "1.2.3" },
+    onUpdateRequired,
     fetch: (input, init) => {
       requested.push(String(input));
       requestHeaders.push(new Headers(init?.headers));
@@ -155,15 +161,11 @@ describe("versionCheck", () => {
 describe("onUpdateRequired", () => {
   const counting = (status: number, body: BodyInit | null) => {
     const signal = vi.fn();
-    const client = createApiClient({
-      baseUrl: "https://api.test",
-      fetch: () => Promise.resolve(new Response(body, { status })),
-      onUpdateRequired: signal,
-    });
-    return { client, signal };
+    return { client: answering(status, body, undefined, signal).client, signal };
   };
   const tooOld = '{"error":{"code":"UPDATE_REQUIRED"}}';
 
+  // The server never refuses /v1/healthz; health() stands in for every later call.
   it("fires when any call is answered UPDATE_REQUIRED", async () => {
     const { client, signal } = counting(426, tooOld);
     await client.health();

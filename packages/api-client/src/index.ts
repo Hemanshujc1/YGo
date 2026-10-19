@@ -35,8 +35,9 @@ export interface ApiClientOptions {
   /** Sent with each request when the caller supplies its app identity. */
   app?: AppIdentity;
   /**
-   * Called whenever any call is answered UPDATE_REQUIRED (426): the server no
-   * longer serves this app's version, so every later call will be refused too.
+   * Called on every answer with UPDATE_REQUIRED (426): the server no longer
+   * serves this app's version, so its later calls are refused too (all but
+   * `/v1/healthz`). It may fire more than once; the caller keeps the state.
    */
   onUpdateRequired?: () => void;
 }
@@ -72,7 +73,10 @@ export function createApiClient({
     return { ok: response.ok, status: response.status, body };
   }
 
-  /** The result for an answer that is not a success, from its error envelope. */
+  /**
+   * The result for an answer that is not a success, from its error envelope.
+   * Calls `onUpdateRequired` for UPDATE_REQUIRED, so call it once per answer.
+   */
   function failure(status: number, body: unknown): ApiFailure {
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
