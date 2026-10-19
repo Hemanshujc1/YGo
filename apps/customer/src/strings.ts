@@ -8,6 +8,32 @@ export const strings = {
   checking: "Checking…",
   ok: "ok",
   unreachable: "The server cannot be reached.",
+  theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
+  update: { title: "Update YGo", button: "Update" },
+  // The Inter review (design system, section 10), until real screens replace it.
+  review: {
+    sizes: "Type sizes",
+    display: "Display 28",
+    titleLarge: "Title large 24",
+    titleText: "Title 20",
+    headline: "Headline 18",
+    body: "Body 16",
+    label: "Label 16",
+    secondary: "Secondary 14",
+    smallLabel: "Small label 13",
+    caption: "Caption 12",
+    weights: "Weights",
+    regular: "Inter 400 Regular ₹",
+    medium: "Inter 500 Medium ₹",
+    semibold: "Inter 600 SemiBold ₹",
+    formats: "Formats",
+    prices: "Price column",
+    countdown: "Countdown",
+    tabs: "Tab labels",
+    tabLabels: ["Orders", "Bill", "Stock", "Deliveries", "More"],
+    hindi: "Hindi line height",
+    hindiSample: "आपका ऑर्डर तैयार है, कृपया दुकान पर आएँ।",
+  },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.
   errors: {
