@@ -42,3 +42,26 @@ describe("Indian display formats without formatToParts", () => {
 
   expectIndianFormats();
 });
+
+// Android's Intl writes "₹ 1,25,000.00", with a no-break space after the sign.
+describe("Indian display formats with Android's space after ₹", () => {
+  type Format = (value: number | bigint) => string;
+  const original = Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype, "format") as PropertyDescriptor;
+  const originalGet = original.get as (this: Intl.NumberFormat) => Format;
+
+  beforeAll(() => {
+    Object.defineProperty(Intl.NumberFormat.prototype, "format", {
+      configurable: true,
+      get(this: Intl.NumberFormat) {
+        const format = originalGet.call(this);
+        return ((value) => format(value).replace("₹", "₹ ")) satisfies Format;
+      },
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(Intl.NumberFormat.prototype, "format", original);
+  });
+
+  expectIndianFormats();
+});

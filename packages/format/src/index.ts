@@ -26,7 +26,9 @@ export const formatNumber = (value: number | bigint) => indianNumber.format(valu
 // Only format() is used: Hermes on iOS has no NumberFormat.formatToParts.
 
 // The only hyphen in a rupee amount is its sign, shown as a true minus.
-export const formatMoney = (value: number | bigint) => indianMoney.format(value).replace("-", "−");
+// Android puts a space after ₹ and iOS does not; the design system has none.
+export const formatMoney = (value: number | bigint) =>
+  indianMoney.format(value).replace("-", "−").replace(/₹\s/, "₹");
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 
