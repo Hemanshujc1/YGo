@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "2.2",
+  "description": "YGo fixed deployment entrypoint; replace ENV, BUCKET and API_HOST per environment",
+  "parameters": {
+    "SHA": {"type": "String", "allowedPattern": "^[a-f0-9]{40}$", "interpolationType": "ENV_VAR"},
+    "Digest": {"type": "String", "allowedPattern": "^[a-f0-9]{64}$", "interpolationType": "ENV_VAR"}
+  },
+  "mainSteps": [{
+    "action": "aws:runShellScript",
+    "name": "deploy",
+    "inputs": {
+      "timeoutSeconds": "900",
+      "runCommand": ["set -eu", "bash /opt/ygo/ops/deploy.sh deploy ENV \"$SSM_SHA\" BUCKET \"$SSM_Digest\" https://API_HOST/v1/healthz"]
+    }
+  }]
+}

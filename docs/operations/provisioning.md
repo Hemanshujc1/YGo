@@ -1,6 +1,6 @@
 # Provision YGo (#35)
 
-Owner-operated runbook for ADR-0004/0005/0008. #132 supplies host setup and release packaging; #133 adds deploy/rollback and #134 adds OIDC promotion. Production automation is ready only after all three. #130 supplies backup/restore and #131 supplies monitoring/jobs. Complete those before the production pilot; this runbook lets provisioning begin now. Never put credentials, parameter values or downloaded dumps in Git.
+Owner-operated runbook for ADR-0004/0005/0008. #132 supplies host setup and release packaging; #133 supplies deploy/rollback and #134 supplies OIDC promotion. #130 supplies backup/restore and #131 supplies monitoring/jobs. Complete those before the production pilot; this runbook lets provisioning begin now. Never put credentials, parameter values or downloaded dumps in Git.
 
 ## Account and billing first
 
@@ -24,9 +24,9 @@ Attach `AmazonSSMManagedInstanceCore` to the EC2 instance role. Add `ssm:GetPara
 
 In Parameter Store, create two **SecureString** values at those paths, each a systemd environment-file document. Set HOST=127.0.0.1, LOG_LEVEL=info, PORT=3000 for staging and PORT=3001 for production, DATABASE_URL with the matching role/database and TLS settings above, plus MIN_CUSTOMER_VERSION/MIN_SHOPKEEPER_VERSION=0.0.0. Use systemd quoting rules for values; URL-encode password characters in DATABASE_URL. Values stay in SSM; never paste them into this runbook or a PR. #133 retrieves them atomically to root-owned mode-0600 `/etc/ygo/<environment>.env`; the application never calls SSM.
 
-Prepare the GitHub OIDC provider `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`. Create separate staging/production roles whose trust restricts both audience and exact subject `repo:Hemanshujc1/YGo:environment:staging` or `repo:Hemanshujc1/YGo:environment:production`. In GitHub Environments, allow only main and require owner approval for production; an environment subject does not itself enforce a branch. No long-lived AWS key.
+Prepare the GitHub OIDC provider `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`. Create separate staging/production roles whose trust restricts both audience and exact subject `repo:Hemanshujc1@129760043/YGo@1414646726:environment:staging` or `repo:Hemanshujc1@129760043/YGo@1414646726:environment:production`. In GitHub Environments, allow only main and require owner approval for production; an environment subject does not itself enforce a branch. No long-lived AWS key.
 
-For #134, role policies scope S3 PutObject/GetObject to the environment's deployment prefix, SendCommand to the one EC2 instance and approved deployment SSM document, and GetCommandInvocation for result polling (that action needs Resource `*`). Do not grant access to SecureString values to Actions. Final document ARN, artifact/promotion permissions and workflow variable names ship in #134; do not enable production dispatch before then. Staging health evidence must authorize the exact full commit SHA before production can run.
+Use the exact role policies and SSM document below. Actions must not read SecureString values. This repository uses immutable OIDC subjects (confirmed through GitHub's OIDC customization API); preserve both numeric IDs above. Recheck the actual subject before enabling the roles.
 
 ## Host setup
 
@@ -89,11 +89,11 @@ Run `sudo systemctl daemon-reload`, `sudo systemctl enable --now ygo-certbot.tim
 
 ## Package and verify a release
 
-From the reviewed checkout, run `pnpm install --frozen-lockfile` then `pnpm --filter @ygo/server build`. Archive the **contents** of `apps/server/dist/`, including package.json, main.js, migrate.js, maps and migrations. Name the archive by its full Git SHA and record its SHA256. The same built artifact must reach staging and production. #133/#134 automate transfer and activation; no production release is activated by setup.
+From the reviewed checkout, run `pnpm install --frozen-lockfile` then `pnpm --filter @ygo/server build`. The staging workflow archives the **contents** of `apps/server/dist/`, including package.json, main.js, migrate.js, maps and migrations. The workflow names the archive by its full Git SHA and records its SHA256. Production uses the same staged bytes; setup activates no release.
 
 Use the host deploy script below to download, verify and unpack the release and load its SSM configuration. Do not unpack releases manually: the script records the artifact digest for each SHA. Before switching `current`, the script runs migrations as `ygo-<environment>`, using the app database role. Systemd reads the root-owned environment file before launching the unprivileged migration process. Never run migrate.js as root. Never apply migrations on API boot. Migrations must remain compatible with the previous release; rollback switches application files, never reverses SQL. #130 is the procedure for database recovery, with deletion replay required before reopening service.
 
-After #134 wires the workflow, deployment sets `/opt/ygo/<environment>/current`, enables `ygo@<environment>` and verifies `/v1/healthz` locally and publicly. The unit restarts after five seconds, and stops after five rapid failures so monitoring can report the crash loop. Keep the last three successful releases, always protecting current/previous; cleanup happens only after successful health. Staging must pass on that exact commit before production. Until the remaining parts ship, use their tickets as prerequisites rather than improvising a live deployment.
+Deployment sets `/opt/ygo/<environment>/current`, enables `ygo@<environment>` and verifies `/v1/healthz` locally and publicly. The unit restarts after five seconds, and stops after five rapid failures so monitoring can report the crash loop. Keep the last three successful releases, always protecting current/previous; cleanup happens only after successful health. Staging must pass on that exact commit before production. Complete #35 live verification before pilot use.
 
 Record in #35: resource IDs and region, no-SSH/private-RDS checks, PostGIS version, role isolation, TLS/renewal checks, setup/runtime versions and failures. Complete SES domain verification/DKIM and production-access request in Mumbai; do not put real users through email sign-in while SES is sandboxed. Run the first-Admin command only after #37 supplies it. The timed restore and its measured recovery time use #130's runbook after #92 supplies replay; never report either prerequisite as complete before it exists.
 
@@ -101,7 +101,7 @@ Sources: [AL2023 Node packages](https://docs.aws.amazon.com/linux/al2023/ug/node
 
 ## Host deploy and rollback (#133)
 
-Transfer the reviewed `ops/deploy.sh` beside the host setup script. The caller runs it as root through SSM; it downloads `s3://BUCKET/ENV/SHA.tar.gz`. The expected SHA256 must come from the trusted build/dispatch (#134), not just a checksum downloaded beside the archive. Environment is exactly staging or production; SHA is the full lowercase commit SHA. The public health URL is the environment's HTTPS `/v1/healthz`. #134 must enforce exact-commit staging eligibility before production is enabled.
+Transfer the reviewed `ops/deploy.sh` beside the host setup script. The caller runs it as root through SSM; it downloads `s3://BUCKET/ENV/SHA.tar.gz`. The workflow supplies the SHA256 from the verified artifact and staging-success record. Environment is exactly staging or production; SHA is the full lowercase commit SHA. The public health URL is the environment's HTTPS `/v1/healthz`. The workflow enforces exact-commit staging eligibility before production mutation.
 
 ```sh
 sudo bash ops/deploy.sh deploy staging <sha> <bucket> <trusted-sha256> https://<staging-api>/v1/healthz
@@ -117,3 +117,34 @@ Failed activation automatically restores the pre-deploy application and configur
 Explicit rollback requires a retained successful release, keeps current configuration (including secret rotations), skips migrations and checks health. On failure it attempts to restore the pre-rollback application/configuration. Keep migrations additive and compatible with retained application versions; database recovery belongs to #130.
 
 Only after success, retain three successful releases per environment, always protecting current and previous; failed releases do not consume slots and are also removed during this cleanup. No cleanup runs after failed activation. The Linux CI harness uses the exact script, real packaged migrations/servers, separate Unix users and real PostGIS. AWS/systemd/public DNS are recorded substitutes; the readiness budget is shortened to four seconds in the harness. Live systemd/SSM/TLS behavior remains a #35 verification.
+
+## OIDC dispatch and promotion (#134)
+
+Configure GitHub Environments `staging` and `production`: permit deployments from main only and require owner approval for production. Each environment supplies non-secret variables `DEPLOY_ROLE_ARN`, `DEPLOY_BUCKET` (the same private deployment bucket), `DEPLOY_INSTANCE_ID` (the shared host), and `DEPLOY_DOCUMENT` (its distinct fixed SSM document name). No AWS access-key secrets or dispatch inputs exist. Workflow permissions are contents:read and id-token:write.
+
+In #35, set Settings → Environments → each environment → Deployment branches and tags to selected branches, allowing only the `main` branch and no tags, before enabling AWS deployment. This setting is the branch security boundary: dispatch runs the selected branch's workflow/code, so edited code on another branch could remove its own main check. Environment-bound OIDC trust alone does not restrict the branch. Verify an off-main dispatch is blocked by the environment rule.
+
+Install the reviewed `ops/deploy.sh` as root-owned, mode 0700 `/opt/ygo/ops/deploy.sh` through Session Manager. Actions cannot replace it. From `ops/deploy-document.json`, create two operator-reviewed SSM Command documents, replacing ENV, BUCKET and API_HOST with fixed staging/production settings; never leave placeholders. Confirm SSM Agent >=3.3.2746.0 supports ENV_VAR interpolation. Each document accepts only a full SHA and SHA256, invokes the same installed host script and has a 900-second execution timeout. The workflow pins document version 1; changed documents need a reviewed new name/workflow update. Do not grant Actions document create/update or arbitrary shell command permission.
+
+For each Actions role, attach these Allow statements (substitute ACCOUNT, BUCKET, INSTANCE and the environment's DOCUMENT; all other actions stay ungranted):
+
+| Action | Resource / condition |
+| --- | --- |
+| `s3:GetObject` | `arn:aws:s3:::BUCKET/staging/*` for both roles; production also `arn:aws:s3:::BUCKET/production/*` |
+| `s3:PutObject` | staging role: `arn:aws:s3:::BUCKET/staging/*`; production role: `arn:aws:s3:::BUCKET/production/*` |
+| `ssm:SendCommand` | `arn:aws:ec2:ap-south-1:ACCOUNT:instance/INSTANCE` and **only** `arn:aws:ssm:ap-south-1:ACCOUNT:document/DOCUMENT` |
+| `ssm:GetCommandInvocation` | `*` (AWS requires it) |
+
+Use the bucket's default SSE-S3 encryption and HTTPS-only access. Neither role gets DeleteObject, staging-proof writes from production, SecureString access, or AWS-RunShellScript SendCommand permission. Keep instance GetObject access to staging/production artifact prefixes as above; never add Actions permissions to its role.
+
+Dispatch `.github/workflows/deploy.yml` from **main**, select staging, and supply the full lowercase SHA of a commit on main. The workflow rejects another ref, an abbreviated SHA or a commit outside main before AWS operations. It builds the selected commit, uploads `staging/SHA.tar.gz` conditionally (never overwrites), then deploys through SSM. Retries reuse existing bytes, even if a rebuild differs. Only SSM Success with exit code zero writes `staging/SHA.json`, binding SHA, SHA256, successful health and command ID. Artifact presence alone is never success evidence. A failed retry does not erase evidence from an earlier successful deployment of that commit.
+
+For production, dispatch the same SHA and select production, then review/approve its GitHub Environment deployment. No rebuild runs. Missing, failed-health, wrong-SHA or checksum-mismatched evidence refuses promotion before any production upload/SSM command. Verified staged bytes are uploaded to `production/SHA.tar.gz`; SSM invokes production's fixed document. Host failures, terminal SSM failures and polling timeout fail Actions; no staging success is recorded on failure. Both environments share one Actions concurrency group with cancellation of running work disabled, plus the host lock from #133. A manually cancelled/timed-out workflow may leave SSM running: inspect its command and host lock before retrying; do not interrupt a migration.
+
+GitHub keeps at most one running and one pending deploy in this group; a new dispatch cancels the existing pending run even with `cancel-in-progress: false`. For example, another staging dispatch can cancel production queued behind a running staging deploy. A production run awaiting owner approval occupies the group and blocks staging behind it. Ordering is not guaranteed. Dispatch one deployment at a time, wait for completion (or resolve a waiting approval), and inspect cancelled runs before submitting another; explicitly redispatch the intended SHA if its queued run was replaced. See [GitHub deployment concurrency](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments#using-concurrency).
+
+Rollback remains the explicit host command above, through owner Session Manager access, using a retained successful SHA. The workflow deploys forward only. Record environment, SHA, digest, SSM command, approval and outcome in the private operator log. No cloud operation has been rehearsed against AWS by this ticket.
+
+In #35 verify actual OIDC subjects/role denials, main-only environment restrictions, production approval, artifact privacy, SSM agent/document/version and execution, migration UID, staging and production HTTPS health, successful promotion and rejection of an unstaged SHA. CI runs `ops/test-dispatch.py` against recorded AWS responses plus #133's unchanged host harness; those tests cannot certify live IAM/SSM/TLS.
+
+Sources: [GitHub OIDC in AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), [S3 conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html), [SSM invocation status](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetCommandInvocation.html), [SSM parameter interpolation](https://docs.aws.amazon.com/systems-manager/latest/userguide/documents-schemas-features.html).
