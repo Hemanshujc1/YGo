@@ -1,0 +1,26 @@
+[Unit]
+Description=YGo API (%i)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+User=ygo-%i
+Group=ygo-%i
+WorkingDirectory=/opt/ygo/%i/current
+EnvironmentFile=/etc/ygo/%i.env
+ExecStart=/opt/ygo/node/bin/node --enable-source-maps main.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0077
+StandardOutput=append:/var/log/ygo/%i.log
+StandardError=append:/var/log/ygo/%i.log
+
+[Install]
+WantedBy=multi-user.target
