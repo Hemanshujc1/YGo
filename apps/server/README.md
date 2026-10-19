@@ -72,7 +72,7 @@ The server never applies them on boot; the tests apply them to each run's databa
 
 ## Build
 
-`pnpm --filter @ygo/server build` writes one bundled file, `dist/main.js`, with workspace packages and npm dependencies inside it. `pnpm --filter @ygo/server start` runs it.
+`pnpm --filter @ygo/server build` writes standalone ESM bundles (`dist/main.js` and `dist/migrate.js`), source maps, migrations and ESM metadata. Dependencies are included; the host needs Node 26 only. `pnpm --filter @ygo/server start` runs the API. Apply migrations explicitly with `DATABASE_URL=… node apps/server/dist/migrate.js` before deployment. See [the provisioning runbook](../../docs/operations/provisioning.md).
 
 ## Errors
 

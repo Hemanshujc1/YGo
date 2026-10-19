@@ -1,10 +1,14 @@
-// One self-contained file for deploy (ADR-0005, ADR-0007): workspace packages
+// Standalone API and migration bundles (ADR-0005, ADR-0007): workspace packages
 // and npm dependencies are bundled, so the instance needs only Node and dist/.
+import { cp, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { build } from "esbuild";
 
+const outdir = process.argv[2] ?? "dist";
+
 await build({
-  entryPoints: ["src/main.ts"],
-  outfile: "dist/main.js",
+  entryPoints: ["src/main.ts", "src/migrate.ts"],
+  outdir,
   bundle: true,
   platform: "node",
   format: "esm",
@@ -18,3 +22,8 @@ await build({
   },
   logLevel: "info",
 });
+
+// Keep migrations and ESM metadata with the bundle, independent of the checkout.
+await mkdir(outdir, { recursive: true });
+await cp("migrations", join(outdir, "migrations"), { recursive: true });
+await writeFile(join(outdir, "package.json"), JSON.stringify({ type: "module" }));
