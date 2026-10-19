@@ -16,7 +16,8 @@ def validate(sha):
         raise RuntimeError("Dispatch must run from main")
     if not re.fullmatch(r"[a-f0-9]{40}", sha):
         raise RuntimeError("Supply a full lowercase commit SHA")
-    subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], check=True, capture_output=True)
+    if subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], capture_output=True).returncode:
+        raise RuntimeError("Candidate commit must exist on main")
 
 
 def aws(*args):
