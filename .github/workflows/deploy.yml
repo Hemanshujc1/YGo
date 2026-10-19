@@ -1,0 +1,69 @@
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      sha:
+        description: Full commit SHA on main (production reuses the staged artifact)
+        type: string
+        required: true
+permissions:
+  contents: read
+# Both environments share one host. Never cancel a running migration/deployment.
+concurrency:
+  group: ygo-host-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.sha }}
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+      DEPLOY_BUCKET: ${{ vars.DEPLOY_BUCKET }}
+      DEPLOY_INSTANCE_ID: ${{ vars.DEPLOY_INSTANCE_ID }}
+      DEPLOY_DOCUMENT: ${{ vars.DEPLOY_DOCUMENT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate main dispatch and candidate
+        run: |
+          python3 ops/dispatch.py validate "$RELEASE_SHA"
+          echo "RELEASE_ARCHIVE=$RUNNER_TEMP/release.tar.gz" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.environment == 'staging'
+        with:
+          ref: ${{ inputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: inputs.environment == 'staging'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: inputs.environment == 'staging'
+        with:
+          node-version-file: candidate/.nvmrc
+          cache: pnpm
+          cache-dependency-path: candidate/pnpm-lock.yaml
+      - name: Package staging candidate
+        if: inputs.environment == 'staging'
+        working-directory: candidate
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @ygo/server build
+          tar -czf "$RELEASE_ARCHIVE" -C apps/server/dist .
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+          role-duration-seconds: 3600
+      - name: Deploy and record successful staging health or promote exact artifact
+        run: python3 ops/dispatch.py "$DEPLOY_ENVIRONMENT" "$RELEASE_SHA"
