@@ -127,6 +127,32 @@ describe("the app version check", () => {
   });
 });
 
+describe("GET /v1/version-check", () => {
+  const app = buildApp({
+    checkDatabase: async () => {},
+    minAppVersions: { customer: "1.4.0", shopkeeper: "2.0.0" },
+  });
+  const check = (headers: Record<string, string>) =>
+    app.inject({ method: "GET", url: "/v1/version-check", headers });
+
+  it("answers 204 to an app the server still serves", async () => {
+    const res = await check({ "x-ygo-app-name": "customer", "x-ygo-app-version": "1.4.0" });
+    expect(res.statusCode).toBe(204);
+    expect(res.body).toBe("");
+  });
+
+  it("answers 426 UPDATE_REQUIRED to an app that is too old", async () => {
+    const res = await check({ "x-ygo-app-name": "shopkeeper", "x-ygo-app-version": "1.9.9" });
+    expect(res.statusCode).toBe(426);
+    expect(res.json()).toEqual({ error: { code: "UPDATE_REQUIRED" } });
+  });
+
+  it("answers 204 to a request with no app headers", async () => {
+    const res = await check({});
+    expect(res.statusCode).toBe(204);
+  });
+});
+
 describe("the test database", () => {
   it("has the migrations applied", async () => {
     const { rows } = await database.pool.query("select postgis_version()");

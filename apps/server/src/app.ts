@@ -82,5 +82,9 @@ export function buildApp({
     },
   );
 
+  // The mobile apps' launch check. The hook above has already refused a version
+  // that is too old, so reaching the handler means this version is served.
+  app.get("/v1/version-check", async (_request, reply) => reply.code(204).send());
+
   return app;
 }
