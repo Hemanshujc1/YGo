@@ -34,6 +34,12 @@ export interface ApiClientOptions {
   timeoutMs?: number;
   /** Sent with each request when the caller supplies its app identity. */
   app?: AppIdentity;
+  /**
+   * Called on every answer with UPDATE_REQUIRED (426): the server no longer
+   * serves this app's version, so its later calls are refused too (all but
+   * `/v1/healthz`). It may fire more than once; the caller keeps the state.
+   */
+  onUpdateRequired?: () => void;
 }
 
 export function createApiClient({
@@ -41,6 +47,7 @@ export function createApiClient({
   fetch: fetchFn,
   timeoutMs = 10_000,
   app,
+  onUpdateRequired,
 }: ApiClientOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
@@ -66,12 +73,15 @@ export function createApiClient({
     return { ok: response.ok, status: response.status, body };
   }
 
-  /** The result for an answer that is not a success, from its error envelope. */
+  /**
+   * The result for an answer that is not a success, from its error envelope.
+   * Calls `onUpdateRequired` for UPDATE_REQUIRED, so call it once per answer.
+   */
   function failure(status: number, body: unknown): ApiFailure {
     const envelope = ErrorEnvelope.safeParse(body);
-    return envelope.success
-      ? { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields }
-      : { ok: false, status, code: "INTERNAL" };
+    if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
+    if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
+    return { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields };
   }
 
   return {

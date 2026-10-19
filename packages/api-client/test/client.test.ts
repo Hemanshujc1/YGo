@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/index";
 
-const answering = (status: number, body: BodyInit | null, baseUrl = "https://api.test") => {
+const answering = (
+  status: number,
+  body: BodyInit | null,
+  baseUrl = "https://api.test",
+  onUpdateRequired?: () => void,
+) => {
   const requested: string[] = [];
   const requestHeaders: Headers[] = [];
   const client = createApiClient({
     baseUrl,
     app: { name: "customer", version: "1.2.3" },
+    onUpdateRequired,
     fetch: (input, init) => {
       requested.push(String(input));
       requestHeaders.push(new Headers(init?.headers));
@@ -149,5 +155,46 @@ describe("versionCheck", () => {
   it("treats an error body that is not the envelope as INTERNAL", async () => {
     const { client } = answering(502, "<html>Bad Gateway</html>");
     expect(await client.versionCheck()).toEqual({ ok: false, status: 502, code: "INTERNAL" });
+  });
+});
+
+describe("onUpdateRequired", () => {
+  const counting = (status: number, body: BodyInit | null) => {
+    const signal = vi.fn();
+    return { client: answering(status, body, undefined, signal).client, signal };
+  };
+  const tooOld = '{"error":{"code":"UPDATE_REQUIRED"}}';
+
+  // The server never refuses /v1/healthz; health() stands in for every later call.
+  it("fires when any call is answered UPDATE_REQUIRED", async () => {
+    const { client, signal } = counting(426, tooOld);
+    await client.health();
+    await client.versionCheck();
+    expect(signal).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fire on success or any other answer", async () => {
+    for (const [status, body] of [
+      [200, '{"status":"ok"}'],
+      [204, null],
+      [503, '{"error":{"code":"UNAVAILABLE"}}'],
+      [502, "<html>Bad Gateway</html>"],
+    ] as const) {
+      const { client, signal } = counting(status, body);
+      await client.health();
+      await client.versionCheck();
+      expect(signal).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not fire when the call fails without an answer", async () => {
+    const signal = vi.fn();
+    const client = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: () => Promise.reject(new TypeError("Network request failed")),
+      onUpdateRequired: signal,
+    });
+    await expect(client.versionCheck()).rejects.toThrow(TypeError);
+    expect(signal).not.toHaveBeenCalled();
   });
 });
