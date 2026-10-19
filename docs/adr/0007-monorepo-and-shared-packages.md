@@ -1,6 +1,6 @@
 # ADR-0007: Monorepo and shared packages
 
-- **Status**: Accepted; "no shared UI package" narrowed to "no UI shared between mobile and web" by [ADR-0009](0009-shared-mobile-package.md)
+- **Status**: Partly superseded by [ADR-0009](0009-shared-mobile-package.md): "no shared UI package" now means no UI shared between mobile and web
 - **Date**: 2026-10-13
 - **Ticket**: [#24 Monorepo and shared packages: Turborepo evaluation](https://github.com/Hemanshujc1/YGo/issues/24)
 
