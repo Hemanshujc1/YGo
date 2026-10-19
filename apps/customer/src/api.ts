@@ -1,4 +1,5 @@
 import { createApiClient } from "@ygo/api-client";
+import { showUpdateRequired } from "@ygo/mobile";
 import Constants from "expo-constants";
 
 // A phone has no page origin to fall back on, so a missing URL is a setup
@@ -11,4 +12,9 @@ if (!baseUrl) throw new Error("EXPO_PUBLIC_API_BASE_URL is not set");
 const version = Constants.expoConfig?.version;
 if (!version) throw new Error("app.json has no version");
 
-export const api = createApiClient({ baseUrl, app: { name: "customer", version } });
+// Any call refused as too old shows the update screen (#137).
+export const api = createApiClient({
+  baseUrl,
+  app: { name: "customer", version },
+  onUpdateRequired: showUpdateRequired,
+});
