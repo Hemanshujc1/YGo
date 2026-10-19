@@ -116,6 +116,8 @@ def main():
                 bundle = state / "bundle"
                 shutil.copytree(source / "apps/server/dist", bundle)
                 uids = {str(port): pwd.getpwnam(f"ygo-{environment}").pw_uid for port, environment in [(3000, "staging"), (3001, "production")]}
+                main = bundle / "main.js"
+                main.write_text(f"console.log('release:{sha}');\n" + main.read_text())
                 migrate = bundle / "migrate.js"
                 migrate.write_text(f"if (process.getuid() !== ({json.dumps(uids)})[process.env.PORT]) throw Error('wrong migration uid');\n" + migrate.read_text())
                 if additive:
@@ -165,6 +167,7 @@ def main():
             url = dict(line.split("=", 1) for line in (state / "staging.env").read_text().splitlines())["DATABASE_URL"]
             assert command("psql", url, "-Atc", "SELECT id FROM deployment_probe") == "133"
             assert Path("/opt/ygo/staging/current").resolve().name == a
+            assert [line for line in (state / "server.log").read_text().splitlines() if line.startswith("release:")][-1] == f"release:{a}"
             settings.update(bad_health=failed, fail="recovery", old=a)
             assert "Recovery failed" in invoke(failed, fail=True)
             assert not (state / "staging.pid").exists()
