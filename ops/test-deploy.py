@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 
 def command(*args, **kwargs):
@@ -95,7 +96,7 @@ def main():
             for environment in ["staging", "production"]:
                 command("useradd", "--system", "--no-create-home", f"ygo-{environment}")
                 (Path(f"/opt/ygo/{environment}") / "releases").mkdir(parents=True)
-                database = f"ygo_deploy_{os.getpid()}_{environment}"
+                database = f"ygo_deploy_{uuid4().hex}_{environment}"
                 command("psql", admin, "-c", f"CREATE DATABASE {database}")
                 databases.append(database)
                 url = urlsplit(admin)
