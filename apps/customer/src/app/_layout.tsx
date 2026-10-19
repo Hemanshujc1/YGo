@@ -14,6 +14,7 @@ export default function Layout() {
         title: strings.update.title,
         message: strings.errors.UPDATE_REQUIRED,
         button: strings.update.button,
+        storeUnavailableMessage: strings.update.storeUnavailableMessage,
         iosStoreUrl: process.env.EXPO_PUBLIC_IOS_STORE_URL,
         androidStoreUrl: process.env.EXPO_PUBLIC_ANDROID_STORE_URL,
       }}

@@ -2,6 +2,8 @@
 
 Run this by hand before every Customer or Shopkeeper app release. Use an entry-level Android 10 phone with 2 GB RAM and an iPhone running iOS 16.4 or later. Use release builds, in portrait, against the release candidate server. Record the device model, OS, app versions and results in a copy of the run record below. A simulator does not replace either phone.
 
+Before a store release, set both `EXPO_PUBLIC_ANDROID_STORE_URL` and `EXPO_PUBLIC_IOS_STORE_URL` for that build.
+
 Test each available screen and flow in both light and dark themes on both phones. Check its normal path, loading, empty and error states where available: text is readable, content scrolls without clipping, controls are reachable with a thumb, touch targets are at least 48 dp, and the next action works. Bills and receipts stay light in both themes. See [Q-1, Q-3 and Q-5](../product/prd-phase1.md#6-qualities-the-product-must-have) and the [screen inventory](../product/specs-ui-phase1.md#screen-inventory).
 
 ## Keep this list current
@@ -16,6 +18,7 @@ Run every applicable row in both themes. The screen rows cover what is available
 | --- | --- | --- | --- |
 | C-health | Customer | Open the app with the server reachable: the server health answer appears. Repeat with the server unreachable: the screen explains that it cannot connect. | Now |
 | S-health | Shopkeeper | Open the app with the server reachable: the server health answer appears. Repeat with the server unreachable: the screen explains that it cannot connect. | Now |
+| Update | Customer and Shopkeeper | Raise the app's minimum version on the release candidate server above the build's version. Confirm the update-required screen appears and its Update button opens the app's store listing, in both themes. | Now |
 | Alarm | Shopkeeper | With the app open, backgrounded and phone locked, send a new order. Confirm a loud in-app alarm when open, a notification with a one-tap order target when backgrounded, and the platform fallback where a full-screen alert is unavailable. Check the repeat alert and permission-limited state. Record what actually happened on each phone. | #55 and #57 |
 | Camera | Shopkeeper | Take a delivery proof photo, review it and save it; confirm the photo remains available offline. Deny camera permission and confirm the screen gives a way to recover. | #56 and #68 |
 | Barcode | Shopkeeper | Scan a stocked barcode from the bill and stock paths; confirm the correct product appears. Try an unknown barcode and denied camera permission; confirm each result is clear. Repeat offline. | #53 and #67 |
@@ -35,6 +38,7 @@ Android model / RAM / OS / app build: __________  iPhone model / iOS / app build
 | --- | --- | --- | --- | --- | --- |
 | C-health | | | | | |
 | S-health | | | | | |
+| Update | | | | | |
 | Alarm | | | | | |
 | Camera | | | | | |
 | Barcode | | | | | |

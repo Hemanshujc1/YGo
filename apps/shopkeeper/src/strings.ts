@@ -9,7 +9,11 @@ export const strings = {
   ok: "ok",
   unreachable: "The server cannot be reached.",
   theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
-  update: { title: "Update YGo Shopkeeper", button: "Update" },
+  update: {
+    title: "Update YGo Shopkeeper",
+    button: "Update",
+    storeUnavailableMessage: "Update this app from the Play Store or App Store.",
+  },
   // The Inter review (design system, section 10), until real screens replace it.
   review: {
     sizes: "Type sizes",
@@ -41,6 +45,6 @@ export const strings = {
     NOT_FOUND: "The server does not know this request.",
     UNAVAILABLE: "The server is running, but a service it needs is not answering.",
     INTERNAL: "Something went wrong on the server.",
-    UPDATE_REQUIRED: "This version of YGo is too old. Update the app to continue.",
+    UPDATE_REQUIRED: "This version of YGo Shopkeeper is too old. Update the app to continue.",
   } satisfies Record<ErrorCode, string>,
 };

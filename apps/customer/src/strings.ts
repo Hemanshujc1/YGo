@@ -9,7 +9,11 @@ export const strings = {
   ok: "ok",
   unreachable: "The server cannot be reached.",
   theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
-  update: { title: "Update YGo", button: "Update" },
+  update: {
+    title: "Update YGo",
+    button: "Update",
+    storeUnavailableMessage: "Update this app from the Play Store or App Store.",
+  },
   // The Inter review (design system, section 10), until real screens replace it.
   review: {
     sizes: "Type sizes",
