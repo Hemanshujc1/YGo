@@ -55,6 +55,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Check host setup script
+        run: |
+          bash -n ops/setup-host.sh
+          shellcheck ops/setup-host.sh
+
       - run: pnpm gate
 
   # PRD Q-9: no secret is ever committed. Scans the full history, so a secret
