@@ -3,11 +3,20 @@
 set -euo pipefail
 version=${1:?Usage: setup-host.sh NODE_VERSION NODE_ARCHIVE_SHA256}
 checksum=${2:?Supply the reviewed SHA256 of the official linux-arm64 archive}
-[[ $version =~ ^26\.[0-9]+\.[0-9]+$ && $checksum =~ ^[a-f0-9]{64}$ ]]
-[[ $EUID == 0 && $(uname -m) == aarch64 ]]
+if ! [[ $version =~ ^26\.[0-9]+\.[0-9]+$ && $checksum =~ ^[a-f0-9]{64}$ ]]; then
+  echo "Supply a full Node 26 version (26.x.y) and a lowercase 64-character SHA256" >&2
+  exit 1
+fi
+if ! [[ $EUID == 0 && $(uname -m) == aarch64 ]]; then
+  echo "Run setup as root on an ARM64 (aarch64) instance" >&2
+  exit 1
+fi
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ $ID == amzn && $VERSION_ID == 2023 ]]
+if ! [[ $ID == amzn && $VERSION_ID == 2023 ]]; then
+  echo "Host setup requires Amazon Linux 2023" >&2
+  exit 1
+fi
 for environment in staging production; do
   if systemctl is-active --quiet "ygo@$environment"; then
     echo "Stop both YGo units before changing the host runtime" >&2
@@ -19,7 +28,7 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 curl -fsS "https://nodejs.org/dist/v$version/node-v$version-linux-arm64.tar.xz" -o "$scratch/node.tar.xz"
 printf '%s  %s\n' "$checksum" "$scratch/node.tar.xz" | sha256sum --check --strict
-install -d -m 0755 /opt/ygo/node /var/log/ygo
+install -d -m 0755 /opt/ygo/node
 # Only run setup with both API units stopped when upgrading the runtime.
 tar -xJf "$scratch/node.tar.xz" -C /opt/ygo/node --strip-components=1
 /opt/ygo/node/bin/node --version
@@ -32,7 +41,7 @@ for environment in staging production; do
 done
 install -m 0644 "$(dirname "$0")/ygo@.service" /etc/systemd/system/ygo@.service
 python3.12 -m venv /opt/certbot
-/opt/certbot/bin/pip install certbot certbot-nginx
+/opt/certbot/bin/pip install certbot==5.8.0 certbot-nginx==5.8.0
 systemctl daemon-reload
 systemctl enable --now amazon-ssm-agent nginx
 # Units stay off until secrets, migrations and a release are ready.

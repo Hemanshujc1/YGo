@@ -38,7 +38,9 @@ Transfer `ops/setup-host.sh` and `ops/ygo@.service` from the reviewed commit to 
 sudo bash ops/setup-host.sh <26.x.y> <reviewed-64-character-archive-sha256>
 ```
 
-The script checks AL2023/ARM64/root, verifies the archive checksum, installs the runtime at `/opt/ygo/node`, Nginx, PostgreSQL 17 clients and Certbot, and creates separate unprivileged service users and root-owned release directories. It installs the service template and leaves both API units off. Only rerun for a runtime update with both units stopped; record and verify the new version. No npm/pnpm install runs on the host. Check `aws --version`, `/opt/ygo/node/bin/node --version`, `psql --version` and Session Manager connectivity.
+The script checks AL2023/ARM64/root, verifies the archive checksum, installs the runtime at `/opt/ygo/node`, Nginx, PostgreSQL 17 clients, Certbot **5.8.0** and certbot-nginx **5.8.0**, and creates separate unprivileged service users and root-owned release directories. It installs the service template and leaves both API units off. Only rerun for a runtime update with both units stopped; record and verify the new version. No npm/pnpm install runs on the host. Check `aws --version`, `/opt/ygo/node/bin/node --version`, `psql --version`, `/opt/certbot/bin/pip show certbot certbot-nginx` and Session Manager connectivity.
+
+API stdout/stderr use the systemd defaults and go to journald, whose size limits cap local log storage; no `/var/log/ygo` directory or append-only API log files are created. Inspect logs with `sudo journalctl -u ygo@staging -u ygo@production -n 50 --no-pager`. In #35, verify the effective journal limits with `systemd-analyze cat-config systemd/journald.conf` and usage with `journalctl --disk-usage`; #131 adds shipping from journald to CloudWatch with seven-day remote retention.
 
 ## DNS, TLS and renewal
 
@@ -83,7 +85,7 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Run `sudo systemctl daemon-reload`, `sudo systemctl enable --now ygo-certbot.timer`, `sudo /opt/certbot/bin/certbot renew --dry-run` and `systemctl list-timers ygo-certbot.timer`. Test HTTPS from outside the instance. Review Certbot updates monthly using its venv pip; record updates and repeat the dry run. #131 adds external health/crash-loop/log alarms. Until then, the owner checks service status and renewal timer failures manually.
+Run `sudo systemctl daemon-reload`, `sudo systemctl enable --now ygo-certbot.timer`, `sudo /opt/certbot/bin/certbot renew --dry-run` and `systemctl list-timers ygo-certbot.timer`. Test HTTPS from outside the instance. Review Certbot updates monthly, change both exact version pins and the versions recorded here in a reviewed PR, then rerun setup with the API units stopped and repeat the dry run. Never upgrade the venv to an unpinned version. #131 adds external health/crash-loop/log alarms. Until then, the owner checks service status and renewal timer failures manually.
 
 ## Package and verify a release
 

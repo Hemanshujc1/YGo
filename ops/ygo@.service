@@ -19,8 +19,6 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 UMask=0077
-StandardOutput=append:/var/log/ygo/%i.log
-StandardError=append:/var/log/ygo/%i.log
 
 [Install]
 WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-// One self-contained file for deploy (ADR-0005, ADR-0007): workspace packages
+// Standalone API and migration bundles (ADR-0005, ADR-0007): workspace packages
 // and npm dependencies are bundled, so the instance needs only Node and dist/.
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
