@@ -83,6 +83,9 @@ else
       systemctl disable --now "$unit" || true
       die "Recovery failed; service stopped. Inspect journalctl -u $unit"
     fi
+    if [[ $mode == rollback ]]; then
+      die "Rollback failed; previous application is healthy again"
+    fi
     die "Deployment failed; previous application is healthy again"
   fi
   systemctl disable --now "$unit" || true
