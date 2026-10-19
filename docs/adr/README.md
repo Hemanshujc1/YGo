@@ -51,3 +51,4 @@ What else was on the table and why it lost. One short paragraph each.
 - [ADR-0006: Web apps](0006-web-apps.md) — no Next.js; two static Vite and React bundles with Tailwind, served by Nginx, plus a five-page public site that Play review and SES both depend on.
 - [ADR-0007: Monorepo and shared packages](0007-monorepo-and-shared-packages.md) — one repository, pnpm workspaces and Turborepo, with seven shared packages shipped as TypeScript source and no build step.
 - [ADR-0008: Provider portability boundary](0008-provider-portability-boundary.md) — AWS stays replaceable through two adapter seams and a lint rule rather than an abstraction layer; the database is deliberately not abstracted, and a provider switch is budgeted at one to two days.
+- [ADR-0009: A shared package for the two mobile apps](0009-shared-mobile-package.md) — `@ygo/mobile` holds code both mobile apps use, words excepted; ADR-0007's "no shared UI package" narrowed to mobile and web.

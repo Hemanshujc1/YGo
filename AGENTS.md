@@ -30,11 +30,12 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 | Colours, spacing, type | `@ygo/tokens` |
 | A component or helper one screen uses | Beside that screen |
 | A component or helper two screens of one app use | That app's `components/` or `lib/` |
+| A component, hook or helper both mobile apps use | `@ygo/mobile` (ADR-0009) |
 
 - Extract on the second use, not the first: the second copy inside one app moves to that app's `components/` or `lib/`.
 - Code two apps need moves into the matching package above. A new package needs an ADR first.
 - Forms check input with the `@ygo/contracts` schema the server uses, and show each field's message from the app's own strings. A rule not there yet is added there, citing where it was decided. Only `@ygo/contracts` writes zod schemas, apart from the server's Fastify glue (`src/zod.ts`) and environment check (`src/config.ts`); the gate (`ygo/no-zod`) fails a `zod` import anywhere else. It cannot see a hand-written check such as a regex in a form, so review looks for one.
-- Mobile and web keep separate UI components; there is no shared UI package (ADR-0001, ADR-0007).
+- Mobile and web keep separate UI components; no UI is shared between them (ADR-0001, ADR-0007, ADR-0009).
 - Add a dependency only after checking that no installed one does the job, and say why in the PR.
 
 ## The gate
