@@ -34,6 +34,11 @@ export interface ApiClientOptions {
   timeoutMs?: number;
   /** Sent with each request when the caller supplies its app identity. */
   app?: AppIdentity;
+  /**
+   * Called whenever any call is answered UPDATE_REQUIRED (426): the server no
+   * longer serves this app's version, so every later call will be refused too.
+   */
+  onUpdateRequired?: () => void;
 }
 
 export function createApiClient({
@@ -41,6 +46,7 @@ export function createApiClient({
   fetch: fetchFn,
   timeoutMs = 10_000,
   app,
+  onUpdateRequired,
 }: ApiClientOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
@@ -69,9 +75,9 @@ export function createApiClient({
   /** The result for an answer that is not a success, from its error envelope. */
   function failure(status: number, body: unknown): ApiFailure {
     const envelope = ErrorEnvelope.safeParse(body);
-    return envelope.success
-      ? { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields }
-      : { ok: false, status, code: "INTERNAL" };
+    if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
+    if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
+    return { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields };
   }
 
   return {
