@@ -4,6 +4,7 @@ import { describe, it } from "vitest";
 
 import { noNumericCoercion } from "../src/rules/no-numeric-coercion.js";
 import { noProviderSdk } from "../src/rules/no-provider-sdk.js";
+import { noMobileImport } from "../src/rules/no-mobile-import.js";
 import { noZod } from "../src/rules/no-zod.js";
 
 RuleTester.describe = describe;
@@ -121,5 +122,22 @@ ruleTester.run("no-zod", noZod, {
     { code: 'const { z } = await import("zod");', errors: [zod("zod")] },
     { code: 'const { z } = require("zod");', errors: [zod("zod")] },
     { code: 'let s: import("zod").ZodType;', errors: [zod("zod")] },
+  ],
+});
+
+const mobile = (/** @type {string} */ source) => ({ messageId: "mobile", data: { source } });
+
+ruleTester.run("no-mobile-import", noMobileImport, {
+  valid: [
+    'import { formatMoney } from "@ygo/format";',
+    // Not the package, just similarly named.
+    'import x from "@ygo/mobile-like";',
+  ],
+  invalid: [
+    { code: 'import { Text } from "@ygo/mobile";', errors: [mobile("@ygo/mobile")] },
+    { code: 'import { Text } from "@ygo/mobile/src/text";', errors: [mobile("@ygo/mobile/src/text")] },
+    { code: 'export { Text } from "@ygo/mobile";', errors: [mobile("@ygo/mobile")] },
+    { code: 'const { Text } = await import("@ygo/mobile");', errors: [mobile("@ygo/mobile")] },
+    { code: 'const { Text } = require("@ygo/mobile");', errors: [mobile("@ygo/mobile")] },
   ],
 });

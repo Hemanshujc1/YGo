@@ -14,8 +14,13 @@ export function savedTheme(): ThemeChoice {
 }
 
 /** The whole app follows the choice, keyboard and system dialogs included, and the token colours with it. */
-export function applyTheme(choice: ThemeChoice) {
+function applyTheme(choice: ThemeChoice) {
   Appearance.setColorScheme(choice === "system" ? "unspecified" : choice);
+}
+
+/** Call once at the top of each app's root layout, after its stylesheet, so a saved Light or Dark never flashes the system theme. */
+export function applySavedTheme() {
+  applyTheme(savedTheme());
 }
 
 export function chooseTheme(choice: ThemeChoice) {

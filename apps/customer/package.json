@@ -17,6 +17,7 @@
     "@ygo/api-client": "workspace:*",
     "@ygo/contracts": "workspace:*",
     "@ygo/format": "workspace:*",
+    "@ygo/mobile": "workspace:*",
     "@ygo/tokens": "workspace:*",
     "expo": "57.0.27",
     "expo-constants": "57.0.21",

@@ -239,6 +239,9 @@ importers:
       '@ygo/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@ygo/mobile':
+        specifier: workspace:*
+        version: link:../../packages/mobile
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -376,6 +379,9 @@ importers:
       '@ygo/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@ygo/mobile':
+        specifier: workspace:*
+        version: link:../../packages/mobile
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -585,6 +591,51 @@ importers:
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/mobile:
+    devDependencies:
+      '@types/react':
+        specifier: 19.2.18
+        version: 19.2.18
+      '@ygo/api-client':
+        specifier: workspace:*
+        version: link:../api-client
+      '@ygo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@ygo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      eslint:
+        specifier: 10.11.0
+        version: 10.11.0(jiti@2.7.0)(supports-color@8.1.1)
+      expo:
+        specifier: 57.0.27
+        version: 57.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@57.0.16)(expo-router@57.0.25)(react-dom@19.3.0(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)(typescript@6.0.3)
+      expo-navigation-bar:
+        specifier: 57.0.3
+        version: 57.0.3(expo@57.0.27)(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)
+      nativewind:
+        specifier: 4.2.7
+        version: 4.2.7(23b2bb983855de024392610047415519)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      react-native:
+        specifier: 0.86.3
+        version: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
+      react-native-css-interop:
+        specifier: 0.2.7
+        version: 0.2.7(23b2bb983855de024392610047415519)
+      react-native-mmkv:
+        specifier: 4.3.2
+        version: 4.3.2(react-native-nitro-modules@0.35.9(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      react-native-nitro-modules:
+        specifier: 0.35.9
+        version: 0.35.9(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/pricing:
     devDependencies:

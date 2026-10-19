@@ -1,0 +1,37 @@
+{
+  "name": "@ygo/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p ."
+  },
+  "peerDependencies": {
+    "expo-navigation-bar": "57.0.3",
+    "nativewind": "4.2.7",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-css-interop": "0.2.7",
+    "react-native-mmkv": "4.3.2",
+    "react-native-nitro-modules": "0.35.9"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@ygo/api-client": "workspace:*",
+    "@ygo/eslint-config": "workspace:*",
+    "@ygo/tsconfig": "workspace:*",
+    "eslint": "10.11.0",
+    "expo": "57.0.27",
+    "expo-navigation-bar": "57.0.3",
+    "nativewind": "4.2.7",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-css-interop": "0.2.7",
+    "react-native-mmkv": "4.3.2",
+    "react-native-nitro-modules": "0.35.9",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,13 +1,12 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { HealthResponse } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatMoney, formatNumber, formatTime } from "@ygo/format";
+import { chooseTheme, savedTheme, Text, type ThemeChoice } from "@ygo/mobile";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
-import { Text } from "../components/text";
 import { strings } from "../strings";
-import { chooseTheme, savedTheme, type ThemeChoice } from "../theme";
 
 // The scaffold screen: the server's health, the theme choice, and the Inter
 // review specimens (design system, section 10) until real screens replace it.
