@@ -1,0 +1,7 @@
+{
+  "extends": ["expo/tsconfig.base", "@ygo/tsconfig/base.json"],
+  "compilerOptions": {
+    "lib": ["es2024", "dom"]
+  },
+  "include": ["src", "nativewind-env.d.ts"]
+}

@@ -141,3 +141,24 @@ describe("the Expo apps' config files", () => {
     );
   });
 });
+
+describe("@ygo/mobile outside the mobile apps (ADR-0009)", () => {
+  const mobileImports = [
+    'import { Text } from "@ygo/mobile";\nexport { Text };\n',
+    'import { Text } from "@ygo/mobile/src/text";\nexport { Text };\n',
+  ];
+
+  it("is banned in the web apps, the server and the other packages", async () => {
+    for (const code of mobileImports) {
+      expect(await rulesAt(base, "src/main.tsx", code)).toEqual(["no-restricted-imports"]);
+      expect(await rulesAt(server, "src/app.ts", code)).toEqual(["no-restricted-imports"]);
+      expect(await rulesAt(contracts, "src/index.ts", code)).toEqual(["no-restricted-imports"]);
+    }
+  });
+
+  it("is allowed in the mobile apps and the package itself", async () => {
+    for (const code of mobileImports) {
+      expect(await rulesAt(expo, "src/app/_layout.tsx", code)).toEqual([]);
+    }
+  });
+});

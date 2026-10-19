@@ -63,6 +63,11 @@ export const base = defineConfig(
     rules: {
       "ygo/no-provider-sdk": "error",
       "ygo/no-zod": "error",
+      // React Native code for the two mobile apps only (ADR-0009).
+      "no-restricted-imports": ["error", {
+        paths: [{ name: "@ygo/mobile", message: "@ygo/mobile is for the mobile apps only (ADR-0009)." }],
+        patterns: [{ group: ["@ygo/mobile/*"], message: "@ygo/mobile is for the mobile apps only (ADR-0009)." }],
+      }],
     },
   },
   moneyPaths(MONEY_PATH_GLOBS),
@@ -92,12 +97,16 @@ export const server = defineConfig(base, {
 });
 
 /**
- * apps/customer and apps/shopkeeper. Babel, Metro and Tailwind load their
+ * apps/customer, apps/shopkeeper and packages/mobile, the one place
+ * @ygo/mobile may be imported (ADR-0009). Babel, Metro and Tailwind load their
  * config files (`babel.config.js` and the like) as CommonJS under Node, so
  * those files get Node globals and `require`. The native projects that
  * `expo prebuild` and `expo run` generate are not linted.
  */
 export const expo = defineConfig(base, globalIgnores(["android/", "ios/"]), {
+  name: "ygo/expo-mobile",
+  rules: { "no-restricted-imports": "off" },
+}, {
   name: "ygo/expo-config-files",
   files: ["*.config.js"],
   languageOptions: { sourceType: "commonjs", globals: globals.node },
