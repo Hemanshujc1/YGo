@@ -18,11 +18,16 @@ export function AppShell({ checkVersion, update, children }: AppShellProps) {
 
   useEffect(() => {
     // Only a refused version stops the app: offline or any other answer carries on.
-    const check = () => void checkVersion().catch(() => {});
+    const check = () => {
+      if (!isUpdateRequired()) void checkVersion().catch(() => {});
+    };
     check();
     // The server may raise its minimum while the app sits in the background.
+    // Only a return from the background re-checks, not a dialog or Control Center.
+    let previous = AppState.currentState;
     const listener = AppState.addEventListener("change", (state) => {
-      if (state === "active") check();
+      if (previous === "background" && state === "active") check();
+      previous = state;
     });
     return () => listener.remove();
     // Once on mount; a new function on each render must not re-check.

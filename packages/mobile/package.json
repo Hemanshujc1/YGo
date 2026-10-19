@@ -7,7 +7,8 @@
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "expo-navigation-bar": "57.0.3",
@@ -31,6 +32,7 @@
     "react-native-css-interop": "0.2.7",
     "react-native-mmkv": "4.3.2",
     "react-native-nitro-modules": "0.35.9",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
   }
 }

@@ -1,5 +1,5 @@
-// Once the server refuses this version, every later call is refused too, so
-// the update screen stays until the app restarts.
+// Once set, the update screen stays until the app restarts (owner decision on
+// #137), even if the server later lowers its minimum. A reload in Metro clears it.
 let required = false;
 const listeners = new Set<() => void>();
 
