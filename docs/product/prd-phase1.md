@@ -651,7 +651,7 @@ The ADRs hold the stack and are not repeated. This section says what is built on
 
 ### 11.1 What is built
 
-Five deployables and seven shared packages, as ADR-0007 lists them: the Customer app, the Shopkeeper app, the Admin web, the public website and one server. The shared contract package holds the shape of every message between them.
+Five deployables and eight shared packages, as ADR-0007 and ADR-0009 list them: the Customer app, the Shopkeeper app, the Admin web, the public website and one server. The shared contract package holds the shape of every message between them.
 
 ### 11.2 Server modules
 

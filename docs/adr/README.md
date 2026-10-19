@@ -11,7 +11,7 @@ The resolution comment on the ticket is the record of *reasoning* — the questi
 ## Convention
 
 - Filename: `NNNN-short-kebab-title.md`, numbers never reused.
-- Status is one of `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, or `Deprecated`. `Proposed` means the technical content is decided but something in it still needs the owner's confirmation — a spending commitment, a date, or an accepted risk — and it names what. Records are **never edited to change a decision** — a new ADR supersedes an old one and the old one's Status line is updated to point at it.
+- Status is one of `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, `Partly superseded by ADR-NNNN` (the rest still stands, and the line names the part that changed), or `Deprecated`. `Proposed` means the technical content is decided but something in it still needs the owner's confirmation — a spending commitment, a date, or an accepted risk — and it names what. Records are **never edited to change a decision** — a new ADR supersedes an old one and the old one's Status line is updated to point at it.
 - Every ADR links back to the ticket whose resolution comment holds its reasoning.
 - **Reading the pilot size in a Context section.** Several records open with "a one-month pilot of fifty to eighty shops". That was the launch shape when they were written. The launch is now two stages: a soft launch of one to two weeks with 12 to 20 shops, then an official launch growing toward 50 to 80 (`CONTEXT.md`, Launch stages). Fifty to eighty remains the size the system is built for, so no decision in any record changes, and the records are left as written.
 
@@ -51,3 +51,4 @@ What else was on the table and why it lost. One short paragraph each.
 - [ADR-0006: Web apps](0006-web-apps.md) — no Next.js; two static Vite and React bundles with Tailwind, served by Nginx, plus a five-page public site that Play review and SES both depend on.
 - [ADR-0007: Monorepo and shared packages](0007-monorepo-and-shared-packages.md) — one repository, pnpm workspaces and Turborepo, with seven shared packages shipped as TypeScript source and no build step.
 - [ADR-0008: Provider portability boundary](0008-provider-portability-boundary.md) — AWS stays replaceable through two adapter seams and a lint rule rather than an abstraction layer; the database is deliberately not abstracted, and a provider switch is budgeted at one to two days.
+- [ADR-0009: A shared package for the two mobile apps](0009-shared-mobile-package.md) — `@ygo/mobile` holds code both mobile apps use, words excepted; ADR-0007's "no shared UI package" narrowed to mobile and web.

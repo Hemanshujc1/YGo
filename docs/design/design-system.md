@@ -282,7 +282,7 @@ The customer-facing and shopkeeper-facing wording above is the designer's. It is
 
 ## 7. Components, Admin web
 
-Same tokens as mobile, separate components (ADR-0007: no shared UI package, no `react-native-web`). Desktop density: 40 high controls, 14 body.
+Same tokens as mobile, separate components (ADR-0007, ADR-0009: no UI shared with mobile, no `react-native-web`). Desktop density: 40 high controls, 14 body.
 
 - **Buttons:** 40 high, radius 8. Primary, secondary, destructive, text. States as on mobile.
 - **Inputs:** 40 high, radius 8. Money fields show the ₹ prefix. A required value that is a typed 0 counts as set (`MNY-13`).
