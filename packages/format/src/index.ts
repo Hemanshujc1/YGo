@@ -23,19 +23,18 @@ const indianTime = new Intl.DateTimeFormat(locale, {
 
 export const formatNumber = (value: number | bigint) => indianNumber.format(value);
 
+// Only format() is used: Hermes on iOS has no NumberFormat.formatToParts.
+
+// The only hyphen in a rupee amount is its sign, shown as a true minus.
+// Android puts a space after ₹ and iOS does not; the design system has none.
 export const formatMoney = (value: number | bigint) =>
-  indianMoney
-    .formatToParts(value)
-    .map((part) => (part.type === "minusSign" ? "−" : part.value))
-    .join("");
+  indianMoney.format(value).replace("-", "−").replace(/₹\s/, "₹");
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 
+// The time holds only digits, a colon, a space and the day period, so upper case touches only "am" or "pm".
 export const formatTime = (value: Date | string | number) =>
-  indianTime
-    .formatToParts(new Date(value))
-    .map((part) => (part.type === "dayPeriod" ? part.value.toUpperCase() : part.value))
-    .join("");
+  indianTime.format(new Date(value)).toUpperCase();
 
 export const formatDateTime = (value: Date | string | number) =>
   `${formatDate(value)}, ${formatTime(value)}`;
