@@ -108,7 +108,7 @@ sudo bash ops/deploy.sh deploy staging <sha> <bucket> <trusted-sha256> https://<
 sudo bash ops/deploy.sh rollback staging <retained-successful-sha> https://<staging-api>/v1/healthz
 ```
 
-One nonblocking host lock serializes both environments; a concurrent caller fails with a clear message. The script validates the archive digest, extracts with Python's data filter, and reads the environment's SecureString into a root-owned mode-0600 temporary file. HOST and PORT must be literal unquoted `127.0.0.1` and `3000` (staging) or `3001` (production). Neither file is sourced by a shell or printed. Existing SHA directories must match the same artifact digest.
+One nonblocking host lock serializes both environments; a concurrent caller fails with a clear message. The script validates the archive digest, extracts with Python's data filter, and reads the environment's SecureString into a root-owned mode-0600 temporary file. HOST and PORT must each occur exactly once, as literal unquoted `127.0.0.1` and `3000` (staging) or `3001` (production). Neither file is sourced by a shell or printed. Existing SHA directories must match the same artifact digest.
 
 Before activating a new release, it runs the equivalent of `systemd-run --wait --collect --service-type=exec --uid=ygo-<environment> --gid=ygo-<environment> -p EnvironmentFile=<root-owned-candidate-file> -p RuntimeMaxSec=600 /opt/ygo/node/bin/node <release>/migrate.js`. A migration failure/ten-minute timeout leaves the active service and configuration untouched; committed SQL is never reversed. After migration, configuration and current-release symlink are replaced atomically, the environment's unit is restarted and both local/public health must pass within sixty seconds.
 

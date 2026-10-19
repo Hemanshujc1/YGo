@@ -143,6 +143,14 @@ def main():
                 assert Path("/opt/ygo/staging/current").resolve().name == a
                 assert Path("/etc/ygo/staging.env").read_text() == original
             settings.clear()
+            calls_before = (state / "calls").read_text().count('"systemd-run"')
+            running = (state / "staging.pid").read_text()
+            for override in ["HOST=0.0.0.0", " PORT =3001"]:
+                (state / "staging.env").write_text(original + override + "\n")
+                assert "assigned loopback host/port" in invoke(b, fail=True)
+                assert Path("/etc/ygo/staging.env").read_text() == original
+                assert (state / "staging.pid").read_text() == running
+            assert (state / "calls").read_text().count('"systemd-run"') == calls_before
             settings["bad_health"] = b
             (state / "staging.env").write_text(original.replace("initial", "rotated"))
             assert "previous application is healthy" in invoke(b, fail=True)

@@ -47,7 +47,8 @@ EXTRACT
     printf '%s\n' "$digest" > "$base/digests/$sha"
   fi
   aws --region ap-south-1 ssm get-parameter --name "/ygo/$environment/runtime" --with-decryption --query Parameter.Value --output text > "$work/new.env"
-  if ! grep -qxF "PORT=$port" "$work/new.env" || ! grep -qxF 'HOST=127.0.0.1' "$work/new.env"; then
+  if [[ $(grep -cE '^[[:space:]]*(HOST|PORT)[[:space:]]*=' "$work/new.env") != 2 ]] ||
+     ! grep -qxF "PORT=$port" "$work/new.env" || ! grep -qxF 'HOST=127.0.0.1' "$work/new.env"; then
     die "Runtime must use its assigned loopback host/port"
   fi
   systemd-run --quiet --wait --collect --service-type=exec --unit="ygo-migrate-$environment-$$" \
