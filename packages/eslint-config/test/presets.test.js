@@ -150,9 +150,9 @@ describe("@ygo/mobile outside the mobile apps (ADR-0009)", () => {
 
   it("is banned in the web apps, the server and the other packages", async () => {
     for (const code of mobileImports) {
-      expect(await rulesAt(base, "src/main.tsx", code)).toEqual(["no-restricted-imports"]);
-      expect(await rulesAt(server, "src/app.ts", code)).toEqual(["no-restricted-imports"]);
-      expect(await rulesAt(contracts, "src/index.ts", code)).toEqual(["no-restricted-imports"]);
+      expect(await rulesAt(base, "src/main.tsx", code)).toEqual(["ygo/no-mobile-import"]);
+      expect(await rulesAt(server, "src/app.ts", code)).toEqual(["ygo/no-mobile-import"]);
+      expect(await rulesAt(contracts, "src/index.ts", code)).toEqual(["ygo/no-mobile-import"]);
     }
   });
 

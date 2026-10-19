@@ -3,6 +3,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+import { noMobileImport } from "./rules/no-mobile-import.js";
 import { noNumericCoercion } from "./rules/no-numeric-coercion.js";
 import { noProviderSdk } from "./rules/no-provider-sdk.js";
 import { noZod } from "./rules/no-zod.js";
@@ -11,6 +12,7 @@ import { noZod } from "./rules/no-zod.js";
 export const plugin = {
   meta: { name: "@ygo/eslint-plugin" },
   rules: {
+    "no-mobile-import": noMobileImport,
     "no-numeric-coercion": noNumericCoercion,
     "no-provider-sdk": noProviderSdk,
     "no-zod": noZod,
@@ -63,11 +65,7 @@ export const base = defineConfig(
     rules: {
       "ygo/no-provider-sdk": "error",
       "ygo/no-zod": "error",
-      // React Native code for the two mobile apps only (ADR-0009).
-      "no-restricted-imports": ["error", {
-        paths: [{ name: "@ygo/mobile", message: "@ygo/mobile is for the mobile apps only (ADR-0009)." }],
-        patterns: [{ group: ["@ygo/mobile/*"], message: "@ygo/mobile is for the mobile apps only (ADR-0009)." }],
-      }],
+      "ygo/no-mobile-import": "error",
     },
   },
   moneyPaths(MONEY_PATH_GLOBS),
@@ -105,7 +103,7 @@ export const server = defineConfig(base, {
  */
 export const expo = defineConfig(base, globalIgnores(["android/", "ios/"]), {
   name: "ygo/expo-mobile",
-  rules: { "no-restricted-imports": "off" },
+  rules: { "ygo/no-mobile-import": "off" },
 }, {
   name: "ygo/expo-config-files",
   files: ["*.config.js"],

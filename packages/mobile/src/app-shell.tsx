@@ -2,11 +2,7 @@ import type { ApiResult } from "@ygo/api-client";
 import { NavigationBar } from "expo-navigation-bar";
 import { type ReactNode, useEffect, useState } from "react";
 import { StatusBar, useColorScheme } from "react-native";
-import { applyTheme, savedTheme } from "./theme";
 import { UpdateRequired, type UpdateRequiredProps } from "./update-required";
-
-// Before the first render, so a saved Light or Dark never flashes the system theme.
-applyTheme(savedTheme());
 
 type AppShellProps = {
   /** The app's own `api.versionCheck`. */
@@ -26,7 +22,8 @@ export function AppShell({ checkVersion, update, children }: AppShellProps) {
       (result) => setUpdateRequired(!result.ok && result.code === "UPDATE_REQUIRED"),
       () => {},
     );
-  }, [checkVersion]);
+    // Once at launch, as before the move; a new function on each render must not re-check.
+  }, []);
 
   return (
     <>

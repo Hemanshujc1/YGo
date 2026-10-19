@@ -9,9 +9,6 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p ."
   },
-  "dependencies": {
-    "@ygo/api-client": "workspace:*"
-  },
   "peerDependencies": {
     "expo-navigation-bar": "57.0.3",
     "nativewind": "4.2.7",
@@ -23,6 +20,7 @@
   },
   "devDependencies": {
     "@types/react": "19.2.18",
+    "@ygo/api-client": "workspace:*",
     "@ygo/eslint-config": "workspace:*",
     "@ygo/tsconfig": "workspace:*",
     "eslint": "10.11.0",

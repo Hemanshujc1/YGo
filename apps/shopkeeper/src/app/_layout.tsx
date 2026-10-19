@@ -1,8 +1,10 @@
-import { AppShell } from "@ygo/mobile";
+import { AppShell, applySavedTheme } from "@ygo/mobile";
 import { Slot } from "expo-router";
 import { api } from "../api";
 import { strings } from "../strings";
 import "../global.css";
+
+applySavedTheme();
 
 export default function Layout() {
   return (
