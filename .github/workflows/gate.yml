@@ -55,12 +55,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Check host setup script
+      - name: Check operational scripts
         run: |
-          bash -n ops/setup-host.sh
-          shellcheck ops/setup-host.sh
+          bash -n ops/setup-host.sh ops/deploy.sh
+          shellcheck ops/setup-host.sh ops/deploy.sh
 
       - run: pnpm gate
+
+      - name: Exercise exact host deployment script
+        run: sudo --preserve-env=PATH,TEST_DATABASE_URL,GITHUB_ACTIONS python3 ops/test-deploy.py
 
   # PRD Q-9: no secret is ever committed. Scans the full history, so a secret
   # added in one commit and deleted in the next is still caught.
