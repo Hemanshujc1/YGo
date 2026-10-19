@@ -6,19 +6,27 @@ export type UpdateRequiredProps = {
   title: string;
   message: string;
   button: string;
-  // Unset until the store listings exist; the button stays hidden until then.
+  storeUnavailableMessage: string;
+  // Unset until the store listings exist; until then a line names the stores instead of the button.
   iosStoreUrl?: string;
   androidStoreUrl?: string;
 };
 
 /** Shown in place of the whole app when the server refuses this version (Q-7). */
-export function UpdateRequired({ title, message, button, iosStoreUrl, androidStoreUrl }: UpdateRequiredProps) {
+export function UpdateRequired({
+  title,
+  message,
+  button,
+  storeUnavailableMessage,
+  iosStoreUrl,
+  androidStoreUrl,
+}: UpdateRequiredProps) {
   const storeUrl = Platform.OS === "ios" ? iosStoreUrl : androidStoreUrl;
   return (
     <View className="flex-1 justify-center bg-bg px-4">
       <Text className="text-title-large font-semibold text-text">{title}</Text>
       <Text className="mt-2 text-body text-muted">{message}</Text>
-      {storeUrl && (
+      {storeUrl ? (
         <Pressable
           accessibilityRole="button"
           onPress={() => void Linking.openURL(storeUrl)}
@@ -26,6 +34,8 @@ export function UpdateRequired({ title, message, button, iosStoreUrl, androidSto
         >
           <Text className="text-label font-medium text-on-primary">{button}</Text>
         </Pressable>
+      ) : (
+        <Text className="mt-8 text-body text-muted">{storeUnavailableMessage}</Text>
       )}
     </View>
   );

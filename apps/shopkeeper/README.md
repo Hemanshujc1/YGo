@@ -11,7 +11,7 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
    ```sh
    EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:3000
-   # Optional until the store listings exist; the update screen hides its button while unset.
+   # Optional until the store listings exist; while unset, the update screen names the stores instead of showing a button. A store build needs both.
    EXPO_PUBLIC_ANDROID_STORE_URL=
    EXPO_PUBLIC_IOS_STORE_URL=
    ```
@@ -27,7 +27,7 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
 The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds. Without `EXPO_PUBLIC_API_BASE_URL`, or without a `version` in `app.json`, the app stops at start with an error naming it.
 
-At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_SHOPKEEPER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform. Offline or any other answer lets the app carry on.
+At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_SHOPKEEPER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform, or a line naming the stores when no link is set. Offline or any other answer lets the app carry on.
 
 The theme choice is saved on the phone with MMKV and applied before the first screen draws. The status bar and Android's navigation bar follow the theme on screen.
 
