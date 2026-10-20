@@ -100,14 +100,21 @@ export function createApiClient({
   let accessToken: string | null = null;
   /** The refresh under way, which every call refused meanwhile waits for. */
   let refreshing: Promise<Answer | null> | null = null;
-  let signingOut = false;
+  /** How many sign-outs are under way. A count, so a sign-out tapped twice still counts. */
+  let signingOut = 0;
   /**
-   * Bumped when a sign-out starts and when it finishes, and when a sign-in is
-   * kept. A refresh, call or sign-in begun before then changes nothing.
+   * Bumped by `turn` when a sign-out starts and when it finishes, and when a
+   * sign-in is kept. A refresh, call or sign-in begun before then changes nothing.
    */
   let epoch = 0;
   /** The store's latest task. Each task waits for the one before, so they land in the order made. */
   let storing: Promise<unknown> = Promise.resolve();
+
+  /** A sign-in or sign-out replaces the session: a refresh begun before it is no longer shared. */
+  function turn() {
+    epoch += 1;
+    refreshing = null;
+  }
 
   /** Runs a task on the store after those already queued. */
   function inTurn<T>(task: () => Promise<T>): Promise<T> {
@@ -173,11 +180,18 @@ export function createApiClient({
   /**
    * Keeps a new session: the access token in memory at once, the refresh
    * token in the store after any change queued before it. Call it straight
-   * after checking `epoch`, with no wait between.
+   * after checking `epoch`, with no wait between. If the store cannot save
+   * it, the access token is dropped too and this rejects, so no session is
+   * half kept.
    */
-  function keep(next: Session): Promise<void> {
+  async function keep(next: Session): Promise<void> {
     accessToken = next.accessToken;
-    return inTurn(async () => session?.set(next.refreshToken));
+    try {
+      await inTurn(async () => session?.set(next.refreshToken));
+    } catch (err) {
+      if (accessToken === next.accessToken) accessToken = null;
+      throw err;
+    }
   }
 
   /** Forgets the session, in memory and then in the store, on the same terms as `keep`. */
@@ -189,9 +203,10 @@ export function createApiClient({
   /**
    * Trades the saved refresh token for a new pair. Answers null when it is
    * done, with the result in `accessToken`, or else the answer to pass on.
-   * Only the server refusing the token (401, or 400 for a malformed one)
-   * clears the store. Any other answer keeps it, and with no network this
-   * rejects and keeps it too.
+   * The store is cleared only when the server refuses the token (401, or a
+   * 400 naming it), or answers a success that breaks the contract, since
+   * that has used the token up. Any other answer keeps it, and with no
+   * network this rejects and keeps it too.
    */
   async function refresh(): Promise<Answer | null> {
     const started = epoch;
@@ -201,16 +216,25 @@ export function createApiClient({
     if (!refreshToken) return NO_SESSION;
     const answer = await send("POST", "/v1/auth/refresh", { refreshToken });
     if (epoch !== started) return null;
-    if (answer.status === 401 || answer.status === 400) {
-      await forget();
-      if (epoch === started && !signingOut) onSignedOut?.();
-      return NO_SESSION;
+    if (answer.ok) {
+      const next = Session.safeParse(answer.body);
+      if (next.success) {
+        await keep(next.data);
+        return null;
+      }
     }
-    if (!answer.ok) return answer;
-    const next = Session.safeParse(answer.body);
-    if (!next.success) return { ok: false, status: answer.status, body: undefined };
-    await keep(next.data);
-    return null;
+    // Read as INTERNAL: a body that breaks the contract, or a 400 about something else.
+    const unreadable: Answer = { ok: false, status: answer.status, body: undefined };
+    const envelope = ErrorEnvelope.safeParse(answer.body);
+    const refused =
+      answer.status === 401 ||
+      (answer.status === 400 && envelope.success && (envelope.data.error.fields ?? []).includes("refreshToken"));
+    if (refused || answer.ok) {
+      await forget();
+      if (epoch === started && signingOut === 0) onSignedOut?.();
+      return refused ? NO_SESSION : unreadable;
+    }
+    return answer.status === 400 ? unreadable : answer;
   }
 
   /**
@@ -220,30 +244,35 @@ export function createApiClient({
    */
   function renew(refused: string | null): Promise<Answer | null> {
     if (accessToken !== refused) return Promise.resolve(null);
-    refreshing ??= refresh().finally(() => {
-      refreshing = null;
+    if (refreshing) return refreshing;
+    const mine: Promise<Answer | null> = refresh().finally(() => {
+      // A sign-in or sign-out may have started a newer one meanwhile.
+      if (refreshing === mine) refreshing = null;
     });
-    return refreshing;
+    refreshing = mine;
+    return mine;
   }
 
   /**
    * Sends a call with the access token. With none in memory, as when the app
    * has just opened, it refreshes first; while a refresh is under way it
-   * waits for it. When the server answers 401 it refreshes once and sends
-   * the call again. A call never crosses a sign-in or sign-out: it answers
+   * waits for it. When the server answers 401 and the call has not
+   * refreshed yet, it refreshes and sends the call again; so it refreshes
+   * once at most. A call never crosses a sign-in or sign-out: it answers
    * UNAUTHENTICATED rather than be sent with another session's token.
    */
   async function signedIn(method: string, path: string, json?: unknown): Promise<Answer> {
     const started = epoch;
     const current = () => (epoch === started ? accessToken : null);
-    if (!accessToken || refreshing) {
+    const renewedFirst = !accessToken || refreshing !== null;
+    if (renewedFirst) {
       const refused = await renew(accessToken);
       if (refused) return refused;
     }
     const token = current();
     if (!token) return NO_SESSION;
     const answer = await send(method, path, json, token);
-    if (answer.status !== 401) return answer;
+    if (answer.status !== 401 || renewedFirst) return answer;
     const refused = await renew(token);
     if (refused) return refused;
     const renewed = current();
@@ -281,7 +310,7 @@ export function createApiClient({
       const answered = result(await send("POST", "/v1/auth/verify", body), Session);
       if (!answered.ok) return answered;
       if (epoch !== started) return failure(NO_SESSION.status, NO_SESSION.body);
-      epoch += 1;
+      turn();
       await keep(answered.data);
       return { ok: true, data: answered.data.account };
     },
@@ -304,11 +333,15 @@ export function createApiClient({
     /**
      * `POST /v1/auth/sign-out`: ends the session on the server, then forgets
      * it here. It is forgotten even when the server cannot be reached, but
-     * not when a sign-in begun meanwhile has already been kept.
+     * not when a sign-in begun meanwhile has already been kept. A refresh
+     * under way lands first, so the server is told with its new token.
      */
     async signOut(): Promise<void> {
-      const mine = ++epoch;
-      signingOut = true;
+      signingOut += 1;
+      // Its failure is the caller's to see; sign-out goes on regardless.
+      if (refreshing) await refreshing.catch(() => null);
+      turn();
+      const mine = epoch;
       try {
         const answer = await signedIn("POST", "/v1/auth/sign-out");
         // Read like any other answer, so UPDATE_REQUIRED still fires onUpdateRequired.
@@ -316,9 +349,9 @@ export function createApiClient({
       } catch {
         // No network: the phone forgets the session all the same.
       } finally {
-        signingOut = false;
+        signingOut -= 1;
         if (epoch === mine) {
-          epoch += 1;
+          turn();
           await forget();
         }
       }
