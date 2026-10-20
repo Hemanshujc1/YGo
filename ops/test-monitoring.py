@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +10,19 @@ SCRIPT = pathlib.Path(__file__).with_name("monitoring.sh")
 
 
 class MonitoringTest(unittest.TestCase):
+    def test_filters_cover_raw_and_wrapped_pino_completions(self):
+        script = SCRIPT.read_text()
+        completed = '"request completed"'
+        errors = r'%statusCode\\?\x22[ ]*:[ ]*5[0-9][0-9]%'
+        self.assertIn(f"--filter-name ygo-completed --filter-pattern '{completed}'", script)
+        self.assertIn(f"--filter-name ygo-5xx --filter-pattern '{errors}'", script)
+        for status in (200, 503):
+            raw = json.dumps({"res": {"statusCode": status}, "msg": "request completed"})
+            wrapped = json.dumps({"body": {"MESSAGE": raw}})
+            for event in (raw, wrapped):
+                self.assertIn("request completed", event)
+                self.assertEqual(bool(re.search(errors[1:-1], event)), status == 503)
+
     def test_crash_filter_reads_systemd_manager_record(self):
         config = json.loads(pathlib.Path(__file__).with_name("cloudwatch-agent.json").read_text())
         entries = config["logs"]["logs_collected"]["journald"]["collect_list"]
@@ -50,6 +64,9 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             self.assertEqual(rate[rate.index("--threshold") + 1], "5")
             self.assertIn("--insufficient-data-actions", rate)
             self.assertEqual(alarms["ygo-health"][alarms["ygo-health"].index("--region") + 1], "us-east-1")
+            health = next(call for call in calls if call[:2] == ["route53", "create-health-check"])
+            config = health[health.index("--health-check-config") + 1]
+            self.assertIn("Regions=us-east-1,eu-west-1,ap-southeast-1", config)
 
 
 if __name__ == "__main__":

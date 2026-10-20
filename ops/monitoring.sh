@@ -26,10 +26,10 @@ for group in /ygo/api/production /ygo/api/staging /ygo/systemd; do
 done
 
 aws logs put-metric-filter --region ap-south-1 --log-group-name /ygo/api/production \
-  --filter-name ygo-completed --filter-pattern '{ $.msg = "request completed" }' \
+  --filter-name ygo-completed --filter-pattern '"request completed"' \
   --metric-transformations metricName=CompletedRequests,metricNamespace=YGo,metricValue=1,defaultValue=0
 aws logs put-metric-filter --region ap-south-1 --log-group-name /ygo/api/production \
-  --filter-name ygo-5xx --filter-pattern '{ $.msg = "request completed" && $.res.statusCode >= 500 && $.res.statusCode < 600 }' \
+  --filter-name ygo-5xx --filter-pattern '%statusCode\\?\x22[ ]*:[ ]*5[0-9][0-9]%' \
   --metric-transformations metricName=ServerErrors,metricNamespace=YGo,metricValue=1,defaultValue=0
 aws logs put-metric-filter --region ap-south-1 --log-group-name /ygo/systemd \
   --filter-name ygo-start-limit --filter-pattern '"Start request repeated too quickly"' \
@@ -39,7 +39,7 @@ health_id=$(aws route53 list-health-checks --query \
   "HealthChecks[?HealthCheckConfig.FullyQualifiedDomainName=='$host' && HealthCheckConfig.ResourcePath=='/v1/healthz'].Id | [0]" --output text)
 if [[ $health_id == None ]]; then
   health_id=$(aws route53 create-health-check --caller-reference "ygo-$host-$(date -u +%s)" \
-    --health-check-config "Type=HTTPS,FullyQualifiedDomainName=$host,Port=443,ResourcePath=/v1/healthz,RequestInterval=30,FailureThreshold=3,EnableSNI=true" \
+    --health-check-config "Type=HTTPS,FullyQualifiedDomainName=$host,Port=443,ResourcePath=/v1/healthz,RequestInterval=30,FailureThreshold=3,EnableSNI=true,Regions=us-east-1,eu-west-1,ap-southeast-1" \
     --query HealthCheck.Id --output text)
 fi
 
