@@ -14,6 +14,7 @@ import type { Database } from "./db";
 import type { Mailer } from "./adapters/mailer";
 import type { Clock } from "./adapters/clock";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerProfileRoutes } from "./routes/profile";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
@@ -82,6 +83,7 @@ export function buildApp({
 
   if (database && mailer && clock && authTokenSecret) {
     registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret });
+    registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 
   app.get(
