@@ -2,6 +2,7 @@ import { and, eq, isNotNull, lt, lte } from "drizzle-orm";
 import type { Clock } from "./adapters/clock";
 import type { Database } from "./db";
 import { jobRuns, refreshTokens, sessions } from "./schema";
+import { REFRESH_TTL_MS } from "./tokens";
 
 export function isJobName(name: string): name is "cleanup-sessions" {
   return name === "cleanup-sessions";
@@ -23,7 +24,7 @@ export async function runJob(database: Database, name: string, clock: Clock): Pr
       await tx.delete(sessions).where(lte(sessions.expiresAt, now));
       await tx.delete(refreshTokens).where(and(
         isNotNull(refreshTokens.replacedAt),
-        lt(refreshTokens.replacedAt, new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)),
+        lt(refreshTokens.replacedAt, new Date(now.getTime() - REFRESH_TTL_MS)),
       ));
     });
     await database.db.update(jobRuns).set({ status: "ok", finishedAt: clock.now() })

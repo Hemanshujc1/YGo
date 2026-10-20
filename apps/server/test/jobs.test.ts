@@ -5,6 +5,7 @@ import { createLocalClock } from "../src/adapters/clock";
 import { connectDatabase } from "../src/db";
 import { runJob } from "../src/jobs";
 import { accounts, jobRuns, refreshTokens, sessions } from "../src/schema";
+import { REFRESH_TTL_MS } from "../src/tokens";
 
 const database = connectDatabase(inject("databaseUrl"));
 afterAll(() => database.close());
@@ -24,7 +25,7 @@ it("records success and removes only expired sessions and old replaced tokens", 
   const clock = createLocalClock(now);
   const expired = await createSession(now);
   const live = await createSession(new Date(now.getTime() + 1));
-  const old = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000 - 1);
+  const old = new Date(now.getTime() - REFRESH_TTL_MS - 1);
   const boundary = new Date(old.getTime() + 1);
   const tokens = [
     { tokenHash: randomUUID(), sessionId: expired, generation: 0 },
@@ -57,7 +58,7 @@ it("records failure and rolls back cleanup", async () => {
   const tokenHash = randomUUID();
   await database.db.insert(refreshTokens).values({
     tokenHash, sessionId: live, generation: 0,
-    replacedAt: new Date(now.getTime() - 91 * 24 * 60 * 60 * 1000),
+    replacedAt: new Date(now.getTime() - REFRESH_TTL_MS - 24 * 60 * 60 * 1000),
   });
   const suffix = randomUUID().replaceAll("-", "");
   const triggerName = `fail_cleanup_${suffix}`;
