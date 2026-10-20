@@ -1,6 +1,6 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import { ErrorEnvelope, Session } from "@ygo/contracts";
+import { Account, ErrorEnvelope, Session } from "@ygo/contracts";
 import { afterAll, afterEach, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../src/app";
 import { createLocalClock } from "../src/adapters/clock";
@@ -553,5 +553,87 @@ describe("sessions", () => {
     expect(new Set(Object.values(keys).map((key) => key.toString("hex"))).size).toBe(4);
     const payload = Buffer.from(JSON.stringify({ sub: a, sid: b, exp: 2_000_000_000 })).toString("base64url");
     expect(digest(keys.refreshHash, payload)).not.toBe(digest(keys.access, payload));
+  });
+});
+
+describe("profile routes", () => {
+  const phone = () => `+919${randomInt(1_000_000_000).toString().padStart(9, "0")}`;
+
+  function call(h: ReturnType<typeof harness>, method: "GET" | "PUT" | "PATCH", url: string, token?: string, payload?: object) {
+    return h.app.inject({ method, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+  }
+
+  it("returns the signed-in account, sets the profile, and changes only the name", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const number = phone();
+    const before = await call(h, "GET", "/v1/me", s.accessToken);
+    expect(before.statusCode).toBe(200);
+    expect(Account.parse(before.json())).toEqual(s.account);
+
+    const set = await call(h, "PUT", "/v1/me/profile", s.accessToken, { name: "  Asha   Kulkarni ", phone: number });
+    expect(set.statusCode).toBe(200);
+    expect(Account.parse(set.json())).toEqual({ ...s.account, name: "Asha Kulkarni", phone: number });
+    const stored = await database.pool.query("SELECT phone_verified FROM accounts WHERE id = $1", [s.account.id]);
+    expect(stored.rows[0].phone_verified).toBe(false);
+
+    const renamed = await call(h, "PATCH", "/v1/me", s.accessToken, { name: "Meera Shah" });
+    expect(renamed.statusCode).toBe(200);
+    expect(Account.parse(renamed.json())).toMatchObject({ name: "Meera Shah", phone: number });
+    expect((await call(h, "GET", "/v1/me", s.accessToken)).json()).toEqual(renamed.json());
+    const forbidden = await call(h, "PATCH", "/v1/me", s.accessToken, { name: "Meera Shah", phone: "+919000000000" });
+    expect(forbidden.statusCode).toBe(400);
+    expect(forbidden.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
+  });
+
+  it("requires a profile on PATCH, while GET, PUT, and sign-out stay available", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const blocked = await call(h, "PATCH", "/v1/me", s.accessToken, { name: "Meera Shah" });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json()).toEqual({ error: { code: "PROFILE_REQUIRED" } });
+    expect((await call(h, "GET", "/v1/me", s.accessToken)).statusCode).toBe(200);
+    expect((await signOut(h, s.accessToken)).statusCode).toBe(204);
+  });
+
+  it("accepts the same phone again and updates the name, but refuses a different phone", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const number = phone();
+    const first = await call(h, "PUT", "/v1/me/profile", s.accessToken, { name: "Asha Kulkarni", phone: number });
+    expect(first.statusCode).toBe(200);
+    const repeat = await call(h, "PUT", "/v1/me/profile", s.accessToken, { name: "Meera Shah", phone: number });
+    expect(repeat.statusCode).toBe(200);
+    expect(repeat.json()).toMatchObject({ name: "Meera Shah", phone: number });
+    const changed = await call(h, "PUT", "/v1/me/profile", s.accessToken, { name: "Asha Kulkarni", phone: phone() });
+    expect(changed.statusCode).toBe(400);
+    expect(changed.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
+    expect((await call(h, "GET", "/v1/me", s.accessToken)).json()).toEqual(repeat.json());
+  });
+
+  it("maps a concurrent phone uniqueness clash to PHONE_IN_USE", async () => {
+    const h = harness();
+    const [first, second] = await Promise.all([signIn(h), signIn(h)]);
+    const number = phone();
+    const answers = await Promise.all([first, second].map((s) =>
+      call(h, "PUT", "/v1/me/profile", s.accessToken, { name: "Asha Kulkarni", phone: number }),
+    ));
+    expect(answers.map((answer) => answer.statusCode).sort()).toEqual([200, 409]);
+    expect(answers.find((answer) => answer.statusCode === 409)?.json()).toEqual({ error: { code: "PHONE_IN_USE" } });
+  });
+
+  it("refuses a missing or bad token on every profile route", async () => {
+    const h = harness();
+    for (const [method, url, payload] of [
+      ["GET", "/v1/me", undefined],
+      ["PUT", "/v1/me/profile", { name: "Asha Kulkarni", phone: "+919876543210" }],
+      ["PATCH", "/v1/me", { name: "Asha Kulkarni" }],
+    ] as const) {
+      for (const token of [undefined, "bad.token"]) {
+        const answer = await call(h, method, url, token, payload);
+        expect(answer.statusCode).toBe(401);
+        expect(answer.json()).toEqual({ error: { code: "UNAUTHENTICATED" } });
+      }
+    }
   });
 });
