@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Writable } from "node:stream";
 import { ErrorEnvelope, Session } from "@ygo/contracts";
 import { afterAll, afterEach, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../src/app";
@@ -14,15 +15,18 @@ afterEach(async () => {
   await Promise.all(activeApps.splice(0).map((app) => app.close()));
 });
 
-function harness(options: { mailer?: Mailer; start?: Date } = {}) {
+function harness(options: { mailer?: Mailer; start?: Date; captureLogs?: boolean } = {}) {
   const mailer = options.mailer ?? createLocalMailer();
   const clock = createLocalClock(options.start ?? new Date("2030-01-01T00:00:00.000Z"));
+  const logLines: string[] = [];
+  const stream = new Writable({ write(chunk, _encoding, callback) { logLines.push(chunk.toString()); callback(); } });
   const app = buildApp({
     checkDatabase: database.ping,
     database,
     mailer,
     clock,
     authTokenSecret: secret,
+    logger: options.captureLogs ? { level: "trace", stream } : false,
   });
   activeApps.push(app);
   const address = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
@@ -30,7 +34,7 @@ function harness(options: { mailer?: Mailer; start?: Date } = {}) {
     app.inject({ method: "POST", url: "/v1/auth/code", headers: { "x-forwarded-for": ip }, payload: { email } });
   const verify = (email: string, code: string) =>
     app.inject({ method: "POST", url: "/v1/auth/verify", headers: { "x-forwarded-for": address }, payload: { email, code } });
-  return { app, mailer, clock, address, requestCode, verify };
+  return { app, mailer, clock, address, requestCode, verify, logLines };
 }
 
 function inbox(mailer: Mailer): Mail[] {
@@ -134,11 +138,14 @@ describe("email sign-in routes", () => {
   });
 
   it("never returns the emailed code in an API answer", async () => {
-    const h = harness();
+    const h = harness({ captureLogs: true });
     const address = email();
     await h.requestCode(address);
     const code = codeFrom(sentMail(h.mailer, 0));
     const verified = await h.verify(address, code);
     expect(verified.body).not.toContain(code);
+    await h.app.close();
+    activeApps.splice(activeApps.indexOf(h.app), 1);
+    expect(h.logLines.join("")).not.toContain(code);
   });
 });
