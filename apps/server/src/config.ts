@@ -6,6 +6,9 @@ const DatabaseUrl = z.url({ protocol: /^postgres(ql)?$/ });
 
 const BaseEnv = z.object({
   DATABASE_URL: DatabaseUrl,
+  AUTH_TOKEN_SECRET: z.string().refine((secret) => Buffer.byteLength(secret, "utf8") >= 32, {
+    message: "must be at least 32 bytes",
+  }),
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

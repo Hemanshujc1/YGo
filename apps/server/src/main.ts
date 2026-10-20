@@ -4,14 +4,16 @@ import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
 
 const config = loadConfig();
-// Construct the configured adapter now; routes start using it in #34.
 const mailer = config.MAILER === "ses"
   ? createSesMailer(config.MAIL_FROM, config.AWS_REGION)
   : createMailpitMailer(config.MAIL_FROM, config.MAILPIT_URL);
-void mailer;
 const database = connectDatabase(config.DATABASE_URL);
 const app = buildApp({
   checkDatabase: database.ping,
+  database,
+  mailer,
+  clock: { now: () => new Date() },
+  authTokenSecret: config.AUTH_TOKEN_SECRET,
   minAppVersions: { customer: config.MIN_CUSTOMER_VERSION, shopkeeper: config.MIN_SHOPKEEPER_VERSION },
   logger: { level: config.LOG_LEVEL },
 });

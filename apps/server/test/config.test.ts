@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config";
 
-const database = { DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo" };
+const database = {
+  DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo",
+  AUTH_TOKEN_SECRET: "01234567890123456789012345678901",
+};
 
 describe("mail configuration", () => {
+  it("requires a secret of at least 32 bytes", () => {
+    expect(() => loadConfig({ ...database, AUTH_TOKEN_SECRET: "short" })).toThrow();
+    expect(loadConfig({ ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" }).AUTH_TOKEN_SECRET).toBe(database.AUTH_TOKEN_SECRET);
+  });
+
   it("requires a provider", () => {
     expect(() => loadConfig(database)).toThrow();
   });

@@ -57,6 +57,7 @@ You need Docker (Docker Desktop or OrbStack) for the database and local email in
 | Variable | Required | Default |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | none; a `postgres://` URL |
+| `AUTH_TOKEN_SECRET` | yes | none; at least 32 bytes, used to sign access tokens and hash codes/tokens |
 | `MAILER` | yes | `ses` or `mailpit`; no console sender |
 | `MAIL_FROM` | yes | sender email address for both providers |
 | `MAILPIT_URL` | with `MAILER=mailpit` | Mailpit HTTP base URL, e.g. `http://localhost:8025` |
@@ -68,6 +69,8 @@ You need Docker (Docker Desktop or OrbStack) for the database and local email in
 | `MIN_SHOPKEEPER_VERSION` | no | `0.0.0`; an older Shopkeeper app gets `426 UPDATE_REQUIRED` |
 
 The process refuses to start when one is missing or malformed.
+
+Generate a local secret with `openssl rand -hex 32` and put it in the ignored `.env` file. Use a different random value in each deployment environment; Parameter Store holds it as part of the SecureString environment document.
 
 ## Tests
 
