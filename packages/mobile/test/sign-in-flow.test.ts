@@ -1,6 +1,15 @@
 import type { Account } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { checkOutcome, codeDigits, needsSend, secondsLeft, sendOutcome } from "../src/sign-in-flow";
+import {
+  aboutField,
+  checkOutcome,
+  codeDigits,
+  needsSend,
+  rejected,
+  secondsLeft,
+  sendOutcome,
+  wholeCode,
+} from "../src/sign-in-flow";
 
 const sent = 1_000_000;
 const account: Account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: "asha@example.com", name: null, phone: null };
@@ -37,6 +46,16 @@ describe("codeDigits", () => {
     ["", ""],
   ])("keeps the digits of %j", (typed, kept) => {
     expect(codeDigits(typed)).toBe(kept);
+  });
+});
+
+describe("wholeCode", () => {
+  it("is the code once all six boxes are full", () => {
+    expect(wholeCode("280419")).toBe("280419");
+  });
+
+  it.each(["", "28041", "28a419"])("is nothing yet for %j", (digits) => {
+    expect(wholeCode(digits)).toBeNull();
   });
 });
 
@@ -90,4 +109,32 @@ describe("checkOutcome", () => {
   it("lets the person try again when no answer came", () => {
     expect(checkOutcome("offline")).toEqual({ problem: "offline", boxesOpen: true });
   });
+
+  it("shuts the boxes when this phone could not keep the sign-in: the code is spent", () => {
+    expect(checkOutcome("not-saved")).toEqual({ problem: "not-saved", boxesOpen: false });
+  });
+});
+
+describe("rejected", () => {
+  it.each([
+    ["no network", new TypeError("Network request failed"), "offline"],
+    ["a timeout", new DOMException("timed out", "TimeoutError"), "offline"],
+    ["an abort", new DOMException("aborted", "AbortError"), "offline"],
+    ["the store refusing to save", new Error("Keychain write failed"), "not-saved"],
+  ])("reads %s as %s", (_, error, problem) => {
+    expect(rejected(error)).toBe(problem);
+  });
+});
+
+describe("aboutField", () => {
+  it.each(["VALIDATION_FAILED", "CODE_WRONG", "CODE_EXPIRED", "CODE_LOCKED"] as const)("marks the field for %s", (problem) => {
+    expect(aboutField(problem)).toBe(true);
+  });
+
+  it.each(["offline", "not-saved", "INTERNAL", "UNAVAILABLE", "TOO_MANY_REQUESTS"] as const)(
+    "leaves the field alone for %s",
+    (problem) => {
+      expect(aboutField(problem)).toBe(false);
+    },
+  );
 });

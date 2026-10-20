@@ -38,6 +38,7 @@ export const strings = {
       send: "Could not send the code. Check your connection, then send it again.",
       check: "Could not check the code. Check your connection, then enter it again.",
     },
+    notSaved: "This phone could not keep you signed in. Send a new code and try again.",
   } satisfies Omit<SignInWords, "errors">,
   // The Inter review (design system, section 10), until real screens replace it.
   review: {

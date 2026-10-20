@@ -1,10 +1,10 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { Account, ErrorCode } from "@ygo/contracts";
+import { type Account, type ErrorCode, LoginOtp } from "@ygo/contracts";
 
 /** How long "Send a new code" waits after a send: the server's own gap between two codes to one email. */
 export const RESEND_WAIT_MS = 30_000;
 
-/** The digits in the emailed code. */
+/** How many boxes C14 shows: the emailed code's digits. */
 export const CODE_LENGTH = 6;
 
 /**
@@ -20,12 +20,18 @@ export function secondsLeft(sentAt: number | null, now: number): number {
 }
 
 /**
- * What the hidden code field holds: its digits only, at most six. Paste and
- * autofill may bring spaces or a dash; whether the code is right is
- * `LoginOtp`'s job.
+ * What the hidden code field keeps of what is typed or pasted: its digits,
+ * one per box. Paste and autofill may bring a space or a dash. It decides
+ * nothing: `wholeCode` does.
  */
 export function codeDigits(text: string): string {
   return text.replace(/\D/g, "").slice(0, CODE_LENGTH);
+}
+
+/** The code to check, once the boxes hold one `LoginOtp` accepts; null until then. */
+export function wholeCode(digits: string): string | null {
+  const code = LoginOtp.safeParse(digits);
+  return code.success ? code.data : null;
 }
 
 /** The last code sent: to which email, and when. */
@@ -40,8 +46,30 @@ export function needsSend(email: string, last: LastSend | null, now: number): bo
   return !(last && last.email === email && secondsLeft(last.at, now) > 0);
 }
 
-/** A problem shown under the email on C01, or on C14. `offline` is no answer at all. */
-export type Problem = ErrorCode | "offline";
+/**
+ * A problem shown under the email on C01, or on C14. `offline` is no answer
+ * at all; `not-saved` is a sign-in the server accepted but this phone could
+ * not keep, so its code is spent.
+ */
+export type Problem = ErrorCode | "offline" | "not-saved";
+
+/**
+ * Which problem a call that rejected is. No network and a timeout reject
+ * with a `TypeError`, `TimeoutError` or `AbortError`; anything else from
+ * `verifyCode` is the store refusing to save the session.
+ */
+export function rejected(error: unknown): "offline" | "not-saved" {
+  if (error instanceof TypeError) return "offline";
+  const name = error instanceof Error ? error.name : "";
+  return name === "TimeoutError" || name === "AbortError" ? "offline" : "not-saved";
+}
+
+/** Whether a problem is about what was typed, so its field shows a red edge. Others (no answer, a server fault) are not. */
+export function aboutField(problem: Problem): boolean {
+  return (
+    problem === "VALIDATION_FAILED" || problem === "CODE_WRONG" || problem === "CODE_EXPIRED" || problem === "CODE_LOCKED"
+  );
+}
 
 /** What happened to a send: sent, or the problem to show. */
 export function sendOutcome(answer: ApiResult<undefined> | "offline"): Problem | null {
@@ -55,14 +83,16 @@ export function sendOutcome(answer: ApiResult<undefined> | "offline"): Problem |
  * - otherwise the problem, and whether the boxes stay open for typing.
  *   A wrong code, a server fault and no answer empty the boxes for another
  *   try. An expired code leaves only "Send a new code", and a locked email
- *   disables the boxes; both keep the boxes shut until a new code is sent.
+ *   disables the boxes; both keep the boxes shut until a new code is sent,
+ *   and so does a sign-in this phone could not keep, whose code is spent.
  */
 export type CheckOutcome =
   | { signedIn: Account }
   | { problem: Problem; boxesOpen: boolean };
 
-export function checkOutcome(answer: ApiResult<Account> | "offline"): CheckOutcome {
+export function checkOutcome(answer: ApiResult<Account> | "offline" | "not-saved"): CheckOutcome {
   if (answer === "offline") return { problem: "offline", boxesOpen: true };
+  if (answer === "not-saved") return { problem: "not-saved", boxesOpen: false };
   if (answer.ok) return { signedIn: answer.data };
   const shut = answer.code === "CODE_EXPIRED" || answer.code === "CODE_LOCKED";
   return { problem: answer.code, boxesOpen: !shut };

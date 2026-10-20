@@ -1,9 +1,9 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type Account, Email, type RequestCodeBody, type VerifyCodeBody } from "@ygo/contracts";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
 import { EnterCode } from "./enter-code";
-import { checkOutcome, type LastSend, needsSend, type Problem, sendOutcome } from "./sign-in-flow";
+import { aboutField, checkOutcome, type LastSend, needsSend, type Problem, rejected, sendOutcome } from "./sign-in-flow";
 import { Button, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
@@ -23,6 +23,17 @@ export type SignInProps = {
   onSignedIn: (account: Account) => void;
 };
 
+/** The last code sent, and whether it is spent (expired, locked, or used by a sign-in this phone could not keep). */
+type Memory = { last: LastSend | null; shut: boolean };
+
+/**
+ * Kept outside the screen, so a remount (the layout showing another state
+ * for a moment, Fast Refresh) keeps the countdown and the shut boxes, and
+ * C01 never sends again into the server's 30-second refusal. A sign-in
+ * clears it: that code is used.
+ */
+let memory: Memory = { last: null, shut: false };
+
 /**
  * C01 Sign in, and C14 once a code is sent (#155, Q6–Q8). The root layout
  * shows it while signed out; there are no sign-in routes.
@@ -32,7 +43,12 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
   const [typed, setTyped] = useState("");
   // The email C14 is open for; C01 while null.
   const [codeFor, setCodeFor] = useState<string | null>(null);
-  const [last, setLast] = useState<LastSend | null>(null);
+  const [{ last, shut }, setMemory] = useState(memory);
+
+  function remember(next: Partial<Memory>) {
+    memory = { ...memory, ...next };
+    setMemory(memory);
+  }
 
   async function send(email: string): Promise<Problem | null> {
     let answer: ApiResult<undefined> | "offline";
@@ -42,16 +58,20 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
       answer = "offline";
     }
     const problem = sendOutcome(answer);
-    if (!problem) setLast({ email, at: Date.now() });
+    if (!problem) remember({ last: { email, at: Date.now() }, shut: false });
     return problem;
   }
 
   async function check(email: string, code: string) {
+    let outcome;
     try {
-      return checkOutcome(await api.verifyCode({ email, code }));
-    } catch {
-      return checkOutcome("offline");
+      outcome = checkOutcome(await api.verifyCode({ email, code }));
+    } catch (error) {
+      outcome = checkOutcome(rejected(error));
     }
+    if ("signedIn" in outcome) remember({ last: null, shut: false });
+    else if (!outcome.boxesOpen) remember({ shut: true });
+    return outcome;
   }
 
   return (
@@ -65,7 +85,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
             words={words}
             supportEmail={supportEmail}
             email={codeFor}
-            sentAt={last?.email === codeFor ? last.at : 0}
+            sentAt={last?.email === codeFor ? last.at : null}
+            boxesOpen={!(shut && last?.email === codeFor)}
             resend={() => send(codeFor)}
             check={(code) => check(codeFor, code)}
             onSignedIn={onSignedIn}
@@ -102,22 +123,31 @@ type EmailStepProps = {
 function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProps) {
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  // Set before React re-renders, so the return key and the button never send twice.
+  const sending = useRef(false);
+  const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(null);
 
   async function submit() {
+    if (sending.current) return;
     const email = Email.safeParse(typed);
     if (!email.success) {
-      setProblem(words.emailInvalid);
+      setProblem({ text: words.emailInvalid, onField: true });
       return;
     }
     setProblem(null);
+    sending.current = true;
     setBusy(true);
     const failed = await send(email.data);
+    sending.current = false;
     setBusy(false);
-    if (failed) setProblem(problemWords(words, failed, "send"));
+    if (failed) setProblem({ text: problemWords(words, failed, "send"), onField: aboutField(failed) });
   }
 
-  const edge = problem ? "border-2 border-danger" : focused ? "border-2 border-primary" : "border border-border-strong";
+  const edge = problem?.onField
+    ? "border-2 border-danger"
+    : focused
+      ? "border-2 border-primary"
+      : "border border-border-strong";
 
   return (
     <>
@@ -152,7 +182,7 @@ function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProp
       />
       {problem && (
         <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
-          {problem}
+          {problem.text}
         </Text>
       )}
 

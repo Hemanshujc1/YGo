@@ -33,11 +33,14 @@ export type SignInWords = {
   };
   /** When no answer came back: one for a send, one for a code being checked. */
   offline: { send: string; check: string };
+  /** When the server accepted the code but this phone could not keep the session. */
+  notSaved: string;
   /** The app's words for each code the server answers. */
   errors: Record<ErrorCode, string>;
 };
 
 /** The words for a problem; no answer reads differently for a send and for a check. */
 export function problemWords(words: SignInWords, problem: Problem, during: "send" | "check"): string {
-  return problem === "offline" ? words.offline[during] : words.errors[problem];
+  if (problem === "offline") return words.offline[during];
+  return problem === "not-saved" ? words.notSaved : words.errors[problem];
 }

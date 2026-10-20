@@ -1,7 +1,7 @@
 import type { Account } from "@ygo/contracts";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, BackHandler, Platform, TextInput, View } from "react-native";
-import { type CheckOutcome, CODE_LENGTH, codeDigits, type Problem, secondsLeft } from "./sign-in-flow";
+import { aboutField, type CheckOutcome, CODE_LENGTH, codeDigits, type Problem, secondsLeft, wholeCode } from "./sign-in-flow";
 import { Button, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
@@ -10,8 +10,10 @@ type EnterCodeProps = {
   words: SignInWords;
   supportEmail: string;
   email: string;
-  /** When the last code went to this email; the countdown runs from it. */
-  sentAt: number;
+  /** When the last code went to this email; the countdown runs from it. Null when none did. */
+  sentAt: number | null;
+  /** False after an expired code, a locked email or a spent code, until a new code is sent. */
+  boxesOpen: boolean;
   /** Sends a new code: null when sent, or the problem. */
   resend: () => Promise<Problem | null>;
   check: (code: string) => Promise<CheckOutcome>;
@@ -24,27 +26,44 @@ type EnterCodeProps = {
  * C14 Enter email code (#155, Q8): six boxes over one hidden field, so paste
  * and code autofill work. The 6th digit checks the code.
  */
-export function EnterCode({ words, supportEmail, email, sentAt, resend, check, onSignedIn, back }: EnterCodeProps) {
+export function EnterCode(props: EnterCodeProps) {
+  const { words, supportEmail, email, sentAt, boxesOpen, resend, check, onSignedIn, back } = props;
   const [digits, setDigits] = useState("");
   const [focused, setFocused] = useState(false);
   const [checking, setChecking] = useState(false);
   const [sending, setSending] = useState(false);
-  const [problem, setProblem] = useState<{ text: string; during: "send" | "check" } | null>(null);
-  // Shut after an expired code or a locked email, until a new code is sent.
-  const [boxesOpen, setBoxesOpen] = useState(true);
+  const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(null);
   const [now, setNow] = useState(Date.now);
   const input = useRef<TextInput>(null);
+  // Set at once, before React re-renders: paste and autofill can bring two
+  // changes in a row, and a code is checked or sent only once at a time.
+  const busy = useRef(false);
+  // Open the keypad again once the boxes take typing again.
+  const refocus = useRef(false);
   const left = secondsLeft(sentAt, now);
   const waiting = left > 0;
+  const typing = boxesOpen && !checking && !sending;
 
-  // Android Back goes to C01, not out of the app (#155, Q6).
+  // Android Back goes to C01, not out of the app (#155, Q6), and waits while a
+  // code is checked or sent, as "Use a different email" does.
+  const leave = useRef(back);
+  leave.current = back;
   useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
-      back();
+      if (!busy.current) leave.current();
       return true;
     });
     return () => listener.remove();
-  }, [back]);
+  }, []);
+
+  // focus() on a field that is not editable yet does nothing, so it waits for
+  // the render that opens the boxes.
+  useEffect(() => {
+    if (typing && refocus.current) {
+      refocus.current = false;
+      input.current?.focus();
+    }
+  }, [typing]);
 
   // The clock is read again each second and on every return to the app, so
   // the countdown shows the time really left (#155, S2).
@@ -59,41 +78,44 @@ export function EnterCode({ words, supportEmail, email, sentAt, resend, check, o
   }, [waiting]);
 
   async function typed(text: string) {
+    if (busy.current) return;
     const next = codeDigits(text);
     setDigits(next);
-    if (problem?.during === "check") setProblem(null);
-    if (next.length < CODE_LENGTH) return;
     setProblem(null);
+    const code = wholeCode(next);
+    if (!code) return;
+    busy.current = true;
     setChecking(true);
-    const outcome = await check(next);
-    setChecking(false);
+    const outcome = await check(code);
+    busy.current = false;
     if ("signedIn" in outcome) {
       onSignedIn(outcome.signedIn);
       return;
     }
+    refocus.current = outcome.boxesOpen;
+    setChecking(false);
     setDigits("");
-    setBoxesOpen(outcome.boxesOpen);
-    setProblem({ text: problemWords(words, outcome.problem, "check"), during: "check" });
-    if (outcome.boxesOpen) input.current?.focus();
+    setProblem({ text: problemWords(words, outcome.problem, "check"), onField: aboutField(outcome.problem) });
   }
 
   async function sendAgain() {
+    if (busy.current) return;
+    busy.current = true;
     setSending(true);
     setProblem(null);
     const failed = await resend();
+    busy.current = false;
+    refocus.current = !failed;
     setSending(false);
     setNow(Date.now());
     if (failed) {
-      setProblem({ text: problemWords(words, failed, "send"), during: "send" });
+      setProblem({ text: problemWords(words, failed, "send"), onField: aboutField(failed) });
       return;
     }
     setDigits("");
-    setBoxesOpen(true);
-    input.current?.focus();
   }
 
-  const typing = boxesOpen && !checking && !sending;
-  const wrong = problem?.during === "check";
+  const wrong = problem?.onField === true;
 
   return (
     <>
@@ -157,7 +179,7 @@ export function EnterCode({ words, supportEmail, email, sentAt, resend, check, o
           disabled={waiting || checking}
           busy={sending}
         />
-        <Button label={words.code.otherEmail} onPress={back} disabled={checking} variant="text" />
+        <Button label={words.code.otherEmail} onPress={back} disabled={checking || sending} variant="text" />
       </View>
 
       <HelpLine before={words.code.spam} help={words.help} supportEmail={supportEmail} />
