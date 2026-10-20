@@ -81,8 +81,37 @@ it("records failure and rolls back cleanup", async () => {
 
 it("rejects an unknown job without writing a run", async () => {
   const now = new Date("2029-01-01T00:00:00.000Z");
-  await expect(runJob(database, "nope", createLocalClock(now)))
-    .rejects.toThrow("Unknown job name");
+  for (const name of ["nope", "toString"]) {
+    await expect(runJob(database, name, createLocalClock(now)))
+      .rejects.toThrow("Unknown job name");
+  }
   expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, now)))
     .toEqual([]);
+});
+
+it("records a verified backup and a failed backup without retaining an error detail", async () => {
+  const success = new Date("2031-01-01T00:00:00.000Z");
+  let calls = 0;
+  await runJob(database, "backup-nightly", createLocalClock(success), async () => { calls++; });
+  expect(calls).toBe(1);
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, success)))
+    .toMatchObject([{ jobName: "backup-nightly", status: "ok", finishedAt: success, errorText: null }]);
+
+  const failure = new Date("2032-01-01T00:00:00.000Z");
+  await expect(runJob(database, "backup-nightly", createLocalClock(failure), async () => {
+    throw new Error("private backup failure detail");
+  })).rejects.toThrow("private backup failure detail");
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, failure)))
+    .toMatchObject([{ jobName: "backup-nightly", status: "failed", finishedAt: failure, errorText: "backup failed" }]);
+});
+
+it("a stuck running row does not block the next backup run", async () => {
+  const stuck = new Date("2033-01-01T00:00:00.000Z");
+  await database.db.insert(jobRuns).values({ jobName: "backup-nightly", startedAt: stuck, status: "running" });
+  const next = new Date("2034-01-01T00:00:00.000Z");
+  await runJob(database, "backup-nightly", createLocalClock(next), async () => {});
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, stuck)))
+    .toMatchObject([{ status: "running", finishedAt: null }]);
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, next)))
+    .toMatchObject([{ status: "ok", finishedAt: next }]);
 });

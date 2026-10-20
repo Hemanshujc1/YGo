@@ -52,7 +52,7 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             calls = [json.loads(line) for line in (work / "calls").read_text().splitlines()]
             alarms = {call[call.index("--alarm-name") + 1]: call for call in calls
                       if call[:2] == ["cloudwatch", "put-metric-alarm"]}
-            self.assertEqual(len(alarms), 8)
+            self.assertEqual(len(alarms), 10)
             for alarm in alarms.values():
                 self.assertIn("--alarm-actions", alarm)
                 self.assertIn("--ok-actions", alarm)
@@ -67,6 +67,11 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             health = next(call for call in calls if call[:2] == ["route53", "create-health-check"])
             config = health[health.index("--health-check-config") + 1]
             self.assertIn("Regions=us-east-1,eu-west-1,ap-southeast-1", config)
+            for job in ("backup-nightly", "cleanup-sessions"):
+                alarm = alarms[f"ygo-job-{job}"]
+                self.assertIn(f"Name=JobName,Value={job}", alarm)
+                self.assertEqual(alarm[alarm.index("--period") + 1], "86400")
+                self.assertEqual(alarm[alarm.index("--treat-missing-data") + 1], "breaching")
 
 
 if __name__ == "__main__":
