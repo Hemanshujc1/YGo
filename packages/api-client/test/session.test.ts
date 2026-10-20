@@ -50,6 +50,9 @@ function fakeServer() {
 function setup(handle: (call: Call) => Response | Promise<Response>, saved: string | null = null) {
   const calls: Call[] = [];
   let stored = saved;
+  /** Each token passed to `set`, when it is called. */
+  const sets: string[] = [];
+  let held: Promise<void> | null = null;
   const onSignedOut = vi.fn();
   const onUpdateRequired = vi.fn();
   const client = createApiClient({
@@ -58,9 +61,12 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
     onUpdateRequired,
     session: {
       get: () => Promise.resolve(stored),
-      set: (token) => {
+      set: async (token) => {
+        sets.push(token);
+        const wait = held;
+        held = null;
+        await wait;
         stored = token;
-        return Promise.resolve();
       },
       clear: () => {
         stored = null;
@@ -79,8 +85,26 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
     },
   });
   const refreshes = () => calls.filter((call) => call.path === "/v1/auth/refresh").length;
-  return { client, calls, refreshes, stored: () => stored, onSignedOut, onUpdateRequired };
+  /** Holds the store's next `set` until the returned function is called. */
+  const holdNextSet = () => {
+    let release = () => {};
+    held = new Promise((resolve) => (release = resolve));
+    return () => release();
+  };
+  return { client, calls, refreshes, sets, holdNextSet, stored: () => stored, onSignedOut, onUpdateRequired };
 }
+
+/** A server answer held until `release(path)`; `waiting()` counts those held. */
+function holds() {
+  const held = new Map<string, () => void>();
+  return {
+    hold: (path: string) => new Promise<void>((release) => held.set(path, release)),
+    release: (path: string) => held.get(path)?.(),
+    waiting: () => held.size,
+  };
+}
+
+const signIn = { email: "asha@example.com", code: "123456" };
 
 describe("each call", () => {
   it("sends its method, path, body and token", async () => {
@@ -255,29 +279,23 @@ describe("signOut", () => {
   });
 
   it("is not undone by a refresh that lands after it", async () => {
-    // The sign-out and the refresh are each held until released.
-    const held = new Map<string, () => void>();
-    const hold = (path: string) => new Promise<void>((release) => held.set(path, release));
+    const server = holds();
     const { client, calls, stored, onSignedOut } = setup(async (call) => {
       if (call.path === "/v1/auth/verify") return answer(200, pair(1));
-      if (call.path === "/v1/auth/sign-out") {
-        await hold(call.path);
-        return answer(204);
-      }
-      if (call.path === "/v1/auth/refresh") {
-        await hold(call.path);
-        return answer(200, pair(2));
+      if (call.path === "/v1/auth/sign-out" || call.path === "/v1/auth/refresh") {
+        await server.hold(call.path);
+        return call.path === "/v1/auth/sign-out" ? answer(204) : answer(200, pair(2));
       }
       return answer(401, unauthenticated);
     });
-    await client.verifyCode({ email: "asha@example.com", code: "123456" });
+    await client.verifyCode(signIn);
 
     const signingOut = client.signOut();
     const loading = client.me();
-    await vi.waitFor(() => expect(held.size).toBe(2));
-    held.get("/v1/auth/sign-out")?.();
+    await vi.waitFor(() => expect(server.waiting()).toBe(2));
+    server.release("/v1/auth/sign-out");
     await signingOut;
-    held.get("/v1/auth/refresh")?.();
+    server.release("/v1/auth/refresh");
 
     expect(await loading).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
     expect(stored()).toBeNull();
@@ -290,5 +308,108 @@ describe("signOut", () => {
     await client.verifyCode({ email: "asha@example.com", code: "123456" });
     await client.signOut();
     expect(await client.me()).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
+  });
+});
+
+describe("a sign-in or sign-out during another change", () => {
+  const signedOut = { ok: false, status: 401, code: "UNAUTHENTICATED" };
+  /** Lets every answer and store write already released finish. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("a sign-out while a refresh is saving its token leaves no session", async () => {
+    const server = holds();
+    const { client, calls, sets, holdNextSet, stored, onSignedOut } = setup(async (call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path === "/v1/auth/refresh") return answer(200, pair(2));
+      if (call.path === "/v1/auth/sign-out") {
+        await server.hold(call.path);
+        return answer(204);
+      }
+      return answer(401, unauthenticated);
+    });
+    await client.verifyCode(signIn);
+    const release = holdNextSet();
+
+    const signingOut = client.signOut();
+    const loading = client.me();
+    await vi.waitFor(() => expect(sets).toEqual(["r1", "r2"]));
+    server.release("/v1/auth/sign-out");
+    await settle();
+    release();
+    await signingOut;
+
+    expect(await loading).toEqual(signedOut);
+    expect(stored()).toBeNull();
+    expect(onSignedOut).not.toHaveBeenCalled();
+    expect(await client.me()).toEqual(signedOut);
+    expect(calls.filter((call) => call.auth === "Bearer a2")).toEqual([]);
+  });
+
+  it("a newer sign-in while a refresh is saving its token keeps the newer session", async () => {
+    let signIns = 0;
+    const { client, calls, sets, holdNextSet, stored } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(++signIns * 10));
+      if (call.path === "/v1/auth/refresh") return answer(200, pair(11));
+      if (call.auth === "Bearer a10") return answer(401, unauthenticated);
+      return answer(200, account);
+    });
+    await client.verifyCode(signIn);
+    const release = holdNextSet();
+
+    const loading = client.me();
+    await vi.waitFor(() => expect(sets).toEqual(["r10", "r11"]));
+    const signingIn = client.verifyCode(signIn);
+    await settle();
+    release();
+
+    expect(await signingIn).toEqual({ ok: true, data: account });
+    // A call begun in the older session is not sent with the newer one.
+    expect(await loading).toEqual(signedOut);
+    expect(sets).toEqual(["r10", "r11", "r20"]);
+    expect(stored()).toBe("r20");
+    await client.me();
+    expect(calls.at(-1)?.auth).toBe("Bearer a20");
+  });
+
+  it("drops a sign-in answer that arrives after sign-out", async () => {
+    const server = holds();
+    const { client, calls, stored } = setup(async (call) => {
+      await server.hold(call.path);
+      return answer(200, pair(1));
+    });
+
+    const signingIn = client.verifyCode(signIn);
+    await vi.waitFor(() => expect(server.waiting()).toBe(1));
+    await client.signOut();
+    server.release("/v1/auth/verify");
+
+    expect(await signingIn).toEqual(signedOut);
+    expect(stored()).toBeNull();
+    expect(await client.me()).toEqual(signedOut);
+    expect(calls.map((call) => call.path)).toEqual(["/v1/auth/verify"]);
+  });
+
+  it("a sign-out does not clear a sign-in begun after it", async () => {
+    const server = holds();
+    let signIns = 0;
+    const { client, calls, stored } = setup(async (call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(++signIns));
+      if (call.path === "/v1/auth/sign-out") {
+        await server.hold(call.path);
+        return answer(204);
+      }
+      return answer(200, account);
+    });
+    await client.verifyCode(signIn);
+
+    const signingOut = client.signOut();
+    await vi.waitFor(() => expect(server.waiting()).toBe(1));
+    expect(await client.verifyCode(signIn)).toEqual({ ok: true, data: account });
+    server.release("/v1/auth/sign-out");
+    await signingOut;
+
+    expect(stored()).toBe("r2");
+    await client.me();
+    expect(calls.at(-1)?.auth).toBe("Bearer a2");
   });
 });
