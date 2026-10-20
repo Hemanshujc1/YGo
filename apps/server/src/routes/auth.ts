@@ -57,8 +57,10 @@ function sendError(reply: FastifyReply, status: 400 | 429 | 503, code: ErrorCode
 }
 
 function rateLimitAddress(address: string): string {
-  if (isIP(address) === 4) return address;
   const raw = address.split("%")[0] ?? address;
+  if (isIP(raw) === 4) return raw;
+  const mappedV4 = /^::ffff:(.+)$/i.exec(raw)?.[1];
+  if (mappedV4 && isIP(mappedV4) === 4) return mappedV4;
   const [before, after] = raw.toLowerCase().split("::");
   const left = before ? before.split(":") : [];
   const right = after ? after.split(":") : [];
@@ -109,7 +111,8 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
              count(*) FILTER (WHERE email = $1)::text AS email_count,
              count(*) FILTER (WHERE address = $2)::text AS address_count,
              max(sent_at) FILTER (WHERE email = $1) AS last_sent
-           FROM email_code_sends WHERE sent_at > $3`,
+           FROM email_code_sends
+           WHERE sent_at > $3 AND (email = $1 OR address = $2)`,
           [email, address, new Date(now.getTime() - SEND_WINDOW_MS)],
         );
         const limit = counts.rows[0];
@@ -175,8 +178,12 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
            VALUES ($1, $2, $3, 0, NULL)
            ON CONFLICT (email) DO UPDATE SET code_hash = EXCLUDED.code_hash,
              expires_at = EXCLUDED.expires_at,
-             wrong_tries = CASE WHEN login_codes.expires_at <= $4 THEN 0 ELSE login_codes.wrong_tries END,
-             locked_until = NULL`,
+             wrong_tries = CASE
+               WHEN login_codes.locked_until > $4 THEN login_codes.wrong_tries
+               WHEN login_codes.expires_at <= $4 THEN 0
+               ELSE login_codes.wrong_tries
+             END,
+             locked_until = CASE WHEN login_codes.locked_until > $4 THEN login_codes.locked_until ELSE NULL END`,
             [email, digest(secret, code), new Date(now.getTime() + CODE_TTL_MS), now],
           );
           await activateClient.query("COMMIT");

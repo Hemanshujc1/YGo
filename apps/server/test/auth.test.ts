@@ -115,6 +115,40 @@ describe("email sign-in routes", () => {
     expect((await h.requestCode(address)).statusCode).toBe(204);
   });
 
+  it("preserves a wrong-try lock set while a replacement code is being sent", async () => {
+    const local = createLocalMailer();
+    let holdReplacement = false;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let replacementStarted!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { replacementStarted = resolve; });
+    const mailer: Mailer = {
+      async send(mail) {
+        await local.send(mail);
+        if (holdReplacement) {
+          replacementStarted();
+          await held;
+        }
+      },
+    };
+    const h = harness({ mailer });
+    const address = email();
+    await h.requestCode(address);
+    const wrongCode = codeFrom(sentMail(local, 0)) === "000000" ? "000001" : "000000";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      expect((await h.verify(address, wrongCode)).json()).toEqual({ error: { code: "CODE_WRONG" } });
+    }
+
+    h.clock.advance(30_000);
+    holdReplacement = true;
+    const replacement = h.requestCode(address);
+    await sendStarted;
+    expect((await h.verify(address, wrongCode)).json()).toEqual({ error: { code: "CODE_LOCKED" } });
+    release();
+    expect((await replacement).statusCode).toBe(204);
+    expect((await h.verify(address, codeFrom(sentMail(local, 1)))).json()).toEqual({ error: { code: "CODE_LOCKED" } });
+  });
+
   it("resets wrong tries when the previous code expired", async () => {
     const h = harness();
     const address = email();
@@ -163,6 +197,16 @@ describe("email sign-in routes", () => {
     h.clock.advance(30_000);
     expect((await h.requestCode(email(), "2001:db8:1:2::ffff")).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
     expect((await h.requestCode(email(), "2001:db8:1:3::1")).statusCode).toBe(204);
+  });
+
+  it("counts IPv4-mapped IPv6 addresses by their embedded IPv4 address", async () => {
+    const h = harness();
+    for (let sent = 0; sent < 20; sent++) {
+      expect((await h.requestCode(email(), "::ffff:203.0.113.12")).statusCode).toBe(204);
+    }
+    expect((await h.requestCode(email(), "::ffff:203.0.113.12")).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
+    expect((await h.requestCode(email(), "::ffff:203.0.113.13")).statusCode).toBe(204);
+    expect((await h.requestCode(email(), "203.0.113.12")).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
   });
 
   it("keeps the database available and other addresses unblocked during held sends", async () => {
