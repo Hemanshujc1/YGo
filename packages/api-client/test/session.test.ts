@@ -51,9 +51,11 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   const calls: Call[] = [];
   let stored = saved;
   const onSignedOut = vi.fn();
+  const onUpdateRequired = vi.fn();
   const client = createApiClient({
     baseUrl: "https://api.test",
     onSignedOut,
+    onUpdateRequired,
     session: {
       get: () => Promise.resolve(stored),
       set: (token) => {
@@ -77,7 +79,7 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
     },
   });
   const refreshes = () => calls.filter((call) => call.path === "/v1/auth/refresh").length;
-  return { client, calls, refreshes, stored: () => stored, onSignedOut };
+  return { client, calls, refreshes, stored: () => stored, onSignedOut, onUpdateRequired };
 }
 
 describe("each call", () => {
@@ -188,9 +190,19 @@ describe("refresh", () => {
       () => answer(400, { error: { code: "VALIDATION_FAILED", fields: ["refreshToken"] } }),
       "r0",
     );
-    await client.me();
+    expect(await client.me()).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
     expect(stored()).toBeNull();
     expect(onSignedOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares a failed refresh too, so calls refused together do not refresh twice", async () => {
+    const { client, refreshes } = setup(() => answer(503, { error: { code: "UNAVAILABLE" } }), "r0");
+    const results = await Promise.all([client.me(), client.changeName({ name: "Asha K" })]);
+    expect(results).toEqual([
+      { ok: false, status: 503, code: "UNAVAILABLE" },
+      { ok: false, status: 503, code: "UNAVAILABLE" },
+    ]);
+    expect(refreshes()).toBe(1);
   });
 
   it("keeps the saved token when there is no network", async () => {
@@ -233,6 +245,44 @@ describe("signOut", () => {
     await client.signOut();
     expect(stored()).toBeNull();
     expect(onSignedOut).not.toHaveBeenCalled();
+  });
+
+  it("fires onUpdateRequired when the server refuses this version", async () => {
+    const { client, stored, onUpdateRequired } = setup(() => answer(426, { error: { code: "UPDATE_REQUIRED" } }), "r0");
+    await client.signOut();
+    expect(onUpdateRequired).toHaveBeenCalledTimes(1);
+    expect(stored()).toBeNull();
+  });
+
+  it("is not undone by a refresh that lands after it", async () => {
+    // The sign-out and the refresh are each held until released.
+    const held = new Map<string, () => void>();
+    const hold = (path: string) => new Promise<void>((release) => held.set(path, release));
+    const { client, calls, stored, onSignedOut } = setup(async (call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path === "/v1/auth/sign-out") {
+        await hold(call.path);
+        return answer(204);
+      }
+      if (call.path === "/v1/auth/refresh") {
+        await hold(call.path);
+        return answer(200, pair(2));
+      }
+      return answer(401, unauthenticated);
+    });
+    await client.verifyCode({ email: "asha@example.com", code: "123456" });
+
+    const signingOut = client.signOut();
+    const loading = client.me();
+    await vi.waitFor(() => expect(held.size).toBe(2));
+    held.get("/v1/auth/sign-out")?.();
+    await signingOut;
+    held.get("/v1/auth/refresh")?.();
+
+    expect(await loading).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
+    expect(stored()).toBeNull();
+    expect(onSignedOut).not.toHaveBeenCalled();
+    expect(calls.filter((call) => call.path === "/v1/me" && call.auth === null)).toEqual([]);
   });
 
   it("leaves later calls signed out", async () => {

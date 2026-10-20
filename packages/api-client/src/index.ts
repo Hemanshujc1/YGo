@@ -61,7 +61,11 @@ export interface ApiClientOptions {
   baseUrl: string;
   /** Defaults to the global `fetch`, looked up on each call. */
   fetch?: typeof fetch;
-  /** How long a call waits, including reading the body, before it rejects. */
+  /**
+   * How long each request waits, including reading the body, before it
+   * rejects. A signed-in call may send up to three: a refresh, the call, and
+   * the call again.
+   */
   timeoutMs?: number;
   /** Sent with each request when the caller supplies its app identity. */
   app?: AppIdentity;
@@ -97,9 +101,11 @@ export function createApiClient({
   /** The refresh under way, which every call refused meanwhile waits for. */
   let refreshing: Promise<Answer | null> | null = null;
   let signingOut = false;
+  /** Bumped when a sign-in or sign-out finishes, so a refresh begun before it is ignored. */
+  let epoch = 0;
 
   /** Sends a call and reads its JSON body; a body that is not JSON reads as undefined. */
-  async function send(method: string, path: string, json?: unknown, token?: string): Promise<Answer> {
+  async function send(method: string, path: string, json?: unknown, token: string | null = null): Promise<Answer> {
     const response = await (fetchFn ?? fetch)(`${origin}${path}`, {
       method,
       headers: {
@@ -165,14 +171,16 @@ export function createApiClient({
    * and with no network this rejects and keeps it too.
    */
   async function refresh(): Promise<Answer | null> {
+    const started = epoch;
     const refreshToken = await session?.get();
     if (!refreshToken) return NO_SESSION;
     const answer = await send("POST", "/v1/auth/refresh", { refreshToken });
+    if (epoch !== started) return accessToken ? null : NO_SESSION;
     if (answer.status === 401 || answer.status === 400) {
       accessToken = null;
       await session?.clear();
       if (!signingOut) onSignedOut?.();
-      return answer;
+      return NO_SESSION;
     }
     if (!answer.ok) return answer;
     const next = Session.safeParse(answer.body);
@@ -182,12 +190,12 @@ export function createApiClient({
   }
 
   /**
-   * Refreshes, unless the refused access token was already replaced. Calls
-   * refused together share one refresh: the server ends a session whose old
-   * refresh token is used twice.
+   * Refreshes, unless the refused access token was already replaced or the
+   * session has ended meanwhile. Calls refused together share one refresh:
+   * the server ends a session whose old refresh token is used twice.
    */
   function renew(refused: string | null): Promise<Answer | null> {
-    if (accessToken !== refused) return Promise.resolve(null);
+    if (accessToken !== refused) return Promise.resolve(accessToken ? null : NO_SESSION);
     refreshing ??= refresh().finally(() => {
       refreshing = null;
     });
@@ -196,21 +204,21 @@ export function createApiClient({
 
   /**
    * Sends a call with the access token. With none in memory, as when the app
-   * has just opened, it refreshes first. When the server answers 401 it
-   * refreshes once and sends the call again.
+   * has just opened, it refreshes first; while a refresh is under way it
+   * waits for it. When the server answers 401 it refreshes once and sends
+   * the call again.
    */
   async function signedIn(method: string, path: string, json?: unknown): Promise<Answer> {
-    if (refreshing) await refreshing;
-    if (!accessToken) {
-      const refused = await renew(null);
+    if (!accessToken || refreshing) {
+      const refused = await renew(accessToken);
       if (refused) return refused;
     }
-    const token = accessToken ?? undefined;
+    const token = accessToken;
     const answer = await send(method, path, json, token);
     if (answer.status !== 401) return answer;
-    const refused = await renew(token ?? null);
+    const refused = await renew(token);
     if (refused) return refused;
-    return send(method, path, json, accessToken ?? undefined);
+    return send(method, path, json, accessToken);
   }
 
   return {
@@ -240,6 +248,7 @@ export function createApiClient({
       if (!session) throw new Error("createApiClient needs a session store to sign in");
       const answered = result(await send("POST", "/v1/auth/verify", body), Session);
       if (!answered.ok) return answered;
+      epoch += 1;
       await keep(answered.data);
       return { ok: true, data: answered.data.account };
     },
@@ -266,10 +275,13 @@ export function createApiClient({
     async signOut(): Promise<void> {
       signingOut = true;
       try {
-        await signedIn("POST", "/v1/auth/sign-out");
+        const answer = await signedIn("POST", "/v1/auth/sign-out");
+        // Read like any other answer, so UPDATE_REQUIRED still fires onUpdateRequired.
+        if (!answer.ok) failure(answer.status, answer.body);
       } catch {
         // No network: the phone forgets the session all the same.
       } finally {
+        epoch += 1;
         accessToken = null;
         signingOut = false;
         await session?.clear();
