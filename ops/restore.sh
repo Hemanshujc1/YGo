@@ -61,5 +61,8 @@ systemd-run --quiet --wait --collect --service-type=exec --unit="ygo-replay-$$" 
 install -m 0600 "$recovery" "$work/new.env"
 mv -f "$work/new.env" /etc/ygo/production.env
 systemctl enable --now "$unit" || die "Service start failed"
+timeout --kill-after=5 60 bash -c '
+  until curl -fsS --max-time 3 http://127.0.0.1:3001/v1/healthz >/dev/null 2>&1; do sleep 1; done
+' || die "Recovered service failed health check"
 committed=true
 echo "Recovery complete; service started"

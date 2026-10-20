@@ -18,7 +18,9 @@ def fake():
     tool, args = Path(sys.argv[0]).name, sys.argv[1:]
     if tool == 'aws':
         if 's3api' in args:
-            print('None' if 'get-bucket-versioning' in args else '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"nightly/"},"Expiration":{"Days":30}}]}')
+            rule = '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"nightly/"},"Expiration":{"Days":30}'
+            if (state / 'early-transition').exists(): rule += ',"Transitions":[{"Days":1,"StorageClass":"GLACIER"}]'
+            print('None' if 'get-bucket-versioning' in args else rule + '}]}')
         else:
             source, dest = args[4:6]
             stored = state / Path(source).name if source.startswith('s3://') else Path(source)
@@ -28,6 +30,8 @@ def fake():
                 with target.open('ab') as output: output.write(b'corrupt')
     elif tool == 'systemctl':
         (state / 'service').write_text('on' if args[0] == 'enable' else 'off')
+    elif tool == 'timeout':
+        sys.exit(1 if (state / 'fail-health').exists() else 0)
     else:
         if (state / 'fail-restore').exists() and 'pg_restore --exit-on-error' in ' '.join(args):
             sys.exit(1)
@@ -49,7 +53,7 @@ def main():
     names = [f'ygo_restore_{uuid4().hex}_{suffix}' for suffix in ('source', 'old')]
     with tempfile.TemporaryDirectory(prefix='ygo-restore-') as temporary:
         state = Path(temporary)
-        for tool in ('aws', 'systemctl', 'systemd-run'):
+        for tool in ('aws', 'systemctl', 'systemd-run', 'timeout'):
             (state / tool).symlink_to(Path(__file__).resolve())
         env = dict(os.environ, YGO_RESTORE_TEST=temporary, PATH=f'{temporary}:' + os.environ['PATH'])
         def url(name):
@@ -70,6 +74,10 @@ def main():
             Path('/etc/ygo/production.env').write_text(f'DATABASE_URL={url(names[0])}\n')
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode == 0, backup.stdout + backup.stderr
+            (state / 'early-transition').touch()
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'earlier actions' in backup.stderr
+            (state / 'early-transition').unlink()
             (state / 'corrupt-download').touch()
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode != 0 and 'mismatch' in backup.stderr
@@ -112,6 +120,9 @@ def main():
             assert 'Cannot verify restored database' in attempt('post-restore verification failure', 'process.exit(0)')
             (state / 'fail-verify').unlink()
             assert 'Deletion replay failed' in attempt('replay failure', 'process.exit(1)')
+            (state / 'fail-health').touch()
+            assert 'failed health check' in attempt('health failure', 'process.exit(0)')
+            (state / 'fail-health').unlink()
             replay.write_text('process.exit(0)')
             target = f'ygo_restore_{uuid4().hex}'
             names.append(target)
@@ -131,5 +142,5 @@ def main():
             shutil.rmtree('/etc/ygo')
             shutil.rmtree('/opt/ygo')
 
-if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run'): fake()
+if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout'): fake()
 else: main()

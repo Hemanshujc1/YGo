@@ -13,7 +13,7 @@ case $mode in
     # A backup bucket must not be the versioned photo bucket. Fail if lifecycle drifts.
     [[ $(aws --region ap-south-1 s3api get-bucket-versioning --bucket "$bucket" --query Status --output text) == None ]] || die "Backup bucket must never have been versioned"
     aws --region ap-south-1 s3api get-bucket-lifecycle-configuration --bucket "$bucket" |
-      python3 -c 'import json,sys; r=json.load(sys.stdin)["Rules"]; assert len(r)==1 and r[0]["Status"]=="Enabled" and r[0].get("Filter")=={"Prefix":"nightly/"} and r[0]["Expiration"]=={"Days":30}' || die "Expected 30-day nightly/ expiration"
+      python3 -c 'import json,sys; r=json.load(sys.stdin)["Rules"]; assert len(r)==1 and set(r[0]) <= {"ID","Status","Filter","Expiration"} and r[0]["Status"]=="Enabled" and r[0].get("Filter")=={"Prefix":"nightly/"} and r[0]["Expiration"]=={"Days":30}' || die "Expected 30-day nightly/ expiration without earlier actions"
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
     # The root-only systemd environment file is read by systemd, not sourced.
