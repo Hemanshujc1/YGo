@@ -219,13 +219,14 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           await client.query("ROLLBACK");
           return sendError(reply, 400, "CODE_EXPIRED");
         }
-        if (!sameDigest(login.code_hash, digest(keys.loginCode, code))) {
+        const codeHash = digest(keys.loginCode, code);
+        if (!sameDigest(login.code_hash, codeHash)) {
           const oldCodes = await client.query<{ code_hash: string }>(
             "SELECT code_hash FROM login_code_history WHERE email = $1 AND expires_at > $2",
             [email, now],
           );
           let replaced = false;
-          for (const old of oldCodes.rows) replaced = sameDigest(old.code_hash, digest(keys.loginCode, code)) || replaced;
+          for (const old of oldCodes.rows) replaced = sameDigest(old.code_hash, codeHash) || replaced;
           if (replaced) {
             await client.query("ROLLBACK");
             return sendError(reply, 400, "CODE_EXPIRED");
