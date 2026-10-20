@@ -68,7 +68,11 @@ interface Life {
   refresh: string | null | undefined;
   /** The refresh under way, which every call refused meanwhile waits for. */
   renewing: Promise<Answer | null> | null;
-  /** Replaced by a sign-in: work still under way on it stops. */
+  /**
+   * Replaced by a sign-in: work still under way on it stops. A session a
+   * sign-out is ending is no longer current but not over, since it may still
+   * refresh to tell the server.
+   */
   over: boolean;
 }
 
@@ -227,7 +231,13 @@ export function createApiClient({
       on.access = null;
       on.refresh = null;
       if (on === current) {
-        await inTurn(async () => session?.clear());
+        try {
+          await inTurn(async () => session?.clear());
+        } catch (err) {
+          // Read the store again next time, so the refusal and the clear are tried again.
+          on.refresh = undefined;
+          throw err;
+        }
         if (on === current) onSignedOut?.();
       }
       return refused ? NO_SESSION : unreadable;
@@ -302,7 +312,7 @@ export function createApiClient({
      * keeps the session and answers the account; the tokens never leave it.
      * An answer that arrives after a sign-out or another sign-in begun after
      * it is dropped as UNAUTHENTICATED. If the store cannot save the session,
-     * this rejects and keeps none.
+     * this rejects and keeps none, unless a call has refreshed it meanwhile.
      */
     async verifyCode(body: VerifyCodeBody): Promise<ApiResult<Account>> {
       if (!session) throw new Error("createApiClient needs a session store to sign in");
@@ -316,8 +326,11 @@ export function createApiClient({
       try {
         await inTurn(() => session.set(answered.data.refreshToken));
       } catch (err) {
-        next.access = null;
-        next.refresh = null;
+        // A refresh meanwhile has replaced the pair, and saves its own.
+        if (next.refresh === answered.data.refreshToken) {
+          next.access = null;
+          next.refresh = null;
+        }
         throw err;
       }
       return { ok: true, data: answered.data.account };
@@ -343,7 +356,7 @@ export function createApiClient({
      * it here. The session is replaced the moment this is called, so other
      * calls answer UNAUTHENTICATED from then on, and a sign-in begun
      * meanwhile is kept. It is forgotten even when the server cannot be
-     * reached. A refresh under way lands first, so the server is told with
+     * reached, unless a sign-in kept meanwhile holds a session. A refresh under way lands first, so the server is told with
      * its new token. Rejects only when the store cannot be cleared, since the
      * session would then come back at the next launch.
      */
@@ -359,7 +372,7 @@ export function createApiClient({
       } catch {
         // No network: the phone forgets the session all the same.
       } finally {
-        if (current === after) await inTurn(async () => session?.clear());
+        if (!current.refresh) await inTurn(async () => session?.clear());
       }
     },
   };
