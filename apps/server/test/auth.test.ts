@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import { ErrorEnvelope, Session } from "@ygo/contracts";
 import { afterAll, afterEach, describe, expect, inject, it } from "vitest";
@@ -6,6 +6,7 @@ import { buildApp } from "../src/app";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer, type Mail, type Mailer } from "../src/adapters/mailer";
 import { connectDatabase } from "../src/db";
+import { accessToken, deriveKeys, digest, successorToken } from "../src/tokens";
 
 const database = connectDatabase(inject("databaseUrl"));
 const secret = "01234567890123456789012345678901";
@@ -329,5 +330,228 @@ describe("email sign-in routes", () => {
     await h.app.close();
     activeApps.splice(activeApps.indexOf(h.app), 1);
     expect(h.logLines.join("")).not.toContain(code);
+  });
+});
+
+const keys = deriveKeys(secret);
+const DAY_MS = 24 * 60 * 60_000;
+
+async function signIn(h: ReturnType<typeof harness>) {
+  const address = email();
+  await h.requestCode(address);
+  const answer = await h.verify(address, codeFrom(sentMail(h.mailer, inbox(h.mailer).length - 1)));
+  const session = Session.parse(answer.json());
+  return { ...session, sessionId: claims(session.accessToken).sid };
+}
+
+function claims(token: string): { sub: string; sid: string; exp: number } {
+  return JSON.parse(Buffer.from(token.slice(0, token.lastIndexOf(".")), "base64url").toString("utf8"));
+}
+
+function refresh(h: ReturnType<typeof harness>, refreshToken: string) {
+  return h.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken } });
+}
+
+/** The refresh token a successful refresh returned, or the error code it gave. */
+async function refreshed(h: ReturnType<typeof harness>, refreshToken: string): Promise<string> {
+  const answer = await refresh(h, refreshToken);
+  if (answer.statusCode === 200) return Session.parse(answer.json()).refreshToken;
+  expect(answer.statusCode).toBe(401);
+  return ErrorEnvelope.parse(answer.json()).error.code;
+}
+
+function signOut(h: ReturnType<typeof harness>, token?: string) {
+  return h.app.inject({
+    method: "POST",
+    url: "/v1/auth/sign-out",
+    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+  });
+}
+
+async function sessionExists(sessionId: string): Promise<boolean> {
+  return Boolean((await database.pool.query("SELECT 1 FROM sessions WHERE id = $1", [sessionId])).rowCount);
+}
+
+async function tokenCount(sessionId: string): Promise<number> {
+  const result = await database.pool.query("SELECT count(*)::int AS count FROM refresh_tokens WHERE session_id = $1", [sessionId]);
+  return result.rows[0].count;
+}
+
+describe("sessions", () => {
+  it("rotates on refresh, and the new token refreshes again", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const answer = await refresh(h, s.refreshToken);
+    expect(answer.statusCode).toBe(200);
+    const next = Session.parse(answer.json());
+    expect(next.refreshToken).not.toBe(s.refreshToken);
+    expect(next.account).toEqual(s.account);
+    expect(claims(next.accessToken).sid).toBe(s.sessionId);
+    expect((await signOut(h, next.accessToken)).statusCode).toBe(204);
+  });
+
+  it("refuses a malformed refresh body with a 400 on refreshToken", async () => {
+    const h = harness();
+    const answer = await refresh(h, "");
+    expect(answer.statusCode).toBe(400);
+    expect(ErrorEnvelope.parse(answer.json()).error).toEqual({ code: "VALIDATION_FAILED", fields: ["refreshToken"] });
+  });
+
+  it("signs out, after which the access and refresh tokens are refused at once", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const out = await signOut(h, s.accessToken);
+    expect(out.statusCode).toBe(204);
+    expect(out.body).toBe("");
+    expect(await sessionExists(s.sessionId)).toBe(false);
+    expect((await signOut(h, s.accessToken)).json()).toEqual({ error: { code: "UNAUTHENTICATED" } });
+    expect(await refreshed(h, s.refreshToken)).toBe("UNAUTHENTICATED");
+  });
+
+  it("refuses a missing, expired, tampered or mismatched access token", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const other = await signIn(h);
+    const dot = s.accessToken.lastIndexOf(".");
+    const [payload, signature] = [s.accessToken.slice(0, dot), s.accessToken.slice(dot + 1)];
+    const otherPayload = other.accessToken.slice(0, other.accessToken.lastIndexOf("."));
+    const flipped = `${signature.slice(0, -1)}${signature.endsWith("0") ? "1" : "0"}`;
+    const extraClaim = Buffer.from(JSON.stringify({ ...claims(s.accessToken), extra: 1 })).toString("base64url");
+    const refused = [
+      undefined,
+      "",
+      `${otherPayload}.${signature}`,
+      `${payload}.${flipped}`,
+      `${extraClaim}.${digest(keys.access, extraClaim)}`,
+      accessToken(keys, other.account.id, s.sessionId, h.clock.now()),
+    ];
+    for (const token of refused) {
+      expect((await signOut(h, token)).json()).toEqual({ error: { code: "UNAUTHENTICATED" } });
+    }
+    h.clock.advance(15 * 60_000);
+    expect((await signOut(h, s.accessToken)).statusCode).toBe(401);
+    h.clock.set(new Date("2030-01-01T00:00:00.000Z"));
+    expect(await sessionExists(s.sessionId)).toBe(true);
+    expect((await signOut(h, s.accessToken)).statusCode).toBe(204);
+  });
+
+  it("ends the whole session when a replaced token is used after 60 s", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const t2 = await refreshed(h, s.refreshToken);
+    h.clock.advance(60_001);
+    expect(await refreshed(h, s.refreshToken)).toBe("UNAUTHENTICATED");
+    expect(await sessionExists(s.sessionId)).toBe(false);
+    expect(await refreshed(h, t2)).toBe("UNAUTHENTICATED");
+  });
+
+  it("refuses a token unused for 90 days, and each refresh restarts the 90 days", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    h.clock.advance(89 * DAY_MS);
+    const t2 = await refreshed(h, s.refreshToken);
+    h.clock.advance(89 * DAY_MS);
+    const t3 = await refreshed(h, t2);
+    expect(t3).not.toBe("UNAUTHENTICATED");
+    h.clock.advance(90 * DAY_MS);
+    expect(await refreshed(h, t3)).toBe("UNAUTHENTICATED");
+  });
+
+  it("gives every concurrent refresh of one token the same successor, with one rotation", async () => {
+    for (let run = 0; run < 20; run++) {
+      const h = harness();
+      const s = await signIn(h);
+      const answers = await Promise.all([1, 2, 3].slice(0, 2 + (run % 2)).map(() => refreshed(h, s.refreshToken)));
+      expect(new Set(answers).size).toBe(1);
+      expect(answers[0]).not.toBe("UNAUTHENTICATED");
+      expect(await tokenCount(s.sessionId)).toBe(2);
+      // Retries arriving together inside the window get it too, and change nothing.
+      h.clock.advance(30_000);
+      expect(await Promise.all([1, 2, 3].map(() => refreshed(h, s.refreshToken)))).toEqual([answers[0], answers[0], answers[0]]);
+      expect(await tokenCount(s.sessionId)).toBe(2);
+      await h.app.close();
+    }
+  });
+
+  it("answers a retry after a lost answer with the same successor", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const t2 = await refreshed(h, s.refreshToken);
+    h.clock.advance(10_000);
+    expect(await refreshed(h, s.refreshToken)).toBe(t2);
+    const t3 = await refreshed(h, t2);
+    h.clock.advance(10_000);
+    expect(await refreshed(h, t2)).toBe(t3);
+    expect(await refreshed(h, t3)).not.toBe("UNAUTHENTICATED");
+  });
+
+  it("allows a retry up to exactly 60 s after replacement, and ends the session at 60.001 s", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const t2 = await refreshed(h, s.refreshToken);
+    h.clock.advance(59_999);
+    expect(await refreshed(h, s.refreshToken)).toBe(t2);
+    h.clock.advance(1);
+    expect(await refreshed(h, s.refreshToken)).toBe(t2);
+    h.clock.advance(1);
+    expect(await refreshed(h, s.refreshToken)).toBe("UNAUTHENTICATED");
+    expect(await sessionExists(s.sessionId)).toBe(false);
+  });
+
+  it("refuses a delayed retry once its successor is replaced, and keeps the session", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const t2 = await refreshed(h, s.refreshToken);
+    const t3 = await refreshed(h, t2);
+    h.clock.advance(20_000);
+    expect(await refreshed(h, s.refreshToken)).toBe("UNAUTHENTICATED");
+    expect(await sessionExists(s.sessionId)).toBe(true);
+    expect(await refreshed(h, t3)).not.toBe("UNAUTHENTICATED");
+  });
+
+  it("ends the session when a stolen copy is used after the other side rotates on", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const [phone, thief] = await Promise.all([refreshed(h, s.refreshToken), refreshed(h, s.refreshToken)]);
+    expect(thief).toBe(phone);
+    const t3 = await refreshed(h, phone);
+    h.clock.advance(60_001);
+    expect(await refreshed(h, thief)).toBe("UNAUTHENTICATED");
+    expect(await sessionExists(s.sessionId)).toBe(false);
+    expect(await refreshed(h, t3)).toBe("UNAUTHENTICATED");
+  });
+
+  it("ends the session when a token two rotations back is used after 60 s", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const t2 = await refreshed(h, s.refreshToken);
+    await refreshed(h, t2);
+    h.clock.advance(60_001);
+    expect(await refreshed(h, s.refreshToken)).toBe("UNAUTHENTICATED");
+    expect(await sessionExists(s.sessionId)).toBe(false);
+  });
+
+  it("refuses fabricated tokens without touching the real session", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const fabricated = [
+      randomBytes(32).toString("base64url"),
+      successorToken(keys, s.sessionId, 5, s.refreshToken),
+      `${s.sessionId}.${randomBytes(32).toString("base64url")}`,
+      `${s.refreshToken}x`,
+    ];
+    for (const token of fabricated) expect(await refreshed(h, token)).toBe("UNAUTHENTICATED");
+    expect(await tokenCount(s.sessionId)).toBe(1);
+    expect(await refreshed(h, s.refreshToken)).not.toBe("UNAUTHENTICATED");
+  });
+
+  it("keeps successors unique to their session and generation, and keys separate", () => {
+    const token = randomBytes(32).toString("base64url");
+    const [a, b] = [randomUUID(), randomUUID()];
+    const successors = [successorToken(keys, a, 1, token), successorToken(keys, b, 1, token), successorToken(keys, a, 2, token)];
+    expect(new Set(successors).size).toBe(3);
+    expect(new Set(Object.values(keys).map((key) => key.toString("hex"))).size).toBe(4);
+    const payload = Buffer.from(JSON.stringify({ sub: a, sid: b, exp: 2_000_000_000 })).toString("base64url");
+    expect(digest(keys.refreshHash, payload)).not.toBe(digest(keys.access, payload));
   });
 });

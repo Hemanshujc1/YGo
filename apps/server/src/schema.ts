@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -5,6 +6,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -37,10 +39,25 @@ export const loginCodeHistory = pgTable(
 export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
-  refreshTokenHash: text("refresh_token_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Every refresh token a session has been issued, as a keyed hash. The one with
+// no replaced_at is current; the database allows one per session (#153, Q3).
+export const refreshTokens = pgTable(
+  "refresh_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+    generation: integer("generation").notNull(),
+    replacedAt: timestamp("replaced_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("refresh_tokens_session_generation_idx").on(table.sessionId, table.generation),
+    uniqueIndex("refresh_tokens_one_current_idx").on(table.sessionId).where(sql`${table.replacedAt} IS NULL`),
+  ],
+);
 
 export const emailCodeSends = pgTable(
   "email_code_sends",

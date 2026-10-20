@@ -1,10 +1,11 @@
-import { createHmac, randomBytes, randomInt, timingSafeEqual, randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
   ErrorEnvelope,
   type ErrorCode,
+  RefreshBody,
   RequestCodeBody,
   Session,
   VerifyCodeBody,
@@ -12,13 +13,21 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import type { Mailer } from "../adapters/mailer";
+import {
+  GRACE_MS,
+  REFRESH_TTL_MS,
+  accessToken,
+  deriveKeys,
+  digest,
+  sameDigest,
+  signedIn,
+  successorToken,
+} from "../tokens";
 
 const CODE_TTL_MS = 5 * 60_000;
 const LOCK_MS = 15 * 60_000;
 const MIN_SEND_INTERVAL_MS = 30_000;
 const SEND_WINDOW_MS = 60 * 60_000;
-const ACCESS_TTL_SECONDS = 15 * 60;
-const REFRESH_TTL_MS = 90 * 24 * 60 * 60_000;
 
 interface AuthOptions {
   pool: Pool;
@@ -29,30 +38,11 @@ interface AuthOptions {
 
 type AuthApp = FastifyInstance;
 
-function digest(secret: string, value: string): string {
-  return createHmac("sha256", secret).update(value).digest("hex");
-}
-
-function sameDigest(expected: string, candidate: string): boolean {
-  const left = Buffer.from(expected, "hex");
-  const right = Buffer.from(candidate, "hex");
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-function accessToken(secret: string, accountId: string, sessionId: string, now: Date): string {
-  const payload = Buffer.from(JSON.stringify({
-    sub: accountId,
-    sid: sessionId,
-    exp: Math.floor(now.getTime() / 1000) + ACCESS_TTL_SECONDS,
-  })).toString("base64url");
-  return `${payload}.${digest(secret, payload)}`;
-}
-
 async function lockKey(client: PoolClient, key: string, namespace: number): Promise<void> {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))", [key, namespace]);
 }
 
-function sendError(reply: FastifyReply, status: 400 | 429 | 503, code: ErrorCode) {
+function sendError(reply: FastifyReply, status: 400 | 401 | 429 | 503, code: ErrorCode) {
   return reply.code(status).send({ error: { code } });
 }
 
@@ -79,6 +69,7 @@ function rateLimitAddress(address: string): string {
 }
 
 export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }: AuthOptions): void {
+  const keys = deriveKeys(secret);
   app.post(
     "/v1/auth/code",
     { schema: { body: RequestCodeBody, response: { 400: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope } } },
@@ -184,7 +175,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
                ELSE login_codes.wrong_tries
              END,
              locked_until = CASE WHEN login_codes.locked_until > $4 THEN login_codes.locked_until ELSE NULL END`,
-            [email, digest(secret, code), new Date(now.getTime() + CODE_TTL_MS), now],
+            [email, digest(keys.loginCode, code), new Date(now.getTime() + CODE_TTL_MS), now],
           );
           await activateClient.query("COMMIT");
         } catch (error) {
@@ -228,13 +219,13 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           await client.query("ROLLBACK");
           return sendError(reply, 400, "CODE_EXPIRED");
         }
-        if (!sameDigest(login.code_hash, digest(secret, code))) {
+        if (!sameDigest(login.code_hash, digest(keys.loginCode, code))) {
           const oldCodes = await client.query<{ code_hash: string }>(
             "SELECT code_hash FROM login_code_history WHERE email = $1 AND expires_at > $2",
             [email, now],
           );
           let replaced = false;
-          for (const old of oldCodes.rows) replaced = sameDigest(old.code_hash, digest(secret, code)) || replaced;
+          for (const old of oldCodes.rows) replaced = sameDigest(old.code_hash, digest(keys.loginCode, code)) || replaced;
           if (replaced) {
             await client.query("ROLLBACK");
             return sendError(reply, 400, "CODE_EXPIRED");
@@ -261,13 +252,17 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         const sessionId = randomUUID();
         const refreshToken = randomBytes(32).toString("base64url");
         await client.query(
-          "INSERT INTO sessions (id, account_id, refresh_token_hash, expires_at) VALUES ($1, $2, $3, $4)",
-          [sessionId, account.id, digest(secret, refreshToken), new Date(now.getTime() + REFRESH_TTL_MS)],
+          "INSERT INTO sessions (id, account_id, expires_at) VALUES ($1, $2, $3)",
+          [sessionId, account.id, new Date(now.getTime() + REFRESH_TTL_MS)],
+        );
+        await client.query(
+          "INSERT INTO refresh_tokens (token_hash, session_id, generation) VALUES ($1, $2, 0)",
+          [digest(keys.refreshHash, refreshToken), sessionId],
         );
         await client.query("DELETE FROM login_codes WHERE email = $1", [email]);
         await client.query("COMMIT");
         return reply.code(200).send({
-          accessToken: accessToken(secret, account.id, sessionId, now),
+          accessToken: accessToken(keys, account.id, sessionId, now),
           refreshToken,
           account,
         });
@@ -277,6 +272,98 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
       } finally {
         client.release();
       }
+    },
+  );
+
+  app.post(
+    "/v1/auth/refresh",
+    { schema: { body: RefreshBody, response: { 200: Session, 400: ErrorEnvelope, 401: ErrorEnvelope } } },
+    async (request, reply) => {
+      const { refreshToken } = request.body as typeof RefreshBody._output;
+      const now = clock.now();
+      const hash = digest(keys.refreshHash, refreshToken);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // An unknown token, fabricated or never issued, changes nothing (#153, Q3).
+        const found = await client.query<{ session_id: string }>(
+          "SELECT session_id FROM refresh_tokens WHERE token_hash = $1",
+          [hash],
+        );
+        const sessionId = found.rows[0]?.session_id;
+        // Concurrent refreshes of one session run one at a time from here.
+        const session = sessionId
+          ? (await client.query<{ account_id: string; expires_at: Date }>(
+              "SELECT account_id, expires_at FROM sessions WHERE id = $1 FOR UPDATE",
+              [sessionId],
+            )).rows[0]
+          : undefined;
+        // Read again under the lock: a refresh that held it may have replaced this token.
+        const token = session
+          ? (await client.query<{ generation: number; replaced_at: Date | null }>(
+              "SELECT generation, replaced_at FROM refresh_tokens WHERE token_hash = $1",
+              [hash],
+            )).rows[0]
+          : undefined;
+        if (!sessionId || !session || !token || session.expires_at <= now) {
+          await client.query("ROLLBACK");
+          return sendError(reply, 401, "UNAUTHENTICATED");
+        }
+
+        const generation = token.generation + 1;
+        const next = successorToken(keys, sessionId, generation, refreshToken);
+        if (token.replaced_at === null) {
+          await client.query("UPDATE refresh_tokens SET replaced_at = $2 WHERE token_hash = $1", [hash, now]);
+          await client.query(
+            "INSERT INTO refresh_tokens (token_hash, session_id, generation) VALUES ($1, $2, $3)",
+            [digest(keys.refreshHash, next), sessionId, generation],
+          );
+          await client.query("UPDATE sessions SET expires_at = $2 WHERE id = $1", [
+            sessionId,
+            new Date(now.getTime() + REFRESH_TTL_MS),
+          ]);
+        } else if (now.getTime() - token.replaced_at.getTime() > GRACE_MS) {
+          // A replaced token used after the grace window may have been stolen.
+          await client.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+          await client.query("COMMIT");
+          return sendError(reply, 401, "UNAUTHENTICATED");
+        } else {
+          // A retry within the window gets the same successor, if it is still current.
+          const current = await client.query(
+            `SELECT 1 FROM refresh_tokens
+             WHERE token_hash = $1 AND session_id = $2 AND generation = $3 AND replaced_at IS NULL`,
+            [digest(keys.refreshHash, next), sessionId, generation],
+          );
+          if (!current.rowCount) {
+            await client.query("ROLLBACK");
+            return sendError(reply, 401, "UNAUTHENTICATED");
+          }
+        }
+        const accountResult = await client.query<Account>(
+          "SELECT id, email, name, phone FROM accounts WHERE id = $1",
+          [session.account_id],
+        );
+        const account = accountResult.rows[0];
+        if (!account) throw new Error("Session has no account");
+        await client.query("COMMIT");
+        return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), refreshToken: next, account });
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  app.post(
+    "/v1/auth/sign-out",
+    { schema: { response: { 401: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await signedIn(request, reply, { pool, clock, keys });
+      if (!who) return reply;
+      await pool.query("DELETE FROM sessions WHERE id = $1", [who.sessionId]);
+      return (reply as FastifyReply).code(204).send();
     },
   );
 }
