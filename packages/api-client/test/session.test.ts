@@ -52,6 +52,7 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   let stored = saved;
   /** Each token passed to `set`, when it is called. */
   const sets: string[] = [];
+  let reads = 0;
   let held: Promise<void> | null = null;
   /** The store methods whose next call fails, as when secure storage is unavailable. */
   const failing = new Set<"get" | "set" | "clear">();
@@ -61,21 +62,24 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   };
   const onSignedOut = vi.fn();
   const onUpdateRequired = vi.fn();
+  const onSaveFailed = vi.fn();
   const client = createApiClient({
     baseUrl: "https://api.test",
     onSignedOut,
     onUpdateRequired,
+    onSaveFailed,
     session: {
       get: async () => {
+        reads += 1;
         fail("get");
         return stored;
       },
       set: async (token) => {
         sets.push(token);
-        fail("set");
         const wait = held;
         held = null;
         await wait;
+        fail("set");
         stored = token;
       },
       clear: async () => {
@@ -105,7 +109,7 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   const failNext = (op: "get" | "set" | "clear") => {
     failing.add(op);
   };
-  return { client, calls, refreshes, sets, holdNextSet, failNext, stored: () => stored, onSignedOut, onUpdateRequired };
+  return { client, calls, refreshes, sets, reads: () => reads, holdNextSet, failNext, stored: () => stored, onSignedOut, onUpdateRequired, onSaveFailed };
 }
 
 /** A server answer held until `release(path)`; `waiting()` counts those held. */
@@ -170,11 +174,32 @@ describe("each call", () => {
   });
 
   it("keeps no session when the phone cannot save it", async () => {
-    const { client, calls, failNext } = setup(fakeServer().handle);
+    const { client, calls, failNext, onSaveFailed } = setup(fakeServer().handle);
     failNext("set");
     await expect(client.verifyCode(signIn)).rejects.toThrow("Keychain unavailable");
+    expect(onSaveFailed).not.toHaveBeenCalled();
     expect(await client.me()).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
     expect(calls.map((call) => call.path)).toEqual(["/v1/auth/verify"]);
+  });
+
+  it("keeps a sign-in the phone could not save when a call has refreshed it meanwhile, since that saves its own", async () => {
+    const { client, calls, sets, holdNextSet, failNext, stored } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(10));
+      if (call.path === "/v1/auth/refresh") return answer(200, pair(11));
+      return call.auth === "Bearer a10" ? answer(401, unauthenticated) : answer(200, account);
+    });
+    const release = holdNextSet();
+    failNext("set");
+    const signingIn = client.verifyCode(signIn);
+    await vi.waitFor(() => expect(sets).toEqual(["r10"]));
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    release();
+
+    await expect(signingIn).rejects.toThrow("Keychain unavailable");
+    await vi.waitFor(() => expect(stored()).toBe("r11"));
+    const sent = calls.length;
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(calls.slice(sent).map((call) => call.auth)).toEqual(["Bearer a11"]);
   });
 
   it("refuses to sign in without a session store", async () => {
@@ -286,13 +311,52 @@ describe("refresh", () => {
     expect(calls[0]?.body).toEqual({ refreshToken: "r0" });
   });
 
-  it("keeps a refreshed session in memory when the phone cannot save it, since the old token is used up", async () => {
-    const { client, calls, refreshes, failNext } = setup(fakeServer().handle, "r0");
+  it("reads the saved token once per launch, then refreshes with the newest one in memory", async () => {
+    const server = fakeServer();
+    const { client, calls, reads } = setup(server.handle, "r0");
+    await client.me();
+    server.expire();
+    await client.me();
+    expect(reads()).toBe(1);
+    expect(calls.filter((call) => call.path === "/v1/auth/refresh").map((call) => call.body)).toEqual([
+      { refreshToken: "r0" },
+      { refreshToken: "r2" },
+    ]);
+  });
+
+  it("lets calls go on with the new access token before the phone has saved the refresh token", async () => {
+    const { client, holdNextSet, stored } = setup(fakeServer().handle, "r0");
+    const release = holdNextSet();
+    const ok = { ok: true, data: account };
+    expect(await Promise.all([client.me(), client.changeName({ name: "Asha K" })])).toEqual([ok, ok]);
+    expect(stored()).toBe("r0");
+    release();
+    await vi.waitFor(() => expect(stored()).toBe("r2"));
+  });
+
+  it("goes on when the phone cannot save a refreshed token, and the next refresh saves again", async () => {
+    const server = fakeServer();
+    const { client, calls, failNext, stored, onSaveFailed } = setup(server.handle, "r0");
     failNext("set");
-    await expect(client.me()).rejects.toThrow("Keychain unavailable");
     expect(await client.me()).toEqual({ ok: true, data: account });
-    expect(refreshes()).toBe(1);
-    expect(calls.at(-1)?.auth).toBe("Bearer a2");
+    expect(stored()).toBe("r0");
+    await vi.waitFor(() => expect(onSaveFailed).toHaveBeenCalledTimes(1));
+    expect(onSaveFailed).toHaveBeenCalledWith(new Error("Keychain unavailable"));
+    server.expire();
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(calls.at(-1)?.auth).toBe("Bearer a3");
+    await vi.waitFor(() => expect(stored()).toBe("r3"));
+    expect(onSaveFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries the refusal and the clear again when the phone could not clear a refused token", async () => {
+    const { client, refreshes, failNext, stored, onSignedOut } = setup(() => answer(401, unauthenticated), "r0");
+    failNext("clear");
+    await expect(client.me()).rejects.toThrow("Keychain unavailable");
+    expect(await client.me()).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
+    expect(refreshes()).toBe(2);
+    expect(stored()).toBeNull();
+    expect(onSignedOut).toHaveBeenCalledTimes(1);
   });
 
   it("shares a failed refresh too, so calls refused together do not refresh twice", async () => {
@@ -466,24 +530,22 @@ describe("a sign-in or sign-out during another change", () => {
   /** Lets every answer and store write already released finish. */
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  it("a sign-out while a refresh is saving its token waits for it, then leaves no session", async () => {
-    const { client, calls, sets, holdNextSet, stored, onSignedOut } = setup((call) => {
-      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
-      if (call.path === "/v1/auth/refresh") return answer(200, pair(2));
-      if (call.path === "/v1/auth/sign-out") return answer(204);
-      return answer(401, unauthenticated);
-    });
+  it("a sign-out while a refresh is saving its token clears the store after the save", async () => {
+    const server = fakeServer();
+    const { client, calls, sets, holdNextSet, stored, onSignedOut } = setup(server.handle);
     await client.verifyCode(signIn);
+    server.expire();
     const release = holdNextSet();
 
-    const loading = client.me();
-    await vi.waitFor(() => expect(sets).toEqual(["r1", "r2"]));
+    // `me` goes on with the refreshed token without waiting for the save.
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(sets).toEqual(["r1", "r2"]);
     const signingOut = client.signOut();
     await settle();
+    expect(stored()).toBe("r1");
     release();
     await signingOut;
 
-    expect(await loading).toEqual(signedOut);
     expect(stored()).toBeNull();
     expect(onSignedOut).not.toHaveBeenCalled();
     expect(await client.me()).toEqual(signedOut);
@@ -503,15 +565,15 @@ describe("a sign-in or sign-out during another change", () => {
     await client.verifyCode(signIn);
     const release = holdNextSet();
 
-    const loading = client.me();
-    await vi.waitFor(() => expect(sets).toEqual(["r10", "r11"]));
+    // The call goes on with the refreshed token while the phone saves it.
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(sets).toEqual(["r10", "r11"]);
     const signingIn = client.verifyCode(signIn);
     await settle();
     release();
 
     expect(await signingIn).toEqual({ ok: true, data: account });
-    // A call begun in the older session is not sent with the newer one.
-    expect(await loading).toEqual(signedOut);
+    // The older write lands first.
     expect(sets).toEqual(["r10", "r11", "r20"]);
     expect(stored()).toBe("r20");
     await client.me();
@@ -662,28 +724,102 @@ describe("a sign-in or sign-out during another change", () => {
 
   it("a sign-out tapped twice does not count as the session ending by itself", async () => {
     const server = holds();
-    let signOuts = 0;
-    const { client, stored, onSignedOut } = setup(async (call) => {
+    const { client, calls, stored, onSignedOut } = setup(async (call) => {
       if (call.path === "/v1/auth/verify") return answer(200, pair(1));
-      if (call.path === "/v1/auth/sign-out" && ++signOuts === 1) {
-        await server.hold(call.path);
-        return answer(204);
-      }
-      if (call.path === "/v1/auth/refresh") await server.hold(call.path);
-      return answer(401, unauthenticated);
+      await server.hold(call.path);
+      return answer(call.path === "/v1/auth/sign-out" ? 204 : 401, unauthenticated);
     });
     await client.verifyCode(signIn);
 
     const first = client.signOut();
-    const second = client.signOut();
-    await vi.waitFor(() => expect(server.waiting()).toBe(2));
+    // The second has no session left to end, so it asks the server nothing.
+    await client.signOut();
+    await vi.waitFor(() => expect(server.waiting()).toBe(1));
     server.release("/v1/auth/sign-out");
     await first;
-    server.release("/v1/auth/refresh");
-    await second;
 
+    expect(calls.map((call) => call.path)).toEqual(["/v1/auth/verify", "/v1/auth/sign-out"]);
     expect(onSignedOut).not.toHaveBeenCalled();
     expect(stored()).toBeNull();
+  });
+
+  it("clears the store when a sign-in kept during a sign-out could not be saved", async () => {
+    const { client, failNext, stored, server, signingOut } = await signOutWaitingOnRefresh(false);
+    failNext("set");
+    await expect(client.verifyCode(signIn)).rejects.toThrow("Keychain unavailable");
+    server.release("/v1/auth/refresh");
+    await signingOut;
+    expect(stored()).toBeNull();
+  });
+
+  it("a sign-out tapped twice still clears the store when the second clear fails", async () => {
+    const server = holds();
+    const { client, failNext, stored } = setup(async (call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      await server.hold(call.path);
+      return answer(204);
+    });
+    await client.verifyCode(signIn);
+    const first = client.signOut();
+    failNext("clear");
+    await expect(client.signOut()).rejects.toThrow("Keychain unavailable");
+    expect(stored()).toBe("r1");
+    server.release("/v1/auth/sign-out");
+    await first;
+    expect(stored()).toBeNull();
+  });
+
+  /** Signs in as pair 10, then holds a sign-out behind a refresh to pair 11 under way. */
+  async function signOutWaitingOnRefresh(holdSecondSignIn: boolean) {
+    const server = holds();
+    let signIns = 0;
+    const handle = async (call: Call) => {
+      if (call.path === "/v1/auth/verify") {
+        if (++signIns === 2 && holdSecondSignIn) await server.hold(call.path);
+        return answer(200, pair(signIns * 10));
+      }
+      if (call.path === "/v1/auth/refresh") {
+        await server.hold(call.path);
+        return answer(200, pair(11));
+      }
+      if (call.path === "/v1/auth/sign-out") return answer(204);
+      return call.auth === "Bearer a10" ? answer(401, unauthenticated) : answer(200, account);
+    };
+    const client = setup(handle);
+    await client.client.verifyCode(signIn);
+    const loading = client.client.me();
+    await vi.waitFor(() => expect(server.waiting()).toBe(1));
+    const signingOut = client.client.signOut();
+    return { ...client, server, loading, signingOut };
+  }
+
+  it("keeps a sign-in begun while a sign-out waits for a refresh, that answers after the sign-out", async () => {
+    const { client, calls, stored, server, loading, signingOut } = await signOutWaitingOnRefresh(true);
+    const signingIn = client.verifyCode(signIn);
+    await vi.waitFor(() => expect(server.waiting()).toBe(2));
+    server.release("/v1/auth/refresh");
+    await signingOut;
+    server.release("/v1/auth/verify");
+
+    expect(await signingIn).toEqual({ ok: true, data: account });
+    expect(await loading).toEqual(signedOut);
+    expect(stored()).toBe("r20");
+    expect(calls.find((call) => call.path === "/v1/auth/sign-out")?.auth).toBe("Bearer a11");
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(calls.at(-1)?.auth).toBe("Bearer a20");
+  });
+
+  it("a sign-in kept while a sign-out waits for a refresh is not signed out by it", async () => {
+    const { client, calls, stored, server, signingOut } = await signOutWaitingOnRefresh(false);
+    expect(await client.verifyCode(signIn)).toEqual({ ok: true, data: account });
+    expect(stored()).toBe("r20");
+    server.release("/v1/auth/refresh");
+    await signingOut;
+
+    expect(stored()).toBe("r20");
+    expect(calls.find((call) => call.path === "/v1/auth/sign-out")?.auth).toBe("Bearer a11");
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(calls.at(-1)?.auth).toBe("Bearer a20");
   });
 
   it("a sign-out while the app is opening tells the server, with the refreshed token", async () => {
