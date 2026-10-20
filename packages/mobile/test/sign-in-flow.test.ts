@@ -10,6 +10,8 @@ import {
   SessionNotSaved,
   sendOutcome,
   wholeCode,
+  withSend,
+  withShut,
 } from "../src/sign-in-flow";
 
 const sent = { wall: 1_000_000, steady: 5_000 };
@@ -91,22 +93,70 @@ describe("wholeCode", () => {
 });
 
 describe("needsSend", () => {
-  const last = { email: "asha@example.com", at: sent };
+  const asha = "asha@example.com";
+  const ravi = "ravi@example.com";
+  const none = new Map();
+  const toAsha = withSend(none, asha, sent);
 
   it("sends the first time", () => {
-    expect(needsSend("asha@example.com", null, sent)).toBe(true);
+    expect(needsSend(asha, none, sent)).toBe(true);
   });
 
   it("goes straight to the code for the same email inside the wait", () => {
-    expect(needsSend("asha@example.com", last, after(5_000))).toBe(false);
+    expect(needsSend(asha, toAsha, after(5_000))).toBe(false);
   });
 
   it("sends to the same email once the wait is over", () => {
-    expect(needsSend("asha@example.com", last, after(30_000))).toBe(true);
+    expect(needsSend(asha, toAsha, after(30_000))).toBe(true);
   });
 
   it("sends to a different email at once", () => {
-    expect(needsSend("ravi@example.com", last, after(5_000))).toBe(true);
+    expect(needsSend(ravi, toAsha, after(5_000))).toBe(true);
+  });
+
+  it("goes straight back to the first email's code after A, then B, then A inside A's wait", () => {
+    const both = withSend(toAsha, ravi, after(5_000));
+    expect(needsSend(asha, both, after(10_000))).toBe(false);
+    expect(both.get(asha)?.at).toEqual(sent);
+    expect(needsSend(ravi, both, after(10_000))).toBe(false);
+  });
+
+  it("sends to A again once A's own wait is over, whatever B's", () => {
+    const both = withSend(toAsha, ravi, after(20_000));
+    expect(needsSend(asha, both, after(30_000))).toBe(true);
+    expect(needsSend(ravi, both, after(30_000))).toBe(false);
+  });
+});
+
+describe("withSend and withShut", () => {
+  const asha = "asha@example.com";
+  const ravi = "ravi@example.com";
+
+  it("keeps A's boxes shut while a code goes to B, and opens them with a new code to A", () => {
+    const shut = withShut(withSend(new Map(), asha, sent), asha);
+    const both = withSend(shut, ravi, after(5_000));
+    expect(both.get(asha)?.shut).toBe(true);
+    expect(both.get(ravi)?.shut).toBe(false);
+    expect(withSend(both, asha, after(30_000)).get(asha)).toEqual({ at: after(30_000), shut: false });
+  });
+
+  it("shuts only the email whose code is spent", () => {
+    const both = withSend(withSend(new Map(), asha, sent), ravi, after(5_000));
+    const shut = withShut(both, ravi);
+    expect(shut.get(asha)?.shut).toBe(false);
+    expect(shut.get(ravi)?.shut).toBe(true);
+  });
+
+  it("leaves the sends as they were for an email no code went to", () => {
+    const one = withSend(new Map(), asha, sent);
+    expect(withShut(one, ravi)).toBe(one);
+  });
+
+  it("never changes the sends it was given", () => {
+    const one = withSend(new Map(), asha, sent);
+    withSend(one, ravi, after(5_000));
+    withShut(one, asha);
+    expect([...one]).toEqual([[asha, { at: sent, shut: false }]]);
   });
 });
 

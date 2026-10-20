@@ -12,7 +12,7 @@ export const CODE_LENGTH = 6;
  * phone sleeps, but the person can set it back or forward. `steady` only runs
  * forward and can't be set, but may stop while the phone sleeps. It starts
  * again with each app start, so a moment is compared only with another from
- * the same run (the last send is kept in memory, never saved).
+ * the same run (the sends are kept in memory, never saved).
  */
 export type Moment = { wall: number; steady: number };
 
@@ -54,16 +54,36 @@ export function wholeCode(digits: string): string | null {
   return code.success ? code.data : null;
 }
 
-/** The last code sent: to which email, and when. */
-export type LastSend = { email: string; at: Moment };
+/** The last code sent to one email: when, and whether it is spent (expired, locked, or used by a sign-in this phone could not keep). */
+export type Sent = { at: Moment; shut: boolean };
 
 /**
- * Whether C01's "Email me a code" sends again. The same email inside the
- * wait goes straight to C14, where the code already sent still works, so
- * coming back to C01 never restarts the countdown (#155, S2).
+ * The last code sent to each email since the last sign-in, by the checked
+ * email. The server's 30-second gap is per email, so each email keeps its
+ * own countdown and shut boxes: A, then B, then A again inside A's wait goes
+ * straight back to A's code.
  */
-export function needsSend(email: string, last: LastSend | null, now: Moment): boolean {
-  return !(last && last.email === email && secondsLeft(last.at, now) > 0);
+export type Sends = ReadonlyMap<string, Sent>;
+
+/** The sends once a new code went to `email` at `at`; its boxes are open. */
+export function withSend(sends: Sends, email: string, at: Moment): Sends {
+  return new Map(sends).set(email, { at, shut: false });
+}
+
+/** The sends once `email`'s code is spent. */
+export function withShut(sends: Sends, email: string): Sends {
+  const sent = sends.get(email);
+  return sent ? new Map(sends).set(email, { ...sent, shut: true }) : sends;
+}
+
+/**
+ * Whether C01's "Email me a code" sends again. An email inside its own wait
+ * goes straight to C14, where the code already sent still works, so coming
+ * back to C01 never restarts the countdown (#155, S2).
+ */
+export function needsSend(email: string, sends: Sends, now: Moment): boolean {
+  const sent = sends.get(email);
+  return !(sent && secondsLeft(sent.at, now) > 0);
 }
 
 /**

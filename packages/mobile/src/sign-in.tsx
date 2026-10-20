@@ -6,12 +6,14 @@ import { EnterCode } from "./enter-code";
 import {
   aboutField,
   checkOutcome,
-  type LastSend,
   moment,
   needsSend,
   type Problem,
   rejected,
+  type Sends,
   sendOutcome,
+  withSend,
+  withShut,
 } from "./sign-in-flow";
 import { Button, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
@@ -32,16 +34,13 @@ export type SignInProps = {
   onSignedIn: (account: Account) => void;
 };
 
-/** The last code sent, and whether it is spent (expired, locked, or used by a sign-in this phone could not keep). */
-type Memory = { last: LastSend | null; shut: boolean };
-
 /**
- * Kept outside the screen, so a remount (the layout showing another state
- * for a moment, Fast Refresh) keeps the countdown and the shut boxes, and
- * C01 never sends again into the server's 30-second refusal. A sign-in
- * clears it: that code is used.
+ * The last code sent to each email, kept outside the screen, so a remount
+ * (the layout showing another state for a moment, Fast Refresh) keeps each
+ * countdown and the shut boxes, and C01 never sends again into the server's
+ * 30-second refusal. A sign-in clears it: that code is used.
  */
-let memory: Memory = { last: null, shut: false };
+let memory: Sends = new Map();
 
 /**
  * C01 Sign in, and C14 once a code is sent (#155, Q6–Q8). The root layout
@@ -52,11 +51,12 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
   const [typed, setTyped] = useState("");
   // The email C14 is open for; C01 while null.
   const [codeFor, setCodeFor] = useState<string | null>(null);
-  const [{ last, shut }, setMemory] = useState(memory);
+  const [sends, setSends] = useState(memory);
+  const sent = codeFor ? sends.get(codeFor) : undefined;
 
-  function remember(next: Partial<Memory>) {
-    memory = { ...memory, ...next };
-    setMemory(memory);
+  function remember(next: Sends) {
+    memory = next;
+    setSends(next);
   }
 
   async function send(email: string): Promise<Problem | null> {
@@ -67,7 +67,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
       answer = "offline";
     }
     const problem = sendOutcome(answer);
-    if (!problem) remember({ last: { email, at: moment() }, shut: false });
+    if (!problem) remember(withSend(memory, email, moment()));
     return problem;
   }
 
@@ -78,8 +78,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
     } catch (error) {
       outcome = checkOutcome(rejected(error));
     }
-    if ("signedIn" in outcome) remember({ last: null, shut: false });
-    else if (!outcome.boxesOpen) remember({ shut: true });
+    if ("signedIn" in outcome) remember(new Map());
+    else if (!outcome.boxesOpen) remember(withShut(memory, email));
     return outcome;
   }
 
@@ -94,8 +94,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
             words={words}
             supportEmail={supportEmail}
             email={codeFor}
-            sentAt={last?.email === codeFor ? last.at : null}
-            boxesOpen={!(shut && last?.email === codeFor)}
+            sentAt={sent?.at ?? null}
+            boxesOpen={!sent?.shut}
             resend={() => send(codeFor)}
             check={(code) => check(codeFor, code)}
             onSignedIn={onSignedIn}
@@ -108,7 +108,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
             typed={typed}
             setTyped={setTyped}
             send={async (email) => {
-              const problem = needsSend(email, last, moment()) ? await send(email) : null;
+              const problem = needsSend(email, memory, moment()) ? await send(email) : null;
               if (!problem) setCodeFor(email);
               return problem;
             }}
