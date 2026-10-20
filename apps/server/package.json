@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "3.1150.0",
+    "@smithy/node-http-handler": "4.12.1",
     "@ygo/contracts": "workspace:*",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.5",

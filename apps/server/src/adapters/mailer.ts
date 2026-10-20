@@ -1,4 +1,5 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 /**
  * The only email the product sends is about access to the account: the sign-in
@@ -28,7 +29,14 @@ export function createLocalMailer(): Mailer & { sent: Mail[] } {
 export function createSesMailer(
   from: string,
   region: string,
-  client: { send(command: SendEmailCommand): Promise<unknown> } = new SESv2Client({ region }),
+  client: { send(command: SendEmailCommand): Promise<unknown> } = new SESv2Client({
+    region,
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: 2_000,
+      requestTimeout: 5_000,
+      throwOnRequestTimeout: true,
+    }),
+  }),
 ): Mailer {
   return {
     async send(mail: Mail) {
