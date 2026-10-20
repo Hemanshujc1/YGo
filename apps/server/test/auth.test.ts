@@ -137,6 +137,27 @@ describe("email sign-in routes", () => {
     expect(inbox(local)).toHaveLength(1);
   });
 
+  it("keeps the database available while ten email sends are held", async () => {
+    let started = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let allStarted!: () => void;
+    const tenStarted = new Promise<void>((resolve) => { allStarted = resolve; });
+    const mailer: Mailer = {
+      async send() {
+        started++;
+        if (started === 10) allStarted();
+        await held;
+      },
+    };
+    const h = harness({ mailer });
+    const sends = Array.from({ length: 10 }, (_, index) => h.requestCode(`${randomUUID()}-${index}@example.com`));
+    await tenStarted;
+    expect((await h.app.inject({ method: "GET", url: "/v1/healthz" })).statusCode).toBe(200);
+    release();
+    expect((await Promise.all(sends)).every((response) => response.statusCode === 204)).toBe(true);
+  });
+
   it("never returns the emailed code in an API answer", async () => {
     const h = harness({ captureLogs: true });
     const address = email();

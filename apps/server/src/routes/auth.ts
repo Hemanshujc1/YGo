@@ -61,6 +61,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
       const { email } = request.body as typeof RequestCodeBody._output;
       const now = clock.now();
       const client = await pool.connect();
+      let clientReleased = false;
       try {
         await client.query("BEGIN");
         await lockKey(client, email, 1);
@@ -72,41 +73,57 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           await client.query("ROLLBACK");
           return sendError(reply, 429, "CODE_LOCKED");
         }
-        await client.query("DELETE FROM login_code_history WHERE expires_at <= $1", [now]);
-
         const code = randomInt(1_000_000).toString().padStart(6, "0");
+        await client.query("DELETE FROM login_code_history WHERE email = $1 AND expires_at <= $2", [email, now]);
+        await client.query("COMMIT");
+        client.release();
+        clientReleased = true;
         try {
           await mailer.send({
             to: email,
             subject: "Your YGo sign-in code",
             text: `Your YGo sign-in code is ${code}. It expires in 5 minutes. If you didn't ask for it, you can ignore this email.`,
           });
-        } catch {
-          await client.query("ROLLBACK");
+        } catch (error) {
+          request.log.error({ err: { name: error instanceof Error ? error.name : "Error" } }, "Email sign-in code delivery failed");
           return sendError(reply, 503, "UNAVAILABLE");
         }
-        if (current.rows[0] && current.rows[0].expires_at > now) {
-          await client.query(
-            "INSERT INTO login_code_history (email, code_hash, expires_at) VALUES ($1, $2, $3)",
-            [email, current.rows[0].code_hash, current.rows[0].expires_at],
+        const activateClient = await pool.connect();
+        try {
+          await activateClient.query("BEGIN");
+          await lockKey(activateClient, email, 1);
+          const latest = await activateClient.query<{ code_hash: string; expires_at: Date }>(
+            "SELECT code_hash, expires_at FROM login_codes WHERE email = $1 FOR UPDATE",
+            [email],
           );
-        }
-        await client.query(
+          if (latest.rows[0] && latest.rows[0].expires_at > now) {
+            await activateClient.query(
+              "INSERT INTO login_code_history (email, code_hash, expires_at) VALUES ($1, $2, $3)",
+              [email, latest.rows[0].code_hash, latest.rows[0].expires_at],
+            );
+          }
+          await activateClient.query(
           `INSERT INTO login_codes (email, code_hash, expires_at, wrong_tries, locked_until)
            VALUES ($1, $2, $3, 0, NULL)
            ON CONFLICT (email) DO UPDATE SET code_hash = EXCLUDED.code_hash,
              expires_at = EXCLUDED.expires_at,
-             wrong_tries = CASE WHEN login_codes.locked_until IS NOT NULL THEN 0 ELSE login_codes.wrong_tries END,
+             wrong_tries = CASE WHEN login_codes.expires_at <= $4 THEN 0 ELSE login_codes.wrong_tries END,
              locked_until = NULL`,
-          [email, digest(secret, code), new Date(now.getTime() + CODE_TTL_MS)],
-        );
-        await client.query("COMMIT");
+            [email, digest(secret, code), new Date(now.getTime() + CODE_TTL_MS), now],
+          );
+          await activateClient.query("COMMIT");
+        } catch (error) {
+          await activateClient.query("ROLLBACK");
+          throw error;
+        } finally {
+          activateClient.release();
+        }
         return (reply as FastifyReply).code(204).send();
       } catch (error) {
-        await client.query("ROLLBACK");
+        if (!clientReleased) await client.query("ROLLBACK");
         throw error;
       } finally {
-        client.release();
+        if (!clientReleased) client.release();
       }
     },
   );
