@@ -8,6 +8,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 
 export const accounts = pgTable("accounts", {
@@ -57,6 +58,19 @@ export const refreshTokens = pgTable(
     uniqueIndex("refresh_tokens_session_generation_idx").on(table.sessionId, table.generation),
     uniqueIndex("refresh_tokens_one_current_idx").on(table.sessionId).where(sql`${table.replacedAt} IS NULL`),
   ],
+);
+
+export const jobRuns = pgTable(
+  "job_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobName: text("job_name").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: text("status", { enum: ["running", "ok", "failed"] }).notNull(),
+    errorText: varchar("error_text", { length: 200 }),
+  },
+  (table) => [index("job_runs_job_name_started_at_idx").on(table.jobName, table.startedAt)],
 );
 
 export const emailCodeSends = pgTable(
