@@ -339,7 +339,10 @@ const DAY_MS = 24 * 60 * 60_000;
 async function signIn(h: ReturnType<typeof harness>) {
   const address = email();
   await h.requestCode(address);
-  const answer = await h.verify(address, codeFrom(sentMail(h.mailer, inbox(h.mailer).length - 1)));
+  // The newest mail to this address: another sign-in running at the same time may have mailed since.
+  const mail = inbox(h.mailer).findLast((sent) => sent.to === address);
+  if (!mail) throw new Error("Expected a sent test email");
+  const answer = await h.verify(address, codeFrom(mail));
   const session = Session.parse(answer.json());
   return { ...session, sessionId: claims(session.accessToken).sid };
 }
