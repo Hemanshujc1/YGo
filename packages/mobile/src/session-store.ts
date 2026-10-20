@@ -25,7 +25,10 @@ interface Marker {
  * can't sign anyone back in; each read tries the clear again (#155, S3). A
  * failed clear also calls `cleared`, so the app goes to sign-in even when
  * the server ended the session. A token that can't be read counts as none.
- * A new sign-in saves over the old token and then drops the marker.
+ * A new sign-in saves over the old token and then drops the marker. A marker
+ * that can't be read counts as set, and one that can't be set still lets the
+ * delete go ahead. The client queues every call here in order (#161), so a
+ * sign-in and a sign-out never overlap.
  */
 export function makeSessionStore(secrets: Secrets, marker: Marker, cleared: () => void): SessionStore {
   async function forget() {
@@ -39,7 +42,13 @@ export function makeSessionStore(secrets: Secrets, marker: Marker, cleared: () =
 
   return {
     async get() {
-      if (marker.isSet()) {
+      let blocked: boolean;
+      try {
+        blocked = marker.isSet();
+      } catch {
+        blocked = true;
+      }
+      if (blocked) {
         await forget();
         return null;
       }
@@ -56,14 +65,22 @@ export function makeSessionStore(secrets: Secrets, marker: Marker, cleared: () =
       marker.clear();
     },
     async clear() {
-      marker.set();
+      try {
+        marker.set();
+      } catch {
+        // Still delete: only a delete that also fails leaves the token usable.
+      }
       try {
         await secrets.delete();
       } catch (err) {
         cleared();
         throw err;
       }
-      marker.clear();
+      try {
+        marker.clear();
+      } catch {
+        // The token is gone; a marker left set only makes the next read delete nothing.
+      }
     },
   };
 }

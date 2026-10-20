@@ -26,7 +26,14 @@ interface SessionApi {
 const byAccount = (account: Account): SessionState =>
   account.name && account.phone ? { status: "signed-in", account } : { status: "profile-needed", account };
 
-/** One per app, beside its client: `createSession(api)`. */
+// The newest session's hold on `showSignedOut`.
+let stopLast = () => {};
+
+/**
+ * One per app, beside its client: `createSession(api)`. A new one takes
+ * `showSignedOut` from the last, so Fast Refresh and tests never pile up
+ * listeners.
+ */
 export function createSession(api: SessionApi) {
   let state: SessionState = { status: "checking" };
   const changed = listeners();
@@ -39,7 +46,8 @@ export function createSession(api: SessionApi) {
     changed.notify();
   }
 
-  onSignedOut(() => move({ status: "signed-out" }));
+  stopLast();
+  stopLast = onSignedOut(() => move({ status: "signed-out" }));
 
   return {
     get: () => state,

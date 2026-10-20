@@ -61,6 +61,16 @@ describe("createSession", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
+  it("a new session takes the signed-out signal from the last, so listeners never pile up", async () => {
+    const first = createSession(fakeApi(async () => ({ ok: true, data: full })));
+    await first.check();
+    const second = createSession(fakeApi(async () => ({ ok: true, data: full })));
+    await second.check();
+    showSignedOut();
+    expect(second.get()).toEqual({ status: "signed-out" });
+    expect(first.get()).toEqual({ status: "signed-in", account: full });
+  });
+
   it("signs out after the client has finished, and reports a storage failure", async () => {
     let finish!: () => void;
     const api = fakeApi(
