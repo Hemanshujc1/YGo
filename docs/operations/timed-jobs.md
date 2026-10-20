@@ -10,6 +10,7 @@ Create root-owned mode-0600 `/etc/ygo/backup.env` containing `BACKUP_BUCKET=<ded
 
 - `ops/ygo-job@.service` and `ops/ygo-job@.timer`
 - `ops/ygo-job@backup-nightly.service.d/override.conf`
+- `ops/ygo-job@backup-nightly.timer.d/override.conf`
 - `ops/ygo-job@cleanup-sessions.timer.d/override.conf`
 - `ops/ygo-job-check.service` and `ops/ygo-job-check.timer`
 
@@ -17,7 +18,7 @@ Keep the two override directories with the same names. The template runs as `ygo
 
 Run `sudo systemd-analyze verify ygo-job@backup-nightly.service ygo-job@backup-nightly.timer ygo-job@cleanup-sessions.service ygo-job@cleanup-sessions.timer ygo-job-check.service ygo-job-check.timer`, then `sudo systemctl daemon-reload`. Inspect `systemctl cat` for both job instances and the checker before enabling them. Start each job once with `sudo systemctl start ygo-job@backup-nightly.service` and `sudo systemctl start ygo-job@cleanup-sessions.service`. Check exit status, journal, the verified S3 archive/digest, and `job_runs` rows. Then start `sudo systemctl start ygo-job-check.service` and inspect both `YGo/JobHealthy` metric series, each with its `JobName` dimension. A job with no successful run is unhealthy.
 
-Only after these checks, run `sudo systemctl enable --now ygo-job@backup-nightly.timer ygo-job@cleanup-sessions.timer ygo-job-check.timer` and inspect `systemctl list-timers`. The schedules are 20:30 UTC backup, 22:30 UTC cleanup and 01:30 UTC checker, all `Persistent=true`. A missed firing runs after the host returns. The checker has its own unprivileged unit; it is not a job and writes no `job_runs` row. It ignores running rows: a latest **finished** failure reports 0; otherwise a success finished more than 26 hours ago (or no success) reports 0. Database read failures report 0 for every job. A failed metric publish exits nonzero, leaving the missing-data alarm to report trouble. The checker uses the instance role, not AWS keys.
+Only after these checks, run `sudo systemctl enable --now ygo-job@backup-nightly.timer ygo-job@cleanup-sessions.timer ygo-job-check.timer` and inspect `systemctl list-timers`. The schedule overrides set 20:30 UTC backup and 22:30 UTC cleanup; the checker runs at 01:30 UTC. All use `Persistent=true`. A missed firing runs after the host returns. The checker has its own unprivileged unit; it is not a job and writes no `job_runs` row. It ignores running rows: a latest **finished** failure reports 0; otherwise a success finished more than 26 hours ago (or no success) reports 0. Database read failures report 0 for every job; a missing or invalid database URL publishes nothing, so missing data breaches. A failed metric publish exits nonzero, leaving the missing-data alarm to report trouble. The checker uses the instance role, not AWS keys.
 
 After the first checker metrics arrive, rerun the reviewed `ops/monitoring.sh` as the operator and confirm `ygo-job-backup-nightly` and `ygo-job-cleanup-sessions` use the existing Mumbai SNS topic with confirmed email subscription. Both alarms evaluate the Minimum `JobHealthy` value over one day, threshold <1, one period, missing data breaching. Each job has its own alarm and 26-hour limit in the server job definition. A future job must add its timer, age limit, metric dimension and alarm in the same feature ticket.
 

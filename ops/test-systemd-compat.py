@@ -28,7 +28,8 @@ units = [
 ]
 for name in units:
     shutil.copy2(Path('/ops') / name, Path('/etc/systemd/system') / name)
-for name in ('ygo-job@backup-nightly.service.d', 'ygo-job@cleanup-sessions.timer.d'):
+for name in ('ygo-job@backup-nightly.service.d', 'ygo-job@backup-nightly.timer.d',
+             'ygo-job@cleanup-sessions.timer.d'):
     shutil.copytree(Path('/ops') / name, Path('/etc/systemd/system') / name, dirs_exist_ok=True)
 Path('/opt/ygo/production/current').mkdir(parents=True, exist_ok=True)
 subprocess.run([

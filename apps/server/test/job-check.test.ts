@@ -65,3 +65,20 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
   await expect(checkJobs(broken, clock, async () => { throw new Error("AWS failed"); }))
     .rejects.toThrow("Could not publish every job health metric");
 });
+
+it("a newer running row does not hide the latest finished failure", async () => {
+  const now = new Date("2050-01-02T01:30:00.000Z");
+  const success = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  const failed = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  const running = new Date(now.getTime() - 60 * 60 * 1000);
+  await database.db.insert(jobRuns).values([
+    { jobName: "backup-nightly", startedAt: success, finishedAt: success, status: "ok" },
+    { jobName: "backup-nightly", startedAt: failed, finishedAt: failed, status: "failed" },
+    { jobName: "backup-nightly", startedAt: running, status: "running" },
+  ]);
+  const reports: { name: JobName; healthy: boolean }[] = [];
+  await checkJobs(database, createLocalClock(now), async (name, healthy) => {
+    reports.push({ name, healthy });
+  });
+  expect(reports).toContainEqual({ name: "backup-nightly", healthy: false });
+});

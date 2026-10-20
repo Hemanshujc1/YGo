@@ -12,7 +12,7 @@ try {
     process.exitCode = 1;
   }
 } catch {
-  // On a database failure, emit 0 for every job; if AWS fails, missing data breaches.
+  // A missing/invalid URL publishes nothing; missing data breaches. Query failures publish 0.
   console.error("Job health check could not load the database or publish every metric");
   process.exitCode = 1;
 } finally {
