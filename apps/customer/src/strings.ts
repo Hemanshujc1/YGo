@@ -46,5 +46,12 @@ export const strings = {
     UNAVAILABLE: "The server is running, but a service it needs is not answering.",
     INTERNAL: "Something went wrong on the server.",
     UPDATE_REQUIRED: "This version of YGo is too old. Update the app to continue.",
+    UNAUTHENTICATED: "You have been signed out. Sign in again to continue.",
+    PROFILE_REQUIRED: "Add your name and phone number to continue.",
+    CODE_WRONG: "That code is not right. Check the email and try again.",
+    CODE_EXPIRED: "That code has expired. Ask for a new one.",
+    CODE_LOCKED: "Too many wrong codes. Try again in 15 minutes.",
+    TOO_MANY_REQUESTS: "Too many codes asked for. Wait a little and try again.",
+    PHONE_IN_USE: "Another account already uses this phone number. Contact support for help.",
   } satisfies Record<ErrorCode, string>,
 };

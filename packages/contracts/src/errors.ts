@@ -5,6 +5,15 @@ import { z } from "zod";
  * (ADR-0004): each client maps a code to its own words. New codes are added,
  * never renamed or removed, so a client treats a code it does not know as
  * INTERNAL.
+ *
+ * Sign-in (#34), with the status each is sent with:
+ * - UNAUTHENTICATED (401): no session, an expired access token, or a revoked session.
+ * - PROFILE_REQUIRED (403): the name and phone are not set yet.
+ * - CODE_WRONG (400): the sign-in code does not match.
+ * - CODE_EXPIRED (400): the code is over 5 minutes old, or a newer one replaced it.
+ * - CODE_LOCKED (429): 5 wrong tries lock the email for 15 minutes.
+ * - TOO_MANY_REQUESTS (429): a limit on sending codes was hit.
+ * - PHONE_IN_USE (409): another account has this phone number.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -12,6 +21,13 @@ export const ErrorCode = z.enum([
   "UNAVAILABLE",
   "INTERNAL",
   "UPDATE_REQUIRED",
+  "UNAUTHENTICATED",
+  "PROFILE_REQUIRED",
+  "CODE_WRONG",
+  "CODE_EXPIRED",
+  "CODE_LOCKED",
+  "TOO_MANY_REQUESTS",
+  "PHONE_IN_USE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
