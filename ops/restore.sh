@@ -4,6 +4,16 @@ set -euo pipefail
 umask 077
 die() { echo "$*" >&2; exit 1; }
 [[ $EUID == 0 ]] || die "Run as root through Session Manager"
+if [[ ${1:-} == _db ]]; then
+  [[ -n ${DATABASE_URL:-} && $# == 3 ]] || die "Missing recovery database input"
+  case $2 in
+    empty) psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND c.relkind IN ('r','p','v','m','S')" > "$3" ;;
+    load) exec pg_restore --exit-on-error --single-transaction --no-owner --no-acl --dbname="$DATABASE_URL" "$3" ;;
+    verify) psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" > "$3" ;;
+    *) die "Unknown recovery database step" ;;
+  esac
+  exit
+fi
 archive=${1:?Usage: restore.sh ARCHIVE SHA256_FILE RECOVERY_ENV}
 digest=${2:?Supply archive SHA256 file}
 recovery=${3:?Supply separate recovery environment file}
@@ -41,17 +51,14 @@ CHECK
 [[ $(sha256sum "$archive" | cut -d' ' -f1) == "$(cut -d' ' -f1 "$digest")" ]] || die "Archive SHA256 mismatch"
 pg_restore --file=/dev/null "$archive" || die "Archive verification failed"
 run_db() {
-  systemd-run --quiet --wait --collect --expand-environment=no --service-type=exec --unit="ygo-restore-$$-$RANDOM" \
-    -p "EnvironmentFile=$recovery" -p RuntimeMaxSec=7200 /usr/bin/bash -c "$1" bash "${@:2}"
+  systemd-run --quiet --wait --collect --service-type=exec --unit="ygo-restore-$$-$RANDOM" \
+    -p "EnvironmentFile=$recovery" -p RuntimeMaxSec=7200 /usr/bin/bash "$(realpath "$0")" _db "$@"
 }
-# shellcheck disable=SC2016 # DATABASE_URL expands only inside the transient service.
-run_db 'psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('\''pg_catalog'\'','\''information_schema'\'') AND n.nspname NOT LIKE '\''pg_toast%'\'' AND c.relkind IN ('\''r'\'','\''p'\'','\''v'\'','\''m'\'','\''S'\'')" > "$1"' "$work/empty.count" || die "Cannot inspect recovery target"
+run_db empty "$work/empty.count" || die "Cannot inspect recovery target"
 count=$(cat "$work/empty.count")
 [[ $count == 0 ]] || die "Recovery target is not empty"
-# shellcheck disable=SC2016 # Same transient-service expansion.
-run_db 'exec pg_restore --exit-on-error --single-transaction --no-owner --no-acl --dbname="$DATABASE_URL" "$1"' "$archive" || die "Restore failed"
-# shellcheck disable=SC2016 # Same transient-service expansion.
-run_db 'psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='\''public'\''" > "$1"' "$work/restored.count" || die "Cannot verify restored database"
+run_db load "$archive" || die "Restore failed"
+run_db verify "$work/restored.count" || die "Cannot verify restored database"
 count=$(cat "$work/restored.count")
 [[ $count =~ ^[1-9][0-9]*$ ]] || die "Restored database has no public tables"
 [[ -f /opt/ygo/production/current/replay-deletions.js ]] || die "Missing #92 replay-deletions.js; service remains stopped"

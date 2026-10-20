@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable Linux/root rehearsal of the exact host restore script and real PostGIS."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -36,9 +37,13 @@ def fake():
     elif tool == 'timeout':
         sys.exit(1 if (state / 'fail-health').exists() else 0)
     else:
-        if (state / 'fail-restore').exists() and 'pg_restore --exit-on-error' in ' '.join(args):
+        assert '--expand-environment=no' not in args, 'systemd 252 rejects --expand-environment=no'
+        assert not any('$' in arg for arg in args), 'systemd 252 expands dollars in command arguments'
+        if trace := os.environ.get('YGO_SYSTEMD_TRACE'):
+            with open(trace, 'a') as output: output.write(json.dumps(args) + '\n')
+        if (state / 'fail-restore').exists() and '_db' in args and 'load' in args:
             sys.exit(1)
-        if (state / 'fail-verify').exists() and 'information_schema.tables' in ' '.join(args):
+        if (state / 'fail-verify').exists() and '_db' in args and 'verify' in args:
             sys.exit(1)
         config = next(a.split('=', 1)[1] for a in args if a.startswith('EnvironmentFile='))
         line = next(s for s in Path(config).read_text().splitlines() if s.startswith('DATABASE_URL='))

@@ -4,6 +4,10 @@ set -euo pipefail
 umask 077
 die() { echo "$*" >&2; exit 1; }
 [[ $EUID == 0 ]] || die "Run as root on the YGo host"
+if [[ ${1:-} == _dump ]]; then
+  [[ $# == 2 && -n ${DATABASE_URL:-} ]] || die "Missing database URL or output path"
+  exec pg_dump -Fc --file="$2" "$DATABASE_URL"
+fi
 mode=${1:?Usage: backup.sh dump BUCKET | snapshot RDS_INSTANCE}
 stamp=$(date -u +%Y%m%d)
 case $mode in
@@ -16,11 +20,10 @@ case $mode in
       python3 -c 'import json,sys; r=json.load(sys.stdin)["Rules"]; assert len(r)==1 and set(r[0]) <= {"ID","Status","Filter","Expiration"} and r[0]["Status"]=="Enabled" and r[0].get("Filter")=={"Prefix":"nightly/"} and r[0]["Expiration"]=={"Days":30}' || die "Expected 30-day nightly/ expiration without earlier actions"
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
-    # The root-only systemd environment file is read by systemd, not sourced.
-    # shellcheck disable=SC2016 # DATABASE_URL expands inside the transient service.
-    systemd-run --quiet --wait --collect --expand-environment=no --service-type=exec --unit="ygo-dump-$$" \
+    # The child reads DATABASE_URL from systemd's environment, not command arguments.
+    systemd-run --quiet --wait --collect --service-type=exec --unit="ygo-dump-$$" \
       -p EnvironmentFile=/etc/ygo/production.env -p RuntimeMaxSec=7200 \
-      /usr/bin/bash -c 'exec pg_dump -Fc --file="$1" "$DATABASE_URL"' bash "$work/$stamp.dump" || die "Dump failed"
+      /usr/bin/bash "$(realpath "$0")" _dump "$work/$stamp.dump" || die "Dump failed"
     pg_restore --file=/dev/null "$work/$stamp.dump" || die "Archive unreadable"
     (cd "$work" && sha256sum "$stamp.dump" > "$stamp.dump.sha256")
     uri="s3://$bucket/nightly/$stamp.dump"
