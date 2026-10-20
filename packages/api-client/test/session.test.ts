@@ -62,10 +62,12 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   };
   const onSignedOut = vi.fn();
   const onUpdateRequired = vi.fn();
+  const onSaveFailed = vi.fn();
   const client = createApiClient({
     baseUrl: "https://api.test",
     onSignedOut,
     onUpdateRequired,
+    onSaveFailed,
     session: {
       get: async () => {
         reads += 1;
@@ -107,7 +109,7 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
   const failNext = (op: "get" | "set" | "clear") => {
     failing.add(op);
   };
-  return { client, calls, refreshes, sets, reads: () => reads, holdNextSet, failNext, stored: () => stored, onSignedOut, onUpdateRequired };
+  return { client, calls, refreshes, sets, reads: () => reads, holdNextSet, failNext, stored: () => stored, onSignedOut, onUpdateRequired, onSaveFailed };
 }
 
 /** A server answer held until `release(path)`; `waiting()` counts those held. */
@@ -172,9 +174,10 @@ describe("each call", () => {
   });
 
   it("keeps no session when the phone cannot save it", async () => {
-    const { client, calls, failNext } = setup(fakeServer().handle);
+    const { client, calls, failNext, onSaveFailed } = setup(fakeServer().handle);
     failNext("set");
     await expect(client.verifyCode(signIn)).rejects.toThrow("Keychain unavailable");
+    expect(onSaveFailed).not.toHaveBeenCalled();
     expect(await client.me()).toEqual({ ok: false, status: 401, code: "UNAUTHENTICATED" });
     expect(calls.map((call) => call.path)).toEqual(["/v1/auth/verify"]);
   });
@@ -333,14 +336,17 @@ describe("refresh", () => {
 
   it("goes on when the phone cannot save a refreshed token, and the next refresh saves again", async () => {
     const server = fakeServer();
-    const { client, calls, failNext, stored } = setup(server.handle, "r0");
+    const { client, calls, failNext, stored, onSaveFailed } = setup(server.handle, "r0");
     failNext("set");
     expect(await client.me()).toEqual({ ok: true, data: account });
     expect(stored()).toBe("r0");
+    await vi.waitFor(() => expect(onSaveFailed).toHaveBeenCalledTimes(1));
+    expect(onSaveFailed).toHaveBeenCalledWith(new Error("Keychain unavailable"));
     server.expire();
     expect(await client.me()).toEqual({ ok: true, data: account });
     expect(calls.at(-1)?.auth).toBe("Bearer a3");
     await vi.waitFor(() => expect(stored()).toBe("r3"));
+    expect(onSaveFailed).toHaveBeenCalledTimes(1);
   });
 
   it("tries the refusal and the clear again when the phone could not clear a refused token", async () => {

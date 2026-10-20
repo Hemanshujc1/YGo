@@ -111,6 +111,13 @@ export interface ApiClientOptions {
    * for `signOut`, which the person asked for.
    */
   onSignedOut?: () => void;
+  /**
+   * Called with the error when the store cannot save a refreshed token. The
+   * session keeps working and the next refresh saves again, so this is for a
+   * log or crash report, not for the person. A sign-in the store cannot save
+   * rejects instead.
+   */
+  onSaveFailed?: (error: unknown) => void;
 }
 
 export function createApiClient({
@@ -121,6 +128,7 @@ export function createApiClient({
   onUpdateRequired,
   session,
   onSignedOut,
+  onSaveFailed,
 }: ApiClientOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
@@ -217,7 +225,7 @@ export function createApiClient({
       if (next.success) {
         on.access = next.data.accessToken;
         on.refresh = next.data.refreshToken;
-        if (on === current) void inTurn(async () => session?.set(next.data.refreshToken)).catch(() => undefined);
+        if (on === current) void inTurn(async () => session?.set(next.data.refreshToken)).catch((err: unknown) => onSaveFailed?.(err));
         return null;
       }
     }
