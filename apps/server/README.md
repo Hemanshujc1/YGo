@@ -93,7 +93,9 @@ The server never applies them on boot; the tests apply them to each run's databa
 
 ## Build
 
-`pnpm --filter @ygo/server build` writes standalone ESM bundles (`dist/main.js` and `dist/migrate.js`), source maps, migrations and ESM metadata. Dependencies are included; the host needs Node 26 only. `pnpm --filter @ygo/server start` runs the API. Apply migrations explicitly with `DATABASE_URL=… node apps/server/dist/migrate.js` before deployment. See [the provisioning runbook](../../docs/operations/provisioning.md).
+`pnpm --filter @ygo/server build` writes standalone ESM bundles (`dist/main.js`, `dist/migrate.js` and `dist/job.js`), source maps, migrations and ESM metadata. Dependencies are included; the host needs Node 26 only. `pnpm --filter @ygo/server start` runs the API. Apply migrations explicitly with `DATABASE_URL=… node apps/server/dist/migrate.js` before deployment. See [the provisioning runbook](../../docs/operations/provisioning.md).
+
+After migration, run the one-shot session cleanup with `DATABASE_URL=… node apps/server/dist/job.js cleanup-sessions`. It records an `ok` or `failed` row in `job_runs` and exits non-zero on failure. An unknown name exits non-zero without writing a row. Scheduling belongs to a later part of #131.
 
 ## Errors
 

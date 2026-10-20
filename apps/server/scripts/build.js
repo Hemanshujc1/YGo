@@ -7,7 +7,7 @@ import { build } from "esbuild";
 const outdir = process.argv[2] ?? "dist";
 
 await build({
-  entryPoints: ["src/main.ts", "src/migrate.ts"],
+  entryPoints: ["src/main.ts", "src/migrate.ts", "src/job.ts"],
   outdir,
   bundle: true,
   platform: "node",
