@@ -1,10 +1,16 @@
 import {
+  Account,
   APP_NAME_HEADER,
   APP_VERSION_HEADER,
   ErrorEnvelope,
   HealthResponse,
+  Session,
   type AppIdentity,
+  type ChangeNameBody,
   type ErrorCode,
+  type RequestCodeBody,
+  type SetProfileBody,
+  type VerifyCodeBody,
 } from "@ygo/contracts";
 
 /**
@@ -25,6 +31,31 @@ interface ApiFailure {
   fields?: string[];
 }
 
+/**
+ * Where the refresh token is kept between launches. The mobile apps back it
+ * with the phone's secure storage; the client never touches storage itself.
+ */
+export interface SessionStore {
+  get(): Promise<string | null>;
+  set(refreshToken: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
+/** A server answer before it is checked against its contract. */
+interface Answer {
+  ok: boolean;
+  status: number;
+  body: unknown;
+}
+
+/** A contract schema. Structural, since only @ygo/contracts imports zod. */
+interface Schema<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false };
+}
+
+/** What a signed-in call answers, without asking the server, when there is no session. */
+const NO_SESSION: Answer = { ok: false, status: 401, body: { error: { code: "UNAUTHENTICATED" } } };
+
 export interface ApiClientOptions {
   /** The API's origin, such as `https://api.example.com`; `""` for the page's own origin. */
   baseUrl: string;
@@ -40,6 +71,14 @@ export interface ApiClientOptions {
    * `/v1/healthz`). It may fire more than once; the caller keeps the state.
    */
   onUpdateRequired?: () => void;
+  /** Needed to sign in. Without it every signed-in call answers UNAUTHENTICATED. */
+  session?: SessionStore;
+  /**
+   * Called when the server refuses the saved refresh token (expired, revoked
+   * or reused): the session has ended and the store is cleared. Not called
+   * for `signOut`, which the person asked for.
+   */
+  onSignedOut?: () => void;
 }
 
 export function createApiClient({
@@ -48,16 +87,28 @@ export function createApiClient({
   timeoutMs = 10_000,
   app,
   onUpdateRequired,
+  session,
+  onSignedOut,
 }: ApiClientOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
-  /** Sends a GET and reads its JSON body; a body that is not JSON reads as undefined. */
-  async function get(path: string) {
+  /** In memory only, so it is gone when the app closes. */
+  let accessToken: string | null = null;
+  /** The refresh under way, which every call refused meanwhile waits for. */
+  let refreshing: Promise<Answer | null> | null = null;
+  let signingOut = false;
+
+  /** Sends a call and reads its JSON body; a body that is not JSON reads as undefined. */
+  async function send(method: string, path: string, json?: unknown, token?: string): Promise<Answer> {
     const response = await (fetchFn ?? fetch)(`${origin}${path}`, {
+      method,
       headers: {
         accept: "application/json",
+        ...(json !== undefined && { "content-type": "application/json" }),
+        ...(token && { authorization: `Bearer ${token}` }),
         ...(app && { [APP_NAME_HEADER]: app.name, [APP_VERSION_HEADER]: app.version }),
       },
+      body: json === undefined ? undefined : JSON.stringify(json),
       signal: AbortSignal.timeout(timeoutMs),
     });
 
@@ -84,15 +135,88 @@ export function createApiClient({
     return { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields };
   }
 
+  /** The result for an answer whose success carries a body matching `schema`. */
+  function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {
+    if (!answer.ok) return failure(answer.status, answer.body);
+    const parsed = schema.safeParse(answer.body);
+    return parsed.success
+      ? { ok: true, data: parsed.data }
+      : { ok: false, status: answer.status, code: "INTERNAL" };
+  }
+
+  /** The result for an answer whose success is 204; another success is INTERNAL. */
+  function empty(answer: Answer): ApiResult<undefined> {
+    if (answer.status === 204) return { ok: true, data: undefined };
+    return answer.ok
+      ? { ok: false, status: answer.status, code: "INTERNAL" }
+      : failure(answer.status, answer.body);
+  }
+
+  /** Keeps a new session: the refresh token in the store, the access token in memory. */
+  async function keep(next: Session) {
+    await session?.set(next.refreshToken);
+    accessToken = next.accessToken;
+  }
+
+  /**
+   * Trades the saved refresh token for a new pair. Answers null on success,
+   * or else the answer to pass on. Only the server refusing the token (401,
+   * or 400 for a malformed one) clears the store. Any other answer keeps it,
+   * and with no network this rejects and keeps it too.
+   */
+  async function refresh(): Promise<Answer | null> {
+    const refreshToken = await session?.get();
+    if (!refreshToken) return NO_SESSION;
+    const answer = await send("POST", "/v1/auth/refresh", { refreshToken });
+    if (answer.status === 401 || answer.status === 400) {
+      accessToken = null;
+      await session?.clear();
+      if (!signingOut) onSignedOut?.();
+      return answer;
+    }
+    if (!answer.ok) return answer;
+    const next = Session.safeParse(answer.body);
+    if (!next.success) return { ok: false, status: answer.status, body: undefined };
+    await keep(next.data);
+    return null;
+  }
+
+  /**
+   * Refreshes, unless the refused access token was already replaced. Calls
+   * refused together share one refresh: the server ends a session whose old
+   * refresh token is used twice.
+   */
+  function renew(refused: string | null): Promise<Answer | null> {
+    if (accessToken !== refused) return Promise.resolve(null);
+    refreshing ??= refresh().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  }
+
+  /**
+   * Sends a call with the access token. With none in memory, as when the app
+   * has just opened, it refreshes first. When the server answers 401 it
+   * refreshes once and sends the call again.
+   */
+  async function signedIn(method: string, path: string, json?: unknown): Promise<Answer> {
+    if (refreshing) await refreshing;
+    if (!accessToken) {
+      const refused = await renew(null);
+      if (refused) return refused;
+    }
+    const token = accessToken ?? undefined;
+    const answer = await send(method, path, json, token);
+    if (answer.status !== 401) return answer;
+    const refused = await renew(token ?? null);
+    if (refused) return refused;
+    return send(method, path, json, accessToken ?? undefined);
+  }
+
   return {
     /** `GET /v1/healthz`: whether the server and its database both answer. */
     async health(): Promise<ApiResult<HealthResponse>> {
-      const { ok, status, body } = await get("/v1/healthz");
-      if (!ok) return failure(status, body);
-      const parsed = HealthResponse.safeParse(body);
-      return parsed.success
-        ? { ok: true, data: parsed.data }
-        : { ok: false, status, code: "INTERNAL" };
+      return result(await send("GET", "/v1/healthz"), HealthResponse);
     },
 
     /**
@@ -100,9 +224,56 @@ export function createApiClient({
      * version. 204 is ok; a version that is too old gets UPDATE_REQUIRED.
      */
     async versionCheck(): Promise<ApiResult<undefined>> {
-      const { ok, status, body } = await get("/v1/version-check");
-      if (status === 204) return { ok: true, data: undefined };
-      return ok ? { ok: false, status, code: "INTERNAL" } : failure(status, body);
+      return empty(await send("GET", "/v1/version-check"));
+    },
+
+    /** `POST /v1/auth/code`: email a sign-in code. */
+    async requestCode(body: RequestCodeBody): Promise<ApiResult<undefined>> {
+      return empty(await send("POST", "/v1/auth/code", body));
+    },
+
+    /**
+     * `POST /v1/auth/verify`: the code from the email. On success the client
+     * keeps the session and answers the account; the tokens never leave it.
+     */
+    async verifyCode(body: VerifyCodeBody): Promise<ApiResult<Account>> {
+      if (!session) throw new Error("createApiClient needs a session store to sign in");
+      const answered = result(await send("POST", "/v1/auth/verify", body), Session);
+      if (!answered.ok) return answered;
+      await keep(answered.data);
+      return { ok: true, data: answered.data.account };
+    },
+
+    /** `GET /v1/me`: the signed-in account. */
+    async me(): Promise<ApiResult<Account>> {
+      return result(await signedIn("GET", "/v1/me"), Account);
+    },
+
+    /** `PUT /v1/me/profile`: the name and phone each account gives once. */
+    async setProfile(body: SetProfileBody): Promise<ApiResult<Account>> {
+      return result(await signedIn("PUT", "/v1/me/profile", body), Account);
+    },
+
+    /** `PATCH /v1/me`: a new name. */
+    async changeName(body: ChangeNameBody): Promise<ApiResult<Account>> {
+      return result(await signedIn("PATCH", "/v1/me", body), Account);
+    },
+
+    /**
+     * `POST /v1/auth/sign-out`: ends the session on the server, then forgets
+     * it here. It is forgotten even when the server cannot be reached.
+     */
+    async signOut(): Promise<void> {
+      signingOut = true;
+      try {
+        await signedIn("POST", "/v1/auth/sign-out");
+      } catch {
+        // No network: the phone forgets the session all the same.
+      } finally {
+        accessToken = null;
+        signingOut = false;
+        await session?.clear();
+      }
     },
   };
 }
