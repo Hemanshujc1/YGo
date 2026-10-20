@@ -1,3 +1,12 @@
+export {
+  Account,
+  ChangeNameBody,
+  RefreshBody,
+  RequestCodeBody,
+  Session,
+  SetProfileBody,
+  VerifyCodeBody,
+} from "./auth";
 export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";
 export {
   Email,
