@@ -41,3 +41,17 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const emailCodeSends = pgTable(
+  "email_code_sends",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    address: text("address").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("email_code_sends_email_sent_at_idx").on(table.email, table.sentAt),
+    index("email_code_sends_address_sent_at_idx").on(table.address, table.sentAt),
+  ],
+);

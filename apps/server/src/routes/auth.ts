@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
@@ -14,6 +15,8 @@ import type { Mailer } from "../adapters/mailer";
 
 const CODE_TTL_MS = 5 * 60_000;
 const LOCK_MS = 15 * 60_000;
+const MIN_SEND_INTERVAL_MS = 30_000;
+const SEND_WINDOW_MS = 60 * 60_000;
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 90 * 24 * 60 * 60_000;
 
@@ -53,6 +56,26 @@ function sendError(reply: FastifyReply, status: 400 | 429 | 503, code: ErrorCode
   return reply.code(status).send({ error: { code } });
 }
 
+function rateLimitAddress(address: string): string {
+  if (isIP(address) === 4) return address;
+  const raw = address.split("%")[0] ?? address;
+  const [before, after] = raw.toLowerCase().split("::");
+  const left = before ? before.split(":") : [];
+  const right = after ? after.split(":") : [];
+  const tail = right.length ? right : left;
+  const dotted = tail.at(-1)?.includes(".") ? tail.pop() : undefined;
+  if (dotted) {
+    const octets = dotted.split(".").map(Number);
+    tail.push(((octets[0] ?? 0) << 8 | (octets[1] ?? 0)).toString(16));
+    tail.push(((octets[2] ?? 0) << 8 | (octets[3] ?? 0)).toString(16));
+  }
+  const groups = [...left, ...right];
+  const expanded = raw.includes("::")
+    ? [...left, ...Array(Math.max(0, 8 - groups.length)).fill("0"), ...right]
+    : groups;
+  return `${expanded.slice(0, 4).map((group) => group.padStart(4, "0")).join(":")}/64`;
+}
+
 export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }: AuthOptions): void {
   app.post(
     "/v1/auth/code",
@@ -60,11 +83,14 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
     async (request, reply) => {
       const { email } = request.body as typeof RequestCodeBody._output;
       const now = clock.now();
+      const address = rateLimitAddress(request.ip);
+      const reservationId = randomUUID();
       const client = await pool.connect();
       let clientReleased = false;
       try {
         await client.query("BEGIN");
         await lockKey(client, email, 1);
+        await lockKey(client, address, 2);
         const current = await client.query<{ locked_until: Date | null; code_hash: string; expires_at: Date }>(
           "SELECT locked_until, code_hash, expires_at FROM login_codes WHERE email = $1",
           [email],
@@ -73,8 +99,37 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           await client.query("ROLLBACK");
           return sendError(reply, 429, "CODE_LOCKED");
         }
-        const code = randomInt(1_000_000).toString().padStart(6, "0");
         await client.query("DELETE FROM login_code_history WHERE email = $1 AND expires_at <= $2", [email, now]);
+        await client.query(
+          "DELETE FROM email_code_sends WHERE (email = $1 OR address = $2) AND sent_at <= $3",
+          [email, address, new Date(now.getTime() - SEND_WINDOW_MS)],
+        );
+        const counts = await client.query<{ email_count: string; address_count: string; last_sent: Date | null }>(
+          `SELECT
+             count(*) FILTER (WHERE email = $1)::text AS email_count,
+             count(*) FILTER (WHERE address = $2)::text AS address_count,
+             max(sent_at) FILTER (WHERE email = $1) AS last_sent
+           FROM email_code_sends WHERE sent_at > $3`,
+          [email, address, new Date(now.getTime() - SEND_WINDOW_MS)],
+        );
+        const limit = counts.rows[0];
+        if (!limit) throw new Error("Send limit query returned no row");
+        const { email_count, address_count, last_sent } = limit;
+        if (last_sent && now.getTime() - last_sent.getTime() < MIN_SEND_INTERVAL_MS) {
+          await client.query("ROLLBACK");
+          return sendError(reply, 429, "TOO_MANY_REQUESTS");
+        }
+        if (Number(email_count) >= 5 || Number(address_count) >= 20) {
+          await client.query("ROLLBACK");
+          return sendError(reply, 429, "TOO_MANY_REQUESTS");
+        }
+
+        const code = randomInt(1_000_000).toString().padStart(6, "0");
+        const mailText = `Your YGo sign-in code is ${code}. It expires in 5 minutes. If you didn't ask for it, you can ignore this email.`;
+        await client.query(
+          "INSERT INTO email_code_sends (id, email, address, sent_at) VALUES ($1, $2, $3, $4)",
+          [reservationId, email, address, now],
+        );
         await client.query("COMMIT");
         client.release();
         clientReleased = true;
@@ -82,10 +137,23 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           await mailer.send({
             to: email,
             subject: "Your YGo sign-in code",
-            text: `Your YGo sign-in code is ${code}. It expires in 5 minutes. If you didn't ask for it, you can ignore this email.`,
+            text: mailText,
           });
         } catch (error) {
-          request.log.error({ err: { name: error instanceof Error ? error.name : "Error" } }, "Email sign-in code delivery failed");
+          const message = error instanceof Error ? error.message : "Unknown mailer error";
+          const safeMessage = message.split(mailText).join("[redacted]").split(email).join("[redacted]").split(code).join("[redacted]");
+          request.log.error({ err: { name: error instanceof Error ? error.name : "Error", message: safeMessage } }, "Email sign-in code delivery failed");
+          const failedClient = await pool.connect();
+          try {
+            await failedClient.query("BEGIN");
+            await failedClient.query("DELETE FROM email_code_sends WHERE id = $1", [reservationId]);
+            await failedClient.query("COMMIT");
+          } catch (deleteError) {
+            await failedClient.query("ROLLBACK");
+            throw deleteError;
+          } finally {
+            failedClient.release();
+          }
           return sendError(reply, 503, "UNAVAILABLE");
         }
         const activateClient = await pool.connect();

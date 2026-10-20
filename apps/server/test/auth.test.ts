@@ -115,6 +115,101 @@ describe("email sign-in routes", () => {
     expect((await h.requestCode(address)).statusCode).toBe(204);
   });
 
+  it("resets wrong tries when the previous code expired", async () => {
+    const h = harness();
+    const address = email();
+    await h.requestCode(address);
+    const wrongCode = codeFrom(sentMail(h.mailer, 0)) === "000000" ? "000001" : "000000";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect((await h.verify(address, wrongCode)).json()).toEqual({ error: { code: "CODE_WRONG" } });
+    }
+    h.clock.advance(5 * 60_000);
+    expect((await h.requestCode(address)).statusCode).toBe(204);
+    expect((await h.verify(address, wrongCode)).json()).toEqual({ error: { code: "CODE_WRONG" } });
+    const result = await database.pool.query("SELECT wrong_tries FROM login_codes WHERE email = $1", [address]);
+    expect(result.rows[0]?.wrong_tries).toBe(1);
+  });
+
+  it("applies the 30-second and five-per-hour email limits", async () => {
+    const h = harness();
+    const address = email();
+    expect((await h.requestCode(address)).statusCode).toBe(204);
+    expect((await h.requestCode(address)).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
+    for (let sent = 1; sent < 5; sent++) {
+      h.clock.advance(30_000);
+      expect((await h.requestCode(address)).statusCode).toBe(204);
+    }
+    h.clock.advance(30_000);
+    expect((await h.requestCode(address)).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
+    expect(inbox(h.mailer)).toHaveLength(5);
+  });
+
+  it("applies the twenty-per-hour forwarded-address limit", async () => {
+    const h = harness();
+    for (let sent = 0; sent < 20; sent++) {
+      if (sent > 0) h.clock.advance(30_000);
+      expect((await h.requestCode(email(), "203.0.113.8")).statusCode).toBe(204);
+    }
+    h.clock.advance(30_000);
+    expect((await h.requestCode(email(), "203.0.113.8")).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
+  });
+
+  it("counts forwarded IPv6 addresses by their /64 prefix", async () => {
+    const h = harness();
+    for (let sent = 0; sent < 20; sent++) {
+      if (sent) h.clock.advance(30_000);
+      expect((await h.requestCode(email(), `2001:db8:1:2::${sent + 1}`)).statusCode).toBe(204);
+    }
+    h.clock.advance(30_000);
+    expect((await h.requestCode(email(), "2001:db8:1:2::ffff")).json()).toEqual({ error: { code: "TOO_MANY_REQUESTS" } });
+    expect((await h.requestCode(email(), "2001:db8:1:3::1")).statusCode).toBe(204);
+  });
+
+  it("keeps the database available and other addresses unblocked during held sends", async () => {
+    let started = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let allStarted!: () => void;
+    const tenStarted = new Promise<void>((resolve) => { allStarted = resolve; });
+    const mailer: Mailer = {
+      async send() {
+        started++;
+        if (started === 10) allStarted();
+        await held;
+      },
+    };
+    const h = harness({ mailer });
+    const sends = Array.from({ length: 10 }, (_, index) => h.requestCode(`${randomUUID()}-${index}@example.com`));
+    await tenStarted;
+    expect((await h.app.inject({ method: "GET", url: "/v1/healthz" })).statusCode).toBe(200);
+    release();
+    expect((await Promise.all(sends)).every((response) => response.statusCode === 204)).toBe(true);
+  });
+
+  it("does not block another email from a different address while delivery is held", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { started = resolve; });
+    const local = createLocalMailer();
+    const mailer: Mailer = {
+      async send(mail) {
+        if (mail.to === "held@example.com") {
+          started();
+          await held;
+        }
+        await local.send(mail);
+      },
+    };
+    const h = harness({ mailer });
+    const first = h.requestCode("held@example.com", "203.0.113.10");
+    await sendStarted;
+    const second = await h.requestCode("other@example.com", "203.0.113.11");
+    expect(second.statusCode).toBe(204);
+    release();
+    expect((await first).statusCode).toBe(204);
+  });
+
   it("keeps the old code active and does not count a failed delivery", async () => {
     const local = createLocalMailer();
     let fail = false;
@@ -137,25 +232,47 @@ describe("email sign-in routes", () => {
     expect(inbox(local)).toHaveLength(1);
   });
 
-  it("keeps the database available while ten email sends are held", async () => {
-    let started = 0;
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    let allStarted!: () => void;
-    const tenStarted = new Promise<void>((resolve) => { allStarted = resolve; });
+  it("logs mail delivery errors without logging the email or code", async () => {
+    const h = harness({
+      captureLogs: true,
+      mailer: {
+        async send(mail) {
+          const code = codeFrom(mail);
+          throw new Error(`failed ${mail.to} ${mail.text} ${code}`);
+        },
+      },
+    });
+    const address = email();
+    const response = await h.requestCode(address);
+    expect(response.statusCode).toBe(503);
+    const log = h.logLines.join("");
+    expect(log).toContain("failed [redacted]");
+    expect(log).not.toContain(address);
+    expect(log).not.toContain("sign-in code is");
+  });
+
+  it("does not use an email send slot when the mailer fails", async () => {
+    const local = createLocalMailer();
+    let fail = false;
     const mailer: Mailer = {
-      async send() {
-        started++;
-        if (started === 10) allStarted();
-        await held;
+      async send(mail) {
+        if (fail) throw new Error("mail provider unavailable");
+        await local.send(mail);
       },
     };
     const h = harness({ mailer });
-    const sends = Array.from({ length: 10 }, (_, index) => h.requestCode(`${randomUUID()}-${index}@example.com`));
-    await tenStarted;
-    expect((await h.app.inject({ method: "GET", url: "/v1/healthz" })).statusCode).toBe(200);
-    release();
-    expect((await Promise.all(sends)).every((response) => response.statusCode === 204)).toBe(true);
+    const address = email();
+    for (let sent = 0; sent < 4; sent++) {
+      if (sent) h.clock.advance(30_000);
+      expect((await h.requestCode(address)).statusCode).toBe(204);
+    }
+    fail = true;
+    h.clock.advance(30_000);
+    expect((await h.requestCode(address)).statusCode).toBe(503);
+    fail = false;
+    h.clock.advance(30_000);
+    expect((await h.requestCode(address)).statusCode).toBe(204);
+    expect(inbox(local)).toHaveLength(5);
   });
 
   it("never returns the emailed code in an API answer", async () => {

@@ -15,6 +15,13 @@
       "when": 1792494609000,
       "tag": "0001_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792494609001,
+      "tag": "0002_send_limits",
+      "breakpoints": true
     }
   ]
 }
