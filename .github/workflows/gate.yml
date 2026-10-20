@@ -58,8 +58,10 @@ jobs:
 
       - name: Check operational scripts
         run: |
-          bash -n ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh
-          shellcheck ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh
+          bash -n ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh
+          shellcheck ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh
+          python3 ops/test-monitoring.py
+          python3 ops/test-off-aws-check.py
 
       - name: Check deployment workflow and promotion
         run: |

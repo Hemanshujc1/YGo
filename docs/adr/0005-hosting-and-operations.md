@@ -57,7 +57,9 @@ All prices in this record were read from **AWS's public price list files for `ap
 
 ## Consequences
 
-**What this forbids.** No NAT gateway. No load balancer in Phase 1, and therefore no ACM certificate. No Multi-AZ. No publicly accessible database. No open port 22 and no SSH key material. No long-lived AWS access keys in CI. No Secrets Manager at 0.40 USD per secret per month where Parameter Store is free. No managed service outside `ap-south-1` (ADR-0002). No resource created before the billing alarms exist. And, per [ADR-0008](0008-provider-portability-boundary.md), **no AWS compute or integration service at all** — no Lambda, ECS, API Gateway, SQS, EventBridge, Cognito or DynamoDB — which is what keeps this hosting choice reversible.
+**What this forbids.** No NAT gateway. No load balancer in Phase 1, and therefore no ACM certificate. No Multi-AZ. No publicly accessible database. No open port 22 and no SSH key material. No long-lived AWS access keys in CI. No Secrets Manager at 0.40 USD per secret per month where Parameter Store is free. No managed service outside `ap-south-1` except the Route 53 monitoring dependency clarified below. No resource created before the billing alarms exist. And, per [ADR-0008](0008-provider-portability-boundary.md), **no AWS compute or integration service at all** — no Lambda, ECS, API Gateway, SQS, EventBridge, Cognito or DynamoDB — which is what keeps this hosting choice reversible.
+
+**Monitoring clarification (#131, 20 Oct 2026).** The Mumbai-only rule has one AWS-required exception: Route 53 publishes endpoint health metrics only in `us-east-1`, so its health alarm and SNS email topic must also live there. The endpoint, instance, database, logs, other alarms and their SNS topic remain in `ap-south-1`. The original cost table below predates the HTTPS health-check feature charge and the extra metrics/alarms; use the current [monitoring estimate](../operations/monitoring.md#cost) before activation.
 
 **What it costs, verified.** At 730 hours a month, in US dollars:
 

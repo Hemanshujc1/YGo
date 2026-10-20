@@ -1,6 +1,6 @@
 # YGo backups and recovery (#130)
 
-Owner-operated procedure for ADR-0005. #131 owns schedules and the >30-day off-AWS-copy alarm; #35 owns real AWS provisioning and the timed pre-launch drill. Never put a database URL, dump, password or recovery key in Git. All AWS resources below are in `ap-south-1`.
+Owner-operated procedure for ADR-0005. [Monitoring part 1](monitoring.md) owns the >30-day off-AWS-copy alarm; #131 part 2 owns backup schedules. #35 owns real AWS provisioning and the timed pre-launch drill. Never put a database URL, dump, password or recovery key in Git. All AWS resources below are in `ap-south-1`.
 
 ## Provision and check retention
 

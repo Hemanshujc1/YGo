@@ -42,7 +42,7 @@ sudo bash ops/setup-host.sh <26.x.y> <reviewed-64-character-archive-sha256>
 
 The script checks AL2023/ARM64/root, verifies the archive checksum, installs the runtime at `/opt/ygo/node`, Nginx, PostgreSQL 17 clients, Certbot **5.8.0** and certbot-nginx **5.8.0**, and creates separate unprivileged service users and root-owned release directories. It installs the service template and leaves both API units off. Only rerun for a runtime update with both units stopped; record and verify the new version. No npm/pnpm install runs on the host. Check `aws --version`, `/opt/ygo/node/bin/node --version`, `psql --version`, `/opt/certbot/bin/pip show certbot certbot-nginx` and Session Manager connectivity.
 
-API stdout/stderr use the systemd defaults and go to journald, whose size limits cap local log storage; no `/var/log/ygo` directory or append-only API log files are created. Inspect logs with `sudo journalctl -u ygo@staging -u ygo@production -n 50 --no-pager`. In #35, verify the effective journal limits with `systemd-analyze cat-config systemd/journald.conf` and usage with `journalctl --disk-usage`; #131 adds shipping from journald to CloudWatch with seven-day remote retention.
+API stdout/stderr use the systemd defaults and go to journald, whose size limits cap local log storage; no `/var/log/ygo` directory or append-only API log files are created. Inspect logs with `sudo journalctl -u ygo@staging -u ygo@production -n 50 --no-pager`. In #35, verify the effective journal limits with `systemd-analyze cat-config systemd/journald.conf` and usage with `journalctl --disk-usage`; activate [monitoring](monitoring.md) after public DNS/TLS and service health work, for CloudWatch shipping with seven-day remote retention.
 
 ## DNS, TLS and renewal
 
