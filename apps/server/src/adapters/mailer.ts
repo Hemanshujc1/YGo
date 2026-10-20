@@ -15,6 +15,8 @@ export interface Mail {
   text: string;
 }
 
+const MAILPIT_REQUEST_TIMEOUT_MS = 5_000;
+
 /** Keeps every mail it is given, for the test to read. */
 export function createLocalMailer(): Mailer & { sent: Mail[] } {
   const sent: Mail[] = [];
@@ -60,16 +62,27 @@ export function createMailpitMailer(from: string, baseUrl: string): Mailer {
   const url = new URL("/api/v1/send", baseUrl);
   return {
     async send(mail: Mail) {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          From: { Email: from },
-          To: [{ Email: mail.to }],
-          Subject: mail.subject,
-          Text: mail.text,
-        }),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), MAILPIT_REQUEST_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            From: { Email: from },
+            To: [{ Email: mail.to }],
+            Subject: mail.subject,
+            Text: mail.text,
+          }),
+          signal: controller.signal,
+        });
+      } catch {
+        if (controller.signal.aborted) throw new Error("Mailpit send timed out");
+        throw new Error("Mailpit send failed");
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!response.ok) throw new Error(`Mailpit send failed with HTTP ${response.status}`);
     },
   };

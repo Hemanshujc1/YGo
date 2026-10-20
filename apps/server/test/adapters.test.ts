@@ -6,7 +6,10 @@ import { createLocalMailer, createMailpitMailer, createSesMailer } from "../src/
 import { createLocalPushSender } from "../src/adapters/push-sender";
 import { createLocalSmsSender } from "../src/adapters/sms-sender";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("local Clock", () => {
   it("stands still until the test sets or advances it", () => {
@@ -92,7 +95,33 @@ describe("Mailpit mailer", () => {
         Subject: "Code",
         Text: "123456",
       }),
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("aborts a timed out request and does not expose fetch error details", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("secret token")), { once: true });
+      }),
+    );
+    const sending = createMailpitMailer("hello@example.com", "http://localhost:8025").send({
+      to: "asha@example.com", subject: "Code", text: "123456",
+    });
+    const rejected = expect(sending).rejects.toThrow("Mailpit send timed out");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await rejected;
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await expect(sending).rejects.not.toThrow("secret token");
+  });
+
+  it("does not expose fetch error details on network failures", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("secret token in URL"));
+    await expect(createMailpitMailer("hello@example.com", "http://localhost:8025").send({
+      to: "asha@example.com", subject: "Code", text: "123456",
+    })).rejects.toThrow("Mailpit send failed");
   });
 
   it("rejects a failed HTTP response", async () => {
