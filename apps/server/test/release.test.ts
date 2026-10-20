@@ -25,7 +25,16 @@ it("ADR-0004: a standalone release migrates once and serves database health", as
     await run(process.execPath, ["scripts/build.js", directory], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
     });
-    const env = { ...process.env, DATABASE_URL: url.href, HOST: "127.0.0.1", PORT: "3000" };
+    const env = {
+      ...process.env, DATABASE_URL: url.href, HOST: "127.0.0.1", PORT: "3000",
+      MAILER: "mailpit", MAIL_FROM: "ygo@example.invalid", MAILPIT_URL: "http://localhost:8025",
+    };
+    const missingSender = await run(process.execPath, [join(directory, "main.js")], {
+      cwd: tmpdir(), env: { ...env, MAILER: "ses", MAIL_FROM: "", AWS_REGION: "ap-south-1" },
+      timeout: 5_000,
+    }).then(() => null, (error: unknown) => error);
+    expect(missingSender).toBeInstanceOf(Error);
+    expect((missingSender as { stderr: string }).stderr).toContain("MAIL_FROM");
     await run(process.execPath, [join(directory, "migrate.js")], { cwd: tmpdir(), env });
     client = new pg.Client({ connectionString: url.href });
     await client.connect();
