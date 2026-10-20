@@ -4,7 +4,7 @@ The one Fastify service on Node 26 (ADR-0004). It reads its configuration from e
 
 ## Run it locally
 
-You need Docker (Docker Desktop or OrbStack) for the database.
+You need Docker (Docker Desktop or OrbStack) for the database and local email inbox.
 
 1. Start PostgreSQL 17 with PostGIS (ADR-0005):
 
@@ -17,19 +17,27 @@ You need Docker (Docker Desktop or OrbStack) for the database.
 
    The official PostGIS image is built for Intel only, so on an Apple Silicon Mac it runs under emulation. That is slower to start and fine for development. The `ygo-postgres` volume keeps the data when the container is removed.
 
-2. Copy the example configuration. `.env` is git-ignored; never commit it.
+2. Start Mailpit. Its HTTP API and inbox are available only on your machine:
+
+   ```sh
+   docker run -d --name ygo-mailpit -p 127.0.0.1:8025:8025 axllent/mailpit
+   ```
+
+   Open http://localhost:8025 to see messages. The server sends to Mailpit's HTTP API; no SMTP port is needed.
+
+3. Copy the example configuration. `.env` is git-ignored; never commit it.
 
    ```sh
    cp apps/server/.env.example apps/server/.env
    ```
 
-3. Start the server with reload on save:
+4. Start the server with reload on save:
 
    ```sh
    pnpm --filter @ygo/server dev
    ```
 
-4. Check it:
+5. Check it:
 
    ```sh
    curl http://127.0.0.1:3000/v1/healthz
@@ -38,11 +46,21 @@ You need Docker (Docker Desktop or OrbStack) for the database.
 
    With the database stopped (`docker stop ygo-postgres`) the same request answers `503` with `{"error":{"code":"UNAVAILABLE"}}`.
 
+6. Smoke-test delivery from a small script in another terminal, then open the Mailpit inbox:
+
+   ```sh
+   pnpm --filter @ygo/server exec tsx -e 'import { createMailpitMailer } from "./src/adapters/mailer.ts"; createMailpitMailer("ygo@example.invalid", "http://localhost:8025").send({ to: "test@example.invalid", subject: "YGo Mailpit smoke test", text: "Local delivery works." }).catch((error) => { console.error(error); process.exitCode = 1; })'
+   ```
+
 ## Configuration
 
 | Variable | Required | Default |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | none; a `postgres://` URL |
+| `MAILER` | yes | `ses` or `mailpit`; no console sender |
+| `MAIL_FROM` | yes | sender email address for both providers |
+| `MAILPIT_URL` | with `MAILER=mailpit` | Mailpit HTTP base URL, e.g. `http://localhost:8025` |
+| `AWS_REGION` | with `MAILER=ses` | `ap-south-1` for the YGo deployment |
 | `HOST` | no | `127.0.0.1` |
 | `PORT` | no | `3000` |
 | `LOG_LEVEL` | no | `info` |
