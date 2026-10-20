@@ -1,0 +1,18 @@
+[Unit]
+Description=Check YGo job run freshness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ygo-production
+Group=ygo-production
+WorkingDirectory=/opt/ygo/production/current
+EnvironmentFile=/etc/ygo/production.env
+ExecStart=/opt/ygo/node/bin/node --enable-source-maps /opt/ygo/production/current/check-jobs.js
+TimeoutStartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0077
