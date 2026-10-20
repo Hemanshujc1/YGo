@@ -7,6 +7,7 @@ from pathlib import Path
 import pwd
 import shutil
 import signal
+import secrets
 import subprocess
 import sys
 import tarfile
@@ -102,7 +103,7 @@ def main():
                 url = urlsplit(admin)
                 url = urlunsplit((url.scheme, url.netloc, "/" + database, url.query, ""))
                 port = 3000 if environment == "staging" else 3001
-                (state / f"{environment}.env").write_text(f"DATABASE_URL={url}\nHOST=127.0.0.1\nPORT={port}\nLOG_LEVEL=info\nMAILER=mailpit\nMAIL_FROM=ygo@example.invalid\nMAILPIT_URL=http://localhost:8025\nREVISION=initial\n")
+                (state / f"{environment}.env").write_text(f"DATABASE_URL={url}\nAUTH_TOKEN_SECRET={secrets.token_hex(32)}\nHOST=127.0.0.1\nPORT={port}\nLOG_LEVEL=info\nMAILER=mailpit\nMAIL_FROM=ygo@example.invalid\nMAILPIT_URL=http://localhost:8025\nREVISION=initial\n")
             def invoke(sha, mode="deploy", environment="staging", fail=False):
                 (state / "settings").write_text(json.dumps(settings))
                 args = ["bash", str(source / "ops/deploy.sh"), mode, environment, sha]

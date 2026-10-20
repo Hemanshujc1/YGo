@@ -1,3 +1,43 @@
-// Drizzle table definitions (ADR-0004). drizzle-kit diffs this file to write
-// each migration. No tables yet.
-export {};
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+export const accounts = pgTable("accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  name: text("name"),
+  phone: text("phone").unique(),
+  phoneVerified: boolean("phone_verified").notNull().default(false),
+  role: text("role").notNull().default("customer"),
+});
+export const loginCodes = pgTable("login_codes", {
+  email: text("email").primaryKey(),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  wrongTries: integer("wrong_tries").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+});
+
+export const loginCodeHistory = pgTable(
+  "login_code_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("login_code_history_email_expires_at_idx").on(table.email, table.expiresAt)],
+);
+export const sessions = pgTable("sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  refreshTokenHash: text("refresh_token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

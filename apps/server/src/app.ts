@@ -10,10 +10,18 @@ import {
 } from "@ygo/contracts";
 import Fastify, { type FastifyError, type FastifyServerOptions } from "fastify";
 import { bodyFields, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "./zod";
+import type { Database } from "./db";
+import type { Mailer } from "./adapters/mailer";
+import type { Clock } from "./adapters/clock";
+import { registerAuthRoutes } from "./routes/auth";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
   checkDatabase: () => Promise<void>;
+  database?: Database;
+  mailer?: Mailer;
+  clock?: Clock;
+  authTokenSecret?: string;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
   minAppVersions?: Record<AppName, AppVersion>;
   logger?: FastifyServerOptions["logger"];
@@ -35,10 +43,14 @@ function isOlder(version: AppVersion, min: AppVersion): boolean {
 
 export function buildApp({
   checkDatabase,
+  database,
+  mailer,
+  clock,
+  authTokenSecret,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   logger = false,
 }: AppOptions) {
-  const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
@@ -67,6 +79,10 @@ export function buildApp({
   });
 
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(envelope("NOT_FOUND")));
+
+  if (database && mailer && clock && authTokenSecret) {
+    registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret });
+  }
 
   app.get(
     "/v1/healthz",

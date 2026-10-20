@@ -11,7 +11,7 @@ import { expect, inject, it } from "vitest";
 
 const run = promisify(execFile);
 
-it("ADR-0004: a standalone release migrates with only DATABASE_URL and serves database health", async () => {
+it("ADR-0004: a standalone release migrates with its runtime config and serves database health", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ygo-release-"));
   const admin = new pg.Client({ connectionString: inject("databaseUrl") });
   const name = `ygo_release_${randomUUID().replaceAll("-", "")}`;
@@ -26,7 +26,7 @@ it("ADR-0004: a standalone release migrates with only DATABASE_URL and serves da
       cwd: fileURLToPath(new URL("..", import.meta.url)),
     });
     const env = {
-      ...process.env, DATABASE_URL: url.href, HOST: "127.0.0.1", PORT: "3000",
+      ...process.env, DATABASE_URL: url.href, AUTH_TOKEN_SECRET: "01234567890123456789012345678901", HOST: "127.0.0.1", PORT: "3000",
       MAILER: "mailpit", MAIL_FROM: "ygo@example.invalid", MAILPIT_URL: "http://localhost:8025",
     };
     const migrateEnv = { DATABASE_URL: url.href };
