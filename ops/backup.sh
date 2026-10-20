@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Called by the future #131 timer, never by the API process.
+# Called by the #131 backup job, never by the API process.
 set -euo pipefail
 umask 077
 die() { echo "$*" >&2; exit 1; }

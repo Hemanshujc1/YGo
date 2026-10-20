@@ -1,0 +1,8 @@
+[Unit]
+Description=Run YGo job %i daily
+
+[Timer]
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=YGo job %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ygo-production
+Group=ygo-production
+WorkingDirectory=/opt/ygo/production/current
+EnvironmentFile=/etc/ygo/production.env
+ExecStart=/opt/ygo/node/bin/node --enable-source-maps /opt/ygo/production/current/job.js %i
+TimeoutStartSec=10800
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0077

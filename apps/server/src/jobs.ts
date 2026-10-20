@@ -4,11 +4,17 @@ import type { Database } from "./db";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
-export function isJobName(name: string): name is "cleanup-sessions" {
-  return name === "cleanup-sessions";
+export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26 } as const;
+export type JobName = keyof typeof jobMaxAgeHours;
+
+export function isJobName(name: string): name is JobName {
+  return Object.hasOwn(jobMaxAgeHours, name);
 }
 
-export async function runJob(database: Database, name: string, clock: Clock): Promise<void> {
+export async function runJob(
+  database: Database, name: string, clock: Clock,
+  backupNightly?: () => Promise<void>,
+): Promise<void> {
   if (!isJobName(name)) throw new Error("Unknown job name");
   const now = clock.now();
   const [run] = await database.db.insert(jobRuns).values({
@@ -19,21 +25,26 @@ export async function runJob(database: Database, name: string, clock: Clock): Pr
   if (!run) throw new Error("Could not record job start");
 
   try {
-    await database.db.transaction(async (tx) => {
-      // ON DELETE CASCADE removes every refresh token of an expired session.
-      await tx.delete(sessions).where(lte(sessions.expiresAt, now));
-      await tx.delete(refreshTokens).where(and(
-        isNotNull(refreshTokens.replacedAt),
-        lt(refreshTokens.replacedAt, new Date(now.getTime() - REFRESH_TTL_MS)),
-      ));
-    });
+    if (name === "backup-nightly") {
+      if (!backupNightly) throw new Error("Backup runner is missing");
+      await backupNightly();
+    } else {
+      await database.db.transaction(async (tx) => {
+        // ON DELETE CASCADE removes every refresh token of an expired session.
+        await tx.delete(sessions).where(lte(sessions.expiresAt, now));
+        await tx.delete(refreshTokens).where(and(
+          isNotNull(refreshTokens.replacedAt),
+          lt(refreshTokens.replacedAt, new Date(now.getTime() - REFRESH_TTL_MS)),
+        ));
+      });
+    }
     await database.db.update(jobRuns).set({ status: "ok", finishedAt: clock.now() })
       .where(eq(jobRuns.id, run.id));
   } catch (error) {
     await database.db.update(jobRuns).set({
       status: "failed",
       finishedAt: clock.now(),
-      errorText: "cleanup failed",
+      errorText: name === "backup-nightly" ? "backup failed" : "cleanup failed",
     }).where(eq(jobRuns.id, run.id));
     throw error;
   }
