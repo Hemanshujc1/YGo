@@ -1,0 +1,29 @@
+{
+  "agent": { "region": "ap-south-1", "metrics_collection_interval": 60 },
+  "metrics": {
+    "namespace": "CWAgent",
+    "append_dimensions": { "InstanceId": "${aws:InstanceId}" },
+    "aggregation_dimensions": [["InstanceId"]],
+    "metrics_collected": {
+      "disk": {
+        "resources": ["/"], "measurement": ["used_percent"],
+        "drop_device": true, "drop_original_metrics": ["disk_used_percent"]
+      },
+      "mem": {
+        "measurement": ["available_percent"],
+        "drop_original_metrics": ["mem_available_percent"]
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "journald": {
+        "collect_list": [
+          { "units": ["ygo@production.service"], "log_group_name": "/ygo/api/production", "log_stream_name": "{instance_id}", "retention_in_days": 7 },
+          { "units": ["ygo@staging.service"], "log_group_name": "/ygo/api/staging", "log_stream_name": "{instance_id}", "retention_in_days": 7 },
+          { "units": ["ygo@production.service"], "filters": [{ "type": "include", "expression": ".*Start request repeated too quickly.*" }], "log_group_name": "/ygo/systemd", "log_stream_name": "{instance_id}", "retention_in_days": 7 }
+        ]
+      }
+    }
+  }
+}

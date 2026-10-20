@@ -1,0 +1,6 @@
+[Unit]
+Description=Check YGo off-AWS copy age
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3.12 /opt/ygo/ops/off-aws-check.py
