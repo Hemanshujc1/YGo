@@ -9,6 +9,13 @@ SCRIPT = pathlib.Path(__file__).with_name("monitoring.sh")
 
 
 class MonitoringTest(unittest.TestCase):
+    def test_crash_filter_reads_systemd_manager_record(self):
+        config = json.loads(pathlib.Path(__file__).with_name("cloudwatch-agent.json").read_text())
+        entries = config["logs"]["logs_collected"]["journald"]["collect_list"]
+        crash = next(entry for entry in entries if entry["log_group_name"] == "/ygo/systemd")
+        self.assertEqual(crash["matches"], [{"UNIT": "ygo@production.service"}])
+        self.assertNotIn("units", crash)
+
     def test_operator_script_defines_rate_and_all_alarm_destinations(self):
         with tempfile.TemporaryDirectory() as directory:
             work = pathlib.Path(directory)
