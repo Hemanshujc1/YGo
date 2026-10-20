@@ -1,6 +1,8 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { Account } from "@ygo/contracts";
 import { useSyncExternalStore } from "react";
+import { listeners } from "./listeners";
+import { onSignedOut } from "./signed-out";
 
 /**
  * Where the person stands, which picks the screen (#155, Q4):
@@ -9,6 +11,7 @@ import { useSyncExternalStore } from "react";
  * - `profile-needed`: C02, until the name and phone are set.
  * - `signed-in`: the app itself.
  * - `unreachable`: the launch check got no answer. The saved token is kept, and Try again calls `check`.
+ *   A refused token goes to `signed-out` even when the phone's storage fails (#155, S3).
  */
 export type SessionState =
   | { status: "checking" | "signed-out" | "unreachable" }
@@ -20,40 +23,28 @@ interface SessionApi {
   signOut(): Promise<void>;
 }
 
-// The server ended the session (refused, expired or reused). An event, not a
-// latch: a later sign-in starts a new session.
-const endedListeners = new Set<() => void>();
-
-/** Pass to `createApiClient` as `onSignedOut`: the app goes back to C01 (#155, Q5). */
-export function showSignedOut() {
-  endedListeners.forEach((listener) => listener());
-}
-
 const byAccount = (account: Account): SessionState =>
   account.name && account.phone ? { status: "signed-in", account } : { status: "profile-needed", account };
 
 /** One per app, beside its client: `createSession(api)`. */
 export function createSession(api: SessionApi) {
   let state: SessionState = { status: "checking" };
-  const listeners = new Set<() => void>();
+  const changed = listeners();
   // Each change bumps it, so a launch check that answers after a sign-in or a sign-out is dropped.
   let turn = 0;
 
   function move(next: SessionState) {
     turn++;
     state = next;
-    listeners.forEach((listener) => listener());
+    changed.notify();
   }
 
-  endedListeners.add(() => move({ status: "signed-out" }));
+  onSignedOut(() => move({ status: "signed-out" }));
 
   return {
     get: () => state,
 
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
+    subscribe: changed.add,
 
     /** At launch, and from Try again: asks the server who is signed in. */
     async check() {
@@ -82,24 +73,26 @@ export function createSession(api: SessionApi) {
      * Sign out, then C01. The client forgets the session the moment this is
      * called (#161). Resolves false when the phone's storage could not be
      * cleared: the screen may say so, and the token is never used again
-     * (#155, S3).
+     * (#155, S3). A sign-in that lands meanwhile is kept.
      */
     async signOut(): Promise<boolean> {
+      const mine = turn;
       let cleared = true;
       try {
         await api.signOut();
       } catch {
         cleared = false;
       }
-      move({ status: "signed-out" });
+      if (mine === turn) move({ status: "signed-out" });
       return cleared;
     },
   };
 }
 
-export type Session = ReturnType<typeof createSession>;
+// Not `Session`: @ygo/contracts uses that name for the token pair.
+export type AppSession = ReturnType<typeof createSession>;
 
 /** The current state; the screen re-renders when it changes. */
-export function useSession(session: Session): SessionState {
+export function useSession(session: AppSession): SessionState {
   return useSyncExternalStore(session.subscribe, session.get);
 }

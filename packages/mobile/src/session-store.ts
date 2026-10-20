@@ -1,6 +1,7 @@
 import type { SessionStore } from "@ygo/api-client";
 import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, deleteItemAsync, getItemAsync, setItemAsync } from "expo-secure-store";
 import { createMMKV } from "react-native-mmkv";
+import { showSignedOut } from "./signed-out";
 
 /** Where the refresh token itself is kept. */
 interface Secrets {
@@ -9,7 +10,7 @@ interface Secrets {
   delete(): Promise<void>;
 }
 
-/** A flag that a sign-out has begun clearing the token. It holds no secret. */
+/** Set while the saved token must not be used. It holds no secret. */
 interface Marker {
   isSet(): boolean;
   set(): void;
@@ -21,21 +22,34 @@ interface Marker {
  *
  * Clearing sets the marker first and drops it only once the token is gone.
  * While it is set the token is never handed out, so a clear that failed
- * (the app then opens signed out) can't sign anyone back in; each read tries
- * the clear again (#155, S3). A new sign-in saves over the old token and then
- * drops the marker.
+ * can't sign anyone back in; each read tries the clear again (#155, S3). A
+ * failed clear also calls `cleared`, so the app goes to sign-in even when
+ * the server ended the session. A token that can't be read counts as none.
+ * A new sign-in saves over the old token and then drops the marker.
  */
-export function makeSessionStore(secrets: Secrets, marker: Marker): SessionStore {
+export function makeSessionStore(secrets: Secrets, marker: Marker, cleared: () => void): SessionStore {
+  async function forget() {
+    try {
+      await secrets.delete();
+      marker.clear();
+    } catch {
+      // Still there: it stays unusable, and the next read tries again.
+    }
+  }
+
   return {
     async get() {
-      if (!marker.isSet()) return secrets.get();
-      try {
-        await secrets.delete();
-        marker.clear();
-      } catch {
-        // Still there: it stays unusable, and the next read tries again.
+      if (marker.isSet()) {
+        await forget();
+        return null;
       }
-      return null;
+      try {
+        return await secrets.get();
+      } catch {
+        // Unreadable (a Keystore key the phone replaced, a damaged item): sign in again.
+        await forget();
+        return null;
+      }
     },
     async set(token) {
       await secrets.set(token);
@@ -43,7 +57,12 @@ export function makeSessionStore(secrets: Secrets, marker: Marker): SessionStore
     },
     async clear() {
       marker.set();
-      await secrets.delete();
+      try {
+        await secrets.delete();
+      } catch (err) {
+        cleared();
+        throw err;
+      }
       marker.clear();
     },
   };
@@ -57,9 +76,12 @@ export function makeSessionStore(secrets: Secrets, marker: Marker): SessionStore
 const options = { keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 const key = "refreshToken";
 
-// MMKV holds the marker only: never the token (#155).
+// MMKV holds two flags, never the token (#155). The Keychain keeps an
+// item after the app is deleted but MMKV doesn't, so a fresh install never
+// picks up the token of whoever used the app before.
 const flags = createMMKV({ id: "session" });
 const signingOut = "signingOut";
+const installed = "installed";
 
 /** Pass to `createApiClient` as `session`. */
 export const sessionStore = makeSessionStore(
@@ -69,8 +91,12 @@ export const sessionStore = makeSessionStore(
     delete: () => deleteItemAsync(key, options),
   },
   {
-    isSet: () => flags.getBoolean(signingOut) === true,
+    isSet: () => flags.getBoolean(signingOut) === true || flags.getBoolean(installed) !== true,
     set: () => flags.set(signingOut, true),
-    clear: () => void flags.remove(signingOut),
+    clear: () => {
+      flags.set(installed, true);
+      flags.remove(signingOut);
+    },
   },
+  showSignedOut,
 );

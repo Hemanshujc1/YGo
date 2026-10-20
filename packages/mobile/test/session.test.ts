@@ -1,7 +1,8 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { Account } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createSession, showSignedOut } from "../src/session";
+import { createSession } from "../src/session";
+import { showSignedOut } from "../src/signed-out";
 
 const blank: Account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: "asha@example.com", name: null, phone: null };
 const full: Account = { ...blank, name: "Asha", phone: "+919876543210" };
@@ -78,5 +79,19 @@ describe("createSession", () => {
     session.signedIn(full);
     expect(await session.signOut()).toBe(false);
     expect(session.get()).toEqual({ status: "signed-out" });
+  });
+
+  it("keeps a sign-in that lands while a sign-out is finishing", async () => {
+    let finish!: () => void;
+    const api = fakeApi(
+      async () => ({ ok: true, data: full }),
+      () => new Promise<void>((resolve) => (finish = resolve)),
+    );
+    const session = createSession(api);
+    const signingOut = session.signOut();
+    session.signedIn(full);
+    finish();
+    await signingOut;
+    expect(session.get()).toEqual({ status: "signed-in", account: full });
   });
 });
