@@ -57,6 +57,10 @@ describe("RefreshBody", () => {
   it("names an empty token", () => {
     expect(fieldsRefused(RefreshBody, { refreshToken: "" })).toEqual(["refreshToken"]);
   });
+
+  it("names a token too long to be one of ours", () => {
+    expect(fieldsRefused(RefreshBody, { refreshToken: "a".repeat(513) })).toEqual(["refreshToken"]);
+  });
 });
 
 describe("SetProfileBody", () => {
@@ -90,6 +94,11 @@ describe("Account", () => {
   it("accepts an account before the profile is set", () => {
     const fresh = { ...account, name: null, phone: null };
     expect(Account.parse(fresh)).toEqual(fresh);
+  });
+
+  it("keeps a name saved under an older, looser rule", () => {
+    const older = { ...account, name: "Aaaa" };
+    expect(Account.parse(older)).toEqual(older);
   });
 
   it("refuses an id that is not a UUID", () => {

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { Email, LoginOtp, PersonName, Phone } from "./fields";
 
+/** An access or refresh token. Capped so a huge body is refused before it is hashed. */
+const Token = z.string().min(1).max(512);
+
 /** `POST /v1/auth/code`: email me a sign-in code. Answers 204. */
 export const RequestCodeBody = z.strictObject({ email: Email });
 export type RequestCodeBody = z.infer<typeof RequestCodeBody>;
@@ -10,7 +13,7 @@ export const VerifyCodeBody = z.strictObject({ email: Email, code: LoginOtp });
 export type VerifyCodeBody = z.infer<typeof VerifyCodeBody>;
 
 /** `POST /v1/auth/refresh`: trade the refresh token for a new pair. Answers a `Session`. */
-export const RefreshBody = z.strictObject({ refreshToken: z.string().min(1) });
+export const RefreshBody = z.strictObject({ refreshToken: Token });
 export type RefreshBody = z.infer<typeof RefreshBody>;
 
 /**
@@ -25,12 +28,17 @@ export type SetProfileBody = z.infer<typeof SetProfileBody>;
 export const ChangeNameBody = z.strictObject({ name: PersonName });
 export type ChangeNameBody = z.infer<typeof ChangeNameBody>;
 
-/** The signed-in account, from `GET /v1/me`. Name and phone are null until the profile is set. */
+/**
+ * The signed-in account, from `GET /v1/me`. Name and phone are null until the
+ * profile is set. Plain strings, not the field rules: those check what a
+ * person types, and a rule made stricter later must not break an account
+ * saved under the old one.
+ */
 export const Account = z.object({
   id: z.uuid(),
-  email: Email,
-  name: PersonName.nullable(),
-  phone: Phone.nullable(),
+  email: z.string(),
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
 });
 export type Account = z.infer<typeof Account>;
 
@@ -40,8 +48,8 @@ export type Account = z.infer<typeof Account>;
  * replaced on every refresh.
  */
 export const Session = z.object({
-  accessToken: z.string().min(1),
-  refreshToken: z.string().min(1),
+  accessToken: Token,
+  refreshToken: Token,
   account: Account,
 });
 export type Session = z.infer<typeof Session>;
