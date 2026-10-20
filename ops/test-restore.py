@@ -11,7 +11,10 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 def cmd(*args, **kwargs):
-    return subprocess.run(args, check=True, text=True, capture_output=True, **kwargs).stdout.strip()
+    result = subprocess.run(args, text=True, capture_output=True, **kwargs)
+    if result.returncode:
+        raise RuntimeError(f'{args[0]} failed: {result.stderr}')
+    return result.stdout.strip()
 
 def fake():
     state = Path(os.environ['YGO_RESTORE_TEST'])
@@ -139,8 +142,8 @@ def main():
             print(f'PASS: exact backup/restore, data, failure paths; recovery elapsed {elapsed:.2f}s')
         finally:
             for name in names: cmd('psql', admin, '-c', f'DROP DATABASE {name} WITH (FORCE)')
-            shutil.rmtree('/etc/ygo')
-            shutil.rmtree('/opt/ygo')
+            if Path('/etc/ygo').exists(): shutil.rmtree('/etc/ygo')
+            if Path('/opt/ygo').exists(): shutil.rmtree('/opt/ygo')
 
 if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout'): fake()
 else: main()
