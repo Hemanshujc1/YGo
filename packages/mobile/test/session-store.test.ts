@@ -32,6 +32,7 @@ vi.mock("react-native-mmkv", () => ({
 const { createApiClient } = await import("@ygo/api-client");
 const { makeSessionStore, sessionStore: store } = await import("../src/session-store");
 const { onSignedOut } = await import("../src/signed-out");
+const { rejected } = await import("../src/sign-in-flow");
 
 const thisPhone = { keychainAccessible: secure.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
@@ -99,6 +100,12 @@ describe("sessionStore", () => {
     expect(phone.keychain.size).toBe(0);
   });
 
+  it("rejects with SessionNotSaved when the Keychain can't save the token", async () => {
+    const cause = new Error("Keychain write failed");
+    secure.setItemAsync.mockRejectedValueOnce(cause);
+    await expect(store.set("T1")).rejects.toMatchObject({ name: "SessionNotSaved", cause });
+  });
+
   it("counts a token it can't read as none, and removes it", async () => {
     await store.set("T1");
     secure.getItemAsync.mockRejectedValueOnce(new Error("DecryptException"));
@@ -151,6 +158,11 @@ describe("makeSessionStore when the marker's storage fails", () => {
     expect(cleared).toHaveBeenCalledOnce();
   });
 
+  it("rejects with SessionNotSaved when a sign-in can't drop the marker", async () => {
+    const { store } = setup({ clear: true });
+    await expect(store.set("T2")).rejects.toMatchObject({ name: "SessionNotSaved" });
+  });
+
   it("finishes a sign-out whose token is gone even when the marker can't be dropped", async () => {
     const { store, token } = setup({ clear: true });
     await store.clear();
@@ -175,6 +187,21 @@ describe("sessionStore behind the client", () => {
     };
     return createApiClient({ baseUrl: "https://api.test", fetch: fetch as typeof globalThis.fetch, session: store });
   }
+
+  it("tells a sign-in the phone could not keep from no network", async () => {
+    const api = client();
+    secure.setItemAsync.mockRejectedValueOnce(new Error("Keychain write failed"));
+    expect(rejected(await api.verifyCode(body).catch((err: unknown) => err))).toBe("not-saved");
+
+    const offline = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: (async () => {
+        throw new TypeError("Network request failed");
+      }) as typeof globalThis.fetch,
+      session: store,
+    });
+    expect(rejected(await offline.verifyCode(body).catch((err: unknown) => err))).toBe("offline");
+  });
 
   /** Starts a sign-out and waits until its delete is with the Keychain. */
   async function signOutHeld(api: ReturnType<typeof client>) {

@@ -3,7 +3,16 @@ import { type Account, Email, type RequestCodeBody, type VerifyCodeBody } from "
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
 import { EnterCode } from "./enter-code";
-import { aboutField, checkOutcome, type LastSend, needsSend, type Problem, rejected, sendOutcome } from "./sign-in-flow";
+import {
+  aboutField,
+  checkOutcome,
+  type LastSend,
+  moment,
+  needsSend,
+  type Problem,
+  rejected,
+  sendOutcome,
+} from "./sign-in-flow";
 import { Button, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
@@ -58,7 +67,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
       answer = "offline";
     }
     const problem = sendOutcome(answer);
-    if (!problem) remember({ last: { email, at: Date.now() }, shut: false });
+    if (!problem) remember({ last: { email, at: moment() }, shut: false });
     return problem;
   }
 
@@ -99,7 +108,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
             typed={typed}
             setTyped={setTyped}
             send={async (email) => {
-              const problem = needsSend(email, last, Date.now()) ? await send(email) : null;
+              const problem = needsSend(email, last, moment()) ? await send(email) : null;
               if (!problem) setCodeFor(email);
               return problem;
             }}

@@ -1,7 +1,17 @@
 import type { Account } from "@ygo/contracts";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, BackHandler, Platform, TextInput, View } from "react-native";
-import { aboutField, type CheckOutcome, CODE_LENGTH, codeDigits, type Problem, secondsLeft, wholeCode } from "./sign-in-flow";
+import {
+  aboutField,
+  type CheckOutcome,
+  CODE_LENGTH,
+  codeDigits,
+  type Moment,
+  moment,
+  type Problem,
+  secondsLeft,
+  wholeCode,
+} from "./sign-in-flow";
 import { Button, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
@@ -11,7 +21,7 @@ type EnterCodeProps = {
   supportEmail: string;
   email: string;
   /** When the last code went to this email; the countdown runs from it. Null when none did. */
-  sentAt: number | null;
+  sentAt: Moment | null;
   /** False after an expired code, a locked email or a spent code, until a new code is sent. */
   boxesOpen: boolean;
   /** Sends a new code: null when sent, or the problem. */
@@ -33,7 +43,7 @@ export function EnterCode(props: EnterCodeProps) {
   const [checking, setChecking] = useState(false);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(null);
-  const [now, setNow] = useState(Date.now);
+  const [now, setNow] = useState(moment);
   const input = useRef<TextInput>(null);
   // Set at once, before React re-renders: paste and autofill can bring two
   // changes in a row, and a code is checked or sent only once at a time.
@@ -65,12 +75,12 @@ export function EnterCode(props: EnterCodeProps) {
     }
   }, [typing]);
 
-  // The clock is read again each second and on every return to the app, so
+  // The clocks are read again each second and on every return to the app, so
   // the countdown shows the time really left (#155, S2).
   useEffect(() => {
     if (!waiting) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    const listener = AppState.addEventListener("change", () => setNow(Date.now()));
+    const timer = setInterval(() => setNow(moment()), 1000);
+    const listener = AppState.addEventListener("change", () => setNow(moment()));
     return () => {
       clearInterval(timer);
       listener.remove();
@@ -79,7 +89,7 @@ export function EnterCode(props: EnterCodeProps) {
 
   async function typed(text: string) {
     if (busy.current) return;
-    const next = codeDigits(text);
+    const next = codeDigits(text, digits);
     setDigits(next);
     setProblem(null);
     const code = wholeCode(next);
@@ -107,7 +117,7 @@ export function EnterCode(props: EnterCodeProps) {
     busy.current = false;
     refocus.current = !failed;
     setSending(false);
-    setNow(Date.now());
+    setNow(moment());
     if (failed) {
       setProblem({ text: problemWords(words, failed, "send"), onField: aboutField(failed) });
       return;

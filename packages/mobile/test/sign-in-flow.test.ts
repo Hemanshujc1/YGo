@@ -7,28 +7,42 @@ import {
   needsSend,
   rejected,
   secondsLeft,
+  SessionNotSaved,
   sendOutcome,
   wholeCode,
 } from "../src/sign-in-flow";
 
-const sent = 1_000_000;
+const sent = { wall: 1_000_000, steady: 5_000 };
+/** `ms` later on both clocks. */
+const after = (ms: number) => ({ wall: sent.wall + ms, steady: sent.steady + ms });
 const account: Account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: "asha@example.com", name: null, phone: null };
 
 describe("secondsLeft", () => {
   it("counts down 30 seconds from the send", () => {
     expect(secondsLeft(sent, sent)).toBe(30);
-    expect(secondsLeft(sent, sent + 1)).toBe(30);
-    expect(secondsLeft(sent, sent + 29_001)).toBe(1);
-    expect(secondsLeft(sent, sent + 30_000)).toBe(0);
+    expect(secondsLeft(sent, after(1))).toBe(30);
+    expect(secondsLeft(sent, after(29_001))).toBe(1);
+    expect(secondsLeft(sent, after(30_000))).toBe(0);
   });
 
   it("shows the time really left after the app was away, never 30 again", () => {
-    expect(secondsLeft(sent, sent + 22_400)).toBe(8);
-    expect(secondsLeft(sent, sent + 10 * 60_000)).toBe(0);
+    expect(secondsLeft(sent, after(22_400))).toBe(8);
+    expect(secondsLeft(sent, after(10 * 60_000))).toBe(0);
   });
 
-  it("never waits longer than 30 seconds when the clock was set back", () => {
-    expect(secondsLeft(sent, sent - 60_000)).toBe(30);
+  it("ends after 30 running seconds even when the phone's clock was set back", () => {
+    const setBack = (ms: number) => ({ wall: sent.wall - 60 * 60_000 + ms, steady: sent.steady + ms });
+    expect(secondsLeft(sent, setBack(0))).toBe(30);
+    expect(secondsLeft(sent, setBack(12_000))).toBe(18);
+    expect(secondsLeft(sent, setBack(30_000))).toBe(0);
+  });
+
+  it("counts a sleep the steady clock missed", () => {
+    expect(secondsLeft(sent, { wall: sent.wall + 40_000, steady: sent.steady + 2_000 })).toBe(0);
+  });
+
+  it("ends early when the phone's clock was set forward: the server still refuses a send too soon", () => {
+    expect(secondsLeft(sent, { wall: sent.wall + 60 * 60_000, steady: sent.steady + 3_000 })).toBe(0);
   });
 
   it("is ready when nothing was sent", () => {
@@ -46,6 +60,23 @@ describe("codeDigits", () => {
     ["", ""],
   ])("keeps the digits of %j", (typed, kept) => {
     expect(codeDigits(typed)).toBe(kept);
+  });
+
+  it("adds a typed digit to those before it", () => {
+    expect(codeDigits("2804", "280")).toBe("2804");
+  });
+
+  it("drops a deleted digit", () => {
+    expect(codeDigits("28", "280")).toBe("28");
+  });
+
+  it("takes a whole code filled in after digits already typed", () => {
+    expect(codeDigits("1280419", "1")).toBe("280419");
+    expect(codeDigits("28280419", "28")).toBe("280419");
+  });
+
+  it("keeps the first code of an autofill that came twice", () => {
+    expect(codeDigits("280419280419")).toBe("280419");
   });
 });
 
@@ -67,15 +98,15 @@ describe("needsSend", () => {
   });
 
   it("goes straight to the code for the same email inside the wait", () => {
-    expect(needsSend("asha@example.com", last, sent + 5_000)).toBe(false);
+    expect(needsSend("asha@example.com", last, after(5_000))).toBe(false);
   });
 
   it("sends to the same email once the wait is over", () => {
-    expect(needsSend("asha@example.com", last, sent + 30_000)).toBe(true);
+    expect(needsSend("asha@example.com", last, after(30_000))).toBe(true);
   });
 
   it("sends to a different email at once", () => {
-    expect(needsSend("ravi@example.com", last, sent + 5_000)).toBe(true);
+    expect(needsSend("ravi@example.com", last, after(5_000))).toBe(true);
   });
 });
 
@@ -120,9 +151,16 @@ describe("rejected", () => {
     ["no network", new TypeError("Network request failed"), "offline"],
     ["a timeout", new DOMException("timed out", "TimeoutError"), "offline"],
     ["an abort", new DOMException("aborted", "AbortError"), "offline"],
-    ["the store refusing to save", new Error("Keychain write failed"), "not-saved"],
+    ["any other failure of the call", new Error("Unexpected end of stream"), "offline"],
+    ["something thrown that is no Error", "boom", "offline"],
+    ["the store refusing to save", new SessionNotSaved(new Error("Keychain write failed")), "not-saved"],
   ])("reads %s as %s", (_, error, problem) => {
     expect(rejected(error)).toBe(problem);
+  });
+
+  it("keeps the store's own error as the cause", () => {
+    const cause = new Error("Keychain write failed");
+    expect(new SessionNotSaved(cause).cause).toBe(cause);
   });
 });
 
