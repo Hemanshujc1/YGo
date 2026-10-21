@@ -8,27 +8,52 @@ import {
   useLoaderData,
   useLocation,
   useNavigate,
+  useRevalidator,
   useRouteError,
   type RouteObject,
 } from "react-router";
+import { Categories } from "./categories";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
 type FieldErrors = Partial<Record<Field, string>>;
 
-function Page({ children, protectedArea = false }: { children: ReactNode; protectedArea?: boolean }) {
+function Page({ children, protectedArea = false, api }: { children: ReactNode; protectedArea?: boolean; api?: AdminApi }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function signOut() {
+    if (!api) return;
+    setSigningOut(true);
+    try {
+      const result = await api.signOut();
+      void navigate("/sign-in", { state: result.ok ? undefined : { warning: strings.signOutUnconfirmed } });
+    } catch {
+      void navigate("/sign-in", { state: { warning: strings.signOutUnconfirmed } });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-bg font-sans text-secondary text-text">
       <header className="border-b border-border bg-surface px-8 py-5">
-        <Link to="/accounts" className="text-title font-semibold text-brand">{strings.title}</Link>
+        <div className="flex items-center justify-between gap-4">
+          <Link to="/accounts" className="text-title font-semibold text-brand">{strings.title}</Link>
+          {protectedArea && api && <button disabled={signingOut} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
+            {signingOut ? strings.signingOut : strings.signOut}
+          </button>}
+        </div>
       </header>
       <div className={protectedArea ? "flex" : ""}>
         {protectedArea && (
           <aside className="w-56 shrink-0 border-r border-border bg-surface px-4 py-8">
             <nav aria-label={strings.navigation}>
-              <Link to="/accounts" aria-current="page" className="block rounded-lg bg-primary-subtle p-3 font-medium text-on-primary-subtle">
+              <Link to="/accounts" aria-current={location.pathname === "/accounts" ? "page" : undefined} className={`block rounded-lg p-3 font-medium ${location.pathname === "/accounts" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
                 {strings.accounts}
+              </Link>
+              <Link to="/categories" aria-current={location.pathname === "/categories" ? "page" : undefined} className={`mt-2 block rounded-lg p-3 font-medium ${location.pathname === "/categories" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
+                {strings.categories}
               </Link>
             </nav>
           </aside>
@@ -128,7 +153,6 @@ function SignIn({ api }: { api: AdminApi }) {
 
 function Accounts({ api }: { api: AdminApi }) {
   const loaded = useLoaderData() as Account[];
-  const navigate = useNavigate();
   const [accounts, setAccounts] = useState(loaded);
   const [screen, setScreen] = useState<"list" | "new" | "created">("list");
   const [fields, setFields] = useState<CreateAdminBody>({ email: "", name: "", phone: "", reason: "" });
@@ -170,26 +194,13 @@ function Accounts({ api }: { api: AdminApi }) {
     }
   }
 
-  async function signOut() {
-    setBusy(true);
-    try {
-      const result = await api.signOut();
-      void navigate("/sign-in", { state: result.ok ? undefined : { warning: strings.signOutUnconfirmed } });
-    } catch {
-      void navigate("/sign-in", { state: { warning: strings.signOutUnconfirmed } });
-    }
-  }
-
   return (
-    <Page protectedArea>
+    <Page protectedArea api={api}>
       <div className="mb-8 flex items-center justify-between gap-6">
         <div>
           <h1 className="text-title-large font-semibold">{strings.accounts}</h1>
           <p className="mt-2 text-muted">{strings.accountIntro}</p>
         </div>
-        <button disabled={busy} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
-          {busy ? strings.signingOut : strings.signOut}
-        </button>
       </div>
       {screen === "list" && (
         <section className="rounded-xl border border-border bg-surface p-6">
@@ -258,10 +269,13 @@ function Accounts({ api }: { api: AdminApi }) {
   );
 }
 
-function RouteError() {
+function RouteError({ api }: { api?: AdminApi }) {
   const error = useRouteError();
+  const revalidator = useRevalidator();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
-  return <Page><Message>{notFound ? strings.notFound : strings.failed}</Message><Link to="/accounts" className="mt-4 inline-block text-primary underline">{strings.retry}</Link></Page>;
+  return <Page protectedArea api={api}><Message>{notFound ? strings.notFound : strings.failed}</Message>
+    <button onClick={() => void revalidator.revalidate()} className="mt-4 h-10 rounded-lg border border-border-strong px-4 text-primary">{strings.retry}</button>
+  </Page>;
 }
 
 export function adminRoutes(api: AdminApi): RouteObject[] {
@@ -278,7 +292,19 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       },
       element: <Accounts api={api} />,
       hydrateFallbackElement: <Page>{strings.loading}</Page>,
-      errorElement: <RouteError />,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/categories",
+      loader: async () => {
+        const result = await api.listCategories();
+        if (result.ok) return result.data.categories;
+        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+        throw new Error(result.code);
+      },
+      element: <Page protectedArea api={api}><Categories api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
+      errorElement: <RouteError api={api} />,
     },
     { path: "*", element: <Page><Message>{strings.notFound}</Message></Page> },
   ];

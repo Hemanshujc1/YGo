@@ -124,14 +124,17 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       return result(await adminRequest("POST", "/v1/admin/accounts", body), Account);
     },
 
+    /** `GET /v1/admin/categories`: list the global category tree. */
     async listCategories(): Promise<ApiResult<CategoriesResponse>> {
       return result(await adminRequest("GET", "/v1/admin/categories"), CategoriesResponse);
     },
 
+    /** `POST /v1/admin/categories`: create a top-level or child category. */
     async createCategory(body: CreateCategoryBody): Promise<ApiResult<Category>> {
       return result(await adminRequest("POST", "/v1/admin/categories", body), Category);
     },
 
+    /** `PATCH /v1/admin/categories/:id`: edit or change a category's active setting. */
     async editCategory(id: string, body: EditCategoryBody): Promise<ApiResult<Category>> {
       return result(await adminRequest("PATCH", `/v1/admin/categories/${encodeURIComponent(id)}`, body), Category);
     },
