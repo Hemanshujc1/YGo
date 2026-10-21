@@ -1,6 +1,6 @@
 import { Text, useSession } from "@ygo/mobile";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView } from "react-native";
 import { session } from "../api";
 import { strings } from "../strings";
 
@@ -11,7 +11,8 @@ export default function NotLinked() {
   const [signingOut, setSigningOut] = useState(false);
 
   return (
-    <View className="flex-1 justify-center bg-bg px-4">
+    // Scrolls so Sign out stays reachable at the largest font sizes.
+    <ScrollView className="flex-1 bg-bg" contentContainerClassName="grow justify-center px-4 py-8">
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">
         {strings.notLinked.title}
       </Text>
@@ -21,6 +22,7 @@ export default function NotLinked() {
       )}
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel={strings.profile.signOut}
         accessibilityState={{ busy: signingOut }}
         disabled={signingOut}
         onPress={() => {
@@ -35,6 +37,6 @@ export default function NotLinked() {
           <Text className="text-secondary font-medium text-text">{strings.profile.signOut}</Text>
         )}
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }

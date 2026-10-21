@@ -33,7 +33,7 @@ At launch the app asks the server who is signed in (`GET /v1/me`), with a blank 
 
 At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_SHOPKEEPER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform, or a line naming the stores when no link is set. Offline or any other answer lets the app carry on.
 
-A theme chosen earlier stays saved on the phone with MMKV and is applied before the first screen draws; otherwise the app follows the phone's theme. The choice comes back with the Account screen (S36). The status bar and Android's navigation bar follow the theme on screen.
+A theme chosen earlier stays saved on the phone with MMKV and is applied before the first screen draws; otherwise the app follows the phone's theme. No Shopkeeper screen offers the choice yet. The status bar and Android's navigation bar follow the theme on screen.
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
