@@ -1,9 +1,10 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
   ErrorEnvelope,
+  BrowserSession,
   type ErrorCode,
   RefreshBody,
   RequestCodeBody,
@@ -28,12 +29,16 @@ const CODE_TTL_MS = 5 * 60_000;
 const LOCK_MS = 15 * 60_000;
 const MIN_SEND_INTERVAL_MS = 30_000;
 const SEND_WINDOW_MS = 60 * 60_000;
+const ADMIN_IDLE_MS = 30 * 60_000;
+const ADMIN_COOKIE = "__Secure-ygo-admin-refresh";
+const ADMIN_REFRESH_HEADER = "x-ygo-admin-refresh";
 
 interface AuthOptions {
   pool: Pool;
   mailer: Mailer;
   clock: Clock;
   secret: string;
+  adminCookieDomain?: string;
 }
 
 type AuthApp = FastifyInstance;
@@ -44,6 +49,14 @@ async function lockKey(client: PoolClient, key: string, namespace: number): Prom
 
 function sendError(reply: FastifyReply, status: 400 | 401 | 429 | 503, code: ErrorCode) {
   return reply.code(status).send({ error: { code } });
+}
+
+function adminCookie(token: string, domain?: string): string {
+  return `${ADMIN_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/v1/admin/auth; Max-Age=${token ? 1800 : 0}${domain ? `; Domain=${domain}` : ""}`;
+}
+
+function cookieToken(request: FastifyRequest): string | undefined {
+  return request.headers.cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${ADMIN_COOKIE}=`))?.slice(ADMIN_COOKIE.length + 1);
 }
 
 function rateLimitAddress(address: string): string {
@@ -68,12 +81,11 @@ function rateLimitAddress(address: string): string {
   return `${expanded.slice(0, 4).map((group) => group.padStart(4, "0")).join(":")}/64`;
 }
 
-export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }: AuthOptions): void {
+export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, adminCookieDomain }: AuthOptions): void {
   const keys = deriveKeys(secret);
-  app.post(
-    "/v1/auth/code",
-    { schema: { body: RequestCodeBody, response: { 400: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope } } },
-    async (request, reply) => {
+  const setAdminCookie = (reply: FastifyReply, token: string) => reply.header("set-cookie", adminCookie(token, adminCookieDomain));
+  const requestCode = (browser: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
+      request.log.info({ flow: browser ? "admin" : "mobile", stage: "code" }, "Auth attempt");
       const { email } = request.body as typeof RequestCodeBody._output;
       const now = clock.now();
       const address = rateLimitAddress(request.ip);
@@ -127,6 +139,16 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         await client.query("COMMIT");
         client.release();
         clientReleased = true;
+        if (browser) {
+          const member = await pool.query(
+            "SELECT 1 FROM accounts a JOIN admin_memberships m ON m.account_id = a.id WHERE a.email = $1",
+            [email],
+          );
+          if (!member.rowCount) {
+            request.log.info({ flow: "admin", outcome: "no_membership" }, "Auth code request");
+            return reply.code(204).send();
+          }
+        }
         try {
           await mailer.send({
             to: email,
@@ -148,6 +170,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           } finally {
             failedClient.release();
           }
+          if (browser) return reply.code(204).send();
           return sendError(reply, 503, "UNAVAILABLE");
         }
         const activateClient = await pool.connect();
@@ -184,20 +207,21 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         } finally {
           activateClient.release();
         }
-        return (reply as FastifyReply).code(204).send();
+        request.log.info({ flow: browser ? "admin" : "mobile", outcome: "code_sent" }, "Auth code request");
+        return reply.code(204).send();
       } catch (error) {
         if (!clientReleased) await client.query("ROLLBACK");
         throw error;
       } finally {
         if (!clientReleased) client.release();
       }
-    },
-  );
+  };
+  const codeSchema = { body: RequestCodeBody, response: { 400: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope } };
+  app.post("/v1/auth/code", { schema: codeSchema }, requestCode(false));
+  app.post("/v1/admin/auth/code", { schema: codeSchema }, requestCode(true));
 
-  app.post(
-    "/v1/auth/verify",
-    { schema: { body: VerifyCodeBody, response: { 200: Session, 400: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope } } },
-    async (request, reply) => {
+  const verifyCode = (browser: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
+      request.log.info({ flow: browser ? "admin" : "mobile", stage: "verify" }, "Auth attempt");
       const { email, code } = request.body as typeof VerifyCodeBody._output;
       const now = clock.now();
       const client = await pool.connect();
@@ -242,19 +266,29 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           return sendError(reply, 400, "CODE_WRONG");
         }
 
-        const accountResult = await client.query<Account>(
-          `INSERT INTO accounts (email) VALUES ($1)
-           ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-           RETURNING id, email, name, phone`,
-          [email],
-        );
+        const accountResult = browser
+          ? await client.query<Account>(
+              `SELECT a.id, a.email, a.name, a.phone FROM accounts a
+               JOIN admin_memberships m ON m.account_id = a.id WHERE a.email = $1`,
+              [email],
+            )
+          : await client.query<Account>(
+              `INSERT INTO accounts (email) VALUES ($1)
+               ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+               RETURNING id, email, name, phone`,
+              [email],
+            );
         const account = accountResult.rows[0];
+        if (browser && !account) {
+          await client.query("ROLLBACK");
+          return sendError(reply, 401, "UNAUTHENTICATED");
+        }
         if (!account) throw new Error("Account insert returned no row");
         const sessionId = randomUUID();
         const refreshToken = randomBytes(32).toString("base64url");
         await client.query(
-          "INSERT INTO sessions (id, account_id, expires_at) VALUES ($1, $2, $3)",
-          [sessionId, account.id, new Date(now.getTime() + REFRESH_TTL_MS)],
+          "INSERT INTO sessions (id, account_id, expires_at, kind) VALUES ($1, $2, $3, $4)",
+          [sessionId, account.id, new Date(now.getTime() + (browser ? ADMIN_IDLE_MS : REFRESH_TTL_MS)), browser ? "admin_web" : "mobile"],
         );
         await client.query(
           "INSERT INTO refresh_tokens (token_hash, session_id, generation) VALUES ($1, $2, 0)",
@@ -262,25 +296,29 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         );
         await client.query("DELETE FROM login_codes WHERE email = $1", [email]);
         await client.query("COMMIT");
-        return reply.code(200).send({
-          accessToken: accessToken(keys, account.id, sessionId, now),
-          refreshToken,
-          account,
-        });
+        request.log.info({ flow: browser ? "admin" : "mobile", outcome: "signed_in" }, "Auth verify");
+        if (browser) {
+          setAdminCookie(reply, refreshToken);
+          return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), account });
+        }
+        return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), refreshToken, account });
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
       } finally {
         client.release();
       }
-    },
-  );
+  };
+  app.post("/v1/auth/verify", { schema: { body: VerifyCodeBody, response: { 200: Session, 400: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope } } }, verifyCode(false));
+  app.post("/v1/admin/auth/verify", { schema: { body: VerifyCodeBody, response: { 200: BrowserSession, 400: ErrorEnvelope, 401: ErrorEnvelope, 429: ErrorEnvelope } } }, verifyCode(true));
 
-  app.post(
-    "/v1/auth/refresh",
-    { schema: { body: RefreshBody, response: { 200: Session, 400: ErrorEnvelope, 401: ErrorEnvelope } } },
-    async (request, reply) => {
-      const { refreshToken } = request.body as typeof RefreshBody._output;
+  const refresh = (browser: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
+      request.log.info({ flow: browser ? "admin" : "mobile", stage: "refresh" }, "Auth attempt");
+      if (browser && request.headers[ADMIN_REFRESH_HEADER] !== "1") {
+        return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+      }
+      const refreshToken = browser ? cookieToken(request) : (request.body as typeof RefreshBody._output).refreshToken;
+      if (!refreshToken || refreshToken.length > 512) return sendError(reply, 401, "UNAUTHENTICATED");
       const now = clock.now();
       const hash = digest(keys.refreshHash, refreshToken);
       const client = await pool.connect();
@@ -294,8 +332,8 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         const sessionId = found.rows[0]?.session_id;
         // Concurrent refreshes of one session run one at a time from here.
         const session = sessionId
-          ? (await client.query<{ account_id: string; expires_at: Date }>(
-              "SELECT account_id, expires_at FROM sessions WHERE id = $1 FOR UPDATE",
+          ? (await client.query<{ account_id: string; expires_at: Date; kind: string }>(
+              "SELECT account_id, expires_at, kind FROM sessions WHERE id = $1 FOR UPDATE",
               [sessionId],
             )).rows[0]
           : undefined;
@@ -306,9 +344,28 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
               [hash],
             )).rows[0]
           : undefined;
+        if (browser && sessionId && session?.kind === "admin_web" && session.expires_at <= now) {
+          await client.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+          await client.query("COMMIT");
+          setAdminCookie(reply, "");
+          return sendError(reply, 401, "UNAUTHENTICATED");
+        }
         if (!sessionId || !session || !token || session.expires_at <= now) {
           await client.query("ROLLBACK");
           return sendError(reply, 401, "UNAUTHENTICATED");
+        }
+        if (session.kind !== (browser ? "admin_web" : "mobile")) {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+        }
+        if (browser) {
+          const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1", [session.account_id]);
+          if (!member.rowCount) {
+            await client.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+            await client.query("COMMIT");
+            setAdminCookie(reply, "");
+            return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+          }
         }
 
         const generation = token.generation + 1;
@@ -321,7 +378,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
           );
           await client.query("UPDATE sessions SET expires_at = $2 WHERE id = $1", [
             sessionId,
-            new Date(now.getTime() + REFRESH_TTL_MS),
+            new Date(now.getTime() + (browser ? ADMIN_IDLE_MS : REFRESH_TTL_MS)),
           ]);
         } else if (now.getTime() - token.replaced_at.getTime() > GRACE_MS) {
           // A replaced token used after the grace window may have been stolen.
@@ -347,6 +404,11 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
         const account = accountResult.rows[0];
         if (!account) throw new Error("Session has no account");
         await client.query("COMMIT");
+        request.log.info({ flow: browser ? "admin" : "mobile", outcome: "refreshed" }, "Auth refresh");
+        if (browser) {
+          setAdminCookie(reply, next);
+          return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), account });
+        }
         return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), refreshToken: next, account });
       } catch (error) {
         await client.query("ROLLBACK");
@@ -354,6 +416,28 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret }
       } finally {
         client.release();
       }
+  };
+  app.post("/v1/auth/refresh", { schema: { body: RefreshBody, response: { 200: Session, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, refresh(false));
+  app.post("/v1/admin/auth/refresh", { schema: { response: { 200: BrowserSession, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, refresh(true));
+
+  app.post(
+    "/v1/admin/auth/sign-out",
+    { schema: { response: { 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    async (request, reply) => {
+      if (request.headers[ADMIN_REFRESH_HEADER] !== "1") return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+      const token = cookieToken(request);
+      if (!token || token.length > 512) return sendError(reply, 401, "UNAUTHENTICATED");
+      const found = await pool.query<{ session_id: string }>(
+        `SELECT r.session_id FROM refresh_tokens r JOIN sessions s ON s.id = r.session_id
+         WHERE r.token_hash = $1 AND s.kind = 'admin_web'`,
+        [digest(keys.refreshHash, token)],
+      );
+      const sessionId = found.rows[0]?.session_id;
+      if (!sessionId) return sendError(reply, 401, "UNAUTHENTICATED");
+      await pool.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+      setAdminCookie(reply, "");
+      request.log.info({ flow: "admin", outcome: "signed_out" }, "Auth sign-out");
+      return (reply as FastifyReply).code(204).send();
     },
   );
 

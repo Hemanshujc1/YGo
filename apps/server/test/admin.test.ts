@@ -198,7 +198,7 @@ describe("Admin database and bootstrap", () => {
     const row = (await isolatedDatabase.pool.query("SELECT account_id FROM admin_memberships LIMIT 1")).rows[0];
     const id = row.account_id as string;
     const sessionId = randomUUID();
-    await isolatedDatabase.pool.query("INSERT INTO sessions (id, account_id, expires_at) VALUES ($1, $2, $3)",
+    await isolatedDatabase.pool.query("INSERT INTO sessions (id, account_id, expires_at, kind) VALUES ($1, $2, $3, 'admin_web')",
       [sessionId, id, new Date("2030-02-01")]);
     const app = buildApp({ checkDatabase: isolatedDatabase.ping });
     const auth = { pool: isolatedDatabase.pool, clock, keys: deriveKeys(secret) };

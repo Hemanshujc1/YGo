@@ -14,6 +14,7 @@ const app = buildApp({
   mailer,
   clock: { now: () => new Date() },
   authTokenSecret: config.AUTH_TOKEN_SECRET,
+  adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,
   minAppVersions: { customer: config.MIN_CUSTOMER_VERSION, shopkeeper: config.MIN_SHOPKEEPER_VERSION },
   logger: { level: config.LOG_LEVEL },
 });

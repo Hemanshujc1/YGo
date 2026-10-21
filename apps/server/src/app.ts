@@ -14,6 +14,7 @@ import type { Database } from "./db";
 import type { Mailer } from "./adapters/mailer";
 import type { Clock } from "./adapters/clock";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerAdminRoutes } from "./routes/admin";
 import { registerProfileRoutes } from "./routes/profile";
 
 export interface AppOptions {
@@ -23,6 +24,7 @@ export interface AppOptions {
   mailer?: Mailer;
   clock?: Clock;
   authTokenSecret?: string;
+  adminCookieDomain?: string;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
   minAppVersions?: Record<AppName, AppVersion>;
   logger?: FastifyServerOptions["logger"];
@@ -48,6 +50,7 @@ export function buildApp({
   mailer,
   clock,
   authTokenSecret,
+  adminCookieDomain,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   logger = false,
 }: AppOptions) {
@@ -82,7 +85,8 @@ export function buildApp({
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(envelope("NOT_FOUND")));
 
   if (database && mailer && clock && authTokenSecret) {
-    registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret });
+    registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret, adminCookieDomain });
+    registerAdminRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 
