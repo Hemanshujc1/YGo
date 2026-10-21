@@ -1,5 +1,5 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
-import { Slot } from "expo-router";
+import { Stack } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { strings } from "../strings";
 import "../global.css";
@@ -30,7 +30,8 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
-        <Slot />
+        {/* A stack, so Account opens over the home screen and Back returns to it (#156, Q5). */}
+        <Stack screenOptions={{ headerShown: false }} />
       </SessionGate>
     </AppShell>
   );

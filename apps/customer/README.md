@@ -1,24 +1,13 @@
 # @ygo/customer
 
-The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, the server's health answer, Sign out, the System / Light / Dark theme choice and the Inter review specimens.
+The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, a link to Account (C23), the server's health answer and the Inter review specimens. Account shows the name, which can be changed, the email and phone, the System / Light / Dark theme choice, Help and Sign out.
 
 ## Run it locally
 
 Expo Go is not used (ADR-0001). `expo run` makes a local development build and starts Metro.
 
 1. Start the server: see `apps/server/README.md`. It listens on `127.0.0.1:3000`.
-2. Tell the app where the API is, in `apps/customer/.env` (git-ignored):
-
-   ```sh
-   EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:3000
-   # Where Help and a phone already in use point.
-   EXPO_PUBLIC_SUPPORT_EMAIL=
-   # Optional until the store listings exist; while unset, the update screen names the stores instead of showing a button. A store build needs both.
-   EXPO_PUBLIC_ANDROID_STORE_URL=
-   EXPO_PUBLIC_IOS_STORE_URL=
-   ```
-
-   That works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`.
+2. Copy `apps/customer/.env.example` to `apps/customer/.env` (git-ignored), and set the support email. It points at the server on `127.0.0.1:3000`, which works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`.
 3. Build and open it:
 
    ```sh
