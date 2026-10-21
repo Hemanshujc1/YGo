@@ -106,5 +106,7 @@ export const strings = {
     CODE_LOCKED: "Too many wrong codes. Try again in 15 minutes.",
     TOO_MANY_REQUESTS: "Too many tries. Wait a little and try again.",
     PHONE_IN_USE: "This number is already used by another account.",
+    EMAIL_IN_USE: "This email is already used by another account.",
+    FORBIDDEN: "This account is not allowed to do that.",
   } satisfies Record<ErrorCode, string>,
 };

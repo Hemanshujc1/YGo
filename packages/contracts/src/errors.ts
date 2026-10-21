@@ -14,6 +14,10 @@ import { z } from "zod";
  * - CODE_LOCKED (429): 5 wrong tries lock the email for 15 minutes.
  * - TOO_MANY_REQUESTS (429): a limit on sending codes was hit.
  * - PHONE_IN_USE (409): another account has this phone number.
+ *
+ * Admin accounts (#37), with the status each is sent with:
+ * - EMAIL_IN_USE (409): another account has this email.
+ * - FORBIDDEN (403): signed in, but not allowed (for example, not an Admin).
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -28,6 +32,8 @@ export const ErrorCode = z.enum([
   "CODE_LOCKED",
   "TOO_MANY_REQUESTS",
   "PHONE_IN_USE",
+  "EMAIL_IN_USE",
+  "FORBIDDEN",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

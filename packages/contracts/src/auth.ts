@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Email, LoginOtp, PersonName, Phone } from "./fields";
+import { AdminActionReason, Email, LoginOtp, PersonName, Phone } from "./fields";
 
 /** An access or refresh token. Capped so a huge body is refused before it is hashed. */
 const Token = z.string().min(1).max(512);
@@ -28,6 +28,15 @@ export type SetProfileBody = z.infer<typeof SetProfileBody>;
 export const ChangeNameBody = z.strictObject({ name: PersonName });
 export type ChangeNameBody = z.infer<typeof ChangeNameBody>;
 
+/** `POST /v1/admin/accounts`: create an Admin account and record why. Answers 201 with the `Account`. */
+export const CreateAdminBody = z.strictObject({
+  email: Email,
+  name: PersonName,
+  phone: Phone,
+  reason: AdminActionReason,
+});
+export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
+
 /**
  * The signed-in account, from `GET /v1/me`. Name and phone are null until the
  * profile is set. Plain strings, not the field rules: those check what a
@@ -42,6 +51,10 @@ export const Account = z.object({
 });
 export type Account = z.infer<typeof Account>;
 
+/** `GET /v1/admin/accounts`: the Admin accounts. */
+export const AdminAccountsResponse = z.strictObject({ accounts: z.array(Account) });
+export type AdminAccountsResponse = z.infer<typeof AdminAccountsResponse>;
+
 /**
  * A signed-in session (#34). The access token is short-lived and kept in
  * memory; the refresh token goes to the phone's secure storage and is
@@ -53,3 +66,13 @@ export const Session = z.object({
   account: Account,
 });
 export type Session = z.infer<typeof Session>;
+
+/**
+ * Admin web uses the same session but receives its rotating refresh token in
+ * an httpOnly cookie. It must never appear in a browser-readable response.
+ */
+export const BrowserSession = z.strictObject({
+  accessToken: Token,
+  account: Account,
+});
+export type BrowserSession = z.infer<typeof BrowserSession>;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  AdminActionReason,
   Email,
   FssaiNumber,
   HandoverOtp,
@@ -30,6 +31,10 @@ function rule(
     });
   }
 }
+
+describe("AdminActionReason", () => {
+  rule(AdminActionReason, { "  Operations coverage  ": "Operations coverage", ["a".repeat(500)]: "a".repeat(500) }, ["   ", "a".repeat(501)]);
+});
 
 describe("Phone", () => {
   rule(

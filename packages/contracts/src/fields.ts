@@ -73,6 +73,9 @@ function climbsFourLetters(value: string): boolean {
 /** An email address, trimmed and lowercased so one inbox is one account (CONTEXT.md, Accounts and sign-in). */
 export const Email = z.string().trim().toLowerCase().pipe(z.email().max(254));
 
+/** Admin action record reason, trimmed and capped at 500 characters (owner decision on #180). */
+export const AdminActionReason = z.string().trim().min(1).max(500);
+
 /** The 6-digit login code (CONTEXT.md, Accounts and sign-in). */
 export const LoginOtp = z.string().overwrite(withoutSpaces).regex(/^\d{6}$/);
 

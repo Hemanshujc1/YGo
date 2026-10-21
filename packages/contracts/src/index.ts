@@ -1,6 +1,9 @@
 export {
   Account,
+  AdminAccountsResponse,
+  BrowserSession,
   ChangeNameBody,
+  CreateAdminBody,
   RefreshBody,
   RequestCodeBody,
   Session,
@@ -9,6 +12,7 @@ export {
 } from "./auth";
 export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";
 export {
+  AdminActionReason,
   Email,
   FssaiNumber,
   HandoverOtp,
