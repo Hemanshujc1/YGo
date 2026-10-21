@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
   Account,
+  BrowserSession,
   ChangeNameBody,
+  CreateAdminBody,
   ErrorEnvelope,
   invalidFields,
   RefreshBody,
@@ -117,6 +119,48 @@ describe("Session", () => {
   });
 });
 
+describe("CreateAdminBody", () => {
+  it("normalizes the shared fields and requires a reason", () => {
+    expect(CreateAdminBody.parse({
+      email: " Asha@Example.com ",
+      name: " Asha   Kulkarni ",
+      phone: "98765 43210",
+      reason: "  Operations coverage  ",
+    })).toEqual({
+      email: "asha@example.com",
+      name: "Asha Kulkarni",
+      phone: "+919876543210",
+      reason: "Operations coverage",
+    });
+  });
+
+  it("names invalid fields and refuses an empty reason", () => {
+    expect(fieldsRefused(CreateAdminBody, {
+      email: "bad",
+      name: "4sha",
+      phone: "12345",
+      reason: "   ",
+    })).toEqual(["email", "name", "phone", "reason"]);
+  });
+
+  it("refuses unexpected account roles", () => {
+    expect(fieldsRefused(CreateAdminBody, {
+      email: account.email, name: account.name, phone: account.phone,
+      reason: "Operations coverage", role: "area-manager",
+    })).toEqual(["role"]);
+  });
+});
+
+describe("BrowserSession", () => {
+  it("accepts a browser-readable access token and account", () => {
+    expect(BrowserSession.parse({ accessToken: "a", account })).toEqual({ accessToken: "a", account });
+  });
+
+  it("refuses a refresh token in the browser response", () => {
+    expect(fieldsRefused(BrowserSession, { accessToken: "a", refreshToken: "r", account })).toEqual(["refreshToken"]);
+  });
+});
+
 describe("sign-in error codes", () => {
   it.each([
     "UNAUTHENTICATED",
@@ -126,6 +170,8 @@ describe("sign-in error codes", () => {
     "CODE_LOCKED",
     "TOO_MANY_REQUESTS",
     "PHONE_IN_USE",
+    "EMAIL_IN_USE",
+    "FORBIDDEN",
   ])("accepts %s", (code) => {
     expect(ErrorEnvelope.parse({ error: { code } })).toEqual({ error: { code } });
   });

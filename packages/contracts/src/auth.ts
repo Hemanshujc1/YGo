@@ -28,6 +28,15 @@ export type SetProfileBody = z.infer<typeof SetProfileBody>;
 export const ChangeNameBody = z.strictObject({ name: PersonName });
 export type ChangeNameBody = z.infer<typeof ChangeNameBody>;
 
+/** `POST /v1/admin/accounts`: create an Admin account and record why. */
+export const CreateAdminBody = z.strictObject({
+  email: Email,
+  name: PersonName,
+  phone: Phone,
+  reason: z.string().trim().min(1),
+});
+export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
+
 /**
  * The signed-in account, from `GET /v1/me`. Name and phone are null until the
  * profile is set. Plain strings, not the field rules: those check what a
@@ -53,3 +62,13 @@ export const Session = z.object({
   account: Account,
 });
 export type Session = z.infer<typeof Session>;
+
+/**
+ * Admin web uses the same session but receives its rotating refresh token in
+ * an httpOnly cookie. It must never appear in a browser-readable response.
+ */
+export const BrowserSession = z.strictObject({
+  accessToken: Token,
+  account: Account,
+});
+export type BrowserSession = z.infer<typeof BrowserSession>;

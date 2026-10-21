@@ -1,6 +1,8 @@
 export {
   Account,
+  BrowserSession,
   ChangeNameBody,
+  CreateAdminBody,
   RefreshBody,
   RequestCodeBody,
   Session,
