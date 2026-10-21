@@ -1,2 +1,10 @@
 @import "tailwindcss";
 @plugin "@ygo/tokens/tailwind";
+
+@font-face {
+  font-family: Inter;
+  src: url("./fonts/InterVariable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+}

@@ -1,26 +1,13 @@
 # @ygo/admin
 
-Admin web (ADR-0006): Vite, React, React Router and Tailwind over `@ygo/tokens`, built to static files. For now it shows the server's health answer.
+Admin web (ADR-0006): a static Vite and React app. Admin access tokens stay in memory. The server rotates the refresh cookie, and the client refreshes only when a protected request needs an access token. The server enforces the 30-minute idle limit.
 
-## Run it locally
+## Run locally
 
-1. Start the server: see `apps/server/README.md`. It listens on `127.0.0.1:3000`.
-2. Start admin:
+Start the API and Mailpit as described in `apps/server/README.md`, then run `pnpm --filter @ygo/admin dev`. The app calls `/v1` on its own origin; Vite proxies those calls to the local API at `127.0.0.1:3000`. Set `YGO_ADMIN_DEV_API_TARGET=http://127.0.0.1:3184` when using a separate local API port. In production, Nginx must serve `/v1` under the Admin hostname and proxy it to the API. The server has no CORS setup, so a separate API hostname will not work for browser cookie requests.
 
-   ```sh
-   pnpm --filter @ygo/admin dev
-   ```
+Only an existing Admin can request a usable Admin sign-in code. A code request shows the same answer for Admin and non-Admin email addresses. The first Admin is made by the deployment bootstrap command; see `apps/server/README.md`.
 
-3. Open the URL Vite prints. The page shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds.
+## Font
 
-## How it reaches the API
-
-The client calls `${VITE_API_BASE_URL}/v1/…` through `@ygo/api-client`.
-
-- **Development:** leave `VITE_API_BASE_URL` unset (blank counts as unset). The page calls its own origin, and the Vite dev server proxies `/v1` to `http://127.0.0.1:3000` (`vite.config.ts`). One origin means no CORS setup on the server. With the server down, the proxy drops the connection, so the page shows "cannot be reached" as it would in production.
-- **Production build:** set `VITE_API_BASE_URL` to the API's origin when running `pnpm --filter @ygo/admin build`. Vite writes it into the bundle at build time, so it is public: never put a secret in a `VITE_` variable.
-- **Not done yet: CORS.** ADR-0006 serves admin from its own hostname through Nginx, and no ADR yet says whether the API shares that origin. The server has no CORS support. The deploy ticket decides: either Nginx also proxies `/v1` on the admin hostname (same origin, `VITE_API_BASE_URL` left unset), or the server allows the admin origin with CORS.
-
-## Colours
-
-Only token roles, such as `bg-surface` and `text-muted`. `@ygo/tokens/tailwind` replaces Tailwind's palette, so a literal colour class does not exist.
+`src/fonts/InterVariable.woff2` is Inter v4.1 from [the Inter project](https://github.com/rsms/inter/tree/v4.1/docs/font-files), bundled with its SIL Open Font License in `src/fonts/LICENSE.txt`. It includes U+20B9 (₹) and OpenType tabular figures. Admin web uses only weights 400, 500 and 600.
