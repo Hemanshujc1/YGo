@@ -48,7 +48,7 @@ export function EnterCode(props: EnterCodeProps) {
   // Set at once, before React re-renders: paste and autofill can bring two
   // changes in a row, and a code is checked or sent only once at a time.
   const busy = useRef(false);
-  // Open the keypad again once the boxes take typing again.
+  // Open the keypad again once a new code opens the boxes.
   const refocus = useRef(false);
   const left = secondsLeft(sentAt, now);
   const waiting = left > 0;
@@ -102,7 +102,8 @@ export function EnterCode(props: EnterCodeProps) {
       onSignedIn(outcome.signedIn);
       return;
     }
-    refocus.current = outcome.boxesOpen;
+    // A closed field lets go of its focus, so focus() opens the keypad after a new code.
+    if (!outcome.boxesOpen) input.current?.blur();
     setChecking(false);
     setDigits("");
     setProblem({ text: problemWords(words, outcome.problem, "check"), onField: aboutField(outcome.problem) });
@@ -159,7 +160,10 @@ export function EnterCode(props: EnterCodeProps) {
           onChangeText={(text) => void typed(text)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          editable={typing}
+          // Editable while a code is checked or sent, so the keypad stays open
+          // (#186); typing then is dropped. A field made not editable keeps its
+          // focus but hides the keypad, and focus() then does nothing.
+          editable={boxesOpen}
           autoFocus
           caretHidden
           keyboardType="number-pad"
