@@ -9,4 +9,5 @@ export { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 export type { SignInWords } from "./sign-in-words";
 export { Text } from "./text";
 export { showUpdateRequired } from "./update-signal";
-export { applySavedTheme, chooseTheme, savedTheme, type ThemeChoice } from "./theme";
+export { applySavedTheme } from "./theme";
+export { ThemePicker, type ThemePickerWords } from "./theme-picker";
