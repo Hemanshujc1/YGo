@@ -16,6 +16,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     verifyCode: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder] } }),
     createAccount: vi.fn().mockResolvedValue({ ok: true, data: created }),
+    listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
+    createCategory: vi.fn(),
+    editCategory: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     ...overrides,
   };
