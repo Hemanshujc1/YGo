@@ -385,9 +385,6 @@ importers:
       '@ygo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@ygo/format':
-        specifier: workspace:*
-        version: link:../../packages/format
       '@ygo/mobile':
         specifier: workspace:*
         version: link:../../packages/mobile
