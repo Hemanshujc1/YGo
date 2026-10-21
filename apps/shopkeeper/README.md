@@ -1,6 +1,6 @@
 # @ygo/shopkeeper
 
-The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, the server's health answer, Sign out, the System / Light / Dark theme choice and the Inter review specimens.
+The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, "You're not linked to a shop yet", the email signed in, and Sign out, until shop applications (#40) and joining a shop (#58) link accounts to shops.
 
 ## Run it locally
 
@@ -27,13 +27,13 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
    The first run asks for an iOS bundle identifier or Android package name. Use a throwaway one and do not commit it: the store ticket picks the real ones, which cannot change after the first upload.
 
-The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds. Without `EXPO_PUBLIC_API_BASE_URL`, without an email address in `EXPO_PUBLIC_SUPPORT_EMAIL`, or without a `version` in `app.json`, the app stops at start with an error naming it.
+Without `EXPO_PUBLIC_API_BASE_URL`, without an email address in `EXPO_PUBLIC_SUPPORT_EMAIL`, or without a `version` in `app.json`, the app stops at start with an error naming it.
 
 At launch the app asks the server who is signed in (`GET /v1/me`), with a blank screen in the theme colour until it answers. With no answer, "Can't reach YGo" offers Try again and keeps the saved sign-in.
 
 At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_SHOPKEEPER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform, or a line naming the stores when no link is set. Offline or any other answer lets the app carry on.
 
-The theme choice is saved on the phone with MMKV and applied before the first screen draws. The status bar and Android's navigation bar follow the theme on screen.
+A theme chosen earlier stays saved on the phone with MMKV and is applied before the first screen draws; otherwise the app follows the phone's theme. The choice comes back with the Account screen (S36). The status bar and Android's navigation bar follow the theme on screen.
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
