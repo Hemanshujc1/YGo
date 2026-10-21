@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatMoney, formatNumber, formatTime } from "../src/index";
+import { formatDate, formatDateTime, formatMoney, formatNumber, formatPhone, formatTime } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -64,4 +64,17 @@ describe("Indian display formats with Android's space after ₹", () => {
   });
 
   expectIndianFormats();
+});
+
+describe("phone numbers", () => {
+  it("shows a stored Indian number as two groups of five, without +91", () => {
+    expect(formatPhone("+919876543210")).toBe("98765 43210");
+  });
+
+  it("shows anything else as stored", () => {
+    expect(formatPhone("+4420794600")).toBe("+4420794600");
+    expect(formatPhone("+91987654321")).toBe("+91987654321");
+    expect(formatPhone("+915876543210")).toBe("+915876543210");
+    expect(formatPhone("")).toBe("");
+  });
 });
