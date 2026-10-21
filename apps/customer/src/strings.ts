@@ -67,6 +67,7 @@ export const strings = {
     email: "Email",
     phone: "Phone",
     changeContact: "To change your email or phone number, write to",
+    changeContactEnd: ".",
     help: "Help",
     sheet: {
       title: "Change name",

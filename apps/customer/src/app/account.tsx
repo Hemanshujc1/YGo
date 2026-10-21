@@ -44,11 +44,11 @@ function Row({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 }
 
 /** A row's label over its value: "Name" over the name. */
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, numbers }: { label: string; value: string; numbers?: boolean }) {
   return (
     <View className="flex-1">
       <Text className="text-secondary text-muted">{label}</Text>
-      <Text className="text-body tabular-nums text-text">{value}</Text>
+      <Text className={`text-body text-text ${numbers ? "tabular-nums" : ""}`}>{value}</Text>
     </View>
   );
 }
@@ -63,6 +63,8 @@ export default function AccountScreen() {
   const [theme, setTheme] = useState(savedTheme);
   const [changing, setChanging] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // Set before React re-renders, so a second tap never signs out twice.
+  const leaving = useRef(false);
 
   // The gate shows the app only when signed in; this tells TypeScript.
   if (state.status !== "signed-in") return null;
@@ -100,13 +102,14 @@ export default function AccountScreen() {
           </View>
           <View className="border-t border-border">
             <Row icon={<Phone size={20} className="text-muted" />}>
-              <Field label={words.phone} value={formatPhone(account.phone ?? "")} />
+              <Field label={words.phone} value={formatPhone(account.phone ?? "")} numbers />
             </Row>
           </View>
         </View>
         <Text className="text-caption text-muted">
           {`${words.changeContact} `}
-          <SupportEmail address={supportEmail} className="text-caption" />.
+          <SupportEmail address={supportEmail} className="text-caption" />
+          {words.changeContactEnd}
         </Text>
 
         <View className="gap-1.5">
@@ -155,6 +158,8 @@ export default function AccountScreen() {
             accessibilityState={{ disabled: signingOut, busy: signingOut }}
             disabled={signingOut}
             onPress={() => {
+              if (leaving.current) return;
+              leaving.current = true;
               setSigningOut(true);
               // The gate shows C01 once it settles, with a notice if the phone could not clear it.
               void session.signOut();
@@ -191,6 +196,12 @@ function ChangeName({ account, onClose }: { account: Account; onClose: () => voi
   const working = useRef(false);
   // While the keyboard is up, the sheet sits on it, not on the home indicator.
   const [keyboardUp, setKeyboardUp] = useState(false);
+  const input = useRef<TextInput>(null);
+
+  // After a refusal the box takes typing again; put the cursor back in it.
+  useEffect(() => {
+    if (!saving && problem) input.current?.focus();
+  }, [saving, problem]);
 
   useEffect(() => {
     const shown = Keyboard.addListener("keyboardDidShow", () => setKeyboardUp(true));
@@ -245,7 +256,7 @@ function ChangeName({ account, onClose }: { account: Account; onClose: () => voi
     <Modal transparent visible animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={close}>
       {/* Padding on Android too: edge to edge, the window no longer shrinks for the keyboard. */}
       <KeyboardAvoidingView behavior="padding" className="flex-1 justify-end bg-scrim">
-        <Pressable accessibilityLabel={words.sheet.cancel} onPress={close} className="flex-1" />
+        <Pressable accessibilityRole="button" accessibilityLabel={words.sheet.cancel} onPress={close} className="flex-1" />
         <View
           className="gap-4 rounded-t-sheet bg-raised px-4 pt-2"
           style={{ paddingBottom: (keyboardUp ? 0 : insets.bottom) + 16 }}
@@ -257,6 +268,7 @@ function ChangeName({ account, onClose }: { account: Account; onClose: () => voi
           <View>
             <Text className="text-label font-medium text-text">{words.sheet.label}</Text>
             <TextInput
+              ref={input}
               value={name}
               onChangeText={(text) => {
                 setName(text);
@@ -266,6 +278,7 @@ function ChangeName({ account, onClose }: { account: Account; onClose: () => voi
               onBlur={() => setFocused(false)}
               onSubmitEditing={() => void save()}
               autoFocus
+              submitBehavior="submit"
               editable={!saving}
               textContentType="name"
               autoComplete="name"

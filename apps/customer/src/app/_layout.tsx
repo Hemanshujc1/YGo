@@ -6,6 +6,9 @@ import "../global.css";
 
 applySavedTheme();
 
+// Home sits under every screen, so Back from a link straight to Account still lands on it.
+export const unstable_settings = { initialRouteName: "index" };
+
 export default function Layout() {
   return (
     <AppShell
