@@ -1,17 +1,17 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { HealthResponse } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatMoney, formatNumber, formatTime } from "@ygo/format";
-import { chooseTheme, savedTheme, Text, type ThemeChoice } from "@ygo/mobile";
+import { Text } from "@ygo/mobile";
+import { Link } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, session } from "../api";
+import { api } from "../api";
 import { strings } from "../strings";
 
-// The scaffold screen: the server's health, the theme choice, and the Inter
-// review specimens (design system, section 10) until real screens replace it.
+// The scaffold screen: the server's health, the way to Account (C23), and the
+// Inter review specimens (design system, section 10) until real screens replace it.
 
-const themes: ThemeChoice[] = ["system", "light", "dark"];
 const prices = [1250, 45.5, 12000, 8];
 const now = new Date();
 
@@ -36,8 +36,6 @@ function Countdown() {
 export default function Home() {
   const insets = useSafeAreaInsets();
   const [result, setResult] = useState<ApiResult<HealthResponse> | "unreachable">();
-  const [theme, setTheme] = useState(savedTheme);
-  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     // health() rejects only when no answer came back: offline, refused or timed out.
@@ -60,51 +58,16 @@ export default function Home() {
       contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
     >
       <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
+      <Link href="/account" asChild>
+        <Pressable
+          accessibilityRole="button"
+          className="mt-4 min-h-12 items-center justify-center self-start rounded-button border border-border bg-surface px-4"
+        >
+          <Text className="text-secondary font-medium text-text">{strings.account.open}</Text>
+        </Pressable>
+      </Link>
       <Text className="mt-6 text-secondary text-muted">{strings.health}</Text>
       <Text className="mt-1 text-body text-text">{answer}</Text>
-      {/* Until Account (C23) replaces it (#155, Q8). */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ busy: signingOut }}
-        disabled={signingOut}
-        onPress={() => {
-          setSigningOut(true);
-          void session.signOut();
-        }}
-        className="mt-4 min-h-12 items-center justify-center self-start rounded-button border border-border bg-surface px-4"
-      >
-        {signingOut ? (
-          <ActivityIndicator className="text-primary" />
-        ) : (
-          <Text className="text-secondary font-medium text-text">{strings.profile.signOut}</Text>
-        )}
-      </Pressable>
-
-      <Heading>{strings.theme.label}</Heading>
-      <View className="mt-3 flex-row gap-2">
-        {themes.map((choice) => (
-          <Pressable
-            key={choice}
-            accessibilityRole="button"
-            accessibilityState={{ selected: theme === choice }}
-            onPress={() => {
-              chooseTheme(choice);
-              setTheme(choice);
-            }}
-            className={`min-h-12 flex-1 items-center justify-center rounded-button border ${
-              theme === choice ? "border-primary bg-primary-subtle" : "border-border bg-surface"
-            }`}
-          >
-            <Text
-              className={`text-secondary font-medium ${
-                theme === choice ? "text-on-primary-subtle" : "text-text"
-              }`}
-            >
-              {strings.theme[choice]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
 
       <Heading>{strings.review.sizes}</Heading>
       <Text className="mt-3 text-display font-semibold text-text">{strings.review.display}</Text>

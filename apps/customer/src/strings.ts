@@ -57,6 +57,27 @@ export const strings = {
     signOut: "Sign out",
     offline: "Could not save. Check your connection, then try again.",
   } satisfies Omit<ProfileWords, "errors">,
+  // C23 Account (#156). The name's message, Sign out and "no answer" are C02's, above.
+  account: {
+    open: "Account",
+    title: "Account",
+    back: "Back",
+    name: "Name",
+    changeName: "Change name",
+    email: "Email",
+    phone: "Phone",
+    changeContact: "To change your email or phone number, write to",
+    changeContactEnd: ".",
+    help: "Help",
+    sheet: {
+      title: "Change name",
+      label: "Your name",
+      hint: "Shops see this name on your orders.",
+      save: "Save name",
+      saving: "Saving…",
+      cancel: "Cancel",
+    },
+  },
   // The screen picker's own words (#155, Q3 and Q5).
   session: {
     unreachable: {

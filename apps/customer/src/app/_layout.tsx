@@ -1,10 +1,13 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
-import { Slot } from "expo-router";
+import { Stack } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { strings } from "../strings";
 import "../global.css";
 
 applySavedTheme();
+
+// Home sits under every screen, so Back from a link straight to Account still lands on it.
+export const unstable_settings = { initialRouteName: "index" };
 
 export default function Layout() {
   return (
@@ -30,7 +33,8 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
-        <Slot />
+        {/* A stack, so Account opens over the home screen and Back returns to it (#156, Q5). */}
+        <Stack screenOptions={{ headerShown: false }} />
       </SessionGate>
     </AppShell>
   );
