@@ -1,17 +1,16 @@
 import {
   Account,
-  APP_NAME_HEADER,
-  APP_VERSION_HEADER,
   ErrorEnvelope,
   HealthResponse,
   Session,
   type AppIdentity,
   type ChangeNameBody,
-  type ErrorCode,
   type RequestCodeBody,
   type SetProfileBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
+import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
+export { createAdminApiClient, type AdminApiClientOptions } from "./admin";
 
 /**
  * What a call returns once the server has answered. With VALIDATION_FAILED,
@@ -19,17 +18,7 @@ import {
  * network is down, the server is unreachable, the call timed out) rejects
  * instead.
  */
-export type ApiResult<T> =
-  | { ok: true; data: T }
-  | ApiFailure;
-
-/** A call the server answered with anything other than success. */
-interface ApiFailure {
-  ok: false;
-  status: number;
-  code: ErrorCode;
-  fields?: string[];
-}
+export type { ApiResult } from "./transport";
 
 /**
  * Where the refresh token is kept between launches. The mobile apps back it
@@ -40,21 +29,6 @@ export interface SessionStore {
   set(refreshToken: string): Promise<void>;
   clear(): Promise<void>;
 }
-
-/** A server answer before it is checked against its contract. */
-interface Answer {
-  ok: boolean;
-  status: number;
-  body: unknown;
-}
-
-/** A contract schema. Structural, since only @ygo/contracts imports zod. */
-interface Schema<T> {
-  safeParse(value: unknown): { success: true; data: T } | { success: false };
-}
-
-/** What a signed-in call answers, without asking the server, when there is no session. */
-const NO_SESSION: Answer = { ok: false, status: 401, body: { error: { code: "UNAUTHENTICATED" } } };
 
 /**
  * One session, from a sign-in (or the app opening) until it is replaced. A
@@ -130,7 +104,10 @@ export function createApiClient({
   onSignedOut,
   onSaveFailed,
 }: ApiClientOptions) {
-  const origin = baseUrl.trim().replace(/\/+$/, "");
+  const transport = createTransport({ baseUrl, fetch: fetchFn, timeoutMs, app, onUpdateRequired });
+  const { result, empty } = transport;
+  const send = (method: string, path: string, json?: unknown, token: string | null = null) =>
+    transport.send(method, path, json, { token });
 
   /** The current session. At launch its refresh token is still in the store. */
   let current = life(null, undefined);
@@ -142,60 +119,6 @@ export function createApiClient({
     const done = storing.then(task);
     storing = done.catch(() => undefined);
     return done;
-  }
-
-  /** Sends a call and reads its JSON body; a body that is not JSON reads as undefined. */
-  async function send(method: string, path: string, json?: unknown, token: string | null = null): Promise<Answer> {
-    const response = await (fetchFn ?? fetch)(`${origin}${path}`, {
-      method,
-      headers: {
-        accept: "application/json",
-        ...(json !== undefined && { "content-type": "application/json" }),
-        ...(token && { authorization: `Bearer ${token}` }),
-        ...(app && { [APP_NAME_HEADER]: app.name, [APP_VERSION_HEADER]: app.version }),
-      },
-      body: json === undefined ? undefined : JSON.stringify(json),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    // A body that is not JSON, breaks the contract, or carries a code this
-    // client does not know counts as INTERNAL (see ErrorCode in
-    // @ygo/contracts). Failing to read the body at all rejects.
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (err) {
-      if (!(err instanceof SyntaxError)) throw err;
-    }
-    return { ok: response.ok, status: response.status, body };
-  }
-
-  /**
-   * The result for an answer that is not a success, from its error envelope.
-   * Calls `onUpdateRequired` for UPDATE_REQUIRED, so call it once per answer.
-   */
-  function failure(status: number, body: unknown): ApiFailure {
-    const envelope = ErrorEnvelope.safeParse(body);
-    if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
-    if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
-    return { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields };
-  }
-
-  /** The result for an answer whose success carries a body matching `schema`. */
-  function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {
-    if (!answer.ok) return failure(answer.status, answer.body);
-    const parsed = schema.safeParse(answer.body);
-    return parsed.success
-      ? { ok: true, data: parsed.data }
-      : { ok: false, status: answer.status, code: "INTERNAL" };
-  }
-
-  /** The result for an answer whose success is 204; another success is INTERNAL. */
-  function empty(answer: Answer): ApiResult<undefined> {
-    if (answer.status === 204) return { ok: true, data: undefined };
-    return answer.ok
-      ? { ok: false, status: answer.status, code: "INTERNAL" }
-      : failure(answer.status, answer.body);
   }
 
   /**

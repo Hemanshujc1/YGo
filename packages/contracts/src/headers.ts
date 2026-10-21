@@ -14,3 +14,4 @@ export type AppIdentity = z.infer<typeof AppIdentity>;
 
 export const APP_NAME_HEADER = "x-ygo-app-name";
 export const APP_VERSION_HEADER = "x-ygo-app-version";
+export const ADMIN_REFRESH_HEADER = "x-ygo-admin-refresh";

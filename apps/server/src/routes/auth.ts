@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
+  ADMIN_REFRESH_HEADER,
   ErrorEnvelope,
   BrowserSession,
   type ErrorCode,
@@ -31,7 +32,6 @@ const MIN_SEND_INTERVAL_MS = 30_000;
 const SEND_WINDOW_MS = 60 * 60_000;
 const ADMIN_IDLE_MS = 30 * 60_000;
 const ADMIN_COOKIE = "__Secure-ygo-admin-refresh";
-const ADMIN_REFRESH_HEADER = "x-ygo-admin-refresh";
 
 interface AuthOptions {
   pool: Pool;
