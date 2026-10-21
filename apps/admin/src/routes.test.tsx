@@ -9,6 +9,9 @@ afterEach(cleanup);
 
 const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210" };
 const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211" };
+const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
+const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
+const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };
 
 function setup(path: string, overrides: Record<string, unknown> = {}) {
   const api = {
@@ -111,6 +114,89 @@ describe("Admin web", () => {
     await screen.findByText(founder.email);
     fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
     expect(await screen.findByText(strings.signOutUnconfirmed)).toBeTruthy();
+  });
+
+  it("shows inherited inactivity and restricts the parent picker", async () => {
+    setup("/categories", { listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [groceries, stationery, snacks] } }) });
+    await screen.findByRole("heading", { name: strings.categories });
+    expect(screen.getByText(strings.categoryInactive)).toBeTruthy();
+    expect(screen.getByText(strings.categoryInactiveViaParent)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.editCategory(groceries.name) }));
+    expect(screen.getByRole("combobox", { name: strings.categoryParent }).querySelectorAll("option")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: strings.cancel }));
+    fireEvent.click(screen.getByRole("button", { name: strings.editCategory(snacks.name) }));
+    const options = [...screen.getByRole("combobox", { name: strings.categoryParent }).querySelectorAll("option")];
+    expect(options.map((option) => option.textContent)).toEqual([strings.topLevel, `Groceries${strings.inactiveOption}`, "Stationery"]);
+  });
+
+  it("validates, creates, edits and moves categories, showing saved and field conflict states", async () => {
+    const made = { id: "00000000-0000-4000-8000-000000000104", parentId: null, name: "Hardware", active: true, effectiveActive: true };
+    const api = {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      createCategory: vi.fn().mockResolvedValueOnce({ ok: false, status: 409, code: "CATEGORY_NAME_IN_USE" }).mockResolvedValueOnce({ ok: true, data: made }),
+      editCategory: vi.fn().mockResolvedValue({ ok: true, data: { ...made, parentId: stationery.id, name: "Tools" } }),
+    };
+    setup("/categories", api);
+    await screen.findByRole("heading", { name: strings.categories });
+    fireEvent.click(screen.getByRole("button", { name: strings.newCategory }));
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCategory }));
+    expect(await screen.findByText(strings.categoryInvalidFields.name)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.categoryName }), { target: { value: " Hardware " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCategory }));
+    expect(await screen.findByText(strings.errors.CATEGORY_NAME_IN_USE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCategory }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.categorySaved);
+    expect(api.createCategory).toHaveBeenCalledWith({ name: "Hardware", parentId: null });
+    fireEvent.click(screen.getByRole("button", { name: strings.editCategory(made.name) }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.categoryName }), { target: { value: "Tools" } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.categoryParent }), { target: { value: stationery.id } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCategory }));
+    expect(await screen.findByText("Tools")).toBeTruthy();
+    expect(api.editCategory).toHaveBeenCalledWith(made.id, { name: "Tools", parentId: stationery.id });
+  });
+
+  it("requires a reason to deactivate and updates child availability when the parent changes", async () => {
+    const api = {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [{ ...groceries, active: true, effectiveActive: true }, { ...snacks, effectiveActive: true }] } }),
+      editCategory: vi.fn().mockResolvedValueOnce({ ok: true, data: groceries }).mockResolvedValueOnce({ ok: true, data: { ...groceries, active: true, effectiveActive: true } }),
+    };
+    setup("/categories", api);
+    await screen.findByRole("heading", { name: strings.categories });
+    fireEvent.click(screen.getByRole("button", { name: strings.deactivateCategory(groceries.name) }));
+    expect(screen.getByRole("dialog", { name: strings.deactivateCategoryTitle(groceries.name) })).toBeTruthy();
+    expect(screen.getByText(strings.deactivateParentWarning)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmDeactivate }));
+    expect(await screen.findByText(strings.categoryInvalidFields.reason)).toBeTruthy();
+    expect(api.editCategory).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: " No longer needed " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmDeactivate }));
+    expect(await screen.findByText(strings.categoryInactiveViaParent)).toBeTruthy();
+    expect(api.editCategory).toHaveBeenCalledWith(groceries.id, { active: false, reason: "No longer needed" });
+    fireEvent.click(screen.getByRole("button", { name: strings.reactivateCategory(groceries.name) }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.categorySaved);
+    expect(screen.queryByText(strings.categoryInactiveViaParent)).toBeNull();
+    expect(api.editCategory).toHaveBeenLastCalledWith(groceries.id, { active: true });
+  });
+
+  it("shows loading, empty and retryable error states for categories", async () => {
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise((done) => { resolve = done; });
+    const api = vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ ok: true, data: { categories: [] } });
+    setup("/categories", { listCategories: api });
+    expect(screen.getByText(strings.categoriesLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.failed)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText(strings.noCategories)).toBeTruthy();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["UNAUTHENTICATED", "FORBIDDEN"])("redirects a %s category session to sign-in", async (code) => {
+    const { router } = setup("/categories", {
+      listCategories: vi.fn().mockResolvedValue({ ok: false, status: code === "FORBIDDEN" ? 403 : 401, code }),
+    });
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(router.state.location.pathname).toBe("/sign-in");
   });
 });
 
