@@ -1,5 +1,4 @@
-import { CreateAdminBody } from "@ygo/contracts";
-import { bootstrapAdmin, BOOTSTRAP_REASON } from "./bootstrap";
+import { bootstrapAdmin } from "./bootstrap";
 import { loadDatabaseUrl } from "./config";
 import { connectDatabase } from "./db";
 
@@ -15,15 +14,12 @@ try {
     }
     values[key] = value;
   }
-  const parsed = CreateAdminBody.safeParse({
-    email: values["--email"],
-    name: values["--name"],
-    phone: values["--phone"],
-    reason: BOOTSTRAP_REASON,
-  });
-  if (!parsed.success) throw new Error("Invalid email, name or phone.");
+  const email = values["--email"];
+  const name = values["--name"];
+  const phone = values["--phone"];
+  if (!email || !name || !phone) throw new Error("Expected --email, --name and --phone once each.");
   database = connectDatabase(loadDatabaseUrl());
-  await bootstrapAdmin(database.pool, parsed.data);
+  await bootstrapAdmin(database.pool, { email, name, phone });
   console.log("Initial Admin created.");
 } catch (error) {
   // Never print input values, database URLs, driver errors or account details.
