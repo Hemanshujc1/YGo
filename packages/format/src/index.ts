@@ -38,3 +38,9 @@ export const formatTime = (value: Date | string | number) =>
 
 export const formatDateTime = (value: Date | string | number) =>
   `${formatDate(value)}, ${formatTime(value)}`;
+
+// "+919876543210", as `Phone` in @ygo/contracts stores it, shows as "98765 43210". Anything else shows as stored.
+export const formatPhone = (value: string) => {
+  const indian = /^\+91([6-9]\d{4})(\d{5})$/.exec(value);
+  return indian ? `${indian[1]} ${indian[2]}` : value;
+};
