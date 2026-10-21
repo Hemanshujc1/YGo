@@ -50,6 +50,13 @@
       "when": 1792584400109,
       "tag": "0006_admin_web_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792604909862,
+      "tag": "0007_catalog_categories",
+      "breakpoints": true
     }
   ]
 }

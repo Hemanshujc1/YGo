@@ -34,6 +34,7 @@ export const ErrorCode = z.enum([
   "PHONE_IN_USE",
   "EMAIL_IN_USE",
   "FORBIDDEN",
+  "CATEGORY_NAME_IN_USE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
