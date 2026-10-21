@@ -89,6 +89,20 @@ describe("Admin routes and browser sessions", () => {
     ]);
   });
 
+  it("requires an Admin web session to create or edit categories", async () => {
+    const id = (await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0]?.id;
+    if (!id) throw new Error("Seeded category missing");
+    const requests = [
+      { method: "POST" as const, url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "PATCH" as const, url: `/v1/admin/categories/${id}`, payload: { name: "Food" } },
+    ];
+    for (const request of requests) expect((await app.inject(request)).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    for (const request of requests) {
+      expect((await app.inject({ ...request, headers: { authorization: `Bearer ${mobile}` } })).statusCode).toBe(403);
+    }
+  });
+
   it("creates, moves, deactivates and reactivates categories with atomic action records", async () => {
     const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
     const headers = { authorization: `Bearer ${token}` };
