@@ -1,17 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type Account, ChangeNameBody, type ErrorCode } from "@ygo/contracts";
 import { formatPhone } from "@ygo/format";
-import {
-  Button,
-  chooseTheme,
-  edgeClass,
-  FieldMessage,
-  savedTheme,
-  SupportEmail,
-  Text,
-  type ThemeChoice,
-  useSession,
-} from "@ygo/mobile";
+import { Button, edgeClass, FieldMessage, SupportEmail, Text, ThemePicker, useSession } from "@ygo/mobile";
 import { router } from "expo-router";
 import { ChevronLeft, LogOut, Mail, Phone, User } from "lucide-react-native";
 import { cssInterop } from "nativewind";
@@ -36,7 +26,6 @@ for (const icon of [ChevronLeft, LogOut, Mail, Phone, User]) {
 }
 
 const words = strings.account;
-const themes: ThemeChoice[] = ["system", "light", "dark"];
 
 /** One row of a list card: an icon, then what it shows. */
 function Row({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -60,7 +49,6 @@ function Field({ label, value, numbers }: { label: string; value: string; number
 export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const state = useSession(session);
-  const [theme, setTheme] = useState(savedTheme);
   const [changing, setChanging] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   // Set before React re-renders, so a second tap never signs out twice.
@@ -112,35 +100,7 @@ export default function AccountScreen() {
           {words.changeContactEnd}
         </Text>
 
-        <View className="gap-1.5">
-          <Text className="text-label font-medium text-text">{strings.theme.label}</Text>
-          <View
-            accessibilityRole="radiogroup"
-            accessibilityLabel={strings.theme.label}
-            className="flex-row overflow-hidden rounded-button border border-border-strong"
-          >
-            {themes.map((choice, i) => (
-              <Pressable
-                key={choice}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: theme === choice }}
-                onPress={() => {
-                  chooseTheme(choice);
-                  setTheme(choice);
-                }}
-                className={`min-h-12 flex-1 items-center justify-center ${i > 0 ? "border-l border-border" : ""} ${
-                  theme === choice ? "bg-primary-subtle" : "bg-surface"
-                }`}
-              >
-                <Text
-                  className={`text-label font-medium ${theme === choice ? "text-on-primary-subtle" : "text-text"}`}
-                >
-                  {strings.theme[choice]}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <ThemePicker words={strings.theme} />
 
         <View className="overflow-hidden rounded-card border border-border bg-surface">
           <Row icon={<Mail className="text-muted" />}>
