@@ -16,6 +16,7 @@ case $mode in
     [[ $bucket =~ ^[a-z0-9][a-z0-9.-]+[a-z0-9]$ ]] || die "Invalid bucket"
     work=/var/tmp/ygo-backup
     size_file=/var/lib/ygo/backup-last-bytes
+    mkdir -m 0700 "$work" 2>/dev/null || : # An existing directory must pass the check below.
     [[ -d $work && ! -L $work && $(stat -c '%u:%g:%a' "$work") == 0:0:700 ]] || die "Backup workspace must be a root-owned mode-0700 directory: $work"
     filesystem=$(findmnt -n -T "$work" -o FSTYPE) || die "Could not inspect filesystem for $work"
     [[ -n $filesystem && $filesystem != tmpfs && $filesystem != ramfs ]] || die "Backup workspace must be disk-backed: $work"

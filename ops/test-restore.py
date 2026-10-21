@@ -154,6 +154,16 @@ def main():
             assert not list(work.iterdir()), 'Failed verification must remove both dump copies'
             assert int(size_file.read_text()) == last, 'A failed verification must not update the size record'
             (state / 'corrupt-download').unlink()
+            work.rmdir() # systemd-tmpfiles may remove an idle /var/tmp workspace.
+            work.mkdir()
+            work.chmod(0o777) # A pre-made directory must not be adopted.
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'root-owned mode-0700' in backup.stderr
+            work.rmdir()
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode == 0, backup.stdout + backup.stderr
+            assert (work.is_dir() and work.stat().st_uid == 0 and work.stat().st_gid == 0
+                    and work.stat().st_mode & 0o777 == 0o700 and not list(work.iterdir()))
             snapshot = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'snapshot', 'test-db'],
                                       env=env, text=True, capture_output=True)
             assert snapshot.returncode == 0, snapshot.stdout + snapshot.stderr
