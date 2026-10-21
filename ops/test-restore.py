@@ -53,6 +53,18 @@ def fake():
         sys.exit(1 if (state / 'fail-health').exists() else 0)
     elif tool == 'sleep':
         return
+    elif tool == 'df':
+        if (state / 'df-bytes').exists():
+            print('Avail\n' + (state / 'df-bytes').read_text().strip())
+        else:
+            sys.exit(subprocess.run([os.environ['YGO_REAL_DF'], *args]).returncode)
+    elif tool == 'findmnt':
+        if (state / 'memory-backed').exists(): print('tmpfs')
+        else: sys.exit(subprocess.run([os.environ['YGO_REAL_FINDMNT'], *args]).returncode)
+    elif tool == 'pg_restore':
+        if '--file=/dev/null' in args and str(Path('/var/tmp/ygo-backup')) in args[-1]:
+            with (state / 'backup-verified-paths').open('a') as output: output.write(args[-1] + '\n')
+        sys.exit(subprocess.run([os.environ['YGO_REAL_PG_RESTORE'], *args]).returncode)
     else:
         assert '--expand-environment=no' not in args, 'systemd 252 rejects --expand-environment=no'
         assert not any('$' in arg for arg in args), 'systemd 252 expands dollars in command arguments'
@@ -78,9 +90,12 @@ def main():
     names = [f'ygo_restore_{uuid4().hex}_{suffix}' for suffix in ('source', 'old')]
     with tempfile.TemporaryDirectory(prefix='ygo-restore-') as temporary:
         state = Path(temporary)
-        for tool in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep'):
+        real_df, real_findmnt, real_pg_restore = (shutil.which(tool) for tool in ('df', 'findmnt', 'pg_restore'))
+        for tool in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep', 'df', 'findmnt', 'pg_restore'):
             (state / tool).symlink_to(Path(__file__).resolve())
-        env = dict(os.environ, YGO_RESTORE_TEST=temporary, PATH=f'{temporary}:' + os.environ['PATH'])
+        env = dict(os.environ, YGO_RESTORE_TEST=temporary, YGO_REAL_DF=real_df,
+                   YGO_REAL_FINDMNT=real_findmnt, YGO_REAL_PG_RESTORE=real_pg_restore,
+                   PATH=f'{temporary}:' + os.environ['PATH'])
         def url(name):
             parsed = urlsplit(admin)
             return urlunsplit((parsed.scheme, parsed.netloc, '/' + name, parsed.query, ''))
@@ -92,13 +107,43 @@ def main():
             (state / 'good.sha256').write_text(digest + '  good.dump\n')
             Path('/etc/ygo').mkdir()
             Path('/opt/ygo/production/current').mkdir(parents=True)
+            work = Path('/var/tmp/ygo-backup')
+            size_dir = Path('/var/lib/ygo')
+            assert not work.exists() and not size_dir.exists(), 'Refusing existing backup state'
+            work.mkdir(mode=0o700)
+            size_dir.mkdir(mode=0o700)
+            size_file = size_dir / 'backup-last-bytes'
+            stale = work / 'stale-run'
+            stale.mkdir()
+            (stale / 'plaintext.dump').write_text('left by killed job')
             Path('/opt/ygo/node/bin').mkdir(parents=True)
             Path('/opt/ygo/node/bin/node').symlink_to(shutil.which('node'))
             original = f'DATABASE_URL={url(names[1])}\nPORT=3001\n'
             Path('/etc/ygo/production.env').write_text(original)
             Path('/etc/ygo/production.env').write_text(f'DATABASE_URL={url(names[0])}\n')
+            (state / 'memory-backed').touch()
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'must be disk-backed' in backup.stderr
+            (state / 'memory-backed').unlink()
+            (state / 'df-bytes').write_text(str(2 * 1024**3 - 1))
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'Insufficient free space' in backup.stderr
+            assert not list(work.iterdir()) and not size_file.exists(), 'Low-space refusal must remove stale plaintext'
+            (state / 'df-bytes').unlink()
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode == 0, backup.stdout + backup.stderr
+            assert not list(work.iterdir()), 'Success must remove both dump copies'
+            uploaded = state / (time.strftime('%Y%m%d', time.gmtime()) + '.dump')
+            assert size_file.read_text().strip() == str(uploaded.stat().st_size)
+            assert size_file.stat().st_mode & 0o777 == 0o600
+            checked = (state / 'backup-verified-paths').read_text().splitlines()
+            assert checked == [str(work / uploaded.name), str(work / 'verify.dump')], checked
+            last = int(size_file.read_text())
+            (state / 'df-bytes').write_text(str(2 * last + 512 * 1024**2 - 1))
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'Insufficient free space' in backup.stderr
+            assert not list(work.iterdir()), 'Low-space refusal must leave no plaintext'
+            (state / 'df-bytes').unlink()
             (state / 'early-transition').touch()
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode != 0 and 'earlier actions' in backup.stderr
@@ -106,7 +151,19 @@ def main():
             (state / 'corrupt-download').touch()
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode != 0 and 'mismatch' in backup.stderr
+            assert not list(work.iterdir()), 'Failed verification must remove both dump copies'
+            assert int(size_file.read_text()) == last, 'A failed verification must not update the size record'
             (state / 'corrupt-download').unlink()
+            work.rmdir() # systemd-tmpfiles may remove an idle /var/tmp workspace.
+            work.mkdir()
+            work.chmod(0o777) # A pre-made directory must not be adopted.
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode != 0 and 'root-owned mode-0700' in backup.stderr
+            work.rmdir()
+            backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
+            assert backup.returncode == 0, backup.stdout + backup.stderr
+            assert (work.is_dir() and work.stat().st_uid == 0 and work.stat().st_gid == 0
+                    and work.stat().st_mode & 0o777 == 0o700 and not list(work.iterdir()))
             snapshot = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'snapshot', 'test-db'],
                                       env=env, text=True, capture_output=True)
             assert snapshot.returncode == 0, snapshot.stdout + snapshot.stderr
@@ -176,6 +233,8 @@ def main():
             for name in names: cmd('psql', admin, '-c', f'DROP DATABASE {name} WITH (FORCE)')
             if Path('/etc/ygo').exists(): shutil.rmtree('/etc/ygo')
             if Path('/opt/ygo').exists(): shutil.rmtree('/opt/ygo')
+            if Path('/var/tmp/ygo-backup').exists(): shutil.rmtree('/var/tmp/ygo-backup')
+            if Path('/var/lib/ygo').exists(): shutil.rmtree('/var/lib/ygo')
 
-if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep'): fake()
+if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep', 'df', 'findmnt', 'pg_restore'): fake()
 else: main()
