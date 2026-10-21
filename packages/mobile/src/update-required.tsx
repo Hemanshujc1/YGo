@@ -29,7 +29,7 @@ export function UpdateRequired({
       {storeUrl ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => void Linking.openURL(storeUrl)}
+          onPress={() => void Linking.openURL(storeUrl).catch(() => {})}
           className="mt-8 items-center rounded-button bg-primary py-3.5 active:bg-primary-pressed"
         >
           <Text className="text-label font-medium text-on-primary">{button}</Text>

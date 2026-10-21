@@ -1,6 +1,6 @@
 # @ygo/customer
 
-The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). For now it shows the server's health answer, the System / Light / Dark theme choice and the Inter review specimens.
+The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, the server's health answer, Sign out, the System / Light / Dark theme choice and the Inter review specimens.
 
 ## Run it locally
 
@@ -11,6 +11,8 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
    ```sh
    EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:3000
+   # Where Help and a phone already in use point.
+   EXPO_PUBLIC_SUPPORT_EMAIL=
    # Optional until the store listings exist; while unset, the update screen names the stores instead of showing a button. A store build needs both.
    EXPO_PUBLIC_ANDROID_STORE_URL=
    EXPO_PUBLIC_IOS_STORE_URL=
@@ -25,7 +27,9 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
 
    The first run asks for an iOS bundle identifier or Android package name. Use a throwaway one and do not commit it: the store ticket picks the real ones, which cannot change after the first upload.
 
-The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds. Without `EXPO_PUBLIC_API_BASE_URL`, or without a `version` in `app.json`, the app stops at start with an error naming it.
+The screen shows "ok", the words for the error code the server answered (`src/strings.ts`), or "The server cannot be reached." when no answer comes back within 10 seconds. Without `EXPO_PUBLIC_API_BASE_URL`, without an email address in `EXPO_PUBLIC_SUPPORT_EMAIL`, or without a `version` in `app.json`, the app stops at start with an error naming it.
+
+At launch the app asks the server who is signed in (`GET /v1/me`), with a blank screen in the theme colour until it answers. With no answer, "Can't reach YGo" offers Try again and keeps the saved sign-in.
 
 At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_CUSTOMER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform, or a line naming the stores when no link is set. Offline or any other answer lets the app carry on.
 

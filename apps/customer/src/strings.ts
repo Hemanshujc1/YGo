@@ -57,6 +57,16 @@ export const strings = {
     signOut: "Sign out",
     offline: "Could not save. Check your connection, then try again.",
   } satisfies Omit<ProfileWords, "errors">,
+  // The screen picker's own words (#155, Q3 and Q5).
+  session: {
+    unreachable: {
+      title: "Can't reach YGo",
+      body: "Check your internet connection, then try again.",
+      retry: "Try again",
+    },
+    notCleared:
+      "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
+  },
   // The Inter review (design system, section 10), until real screens replace it.
   review: {
     sizes: "Type sizes",

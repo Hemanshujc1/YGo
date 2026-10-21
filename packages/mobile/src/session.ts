@@ -7,14 +7,16 @@ import { onSignedOut } from "./signed-out";
 /**
  * Where the person stands, which picks the screen (#155, Q4):
  * - `checking`: at launch, while the server is asked who is signed in.
- * - `signed-out`: C01 Sign in.
+ * - `signed-out`: C01 Sign in. `notCleared` when a sign-out could not clear
+ *   the phone's storage: C01 says so once, and the token is never used again (#155, S3 and Q5).
  * - `profile-needed`: C02, until the name and phone are set.
  * - `signed-in`: the app itself.
  * - `unreachable`: the launch check got no answer. The saved token is kept, and Try again calls `check`.
  *   A refused token goes to `signed-out` even when the phone's storage fails (#155, S3).
  */
 export type SessionState =
-  | { status: "checking" | "signed-out" | "unreachable" }
+  | { status: "checking" | "unreachable" }
+  | { status: "signed-out"; notCleared?: true }
   | { status: "profile-needed" | "signed-in"; account: Account };
 
 /** The calls the session makes: the app's own client. */
@@ -79,9 +81,9 @@ export function createSession(api: SessionApi) {
 
     /**
      * Sign out, then C01. The client forgets the session the moment this is
-     * called (#161). Resolves false when the phone's storage could not be
-     * cleared: the screen may say so, and the token is never used again
-     * (#155, S3). A sign-in that lands meanwhile is kept.
+     * called (#161). Resolves false, and marks the state `notCleared`, when
+     * the phone's storage could not be cleared; the token is never used
+     * again (#155, S3). A sign-in that lands meanwhile is kept.
      */
     async signOut(): Promise<boolean> {
       const mine = turn;
@@ -91,7 +93,11 @@ export function createSession(api: SessionApi) {
       } catch {
         cleared = false;
       }
-      if (mine === turn) move({ status: "signed-out" });
+      // A failed clear signals the sign-out itself before it rejects, so
+      // signed-out still takes the mark; a sign-in that landed is kept.
+      if (mine === turn || state.status === "signed-out") {
+        move(cleared ? { status: "signed-out" } : { status: "signed-out", notCleared: true });
+      }
       return cleared;
     },
   };

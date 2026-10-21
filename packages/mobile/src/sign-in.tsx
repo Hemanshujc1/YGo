@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type Account, Email, type RequestCodeBody, type VerifyCodeBody } from "@ygo/contracts";
 import { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, ScrollView, TextInput, View } from "react-native";
 import { EnterCode } from "./enter-code";
 import {
   aboutField,
@@ -32,6 +32,8 @@ export type SignInProps = {
   api: SignInApi;
   /** The session's `signedIn`: the root layout then shows C02 or the app. */
   onSignedIn: (account: Account) => void;
+  /** A message C01 shows under the email until the person types (#155, Q5). */
+  notice?: string;
 };
 
 /**
@@ -46,9 +48,11 @@ let memory: Sends = new Map();
  * C01 Sign in, and C14 once a code is sent (#155, Q6–Q8). The root layout
  * shows it while signed out; there are no sign-in routes.
  */
-export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
+export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInProps) {
   // The email as typed, kept when C14 goes back to C01.
   const [typed, setTyped] = useState("");
+  // The notice goes at the first keystroke, so C14 going back to C01 never shows it again.
+  const [noticeGone, setNoticeGone] = useState(false);
   // The email C14 is open for; C01 while null.
   const [codeFor, setCodeFor] = useState<string | null>(null);
   const [sends, setSends] = useState(memory);
@@ -84,7 +88,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-bg">
+    // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard.
+    <KeyboardAvoidingView behavior="padding" className="flex-1 bg-bg">
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerClassName="grow justify-center px-4 py-16"
@@ -106,7 +111,11 @@ export function SignIn({ words, supportEmail, api, onSignedIn }: SignInProps) {
             words={words}
             supportEmail={supportEmail}
             typed={typed}
-            setTyped={setTyped}
+            setTyped={(text) => {
+              setTyped(text);
+              setNoticeGone(true);
+            }}
+            notice={noticeGone ? undefined : notice}
             send={async (email) => {
               const problem = needsSend(email, memory, moment()) ? await send(email) : null;
               if (!problem) setCodeFor(email);
@@ -124,12 +133,13 @@ type EmailStepProps = {
   supportEmail: string;
   typed: string;
   setTyped: (text: string) => void;
+  notice: string | undefined;
   /** Sends a code to the checked email, or goes straight to C14: null, or the problem. */
   send: (email: string) => Promise<Problem | null>;
 };
 
 /** C01: the email and "Email me a code". A send that fails stays here, with its message under the email (#155, Q7). */
-function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProps) {
+function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: EmailStepProps) {
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
   // Set before React re-renders, so the return key and the button never send twice.
@@ -183,7 +193,15 @@ function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProp
         accessibilityLabel={words.emailLabel}
         className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem?.onField === true, focused)}`}
       />
-      {problem && <FieldMessage text={problem.text} />}
+      {problem ? (
+        <FieldMessage text={problem.text} />
+      ) : (
+        notice && (
+          <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-text">
+            {notice}
+          </Text>
+        )
+      )}
 
       <View className="mt-6">
         <Button label={words.send} onPress={() => void submit()} busy={busy} />

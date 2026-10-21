@@ -26,12 +26,17 @@ export function FieldMessage({ text }: { text: string }) {
   );
 }
 
-/** The support email as a link that opens a new email to it; `className` sets its size. */
+/**
+ * The support email as a link that opens a new email to it; `className` sets
+ * its size. A phone with no email app can't open it, so the address can also
+ * be pressed and held to copy (#155, Q9).
+ */
 export function SupportEmail({ address, className }: { address: string; className: string }) {
   return (
     <Text
+      selectable
       accessibilityRole="link"
-      onPress={() => void Linking.openURL(`mailto:${address}`)}
+      onPress={() => void Linking.openURL(`mailto:${address}`).catch(() => {})}
       className={`${className} font-medium text-primary underline`}
     >
       {address}

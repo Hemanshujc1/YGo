@@ -1,6 +1,7 @@
 export { AppShell } from "./app-shell";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
 export { createSession, useSession, type AppSession, type SessionState } from "./session";
+export { SessionGate, type SessionGateWords } from "./session-gate";
 export { sessionStore } from "./session-store";
 export { showSignedOut } from "./signed-out";
 export { SignIn, type SignInProps } from "./sign-in";
