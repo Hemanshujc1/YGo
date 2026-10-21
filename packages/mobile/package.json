@@ -22,7 +22,8 @@
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
     "react-native-mmkv": "4.3.2",
-    "react-native-nitro-modules": "0.35.9"
+    "react-native-nitro-modules": "0.35.9",
+    "react-native-safe-area-context": "5.7.0"
   },
   "devDependencies": {
     "@types/react": "19.2.18",
@@ -38,6 +39,7 @@
     "react-native-css-interop": "0.2.7",
     "react-native-mmkv": "4.3.2",
     "react-native-nitro-modules": "0.35.9",
+    "react-native-safe-area-context": "5.7.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

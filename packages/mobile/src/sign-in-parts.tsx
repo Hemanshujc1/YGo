@@ -7,13 +7,20 @@ export function HelpLine({ before, help, supportEmail }: { before?: string; help
     <Text className="mt-8 text-secondary text-muted">
       {before ? `${before} ` : ""}
       {`${help} `}
-      <Text
-        accessibilityRole="link"
-        onPress={() => void Linking.openURL(`mailto:${supportEmail}`)}
-        className="text-secondary font-medium text-primary underline"
-      >
-        {supportEmail}
-      </Text>
+      <SupportEmail address={supportEmail} className="text-secondary" />
+    </Text>
+  );
+}
+
+/** The support email as a link that opens a new email to it; `className` sets its size. */
+export function SupportEmail({ address, className }: { address: string; className: string }) {
+  return (
+    <Text
+      accessibilityRole="link"
+      onPress={() => void Linking.openURL(`mailto:${address}`)}
+      className={`${className} font-medium text-primary underline`}
+    >
+      {address}
     </Text>
   );
 }
