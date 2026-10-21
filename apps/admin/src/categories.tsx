@@ -78,6 +78,7 @@ export function Categories({ api }: { api: AdminApi }) {
   }
 
   async function changeActive(category: Category, active: boolean, text?: string) {
+    setSaved(false);
     const parsed = EditCategoryBody.safeParse({ active, ...(text !== undefined && { reason: text }) });
     if (!parsed.success) {
       setErrors({ reason: strings.categoryInvalidFields.reason });
@@ -89,6 +90,7 @@ export function Categories({ api }: { api: AdminApi }) {
     try {
       const result = await api.editCategory(category.id, parsed.data);
       if (result.ok) finish(result.data);
+      else if (active) setError(strings.failed);
       else failed(result.code, result.fields);
     } catch {
       setError(strings.failed);
@@ -135,6 +137,7 @@ export function Categories({ api }: { api: AdminApi }) {
       {screen === "list" && <button onClick={() => openForm(null)} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.newCategory}</button>}
     </div>
     {saved && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{strings.categorySaved}</p>}
+    {screen === "list" && error && <p role="alert" className="mb-4 text-danger">{error}</p>}
     {(screen === "list" || screen === "deactivate") && <section className="rounded-xl border border-border bg-surface">
       {categories.length === 0 ? <p className="p-6 text-muted">{strings.noCategories}</p> : <ul>{roots.map(row)}</ul>}
     </section>}

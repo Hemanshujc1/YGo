@@ -158,7 +158,7 @@ describe("Admin web", () => {
   it("requires a reason to deactivate and updates child availability when the parent changes", async () => {
     const api = {
       listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [{ ...groceries, active: true, effectiveActive: true }, { ...snacks, effectiveActive: true }] } }),
-      editCategory: vi.fn().mockResolvedValueOnce({ ok: true, data: groceries }).mockResolvedValueOnce({ ok: true, data: { ...groceries, active: true, effectiveActive: true } }),
+      editCategory: vi.fn().mockResolvedValueOnce({ ok: true, data: groceries }).mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" }),
     };
     setup("/categories", api);
     await screen.findByRole("heading", { name: strings.categories });
@@ -173,8 +173,9 @@ describe("Admin web", () => {
     expect(await screen.findByText(strings.categoryInactiveViaParent)).toBeTruthy();
     expect(api.editCategory).toHaveBeenCalledWith(groceries.id, { active: false, reason: "No longer needed" });
     fireEvent.click(screen.getByRole("button", { name: strings.reactivateCategory(groceries.name) }));
-    expect((await screen.findByRole("status")).textContent).toBe(strings.categorySaved);
-    expect(screen.queryByText(strings.categoryInactiveViaParent)).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.failed);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText(strings.categoryInactive)).toBeTruthy();
     expect(api.editCategory).toHaveBeenLastCalledWith(groceries.id, { active: true });
   });
 
