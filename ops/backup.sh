@@ -39,8 +39,20 @@ case $mode in
   snapshot)
     instance=${2:?Supply RDS instance identifier}
     [[ $instance =~ ^[a-z][a-z0-9-]+$ ]] || die "Invalid RDS identifier"
-    aws --region ap-south-1 rds create-db-snapshot --db-instance-identifier "$instance" --db-snapshot-identifier "ygo-weekly-$stamp"
-    aws --region ap-south-1 rds wait db-snapshot-completed --db-snapshot-identifier "ygo-weekly-$stamp"
+    id="ygo-weekly-$stamp"
+    aws --region ap-south-1 rds create-db-snapshot --db-instance-identifier "$instance" --db-snapshot-identifier "$id"
+    # Leave ten minutes of the service's three-hour limit for retention work.
+    deadline=$(($(date +%s) + 10200))
+    while :; do
+      status=$(aws --region ap-south-1 rds describe-db-snapshots --db-snapshot-identifier "$id" --query 'DBSnapshots[0].Status' --output text) || die "Could not inspect new snapshot"
+      case $status in
+        available) break ;;
+        creating) ;;
+        *) die "Snapshot stopped creating: $status" ;;
+      esac
+      (( $(date +%s) < deadline )) || die "Snapshot did not complete within 170 minutes"
+      sleep 60
+    done
     cutoff=$(date -u -d '35 days ago' +%Y%m%d)
     snapshots=$(aws --region ap-south-1 rds describe-db-snapshots --db-instance-identifier "$instance" --snapshot-type manual --query 'DBSnapshots[].DBSnapshotIdentifier' --output text) || die "Could not inspect snapshots"
     while read -r snapshot; do

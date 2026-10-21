@@ -4,7 +4,7 @@ import type { Database } from "./db";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
-export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26 } as const;
+export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26, "snapshot-weekly": 8 * 24 } as const;
 export type JobName = keyof typeof jobMaxAgeHours;
 
 export function isJobName(name: string): name is JobName {
@@ -14,6 +14,7 @@ export function isJobName(name: string): name is JobName {
 export async function runJob(
   database: Database, name: string, clock: Clock,
   backupNightly?: () => Promise<void>,
+  snapshotWeekly?: () => Promise<void>,
 ): Promise<void> {
   if (!isJobName(name)) throw new Error("Unknown job name");
   const now = clock.now();
@@ -28,6 +29,9 @@ export async function runJob(
     if (name === "backup-nightly") {
       if (!backupNightly) throw new Error("Backup runner is missing");
       await backupNightly();
+    } else if (name === "snapshot-weekly") {
+      if (!snapshotWeekly) throw new Error("Snapshot runner is missing");
+      await snapshotWeekly();
     } else {
       await database.db.transaction(async (tx) => {
         // ON DELETE CASCADE removes every refresh token of an expired session.
@@ -44,7 +48,8 @@ export async function runJob(
     await database.db.update(jobRuns).set({
       status: "failed",
       finishedAt: clock.now(),
-      errorText: name === "backup-nightly" ? "backup failed" : "cleanup failed",
+      errorText: name === "backup-nightly" ? "backup failed" :
+        name === "snapshot-weekly" ? "snapshot failed" : "cleanup failed",
     }).where(eq(jobRuns.id, run.id));
     throw error;
   }

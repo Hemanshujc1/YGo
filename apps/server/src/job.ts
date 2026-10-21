@@ -1,7 +1,7 @@
 import { loadDatabaseUrl } from "./config";
 import { connectDatabase, type Database } from "./db";
 import { isJobName, runJob } from "./jobs";
-import { runNightlyBackup } from "./adapters/backup";
+import { runNightlyBackup, runWeeklySnapshot } from "./adapters/backup";
 
 const name = process.argv[2];
 if (!name || !isJobName(name) || process.argv.length !== 3) {
@@ -12,7 +12,7 @@ if (!name || !isJobName(name) || process.argv.length !== 3) {
   try {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is missing");
     database = connectDatabase(loadDatabaseUrl());
-    await runJob(database, name, { now: () => new Date() }, runNightlyBackup);
+    await runJob(database, name, { now: () => new Date() }, runNightlyBackup, runWeeklySnapshot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const databaseUrl = process.env.DATABASE_URL;
