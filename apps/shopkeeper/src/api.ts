@@ -1,4 +1,5 @@
 import { createApiClient } from "@ygo/api-client";
+import { Email } from "@ygo/contracts";
 import { createSession, sessionStore, showSignedOut, showUpdateRequired } from "@ygo/mobile";
 import Constants from "expo-constants";
 
@@ -6,6 +7,11 @@ import Constants from "expo-constants";
 // mistake, not an unreachable server. See README.md.
 const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 if (!baseUrl) throw new Error("EXPO_PUBLIC_API_BASE_URL is not set");
+
+// Where Help and a phone in use point (#155, Q7); never written in the code.
+const supportEmailSetting = Email.safeParse(process.env.EXPO_PUBLIC_SUPPORT_EMAIL);
+if (!supportEmailSetting.success) throw new Error("EXPO_PUBLIC_SUPPORT_EMAIL is not set to an email address");
+export const supportEmail = supportEmailSetting.data;
 
 // The version in app.json, sent with every request so the server can refuse
 // one that is too old (Q-7).

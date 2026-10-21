@@ -4,7 +4,7 @@ import { Text } from "./text";
 /** C01 and C14's last line: "Help:" and the support email, which opens a new email. */
 export function HelpLine({ before, help, supportEmail }: { before?: string; help: string; supportEmail: string }) {
   return (
-    <Text className="mt-8 text-secondary text-muted">
+    <Text selectable className="mt-8 text-secondary text-muted">
       {before ? `${before} ` : ""}
       {`${help} `}
       <SupportEmail address={supportEmail} className="text-secondary" />
@@ -26,12 +26,17 @@ export function FieldMessage({ text }: { text: string }) {
   );
 }
 
-/** The support email as a link that opens a new email to it; `className` sets its size. */
+/**
+ * The support email as a link that opens a new email to it; `className` sets
+ * its size. A phone with no email app can't open it, so the address can also
+ * be pressed and held to copy (#155, Q9).
+ */
 export function SupportEmail({ address, className }: { address: string; className: string }) {
   return (
     <Text
+      selectable
       accessibilityRole="link"
-      onPress={() => void Linking.openURL(`mailto:${address}`)}
+      onPress={() => void Linking.openURL(`mailto:${address}`).catch(() => {})}
       className={`${className} font-medium text-primary underline`}
     >
       {address}

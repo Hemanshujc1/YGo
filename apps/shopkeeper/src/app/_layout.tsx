@@ -1,6 +1,6 @@
-import { AppShell, applySavedTheme } from "@ygo/mobile";
+import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
 import { Slot } from "expo-router";
-import { api } from "../api";
+import { api, session, supportEmail } from "../api";
 import { strings } from "../strings";
 import "../global.css";
 
@@ -19,7 +19,19 @@ export default function Layout() {
         androidStoreUrl: process.env.EXPO_PUBLIC_ANDROID_STORE_URL,
       }}
     >
-      <Slot />
+      <SessionGate
+        session={session}
+        api={api}
+        supportEmail={supportEmail}
+        words={{
+          signIn: { ...strings.signIn, errors: strings.errors },
+          profile: { ...strings.profile, errors: strings.errors },
+          unreachable: strings.session.unreachable,
+          notCleared: strings.session.notCleared,
+        }}
+      >
+        <Slot />
+      </SessionGate>
     </AppShell>
   );
 }

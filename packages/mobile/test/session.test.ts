@@ -88,7 +88,8 @@ describe("createSession", () => {
     api.signOut.mockRejectedValueOnce(new Error("Keychain busy"));
     session.signedIn(full);
     expect(await session.signOut()).toBe(false);
-    expect(session.get()).toEqual({ status: "signed-out" });
+    // C01 then says this phone could not clear its saved sign-in (#155, Q5).
+    expect(session.get()).toEqual({ status: "signed-out", notCleared: true });
   });
 
   it("keeps a sign-in that lands while a sign-out is finishing", async () => {

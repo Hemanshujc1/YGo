@@ -5,7 +5,7 @@ import { chooseTheme, savedTheme, Text, type ThemeChoice } from "@ygo/mobile";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "../api";
+import { api, session } from "../api";
 import { strings } from "../strings";
 
 // The scaffold screen: the server's health, the theme choice, and the Inter
@@ -61,6 +61,13 @@ export default function Home() {
       <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
       <Text className="mt-6 text-secondary text-muted">{strings.health}</Text>
       <Text className="mt-1 text-body text-text">{answer}</Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => void session.signOut()}
+        className="mt-4 min-h-12 items-center justify-center self-start rounded-button border border-border bg-surface px-4"
+      >
+        <Text className="text-secondary font-medium text-text">{strings.signOut}</Text>
+      </Pressable>
 
       <Heading>{strings.theme.label}</Heading>
       <View className="mt-3 flex-row gap-2">
