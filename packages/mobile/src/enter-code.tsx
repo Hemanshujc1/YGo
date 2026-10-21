@@ -99,6 +99,7 @@ export function EnterCode(props: EnterCodeProps) {
     const outcome = await check(code);
     // Still busy once signed in: the field takes typing until C14 goes, and the spent code must not be checked again.
     if ("signedIn" in outcome) {
+      input.current?.blur();
       onSignedIn(outcome.signedIn);
       return;
     }
