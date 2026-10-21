@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Email, LoginOtp, PersonName, Phone } from "./fields";
+import { AdminActionReason, Email, LoginOtp, PersonName, Phone } from "./fields";
 
 /** An access or refresh token. Capped so a huge body is refused before it is hashed. */
 const Token = z.string().min(1).max(512);
@@ -33,7 +33,7 @@ export const CreateAdminBody = z.strictObject({
   email: Email,
   name: PersonName,
   phone: Phone,
-  reason: z.string().trim().min(1).max(500),
+  reason: AdminActionReason,
 });
 export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
 
