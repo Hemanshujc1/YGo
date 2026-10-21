@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
   Account,
+  AdminAccountsResponse,
   BrowserSession,
   ChangeNameBody,
   CreateAdminBody,
@@ -143,11 +144,31 @@ describe("CreateAdminBody", () => {
     })).toEqual(["email", "name", "phone", "reason"]);
   });
 
+  it("refuses a reason over 500 characters", () => {
+    expect(fieldsRefused(CreateAdminBody, {
+      email: account.email,
+      name: account.name,
+      phone: account.phone,
+      reason: "a".repeat(501),
+    })).toEqual(["reason"]);
+  });
+
   it("refuses unexpected account roles", () => {
     expect(fieldsRefused(CreateAdminBody, {
       email: account.email, name: account.name, phone: account.phone,
       reason: "Operations coverage", role: "area-manager",
     })).toEqual(["role"]);
+  });
+});
+
+describe("AdminAccountsResponse", () => {
+  it("accepts an Admin account list", () => {
+    expect(AdminAccountsResponse.parse({ accounts: [account] })).toEqual({ accounts: [account] });
+    expect(AdminAccountsResponse.parse({ accounts: [] })).toEqual({ accounts: [] });
+  });
+
+  it("refuses an invalid account", () => {
+    expect(fieldsRefused(AdminAccountsResponse, { accounts: [{ ...account, id: "bad" }] })).toEqual(["accounts.0.id"]);
   });
 });
 

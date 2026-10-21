@@ -28,12 +28,12 @@ export type SetProfileBody = z.infer<typeof SetProfileBody>;
 export const ChangeNameBody = z.strictObject({ name: PersonName });
 export type ChangeNameBody = z.infer<typeof ChangeNameBody>;
 
-/** `POST /v1/admin/accounts`: create an Admin account and record why. */
+/** `POST /v1/admin/accounts`: create an Admin account and record why. Answers 201 with the `Account`. */
 export const CreateAdminBody = z.strictObject({
   email: Email,
   name: PersonName,
   phone: Phone,
-  reason: z.string().trim().min(1),
+  reason: z.string().trim().min(1).max(500),
 });
 export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
 
@@ -50,6 +50,10 @@ export const Account = z.object({
   phone: z.string().nullable(),
 });
 export type Account = z.infer<typeof Account>;
+
+/** `GET /v1/admin/accounts`: the Admin accounts. */
+export const AdminAccountsResponse = z.strictObject({ accounts: z.array(Account) });
+export type AdminAccountsResponse = z.infer<typeof AdminAccountsResponse>;
 
 /**
  * A signed-in session (#34). The access token is short-lived and kept in

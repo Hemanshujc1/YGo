@@ -1,5 +1,6 @@
 export {
   Account,
+  AdminAccountsResponse,
   BrowserSession,
   ChangeNameBody,
   CreateAdminBody,
