@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -19,6 +20,30 @@ export const accounts = pgTable("accounts", {
   phoneVerified: boolean("phone_verified").notNull().default(false),
   role: text("role").notNull().default("customer"),
 });
+
+// Admin authority is independent of the account's customer role and of tokens.
+export const adminMemberships = pgTable("admin_memberships", {
+  accountId: uuid("account_id").primaryKey().references(() => accounts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const adminActions = pgTable(
+  "admin_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorId: uuid("actor_id"),
+    action: text("action").notNull(),
+    targetAccountId: uuid("target_account_id").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("admin_actions_action_nonempty", sql`btrim(${table.action}) <> ''`),
+    check("admin_actions_reason_valid", sql`btrim(${table.reason}) <> '' AND char_length(${table.reason}) <= 500`),
+    check("admin_actions_actor_valid", sql`(${table.action} = 'admin.bootstrap' AND ${table.actorId} IS NULL AND ${table.reason} = 'Initial Admin bootstrap') OR (${table.action} <> 'admin.bootstrap' AND ${table.actorId} IS NOT NULL)`),
+    uniqueIndex("admin_actions_one_bootstrap_idx").on(table.action).where(sql`${table.action} = 'admin.bootstrap'`),
+  ],
+);
 export const loginCodes = pgTable("login_codes", {
   email: text("email").primaryKey(),
   codeHash: text("code_hash").notNull(),

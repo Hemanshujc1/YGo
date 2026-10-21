@@ -97,6 +97,12 @@ The server never applies them on boot; the tests apply them to each run's databa
 
 After migration, the one-shot command `node apps/server/dist/job.js cleanup-sessions` runs cleanup; `backup-nightly` and `snapshot-weekly` invoke the #130 backup script and need `BACKUP_BUCKET` and `RDS_INSTANCE_ID`, respectively, in their host environment. Each run records `ok` or `failed` in `job_runs` and exits non-zero on failure. An unknown name exits non-zero without writing a row. `node apps/server/dist/check-jobs.js` checks all three jobs and publishes their health metrics. See [timed jobs](../../docs/operations/timed-jobs.md) for production environment files, timers and alarms.
 
+## First Admin
+
+After applying migrations, run `DATABASE_URL=… node apps/server/dist/bootstrap-admin.js --email admin@example.com --name "Asha Kulkarni" --phone +919876543210` once. Supply the connection URL through the environment, not an argument. The command checks the shared email, name and phone rules, refuses duplicate account details, and writes the account, separate Admin membership and `admin.bootstrap` action in one serialized transaction. It prints no personal details. If an Admin already exists, use Admin web to add another. Once a bootstrap action exists, this command can never be reused, even after all memberships are removed; recovery requires a separate, deliberate procedure.
+
+Admin action records are append-only. PostgreSQL rejects update, delete and truncate, requires a non-empty reason, and reserves the null actor and fixed reason for `admin.bootstrap`. Actor and target UUIDs intentionally have no account foreign keys so their identifiers survive account deletion or anonymization. PostgreSQL validates their UUID format but does not enforce their referential integrity.
+
 ## Errors
 
 Every non-2xx response is the `ErrorEnvelope` from `@ygo/contracts`: `{"error":{"code":"…"}}`, a machine code and no display text. Each client maps the code to its own words.
