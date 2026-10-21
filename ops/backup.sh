@@ -14,12 +14,32 @@ case $mode in
   dump)
     bucket=${2:?Supply dedicated backup bucket}
     [[ $bucket =~ ^[a-z0-9][a-z0-9.-]+[a-z0-9]$ ]] || die "Invalid bucket"
+    work=/var/tmp/ygo-backup
+    size_file=/var/lib/ygo/backup-last-bytes
+    mkdir -m 0700 "$work" 2>/dev/null || : # An existing directory must pass the check below.
+    [[ -d $work && ! -L $work && $(stat -c '%u:%g:%a' "$work") == 0:0:700 ]] || die "Backup workspace must be a root-owned mode-0700 directory: $work"
+    filesystem=$(findmnt -n -T "$work" -o FSTYPE) || die "Could not inspect filesystem for $work"
+    [[ -n $filesystem && $filesystem != tmpfs && $filesystem != ramfs ]] || die "Backup workspace must be disk-backed: $work"
+    [[ -d /var/lib/ygo && $(stat -c '%u:%g:%a' /var/lib/ygo) == 0:0:700 ]] || die "Backup size directory must be root-owned mode 0700: /var/lib/ygo"
+    # Recover from a killed run before measuring free space; remove both copies on exit.
+    find "$work" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    trap 'find "$work" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || exit 1' EXIT
+    trap 'exit 1' HUP INT TERM
+    required=2147483648 # First run: 2 GiB.
+    if [[ -e $size_file || -L $size_file ]]; then
+      [[ -f $size_file && ! -L $size_file && $(stat -c '%u:%g:%a' "$size_file") == 0:0:600 ]] || die "Invalid backup size record: $size_file"
+      last=$(<"$size_file")
+      [[ $last =~ ^[1-9][0-9]*$ && ${#last} -le 19 ]] || die "Invalid backup size record: $size_file"
+      (( last <= 4000000000000000000 )) || die "Invalid backup size record: $size_file"
+      required=$((2 * last + 536870912)) # Two copies plus 512 MiB.
+    fi
+    available=$(df -B1 --output=avail "$work" | tail -n 1)
+    [[ $available =~ ^[0-9]+$ ]] || die "Could not measure free space for $work"
+    (( available >= required )) || die "Insufficient free space in $work: need $required bytes, have $available"
     # A backup bucket must not be the versioned photo bucket. Fail if lifecycle drifts.
     [[ $(aws --region ap-south-1 s3api get-bucket-versioning --bucket "$bucket" --query Status --output text) == None ]] || die "Backup bucket must never have been versioned"
     aws --region ap-south-1 s3api get-bucket-lifecycle-configuration --bucket "$bucket" |
       python3 -c 'import json,sys; r=json.load(sys.stdin)["Rules"]; assert len(r)==1 and set(r[0]) <= {"ID","Status","Filter","Expiration"} and r[0]["Status"]=="Enabled" and r[0].get("Filter")=={"Prefix":"nightly/"} and r[0]["Expiration"]=={"Days":30}' || die "Expected 30-day nightly/ expiration without earlier actions"
-    work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
     # The child reads DATABASE_URL from systemd's environment, not command arguments.
     systemd-run --quiet --wait --collect --service-type=exec --unit="ygo-dump-$$" \
       -p EnvironmentFile=/etc/ygo/production.env -p RuntimeMaxSec=7200 \
@@ -34,6 +54,8 @@ case $mode in
     cmp "$work/$stamp.dump.sha256" "$work/verify.sha256" || die "Uploaded digest mismatch"
     [[ $(sha256sum "$work/verify.dump" | cut -d' ' -f1) == "$(cut -d' ' -f1 "$work/verify.sha256")" ]] || die "Uploaded archive mismatch"
     pg_restore --file=/dev/null "$work/verify.dump" || die "Uploaded archive unreadable"
+    stat -c %s "$work/$stamp.dump" > "$size_file.tmp.$$"
+    mv -f "$size_file.tmp.$$" "$size_file"
     echo "Verified nightly backup $uri"
     ;;
   snapshot)

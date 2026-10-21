@@ -10,6 +10,7 @@ version = subprocess.check_output(['systemd-run', '--version'], text=True).split
 assert version.startswith('systemd 252 '), version
 calls = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()]
 assert any('_dump' in call for call in calls), 'backup invocation missing'
+assert all('/var/tmp/ygo-backup/' in arg for call in calls if '_dump' in call for arg in call if arg.endswith('.dump'))
 assert any('_db' in call for call in calls), 'restore invocation missing'
 assert any('replay-deletions.js' in ' '.join(call) for call in calls), 'replay invocation missing'
 # The parser checks that direct executables exist before attempting the bus.
@@ -32,6 +33,9 @@ for name in ('ygo-job@backup-nightly.service.d', 'ygo-job@backup-nightly.timer.d
              'ygo-job@cleanup-sessions.timer.d', 'ygo-job@snapshot-weekly.service.d',
              'ygo-job@snapshot-weekly.timer.d'):
     shutil.copytree(Path('/ops') / name, Path('/etc/systemd/system') / name, dirs_exist_ok=True)
+backup_override = (Path('/ops') / 'ygo-job@backup-nightly.service.d/override.conf').read_text()
+for setting in ('User=root', 'PrivateTmp=false', 'ReadWritePaths=/var/tmp', 'StateDirectory=ygo', 'StateDirectoryMode=0700'):
+    assert setting in backup_override, setting
 assert 'OnCalendar=Mon *-*-* 00:30:00 UTC' in (Path('/etc/systemd/system') /
     'ygo-job@snapshot-weekly.timer.d/override.conf').read_text()
 Path('/opt/ygo/production/current').mkdir(parents=True, exist_ok=True)
