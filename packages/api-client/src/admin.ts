@@ -2,7 +2,11 @@ import {
   Account,
   AdminAccountsResponse,
   BrowserSession,
+  CategoriesResponse,
+  Category,
   type CreateAdminBody,
+  type CreateCategoryBody,
+  type EditCategoryBody,
   type RequestCodeBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
@@ -13,7 +17,7 @@ export interface AdminApiClientOptions {
   baseUrl: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
-  /** Called when the server refuses refresh or an account request ends the session. */
+  /** Called when the server refuses refresh or an Admin request ends the session. */
   onSignedOut?: () => void;
 }
 
@@ -63,7 +67,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function accountRequest(method: string, json?: CreateAdminBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -73,7 +77,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     }
     if (on !== current || on.ended || !on.access) return NO_SESSION;
     const token = on.access;
-    const answer = await send(method, "/v1/admin/accounts", json, { token });
+    const answer = await send(method, path, json, { token });
     if (on !== current || on.ended) return NO_SESSION;
     if (answer.status === 403) {
       end(on);
@@ -87,7 +91,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     const refused = await renew(on, token);
     if (refused) return refused;
     if (on !== current || on.ended || !on.access) return NO_SESSION;
-    const retried = await send(method, "/v1/admin/accounts", json, { token: on.access });
+    const retried = await send(method, path, json, { token: on.access });
     if (on !== current || on.ended) return NO_SESSION;
     if (retried.status === 401 || retried.status === 403) end(on);
     return retried;
@@ -112,12 +116,24 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
 
     /** `GET /v1/admin/accounts`: Admin memberships and their accounts. */
     async listAccounts(): Promise<ApiResult<AdminAccountsResponse>> {
-      return result(await accountRequest("GET"), AdminAccountsResponse);
+      return result(await adminRequest("GET", "/v1/admin/accounts"), AdminAccountsResponse);
     },
 
     /** `POST /v1/admin/accounts`: create an Admin with a recorded reason. */
     async createAccount(body: CreateAdminBody): Promise<ApiResult<Account>> {
-      return result(await accountRequest("POST", body), Account);
+      return result(await adminRequest("POST", "/v1/admin/accounts", body), Account);
+    },
+
+    async listCategories(): Promise<ApiResult<CategoriesResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/categories"), CategoriesResponse);
+    },
+
+    async createCategory(body: CreateCategoryBody): Promise<ApiResult<Category>> {
+      return result(await adminRequest("POST", "/v1/admin/categories", body), Category);
+    },
+
+    async editCategory(id: string, body: EditCategoryBody): Promise<ApiResult<Category>> {
+      return result(await adminRequest("PATCH", `/v1/admin/categories/${encodeURIComponent(id)}`, body), Category);
     },
 
     /** Clear local access immediately and ask the server to end the cookie session. */

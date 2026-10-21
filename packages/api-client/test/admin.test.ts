@@ -14,6 +14,13 @@ const createBody = {
   reason: "Add a second platform administrator",
 };
 const code = { email: account.email, code: "123456" };
+const category = {
+  id: "00000000-0000-4000-8000-000000000101",
+  parentId: null,
+  name: "Groceries",
+  active: true,
+  effectiveActive: true,
+};
 const denied = { error: { code: "UNAUTHENTICATED" } };
 const forbidden = { error: { code: "FORBIDDEN" } };
 const answer = (status: number, body?: unknown) =>
@@ -126,6 +133,41 @@ describe("Admin browser API client", () => {
     );
     await client.verifyCode(code);
     expect(await client.createAccount(createBody)).toEqual({ ok: true, data: account });
+  });
+
+  it("lists, creates and edits categories with the Admin session", async () => {
+    const { client, calls, refreshes } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET") return answer(200, { categories: [category] });
+      return answer(method === "POST" ? 201 : 200, category);
+    });
+    expect(await client.listCategories()).toEqual({ ok: true, data: { categories: [category] } });
+    expect(await client.createCategory({ name: "Groceries", parentId: null })).toEqual({ ok: true, data: category });
+    expect(await client.editCategory(category.id, { active: false, reason: "No longer used" })).toEqual({ ok: true, data: category });
+    expect(refreshes()).toHaveLength(1);
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      ["/v1/admin/categories", "GET", undefined],
+      ["/v1/admin/categories", "POST", { name: "Groceries", parentId: null }],
+      [`/v1/admin/categories/${category.id}`, "PATCH", { active: false, reason: "No longer used" }],
+    ]);
+    expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
+  });
+
+  it("retries a category write after 401 and preserves category conflict codes", async () => {
+    const { client, calls, refreshes } = setup(({ path, method, headers }) => {
+      if (path.endsWith("/verify")) return answer(200, { accessToken: "access-1", account });
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-2", account });
+      if (method === "POST" && headers.get("authorization") === "Bearer access-1") return answer(401, denied);
+      return answer(409, { error: { code: "CATEGORY_NAME_IN_USE" } });
+    });
+    await client.verifyCode(code);
+    expect(await client.createCategory({ name: "Groceries", parentId: null })).toEqual({
+      ok: false, status: 409, code: "CATEGORY_NAME_IN_USE", fields: undefined,
+    });
+    expect(refreshes()).toHaveLength(1);
+    expect(calls.filter(({ path }) => path === "/v1/admin/categories").map(({ headers }) => headers.get("authorization"))).toEqual([
+      "Bearer access-1", "Bearer access-2",
+    ]);
   });
 
   it("refreshes after a 401, retries once, and ends the session on a second 401", async () => {

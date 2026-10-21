@@ -12,6 +12,7 @@ export const Category = z.strictObject({
 });
 export type Category = z.infer<typeof Category>;
 export const CategoriesResponse = z.strictObject({ categories: z.array(Category) });
+export type CategoriesResponse = z.infer<typeof CategoriesResponse>;
 export const CategoryParams = z.strictObject({ id: z.uuid() });
 export const CreateCategoryBody = z.strictObject({ name: CategoryName, parentId: z.uuid().nullable().default(null) });
 export type CreateCategoryBody = z.infer<typeof CreateCategoryBody>;
