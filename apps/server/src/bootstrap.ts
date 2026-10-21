@@ -29,7 +29,7 @@ export async function bootstrapAdmin(pool: Pool, fields: BootstrapFields): Promi
     if (!id) throw new Error("Account insert returned no ID.");
     await client.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [id]);
     await client.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES (NULL, 'admin.bootstrap', $1, $2)",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES (NULL, 'admin.bootstrap', $1, $2)",
       [id, BOOTSTRAP_REASON],
     );
     await client.query("COMMIT");

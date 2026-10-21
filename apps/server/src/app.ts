@@ -15,6 +15,7 @@ import type { Mailer } from "./adapters/mailer";
 import type { Clock } from "./adapters/clock";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerAdminRoutes } from "./routes/admin";
+import { registerCategoryRoutes } from "./routes/categories";
 import { registerProfileRoutes } from "./routes/profile";
 
 export interface AppOptions {
@@ -87,6 +88,7 @@ export function buildApp({
   if (database && mailer && clock && authTokenSecret) {
     registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret, adminCookieDomain });
     registerAdminRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerCategoryRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 

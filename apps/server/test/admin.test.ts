@@ -87,41 +87,41 @@ describe("Admin database and bootstrap", () => {
     const target = randomUUID();
     const actor = randomUUID();
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES (NULL, 'admin.create', $1, 'reason')",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES (NULL, 'admin.create', $1, 'reason')",
       [target],
     )).rejects.toMatchObject({ code: "23514" });
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES (NULL, 'admin.bootstrap', $1, 'wrong')",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES (NULL, 'admin.bootstrap', $1, 'wrong')",
       [target],
     )).rejects.toMatchObject({ code: "23514" });
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.bootstrap', $2, $3)",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.bootstrap', $2, $3)",
       [actor, target, BOOTSTRAP_REASON],
     )).rejects.toMatchObject({ code: "23514" });
     for (const reason of ["", "  ", "x".repeat(501)]) {
       await expect(isolatedDatabase.pool.query(
-        "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.create', $2, $3)",
+        "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', $2, $3)",
         [actor, target, reason],
       )).rejects.toMatchObject({ code: "23514" });
     }
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, '', $2, 'reason')",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, '', $2, 'reason')",
       [actor, target],
     )).rejects.toMatchObject({ code: "23514" });
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.create', $2, NULL)",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', $2, NULL)",
       [actor, target],
     )).rejects.toMatchObject({ code: "23502" });
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ('bad-uuid', 'admin.create', $1, 'reason')",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ('bad-uuid', 'admin.create', $1, 'reason')",
       [target],
     )).rejects.toMatchObject({ code: "22P02" });
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.create', 'bad-uuid', 'reason')",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', 'bad-uuid', 'reason')",
       [actor],
     )).rejects.toMatchObject({ code: "22P02" });
     const inserted = await isolatedDatabase.pool.query<{ id: string }>(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.create', $2, 'reason') RETURNING id",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', $2, 'reason') RETURNING id",
       [actor, target],
     );
     const id = inserted.rows[0]?.id;
@@ -129,8 +129,8 @@ describe("Admin database and bootstrap", () => {
     await expect(isolatedDatabase.pool.query("UPDATE admin_actions SET reason = 'changed' WHERE id = $1", [id])).rejects.toThrow();
     await expect(isolatedDatabase.pool.query("DELETE FROM admin_actions WHERE id = $1", [id])).rejects.toThrow();
     await expect(isolatedDatabase.pool.query("TRUNCATE admin_actions")).rejects.toThrow();
-    expect((await isolatedDatabase.pool.query("SELECT actor_id, target_account_id, reason FROM admin_actions WHERE id = $1", [id])).rows[0])
-      .toMatchObject({ actor_id: actor, target_account_id: target, reason: "reason" });
+    expect((await isolatedDatabase.pool.query("SELECT actor_id, target_id, target_type, reason FROM admin_actions WHERE id = $1", [id])).rows[0])
+      .toMatchObject({ actor_id: actor, target_id: target, target_type: "account", reason: "reason" });
     const foreignKeys = await isolatedDatabase.pool.query(
       "SELECT 1 FROM pg_constraint WHERE conrelid = 'admin_actions'::regclass AND contype = 'f'",
     );
@@ -139,7 +139,7 @@ describe("Admin database and bootstrap", () => {
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'admin_actions'",
     );
     expect(columns.rows.map((column) => column.column_name).sort()).toEqual(
-      ["id", "actor_id", "action", "target_account_id", "reason", "created_at"].sort(),
+      ["id", "actor_id", "action", "target_id", "target_type", "reason", "created_at"].sort(),
     );
   });
 
@@ -181,14 +181,14 @@ describe("Admin database and bootstrap", () => {
       expect(output).not.toContain(second.phone);
     }
     const rows = await isolatedDatabase.pool.query(
-      "SELECT a.id, a.role, m.account_id, x.actor_id, x.action, x.target_account_id, x.reason, x.created_at FROM admin_memberships m JOIN accounts a ON a.id = m.account_id JOIN admin_actions x ON x.target_account_id = a.id WHERE x.action = 'admin.bootstrap'",
+      "SELECT a.id, a.role, m.account_id, x.actor_id, x.action, x.target_id, x.reason, x.created_at FROM admin_memberships m JOIN accounts a ON a.id = m.account_id JOIN admin_actions x ON x.target_id = a.id WHERE x.action = 'admin.bootstrap'",
     );
     expect(rows.rowCount).toBe(1);
     expect(rows.rows[0]).toMatchObject({ role: "customer", actor_id: null, action: "admin.bootstrap", reason: BOOTSTRAP_REASON });
-    expect(rows.rows[0].target_account_id).toBe(rows.rows[0].id);
+    expect(rows.rows[0].target_id).toBe(rows.rows[0].id);
     expect(rows.rows[0].created_at).toBeInstanceOf(Date);
     await expect(isolatedDatabase.pool.query(
-      "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES (NULL, 'admin.bootstrap', $1, $2)",
+      "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES (NULL, 'admin.bootstrap', $1, $2)",
       [randomUUID(), BOOTSTRAP_REASON],
     )).rejects.toMatchObject({ code: "23505" });
   });

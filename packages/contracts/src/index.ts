@@ -25,3 +25,4 @@ export {
 } from "./fields";
 export { ADMIN_REFRESH_HEADER, APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity, AppName, AppVersion } from "./headers";
 export { HealthResponse } from "./health";
+export { Category, CategoriesResponse, CategoryName, CategoryParams, CreateCategoryBody, EditCategoryBody } from "./catalog";

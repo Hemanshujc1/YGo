@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const accounts = pgTable("accounts", {
@@ -33,7 +34,8 @@ export const adminActions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     actorId: uuid("actor_id"),
     action: text("action").notNull(),
-    targetAccountId: uuid("target_account_id").notNull(),
+    targetId: uuid("target_id").notNull(),
+    targetType: text("target_type").notNull().default("account"),
     reason: text("reason").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -44,6 +46,17 @@ export const adminActions = pgTable(
     uniqueIndex("admin_actions_one_bootstrap_idx").on(table.action).where(sql`${table.action} = 'admin.bootstrap'`),
   ],
 );
+
+export const categories = pgTable("categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").references((): AnyPgColumn => categories.id),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+}, (table) => [
+  check("categories_name_valid", sql`btrim(${table.name}) <> '' AND char_length(${table.name}) <= 100`),
+  uniqueIndex("categories_root_name_idx").on(sql`lower(${table.name})`).where(sql`${table.parentId} IS NULL`),
+  uniqueIndex("categories_child_name_idx").on(table.parentId, sql`lower(${table.name})`).where(sql`${table.parentId} IS NOT NULL`),
+]);
 export const loginCodes = pgTable("login_codes", {
   email: text("email").primaryKey(),
   codeHash: text("code_hash").notNull(),

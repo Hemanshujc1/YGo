@@ -52,7 +52,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
         if (!account) throw new Error("Admin insert returned no account");
         await client.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [account.id]);
         await client.query(
-          "INSERT INTO admin_actions (actor_id, action, target_account_id, reason) VALUES ($1, 'admin.create', $2, $3)",
+          "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', $2, $3)",
           [who.accountId, account.id, reason],
         );
         await client.query("COMMIT");

@@ -77,6 +77,66 @@ function accounts(token?: string) {
 }
 
 describe("Admin routes and browser sessions", () => {
+  it("seeds global categories and requires an Admin web session", async () => {
+    const get = (token?: string) => app.inject({ method: "GET", url: "/v1/admin/categories", headers: token ? { authorization: `Bearer ${token}` } : {} });
+    expect((await get()).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    expect((await get(mobile)).statusCode).toBe(403);
+    clock.advance(30_000);
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    expect((await get(token)).json().categories.map((row: { name: string }) => row.name)).toEqual([
+      "Fruits and Vegetables", "Groceries", "Stationery",
+    ]);
+  });
+
+  it("requires an Admin web session to create or edit categories", async () => {
+    const id = (await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0]?.id;
+    if (!id) throw new Error("Seeded category missing");
+    const requests = [
+      { method: "POST" as const, url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "PATCH" as const, url: `/v1/admin/categories/${id}`, payload: { name: "Food" } },
+    ];
+    for (const request of requests) expect((await app.inject(request)).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    for (const request of requests) {
+      expect((await app.inject({ ...request, headers: { authorization: `Bearer ${mobile}` } })).statusCode).toBe(403);
+    }
+  });
+
+  it("creates, moves, deactivates and reactivates categories with atomic action records", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const create = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/categories", headers, payload });
+    const edit = (id: string, payload: object) => app.inject({ method: "PATCH", url: `/v1/admin/categories/${id}`, headers, payload });
+    const roots = (await app.inject({ method: "GET", url: "/v1/admin/categories", headers })).json().categories;
+    const groceries = roots.find((row: { name: string }) => row.name === "Groceries").id as string;
+    const stationery = roots.find((row: { name: string }) => row.name === "Stationery").id as string;
+    const made = await create({ name: "  Snacks  ", parentId: groceries });
+    expect(made.statusCode).toBe(201);
+    expect(made.json()).toMatchObject({ name: "Snacks", parentId: groceries, active: true, effectiveActive: true });
+    const id = made.json().id as string;
+    expect((await create({ name: "snacks", parentId: groceries })).json()).toEqual({ error: { code: "CATEGORY_NAME_IN_USE" } });
+    expect((await create({ name: "Snacks", parentId: stationery })).statusCode).toBe(201);
+    expect((await create({ name: "Grandchild", parentId: id })).statusCode).toBe(400);
+    expect((await edit(groceries, { parentId: id })).statusCode).toBe(400);
+    expect((await edit(id, { parentId: stationery })).statusCode).toBe(409);
+    expect((await edit(id, { name: "Bites", parentId: stationery })).json()).toMatchObject({ name: "Bites", parentId: stationery });
+    expect((await edit(stationery, { active: false })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["reason"] } });
+    expect((await edit(stationery, { active: false, reason: "No longer in use" })).statusCode).toBe(200);
+    expect((await edit(stationery, { active: false, name: "Paper goods" })).statusCode).toBe(200);
+    const listed = (await app.inject({ method: "GET", url: "/v1/admin/categories", headers })).json().categories;
+    expect(listed.find((row: { id: string }) => row.id === id)).toMatchObject({ active: true, effectiveActive: false });
+    expect((await edit(stationery, { active: true })).statusCode).toBe(200);
+    const restored = (await app.inject({ method: "GET", url: "/v1/admin/categories", headers })).json().categories;
+    expect(restored.find((row: { id: string }) => row.id === id).effectiveActive).toBe(true);
+    const audit = await database.pool.query("SELECT action, target_type, target_id, reason FROM admin_actions WHERE target_type = 'category' ORDER BY created_at");
+    expect(audit.rows.map((row) => row.action).sort()).toEqual([
+      "category.create", "category.create", "category.rename", "category.rename", "category.move", "category.deactivate", "category.reactivate",
+    ].sort());
+    expect(audit.rows.find((row) => row.action === "category.deactivate")?.reason).toBe("No longer in use");
+    expect(audit.rows.every((row) => row.target_type === "category")).toBe(true);
+  });
+
   it("lists and creates only for Admin web sessions, with an atomic action", async () => {
     const signed = await signIn("/v1/admin/auth");
     const token = signed.json().accessToken as string;
@@ -89,12 +149,12 @@ describe("Admin routes and browser sessions", () => {
     expect(account).toMatchObject({ email: payload.email, name: payload.name, phone: payload.phone });
     expect((await accounts(token)).json().accounts).toHaveLength(2);
     const rows = await database.pool.query(
-      `SELECT a.role, m.account_id, x.actor_id, x.action, x.reason, x.target_account_id
+      `SELECT a.role, m.account_id, x.actor_id, x.action, x.reason, x.target_id
        FROM accounts a JOIN admin_memberships m ON m.account_id = a.id
-       JOIN admin_actions x ON x.target_account_id = a.id WHERE a.id = $1`,
+       JOIN admin_actions x ON x.target_id = a.id WHERE a.id = $1`,
       [account.id],
     );
-    expect(rows.rows[0]).toMatchObject({ role: "customer", account_id: account.id, action: "admin.create", reason: payload.reason, target_account_id: account.id });
+    expect(rows.rows[0]).toMatchObject({ role: "customer", account_id: account.id, action: "admin.create", reason: payload.reason, target_id: account.id });
     expect(rows.rows[0].actor_id).not.toBe(account.id);
   });
 

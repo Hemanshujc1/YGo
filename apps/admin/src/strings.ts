@@ -63,5 +63,6 @@ export const strings = {
     PHONE_IN_USE: "Another account already uses this phone number. Contact support for help.",
     EMAIL_IN_USE: "Another account already uses this email address.",
     FORBIDDEN: "This account is not allowed to do that.",
+    CATEGORY_NAME_IN_USE: "A category with this name already exists under that parent.",
   } satisfies Record<ErrorCode, string>,
 };
