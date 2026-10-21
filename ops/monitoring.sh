@@ -80,7 +80,7 @@ alarm ap-south-1 "$mumbai_topic" off-aws-copy --namespace YGo --metric-name OffA
   --statistic Minimum --period 86400 --evaluation-periods 1 --threshold 1 \
   --comparison-operator LessThanThreshold --treat-missing-data breaching
 
-for job in backup-nightly cleanup-sessions; do
+for job in backup-nightly cleanup-sessions snapshot-weekly; do
   alarm ap-south-1 "$mumbai_topic" "job-$job" --namespace YGo --metric-name JobHealthy \
     --dimensions "Name=JobName,Value=$job" --statistic Minimum --period 86400 \
     --evaluation-periods 1 --threshold 1 --comparison-operator LessThanThreshold \

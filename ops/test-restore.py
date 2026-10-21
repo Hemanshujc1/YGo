@@ -21,7 +21,22 @@ def fake():
     state = Path(os.environ['YGO_RESTORE_TEST'])
     tool, args = Path(sys.argv[0]).name, sys.argv[1:]
     if tool == 'aws':
-        if 's3api' in args:
+        if 'rds' in args:
+            action = args[args.index('rds') + 1]
+            if action == 'describe-db-snapshots':
+                if '--db-snapshot-identifier' in args:
+                    count_file = state / 'snapshot-polls'
+                    count = int(count_file.read_text()) + 1 if count_file.exists() else 1
+                    count_file.write_text(str(count))
+                    print('error' if (state / 'snapshot-fail').exists() else
+                          'creating' if count <= 35 else 'available')
+                else:
+                    print('ygo-weekly-20200101\tygo-weekly-' + time.strftime('%Y%m%d', time.gmtime()) +
+                          '\tunrelated-20200101')
+            elif action == 'delete-db-snapshot':
+                with (state / 'snapshot-deletions').open('a') as output:
+                    output.write(args[args.index('--db-snapshot-identifier') + 1] + '\n')
+        elif 's3api' in args:
             rule = '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"nightly/"},"Expiration":{"Days":30}'
             if (state / 'early-transition').exists(): rule += ',"Transitions":[{"Days":1,"StorageClass":"GLACIER"}]'
             print('None' if 'get-bucket-versioning' in args else rule + '}]}')
@@ -36,6 +51,8 @@ def fake():
         (state / 'service').write_text('on' if args[0] == 'enable' else 'off')
     elif tool == 'timeout':
         sys.exit(1 if (state / 'fail-health').exists() else 0)
+    elif tool == 'sleep':
+        return
     else:
         assert '--expand-environment=no' not in args, 'systemd 252 rejects --expand-environment=no'
         assert not any('$' in arg for arg in args), 'systemd 252 expands dollars in command arguments'
@@ -61,7 +78,7 @@ def main():
     names = [f'ygo_restore_{uuid4().hex}_{suffix}' for suffix in ('source', 'old')]
     with tempfile.TemporaryDirectory(prefix='ygo-restore-') as temporary:
         state = Path(temporary)
-        for tool in ('aws', 'systemctl', 'systemd-run', 'timeout'):
+        for tool in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep'):
             (state / tool).symlink_to(Path(__file__).resolve())
         env = dict(os.environ, YGO_RESTORE_TEST=temporary, PATH=f'{temporary}:' + os.environ['PATH'])
         def url(name):
@@ -90,6 +107,16 @@ def main():
             backup = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'dump', 'test-bucket'], env=env, text=True, capture_output=True)
             assert backup.returncode != 0 and 'mismatch' in backup.stderr
             (state / 'corrupt-download').unlink()
+            snapshot = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'snapshot', 'test-db'],
+                                      env=env, text=True, capture_output=True)
+            assert snapshot.returncode == 0, snapshot.stdout + snapshot.stderr
+            assert int((state / 'snapshot-polls').read_text()) == 36
+            assert (state / 'snapshot-deletions').read_text().splitlines() == ['ygo-weekly-20200101']
+            (state / 'snapshot-fail').touch()
+            failed_snapshot = subprocess.run(['bash', str(source / 'ops/backup.sh'), 'snapshot', 'test-db'],
+                                             env=env, text=True, capture_output=True)
+            assert failed_snapshot.returncode != 0 and 'Snapshot stopped creating' in failed_snapshot.stderr
+            (state / 'snapshot-fail').unlink()
             Path('/etc/ygo/production.env').write_text(original)
             (state / 'service').write_text('on')
             replay = Path('/opt/ygo/production/current/replay-deletions.js')
@@ -144,11 +171,11 @@ def main():
             assert result.returncode == 0, result.stdout + result.stderr
             assert (state / 'service').read_text() == 'on'
             assert cmd('psql', url(target), '-Atc', 'SELECT id FROM recovery_probe') == '130'
-            print(f'PASS: exact backup/restore, data, failure paths; recovery elapsed {elapsed:.2f}s')
+            print(f'PASS: exact backup/snapshot/restore, data, failure paths; recovery elapsed {elapsed:.2f}s')
         finally:
             for name in names: cmd('psql', admin, '-c', f'DROP DATABASE {name} WITH (FORCE)')
             if Path('/etc/ygo').exists(): shutil.rmtree('/etc/ygo')
             if Path('/opt/ygo').exists(): shutil.rmtree('/opt/ygo')
 
-if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout'): fake()
+if Path(sys.argv[0]).name in ('aws', 'systemctl', 'systemd-run', 'timeout', 'sleep'): fake()
 else: main()

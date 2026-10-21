@@ -26,12 +26,14 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "snapshot-weekly", healthy: false },
   ]);
 
   const yesterday = new Date(now.getTime() - 25 * 60 * 60 * 1000);
   await database.db.insert(jobRuns).values([
     { jobName: "backup-nightly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "cleanup-sessions", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
+    { jobName: "snapshot-weekly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
   ]);
   expect(await check()).toBe(true);
   expect(reports.every((report) => report.healthy)).toBe(true);
@@ -47,7 +49,11 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
 
   clock.advance(2 * 60 * 60 * 1000);
   expect(await check()).toBe(false);
-  expect(reports.every((report) => !report.healthy)).toBe(true);
+  expect(reports).toEqual([
+    { name: "backup-nightly", healthy: false },
+    { name: "cleanup-sessions", healthy: false },
+    { name: "snapshot-weekly", healthy: true },
+  ]);
 });
 
 it("publishes 0 for every job if database reads fail, and rejects failed publishing", async () => {
@@ -61,6 +67,7 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "snapshot-weekly", healthy: false },
   ]);
   await expect(checkJobs(broken, clock, async () => { throw new Error("AWS failed"); }))
     .rejects.toThrow("Could not publish every job health metric");
@@ -81,4 +88,35 @@ it("a newer running row does not hide the latest finished failure", async () => 
     reports.push({ name, healthy });
   });
   expect(reports).toContainEqual({ name: "backup-nightly", healthy: false });
+});
+
+it("reports a weekly snapshot healthy through day eight, then unhealthy", async () => {
+  const now = new Date("2051-01-09T00:30:00.000Z");
+  const clock = createLocalClock(now);
+  const finished = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+  await database.db.insert(jobRuns).values({
+    jobName: "snapshot-weekly", startedAt: finished, finishedAt: finished, status: "ok",
+  });
+  const reports: { name: JobName; healthy: boolean }[] = [];
+  const check = async () => {
+    reports.length = 0;
+    await checkJobs(database, clock, async (name, healthy) => { reports.push({ name, healthy }); });
+    return reports.find((report) => report.name === "snapshot-weekly")?.healthy;
+  };
+  expect(await check()).toBe(true);
+  clock.advance(1);
+  expect(await check()).toBe(false);
+
+  const fresh = clock.now();
+  await database.db.insert(jobRuns).values({
+    jobName: "snapshot-weekly", startedAt: fresh, finishedAt: fresh, status: "ok",
+  });
+  expect(await check()).toBe(true);
+  clock.advance(60 * 1000);
+  const failed = clock.now();
+  await database.db.insert(jobRuns).values([
+    { jobName: "snapshot-weekly", startedAt: failed, finishedAt: failed, status: "failed", errorText: "snapshot failed" },
+    { jobName: "snapshot-weekly", startedAt: new Date(failed.getTime() + 1), status: "running" },
+  ]);
+  expect(await check()).toBe(false);
 });

@@ -115,3 +115,19 @@ it("a stuck running row does not block the next backup run", async () => {
   expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, next)))
     .toMatchObject([{ status: "ok", finishedAt: next }]);
 });
+
+it("records completed and failed weekly snapshots without storing error details", async () => {
+  const success = new Date("2035-01-01T00:00:00.000Z");
+  let calls = 0;
+  await runJob(database, "snapshot-weekly", createLocalClock(success), undefined, async () => { calls++; });
+  expect(calls).toBe(1);
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, success)))
+    .toMatchObject([{ jobName: "snapshot-weekly", status: "ok", finishedAt: success, errorText: null }]);
+
+  const failure = new Date("2036-01-01T00:00:00.000Z");
+  await expect(runJob(database, "snapshot-weekly", createLocalClock(failure), undefined, async () => {
+    throw new Error("private snapshot detail");
+  })).rejects.toThrow("private snapshot detail");
+  expect(await database.db.select().from(jobRuns).where(eq(jobRuns.startedAt, failure)))
+    .toMatchObject([{ jobName: "snapshot-weekly", status: "failed", finishedAt: failure, errorText: "snapshot failed" }]);
+});

@@ -29,13 +29,17 @@ units = [
 for name in units:
     shutil.copy2(Path('/ops') / name, Path('/etc/systemd/system') / name)
 for name in ('ygo-job@backup-nightly.service.d', 'ygo-job@backup-nightly.timer.d',
-             'ygo-job@cleanup-sessions.timer.d'):
+             'ygo-job@cleanup-sessions.timer.d', 'ygo-job@snapshot-weekly.service.d',
+             'ygo-job@snapshot-weekly.timer.d'):
     shutil.copytree(Path('/ops') / name, Path('/etc/systemd/system') / name, dirs_exist_ok=True)
+assert 'OnCalendar=Mon *-*-* 00:30:00 UTC' in (Path('/etc/systemd/system') /
+    'ygo-job@snapshot-weekly.timer.d/override.conf').read_text()
 Path('/opt/ygo/production/current').mkdir(parents=True, exist_ok=True)
 subprocess.run([
     'systemd-analyze', 'verify',
     'ygo-job@backup-nightly.service', 'ygo-job@backup-nightly.timer',
     'ygo-job@cleanup-sessions.service', 'ygo-job@cleanup-sessions.timer',
+    'ygo-job@snapshot-weekly.service', 'ygo-job@snapshot-weekly.timer',
     'ygo-job-check.service', 'ygo-job-check.timer',
 ], check=True)
-print(f'PASS: {len(calls)} backup/restore invocations and six job units accepted by {version}')
+print(f'PASS: {len(calls)} backup/restore invocations and eight job units accepted by {version}')

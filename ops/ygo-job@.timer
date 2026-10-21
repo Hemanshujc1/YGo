@@ -1,5 +1,5 @@
 [Unit]
-Description=Run YGo job %i daily
+Description=Run YGo job %i on its schedule
 
 [Timer]
 Persistent=true
