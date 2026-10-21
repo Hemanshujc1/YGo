@@ -1,6 +1,6 @@
-import { Text, useSession } from "@ygo/mobile";
+import { Text, ThemePicker, useSession } from "@ygo/mobile";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { session } from "../api";
 import { strings } from "../strings";
 
@@ -20,6 +20,9 @@ export default function NotLinked() {
       {state.status === "signed-in" && (
         <Text className="mt-4 text-secondary text-muted">{strings.notLinked.signedInAs(state.account.email)}</Text>
       )}
+      <View className="mt-8">
+        <ThemePicker words={strings.theme} />
+      </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={strings.profile.signOut}

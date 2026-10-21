@@ -1,6 +1,6 @@
 # @ygo/shopkeeper
 
-The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, "You're not linked to a shop yet", the email signed in, and Sign out, until shop applications (#40) and joining a shop (#58) link accounts to shops.
+The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it shows, for now, "You're not linked to a shop yet", the email signed in, the theme choice, and Sign out, until shop applications (#40) and joining a shop (#58) link accounts to shops.
 
 ## Run it locally
 
@@ -33,7 +33,7 @@ At launch the app asks the server who is signed in (`GET /v1/me`), with a blank 
 
 At launch the app calls `GET /v1/version-check`, sending its name and the `app.json` version. If the server answers 426 `UPDATE_REQUIRED` (its `MIN_SHOPKEEPER_VERSION` is newer), a full screen asks the person to update, with a button to the store link for the platform, or a line naming the stores when no link is set. Offline or any other answer lets the app carry on.
 
-A theme chosen earlier stays saved on the phone with MMKV and is applied before the first screen draws; otherwise the app follows the phone's theme. No Shopkeeper screen offers the choice yet. The status bar and Android's navigation bar follow the theme on screen.
+The theme (System, Light or Dark) is chosen on the not-linked screen for now, and on S36 More once it is built. The choice is saved on the phone with MMKV and applied before the first screen draws; System follows the phone's theme. The status bar and Android's navigation bar follow the theme on screen.
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
