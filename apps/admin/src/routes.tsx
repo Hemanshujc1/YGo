@@ -17,13 +17,24 @@ type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
 type FieldErrors = Partial<Record<Field, string>>;
 
-function Page({ children }: { children: ReactNode }) {
+function Page({ children, protectedArea = false }: { children: ReactNode; protectedArea?: boolean }) {
   return (
-    <div className="min-h-screen bg-bg text-text">
+    <div className="min-h-screen bg-bg font-sans text-secondary text-text">
       <header className="border-b border-border bg-surface px-8 py-5">
-        <Link to="/accounts" className="text-xl font-semibold text-brand">{strings.title}</Link>
+        <Link to="/accounts" className="text-title font-semibold text-brand">{strings.title}</Link>
       </header>
-      <main className="mx-auto max-w-5xl px-8 py-10">{children}</main>
+      <div className={protectedArea ? "flex" : ""}>
+        {protectedArea && (
+          <aside className="w-56 shrink-0 border-r border-border bg-surface px-4 py-8">
+            <nav aria-label={strings.navigation}>
+              <Link to="/accounts" aria-current="page" className="block rounded-lg bg-primary-subtle p-3 font-medium text-on-primary-subtle">
+                {strings.accounts}
+              </Link>
+            </nav>
+          </aside>
+        )}
+        <main className="mx-auto min-w-0 max-w-5xl flex-1 px-8 py-10">{children}</main>
+      </div>
     </div>
   );
 }
@@ -79,7 +90,7 @@ function SignIn({ api }: { api: AdminApi }) {
   return (
     <Page>
       <section className="mx-auto max-w-md rounded-xl border border-border bg-surface p-8">
-        <h1 className="text-2xl font-semibold">{strings.signIn}</h1>
+        <h1 className="text-title-large font-semibold">{strings.signIn}</h1>
         {location.state?.warning && <Message>{location.state.warning}</Message>}
         {stage === "email" ? (
           <form onSubmit={(event) => { event.preventDefault(); void requestCode(); }} className="mt-6 space-y-5" noValidate>
@@ -170,10 +181,10 @@ function Accounts({ api }: { api: AdminApi }) {
   }
 
   return (
-    <Page>
+    <Page protectedArea>
       <div className="mb-8 flex items-center justify-between gap-6">
         <div>
-          <h1 className="text-2xl font-semibold">{strings.accounts}</h1>
+          <h1 className="text-title-large font-semibold">{strings.accounts}</h1>
           <p className="mt-2 text-muted">{strings.accountIntro}</p>
         </div>
         <button disabled={busy} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
@@ -183,20 +194,21 @@ function Accounts({ api }: { api: AdminApi }) {
       {screen === "list" && (
         <section className="rounded-xl border border-border bg-surface p-6">
           <div className="mb-6 flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold">{strings.accounts}</h2>
+            <h2 className="text-body font-semibold">{strings.accounts}</h2>
             <button onClick={() => setScreen("new")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">
               {strings.newAccount}
             </button>
           </div>
           {accounts.length === 0 ? <p className="text-muted">{strings.noAccounts}</p> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-xl text-left text-sm">
+              <table className="w-full min-w-xl text-left">
                 <thead className="bg-sunken"><tr>
                   <th className="p-3 font-medium">{strings.name}</th><th className="p-3 font-medium">{strings.email}</th>
                   <th className="p-3 font-medium">{strings.phone}</th>
                 </tr></thead>
                 <tbody>{accounts.map((account) => <tr key={account.id} className="border-t border-border">
-                  <td className="p-3">{account.name}</td><td className="p-3">{account.email}</td><td className="p-3">{account.phone}</td>
+                  <td className="p-3">{account.name}</td><td className="p-3">{account.email}</td>
+                  <td className="p-3 tabular-nums">{account.phone ? `${account.phone.slice(-10, -5)} ${account.phone.slice(-5)}` : strings.noPhone}</td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -205,7 +217,7 @@ function Accounts({ api }: { api: AdminApi }) {
       )}
       {screen === "new" && (
         <section className="max-w-xl rounded-xl border border-border bg-surface p-6">
-          <h2 className="text-lg font-semibold">{strings.newAccount}</h2>
+          <h2 className="text-body font-semibold">{strings.newAccount}</h2>
           <form onSubmit={create} className="mt-6 space-y-4" noValidate>
             {(["email", "name", "phone", "reason"] as const).map((field) => (
               <div key={field}>
@@ -219,8 +231,8 @@ function Accounts({ api }: { api: AdminApi }) {
                     onChange={(event) => setFields({ ...fields, [field]: event.target.value })}
                     className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />
                 )}
-                {field === "reason" && <p className="mt-1 text-sm text-muted">{strings.reasonHint}</p>}
-                {errors[field] && <p role="alert" className="mt-1 text-sm text-danger">{errors[field]}</p>}
+                {field === "reason" && <p className="mt-1 text-secondary text-muted">{strings.reasonHint}</p>}
+                {errors[field] && <p role="alert" className="mt-1 text-secondary text-danger">{errors[field]}</p>}
               </div>
             ))}
             {error && <Message>{error}</Message>}
@@ -236,7 +248,7 @@ function Accounts({ api }: { api: AdminApi }) {
       )}
       {screen === "created" && created && (
         <section className="max-w-xl rounded-xl border border-border bg-surface p-6">
-          <h2 className="text-lg font-semibold text-success">{strings.created}</h2>
+          <h2 className="text-body font-semibold text-success">{strings.created}</h2>
           <p className="mt-3">{created.name} · {created.email}</p>
           <button onClick={() => { setScreen("list"); setFields({ email: "", name: "", phone: "", reason: "" }); }}
             className="mt-6 h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.backToAccounts}</button>

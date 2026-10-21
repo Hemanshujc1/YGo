@@ -34,6 +34,8 @@ describe("Admin web", () => {
     fireEvent.change(screen.getByLabelText(strings.code), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: strings.verify }));
     await screen.findByText(founder.email);
+    expect(screen.getByRole("navigation", { name: strings.navigation })).toBeTruthy();
+    expect(screen.getByText("98765 43210")).toBeTruthy();
     expect(api.verifyCode).toHaveBeenCalledWith({ email: founder.email, code: "123456" });
     expect(router.state.location.pathname).toBe("/accounts");
   });
