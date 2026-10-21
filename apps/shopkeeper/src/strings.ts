@@ -66,8 +66,6 @@ export const strings = {
     notCleared:
       "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
   },
-  // On the scaffold screen until Account (C23) replaces it (#155, Q8).
-  signOut: "Sign out",
   // The Inter review (design system, section 10), until real screens replace it.
   review: {
     sizes: "Type sizes",

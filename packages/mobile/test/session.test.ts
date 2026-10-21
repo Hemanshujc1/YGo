@@ -92,6 +92,21 @@ describe("createSession", () => {
     expect(session.get()).toEqual({ status: "signed-out", notCleared: true });
   });
 
+  it("still marks a failed clear when the store signals the sign-out before it throws", async () => {
+    // The real store calls showSignedOut, then rejects, when the Keychain delete fails.
+    const api = fakeApi(
+      async () => ({ ok: true, data: full }),
+      async () => {
+        showSignedOut();
+        throw new Error("Keychain busy");
+      },
+    );
+    const session = createSession(api);
+    session.signedIn(full);
+    expect(await session.signOut()).toBe(false);
+    expect(session.get()).toEqual({ status: "signed-out", notCleared: true });
+  });
+
   it("keeps a sign-in that lands while a sign-out is finishing", async () => {
     let finish!: () => void;
     const api = fakeApi(

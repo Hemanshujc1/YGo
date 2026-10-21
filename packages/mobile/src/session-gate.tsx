@@ -37,8 +37,9 @@ type SessionGateProps = {
 export function SessionGate({ session, api, supportEmail, words, children }: SessionGateProps) {
   const state = useSession(session);
 
+  // Once per launch: a remount (Fast Refresh) never sends the person back to the blank screen.
   useEffect(() => {
-    void session.check();
+    if (session.get().status === "checking") void session.check();
   }, [session]);
 
   switch (state.status) {

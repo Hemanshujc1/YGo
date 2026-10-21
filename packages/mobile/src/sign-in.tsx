@@ -51,8 +51,8 @@ let memory: Sends = new Map();
 export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInProps) {
   // The email as typed, kept when C14 goes back to C01.
   const [typed, setTyped] = useState("");
-  // Shown until the first keystroke, so C14 going back to C01 never shows it again.
-  const [showNotice, setShowNotice] = useState(notice !== undefined);
+  // The notice goes at the first keystroke, so C14 going back to C01 never shows it again.
+  const [noticeGone, setNoticeGone] = useState(false);
   // The email C14 is open for; C01 while null.
   const [codeFor, setCodeFor] = useState<string | null>(null);
   const [sends, setSends] = useState(memory);
@@ -112,9 +112,9 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInP
             typed={typed}
             setTyped={(text) => {
               setTyped(text);
-              setShowNotice(false);
+              setNoticeGone(true);
             }}
-            notice={showNotice ? notice : undefined}
+            notice={noticeGone ? undefined : notice}
             send={async (email) => {
               const problem = needsSend(email, memory, moment()) ? await send(email) : null;
               if (!problem) setCodeFor(email);
@@ -143,9 +143,7 @@ function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: Email
   const [busy, setBusy] = useState(false);
   // Set before React re-renders, so the return key and the button never send twice.
   const sending = useRef(false);
-  const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(
-    notice ? { text: notice, onField: false } : null,
-  );
+  const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(null);
 
   async function submit() {
     if (sending.current) return;
@@ -194,7 +192,15 @@ function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: Email
         accessibilityLabel={words.emailLabel}
         className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem?.onField === true, focused)}`}
       />
-      {problem && <FieldMessage text={problem.text} />}
+      {problem ? (
+        <FieldMessage text={problem.text} />
+      ) : (
+        notice && (
+          <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-text">
+            {notice}
+          </Text>
+        )
+      )}
 
       <View className="mt-6">
         <Button label={words.send} onPress={() => void submit()} busy={busy} />

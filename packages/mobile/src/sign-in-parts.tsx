@@ -4,7 +4,7 @@ import { Text } from "./text";
 /** C01 and C14's last line: "Help:" and the support email, which opens a new email. */
 export function HelpLine({ before, help, supportEmail }: { before?: string; help: string; supportEmail: string }) {
   return (
-    <Text selectable className="mt-8 text-secondary text-muted">
+    <Text className="mt-8 text-secondary text-muted">
       {before ? `${before} ` : ""}
       {`${help} `}
       <SupportEmail address={supportEmail} className="text-secondary" />

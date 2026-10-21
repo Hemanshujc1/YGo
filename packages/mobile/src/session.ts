@@ -93,7 +93,11 @@ export function createSession(api: SessionApi) {
       } catch {
         cleared = false;
       }
-      if (mine === turn) move(cleared ? { status: "signed-out" } : { status: "signed-out", notCleared: true });
+      // A failed clear signals the sign-out itself before it rejects, so
+      // signed-out still takes the mark; a sign-in that landed is kept.
+      if (mine === turn || state.status === "signed-out") {
+        move(cleared ? { status: "signed-out" } : { status: "signed-out", notCleared: true });
+      }
       return cleared;
     },
   };
