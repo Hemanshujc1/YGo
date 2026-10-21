@@ -43,6 +43,13 @@
       "when": 1792582211742,
       "tag": "0005_admin_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792584400109,
+      "tag": "0006_admin_web_sessions",
+      "breakpoints": true
     }
   ]
 }

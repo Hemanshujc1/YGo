@@ -1,0 +1,2 @@
+ALTER TABLE "sessions" ADD COLUMN "kind" text DEFAULT 'mobile' NOT NULL;--> statement-breakpoint
+ALTER TABLE "sessions" ADD CONSTRAINT "sessions_kind_valid" CHECK ("sessions"."kind" IN ('mobile', 'admin_web'));

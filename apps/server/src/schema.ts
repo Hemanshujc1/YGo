@@ -62,12 +62,17 @@ export const loginCodeHistory = pgTable(
   },
   (table) => [index("login_code_history_email_expires_at_idx").on(table.email, table.expiresAt)],
 );
-export const sessions = pgTable("sessions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["mobile", "admin_web"] }).notNull().default("mobile"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check("sessions_kind_valid", sql`${table.kind} IN ('mobile', 'admin_web')`)],
+);
 
 // Every refresh token a session has been issued, as a keyed hash. The one with
 // no replaced_at is current; the database allows one per session (#153, Q3).

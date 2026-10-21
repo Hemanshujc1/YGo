@@ -11,6 +11,11 @@ export async function adminSignedIn(
 ): Promise<SignedIn | undefined> {
   const who = await signedIn(request, reply, auth);
   if (!who) return undefined;
+  const session = await auth.pool.query("SELECT 1 FROM sessions WHERE id = $1 AND kind = 'admin_web'", [who.sessionId]);
+  if (!session.rowCount) {
+    reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return undefined;
+  }
   const membership = await auth.pool.query("SELECT 1 FROM admin_memberships WHERE account_id = $1", [who.accountId]);
   if (membership.rowCount) return who;
   reply.code(403).send({ error: { code: "FORBIDDEN" } });
