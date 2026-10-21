@@ -1,4 +1,5 @@
 import {
+  ADMIN_REFRESH_HEADER,
   APP_NAME_HEADER,
   APP_VERSION_HEADER,
   ErrorEnvelope,
@@ -21,10 +22,12 @@ export interface Answer {
   body: unknown;
 }
 
+/** A contract schema. Structural, since only @ygo/contracts imports zod. */
 interface Schema<T> {
   safeParse(value: unknown): { success: true; data: T } | { success: false };
 }
 
+/** What a signed-in call answers, without asking the server, when there is no session. */
 export const NO_SESSION: Answer = { ok: false, status: 401, body: { error: { code: "UNAUTHENTICATED" } } };
 
 interface TransportOptions {
@@ -51,7 +54,7 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
         accept: "application/json",
         ...(json !== undefined && { "content-type": "application/json" }),
         ...(options.token && { authorization: `Bearer ${options.token}` }),
-        ...(options.adminRefresh && { "x-ygo-admin-refresh": "1" }),
+        ...(options.adminRefresh && { [ADMIN_REFRESH_HEADER]: "1" }),
         ...(app && { [APP_NAME_HEADER]: app.name, [APP_VERSION_HEADER]: app.version }),
       },
       body: json === undefined ? undefined : JSON.stringify(json),
@@ -59,6 +62,9 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
       signal: AbortSignal.timeout(timeoutMs),
     });
 
+    // A body that is not JSON, breaks the contract, or carries a code this
+    // client does not know counts as INTERNAL (see ErrorCode in
+    // @ygo/contracts). Failing to read the body at all rejects.
     let body: unknown;
     try {
       body = await response.json();
@@ -68,6 +74,10 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     return { ok: response.ok, status: response.status, body };
   }
 
+  /**
+   * The result for an answer that is not a success, from its error envelope.
+   * Calls `onUpdateRequired` for UPDATE_REQUIRED, so call it once per answer.
+   */
   function failure(status: number, body: unknown): ApiFailure {
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
