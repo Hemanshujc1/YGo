@@ -41,13 +41,12 @@ export function saveOutcome(answer: ApiResult<Account> | "offline"): { saved: Ac
   return { problems: onFields ?? { ...none, other: answer.code } };
 }
 
-/** The field to focus after a refusal: the first wrong one, top to bottom. */
+/**
+ * The field to focus after a refusal: the first one to retype, top to
+ * bottom. A phone in use is not focused: the keyboard would cover the card
+ * with the support email, the person's way out.
+ */
 export function firstWrong(problems: ProfileProblems): "name" | "phone" | null {
   if (problems.name) return "name";
-  return problems.phone ? "phone" : null;
-}
-
-/** A saved phone as the box shows it, after the fixed +91. */
-export function phoneTyped(phone: string | null): string {
-  return phone?.startsWith(PHONE_PREFIX) ? phone.slice(PHONE_PREFIX.length) : (phone ?? "");
+  return problems.phone === "invalid" ? "phone" : null;
 }

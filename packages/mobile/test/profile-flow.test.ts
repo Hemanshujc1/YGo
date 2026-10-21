@@ -1,6 +1,6 @@
 import type { Account } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { checkProfile, firstWrong, phoneTyped, saveOutcome } from "../src/profile-flow";
+import { checkProfile, firstWrong, saveOutcome } from "../src/profile-flow";
 
 const account: Account = {
   id: "6f1c1d1e-0000-4000-8000-000000000001",
@@ -67,14 +67,11 @@ describe("saveOutcome", () => {
 describe("firstWrong", () => {
   it("names the first wrong field, the name before the phone", () => {
     expect(firstWrong({ ...none, name: true, phone: "invalid" })).toBe("name");
-    expect(firstWrong({ ...none, phone: "in-use" })).toBe("phone");
+    expect(firstWrong({ ...none, phone: "invalid" })).toBe("phone");
     expect(firstWrong({ ...none, other: "offline" })).toBeNull();
   });
-});
 
-describe("phoneTyped", () => {
-  it("shows a saved phone without the +91 the box already shows", () => {
-    expect(phoneTyped("+919876543210")).toBe("9876543210");
-    expect(phoneTyped(null)).toBe("");
+  it("leaves a phone in use unfocused, so the keyboard never covers the support email", () => {
+    expect(firstWrong({ ...none, phone: "in-use" })).toBeNull();
   });
 });

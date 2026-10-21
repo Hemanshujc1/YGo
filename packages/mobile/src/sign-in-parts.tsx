@@ -12,6 +12,20 @@ export function HelpLine({ before, help, supportEmail }: { before?: string; help
   );
 }
 
+/** A text box's edge: red when its value was refused, else blue while focused. */
+export function edgeClass(wrong: boolean, focused: boolean): string {
+  return wrong ? "border-2 border-danger" : focused ? "border-2 border-primary" : "border border-border-strong";
+}
+
+/** The message under a field, read out when it appears. */
+export function FieldMessage({ text }: { text: string }) {
+  return (
+    <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
+      {text}
+    </Text>
+  );
+}
+
 /** The support email as a link that opens a new email to it; `className` sets its size. */
 export function SupportEmail({ address, className }: { address: string; className: string }) {
   return (

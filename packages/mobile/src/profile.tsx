@@ -7,11 +7,10 @@ import {
   checkProfile,
   firstWrong,
   PHONE_PREFIX,
-  phoneTyped,
   type ProfileProblems,
   saveOutcome,
 } from "./profile-flow";
-import { Button, SupportEmail } from "./sign-in-parts";
+import { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 import { Text } from "./text";
 
 /** Every word C02 shows, from the app's `strings.ts`: the package holds none (ADR-0009). */
@@ -47,23 +46,27 @@ export type ProfileProps = {
   words: ProfileWords;
   /** The address the phone-in-use card opens a new email to. */
   supportEmail: string;
-  /** The signed-in account; a name or phone it already has fills its box. */
-  account: Account;
   api: ProfileApi;
   /** The session's `signedIn`: the root layout then shows the app. */
   onSaved: (account: Account) => void;
-  /** The session's `signOut`: the root layout then shows C01. */
+  /**
+   * The session's `signOut`: the root layout then shows C01, with the
+   * failed-clear message when it resolves false (#155, Q5). It never
+   * rejects; C02 only waits for it.
+   */
   onSignOut: () => Promise<unknown>;
 };
 
 /**
  * C02 Your name and phone number (#155, Q4 and Q5): asked once after the
  * first sign-in, before anything else. The only other way off it is Sign out.
+ * Both boxes start empty: the server saves the name and phone together, and
+ * changes a name only once both are set, so an account here has neither.
  */
-export function Profile({ words, supportEmail, account, api, onSaved, onSignOut }: ProfileProps) {
+export function Profile({ words, supportEmail, api, onSaved, onSignOut }: ProfileProps) {
   const insets = useSafeAreaInsets();
-  const [name, setName] = useState(account.name ?? "");
-  const [phone, setPhone] = useState(phoneTyped(account.phone));
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [focused, setFocused] = useState<"name" | "phone" | null>(null);
   const [problems, setProblems] = useState<ProfileProblems | null>(null);
   const [busy, setBusy] = useState<"saving" | "signing-out" | null>(null);
@@ -121,8 +124,6 @@ export function Profile({ words, supportEmail, account, api, onSaved, onSignOut 
     setBusy(null);
   }
 
-  const edge = (field: "name" | "phone", wrong: boolean) =>
-    wrong ? "border-2 border-danger" : focused === field ? "border-2 border-primary" : "border border-border-strong";
   const phoneWrong = problems?.phone ?? null;
   const other = problems?.other ?? null;
 
@@ -130,7 +131,7 @@ export function Profile({ words, supportEmail, account, api, onSaved, onSignOut 
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-bg">
       <View style={{ paddingTop: insets.top }}>
         <View className="min-h-14 justify-center px-4">
-          <Text accessibilityRole="header" numberOfLines={1} className="text-headline font-semibold text-text">
+          <Text accessibilityRole="header" className="text-headline font-semibold text-text">
             {words.title}
           </Text>
         </View>
@@ -159,19 +160,15 @@ export function Profile({ words, supportEmail, account, api, onSaved, onSignOut 
             autoCorrect={false}
             returnKeyType="next"
             accessibilityLabel={words.nameLabel}
-            className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edge("name", problems?.name === true)}`}
+            className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problems?.name === true, focused === "name")}`}
           />
-          {problems?.name && (
-            <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
-              {words.nameInvalid}
-            </Text>
-          )}
+          {problems?.name && <FieldMessage text={words.nameInvalid} />}
         </View>
 
         <View>
           <Text className="text-label font-medium text-text">{words.phoneLabel}</Text>
           <View
-            className={`mt-2 h-[52px] flex-row items-center gap-2 rounded-input bg-surface px-4 ${edge("phone", phoneWrong !== null)}`}
+            className={`mt-2 h-[52px] flex-row items-center gap-2 rounded-input bg-surface px-4 ${edgeClass(phoneWrong !== null, focused === "phone")}`}
           >
             <Text className="text-body tabular-nums text-muted">{PHONE_PREFIX}</Text>
             <TextInput
@@ -194,9 +191,7 @@ export function Profile({ words, supportEmail, account, api, onSaved, onSignOut 
             />
           </View>
           {phoneWrong && (
-            <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
-              {phoneWrong === "in-use" ? words.errors.PHONE_IN_USE : words.phoneInvalid}
-            </Text>
+            <FieldMessage text={phoneWrong === "in-use" ? words.errors.PHONE_IN_USE : words.phoneInvalid} />
           )}
         </View>
 
