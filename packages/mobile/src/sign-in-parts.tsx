@@ -7,13 +7,34 @@ export function HelpLine({ before, help, supportEmail }: { before?: string; help
     <Text className="mt-8 text-secondary text-muted">
       {before ? `${before} ` : ""}
       {`${help} `}
-      <Text
-        accessibilityRole="link"
-        onPress={() => void Linking.openURL(`mailto:${supportEmail}`)}
-        className="text-secondary font-medium text-primary underline"
-      >
-        {supportEmail}
-      </Text>
+      <SupportEmail address={supportEmail} className="text-secondary" />
+    </Text>
+  );
+}
+
+/** A text box's edge: red when its value was refused, else blue while focused. */
+export function edgeClass(wrong: boolean, focused: boolean): string {
+  return wrong ? "border-2 border-danger" : focused ? "border-2 border-primary" : "border border-border-strong";
+}
+
+/** The message under a field, read out when it appears. */
+export function FieldMessage({ text }: { text: string }) {
+  return (
+    <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
+      {text}
+    </Text>
+  );
+}
+
+/** The support email as a link that opens a new email to it; `className` sets its size. */
+export function SupportEmail({ address, className }: { address: string; className: string }) {
+  return (
+    <Text
+      accessibilityRole="link"
+      onPress={() => void Linking.openURL(`mailto:${address}`)}
+      className={`${className} font-medium text-primary underline`}
+    >
+      {address}
     </Text>
   );
 }

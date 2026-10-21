@@ -12,7 +12,7 @@ import {
   secondsLeft,
   wholeCode,
 } from "./sign-in-flow";
-import { Button, HelpLine } from "./sign-in-parts";
+import { Button, edgeClass, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
 
@@ -139,7 +139,7 @@ export function EnterCode(props: EnterCodeProps) {
         <View className="flex-row gap-2" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           {Array.from({ length: CODE_LENGTH }, (_, i) => {
             const current = focused && typing && i === Math.min(digits.length, CODE_LENGTH - 1);
-            const edge = wrong ? "border-2 border-danger" : current ? "border-2 border-primary" : "border border-border-strong";
+            const edge = edgeClass(wrong, current);
             return (
               <View
                 key={i}

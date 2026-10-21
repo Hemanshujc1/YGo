@@ -15,7 +15,7 @@ import {
   withSend,
   withShut,
 } from "./sign-in-flow";
-import { Button, HelpLine } from "./sign-in-parts";
+import { Button, edgeClass, FieldMessage, HelpLine } from "./sign-in-parts";
 import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
 
@@ -152,12 +152,6 @@ function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProp
     if (failed) setProblem({ text: problemWords(words, failed, "send"), onField: aboutField(failed) });
   }
 
-  const edge = problem?.onField
-    ? "border-2 border-danger"
-    : focused
-      ? "border-2 border-primary"
-      : "border border-border-strong";
-
   return (
     <>
       <Text accessibilityRole="header" className="text-display font-semibold text-text">
@@ -187,13 +181,9 @@ function EmailStep({ words, supportEmail, typed, setTyped, send }: EmailStepProp
         autoCorrect={false}
         returnKeyType="send"
         accessibilityLabel={words.emailLabel}
-        className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edge}`}
+        className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem?.onField === true, focused)}`}
       />
-      {problem && (
-        <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-danger">
-          {problem.text}
-        </Text>
-      )}
+      {problem && <FieldMessage text={problem.text} />}
 
       <View className="mt-6">
         <Button label={words.send} onPress={() => void submit()} busy={busy} />

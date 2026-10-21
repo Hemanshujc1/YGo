@@ -1,5 +1,5 @@
 import type { ErrorCode } from "@ygo/contracts";
-import type { SignInWords } from "@ygo/mobile";
+import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
 // one file (CONTEXT.md: every string externalised from day one).
@@ -40,6 +40,23 @@ export const strings = {
     },
     notSaved: "This phone could not keep you signed in. Send a new code and try again.",
   } satisfies Omit<SignInWords, "errors">,
+  // C02 (#155). The +91 before the phone comes from the Phone rule, never from here.
+  profile: {
+    title: "Your name and phone number",
+    lead: "The shop and the person delivering use these to reach you about an order. Each phone number can have one account.",
+    nameLabel: "Your name",
+    nameInvalid: "Enter your name in letters, such as Asha Kulkarni.",
+    phoneLabel: "Phone number",
+    phoneInvalid: "Enter a 10-digit mobile number, such as 98765 43210.",
+    inUse: {
+      title: "Is it your number?",
+      body: "Write to us from this email and we will help you get into the right account.",
+    },
+    save: "Continue",
+    saving: "Saving…",
+    signOut: "Sign out",
+    offline: "Could not save. Check your connection, then try again.",
+  } satisfies Omit<ProfileWords, "errors">,
   // The Inter review (design system, section 10), until real screens replace it.
   review: {
     sizes: "Type sizes",
@@ -78,6 +95,6 @@ export const strings = {
     CODE_EXPIRED: "That code has expired. Ask for a new one.",
     CODE_LOCKED: "Too many wrong codes. Try again in 15 minutes.",
     TOO_MANY_REQUESTS: "Too many tries. Wait a little and try again.",
-    PHONE_IN_USE: "Another account already uses this phone number. Contact support for help.",
+    PHONE_IN_USE: "This number is already used by another account.",
   } satisfies Record<ErrorCode, string>,
 };
