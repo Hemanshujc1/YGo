@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { Account, ErrorCode, SetProfileBody } from "@ygo/contracts";
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
+import { Keyboard, KeyboardAvoidingView, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   checkProfile,
@@ -76,6 +76,17 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
   const phoneInput = useRef<TextInput>(null);
   // The first wrong field, focused once the boxes take typing again: focus() on a locked box does nothing.
   const refocus = useRef<"name" | "phone" | null>(null);
+  // While the keyboard is up, the footer sits on it, not on the home indicator.
+  const [keyboardUp, setKeyboardUp] = useState(false);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener("keyboardDidShow", () => setKeyboardUp(true));
+    const hidden = Keyboard.addListener("keyboardDidHide", () => setKeyboardUp(false));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (busy || !refocus.current) return;
@@ -128,9 +139,10 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
   const other = problems?.other ?? null;
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-bg">
+    // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard.
+    <KeyboardAvoidingView behavior="padding" className="flex-1 bg-bg">
       <View style={{ paddingTop: insets.top }}>
-        <View className="min-h-14 justify-center px-4">
+        <View className="min-h-14 justify-center px-6">
           <Text accessibilityRole="header" className="text-headline font-semibold text-text">
             {words.title}
           </Text>
@@ -204,7 +216,7 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
         )}
       </ScrollView>
 
-      <View className="gap-2.5 border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: insets.bottom + 12 }}>
+      <View className="gap-2.5 border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: (keyboardUp ? 0 : insets.bottom) + 12 }}>
         {other && (
           <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">
             {other === "offline" ? words.offline : words.errors[other]}

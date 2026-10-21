@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type Account, Email, type RequestCodeBody, type VerifyCodeBody } from "@ygo/contracts";
 import { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, ScrollView, TextInput, View } from "react-native";
 import { EnterCode } from "./enter-code";
 import {
   aboutField,
@@ -88,7 +88,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInP
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-bg">
+    // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard.
+    <KeyboardAvoidingView behavior="padding" className="flex-1 bg-bg">
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerClassName="grow justify-center px-4 py-16"
