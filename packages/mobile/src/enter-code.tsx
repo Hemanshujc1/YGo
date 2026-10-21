@@ -97,11 +97,12 @@ export function EnterCode(props: EnterCodeProps) {
     busy.current = true;
     setChecking(true);
     const outcome = await check(code);
-    busy.current = false;
+    // Still busy once signed in: the field takes typing until C14 goes, and the spent code must not be checked again.
     if ("signedIn" in outcome) {
       onSignedIn(outcome.signedIn);
       return;
     }
+    busy.current = false;
     // A closed field lets go of its focus, so focus() opens the keypad after a new code.
     if (!outcome.boxesOpen) input.current?.blur();
     setChecking(false);
