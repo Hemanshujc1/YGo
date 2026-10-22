@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminActionReason } from "./fields";
+import { AdminActionReason, ProductBrand, ProductImage, ProductName } from "./fields";
 
 /** Admin-managed global categories (#200, CAT-5); two levels at most. */
 export const CategoryName = z.string().trim().min(1).max(100);
@@ -27,9 +27,6 @@ export type EditCategoryBody = z.infer<typeof EditCategoryBody>;
 /** The canonical unit is `each` for counted products, or kg/l for measured products. */
 export const ProductBaseUnit = z.enum(["each", "kg", "l"]);
 export const ProductClassification = z.enum(["counted", "measured"]);
-const ProductName = z.string().trim().min(1).max(200);
-const ProductBrand = z.string().trim().min(1).max(100).nullable().optional();
-const ProductImage = z.base64().max(13_981_016);
 
 export const MasterProduct = z.strictObject({
   id: z.uuid(),

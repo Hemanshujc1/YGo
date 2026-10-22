@@ -83,12 +83,7 @@ export function createProductImageStorage(options: {
         cacheControl: PRODUCT_IMAGE_CACHE_CONTROL,
       })));
 
-      const urls: ProductImageVariants = {
-        256: `https://${options.cloudFrontDomain}/${keys[256]}`,
-        512: `https://${options.cloudFrontDomain}/${keys[512]}`,
-        1024: `https://${options.cloudFrontDomain}/${keys[1024]}`,
-      };
-      return { keys, urls };
+      return { keys, urls: this.urls(keys) };
     },
     urls(keys: ProductImageVariants): ProductImageVariants {
       return {
