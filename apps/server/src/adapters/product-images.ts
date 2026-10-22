@@ -39,7 +39,8 @@ export interface PreparedProductImage {
   variants: ProductImageBuffers;
 }
 
-export function createS3ProductImageClient(client: S3Client): ProductImagePutClient {
+export function createS3ProductImageClient(options: { region: string; endpoint?: string }): ProductImagePutClient {
+  const client = new S3Client(options);
   return {
     async putObject(input) {
       await client.send(new PutObjectCommand({
