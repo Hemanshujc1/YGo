@@ -23,6 +23,8 @@ import { z } from "zod";
  * - AREA_NAME_IN_USE (409): another Area has this name, ignoring case.
  * - PINCODE_IN_OTHER_AREA (409): another Area holds one or more of the
  *   pincodes; `conflicts` names each pincode and the Area holding it.
+ * Master products (#203):
+ * - PRODUCT_NAME_IN_USE (409): another global product has the same name and brand, ignoring case.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -42,6 +44,7 @@ export const ErrorCode = z.enum([
   "CATEGORY_NAME_IN_USE",
   "AREA_NAME_IN_USE",
   "PINCODE_IN_OTHER_AREA",
+  "PRODUCT_NAME_IN_USE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -56,6 +59,7 @@ export const ErrorEnvelope = z.object({
     code: ErrorCode,
     fields: z.array(z.string()).optional(),
     conflicts: z.array(z.object({ pincode: z.string(), areaName: z.string() })).optional(),
+    draftId: z.uuid().optional(),
   }),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

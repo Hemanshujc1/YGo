@@ -27,7 +27,20 @@ export interface ProductImageVariants {
 
 type ProductImageBuffers = Record<keyof ProductImageVariants, Buffer>;
 
-export function createS3ProductImageClient(client: S3Client): ProductImagePutClient {
+export class InvalidProductImageError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "InvalidProductImageError";
+  }
+}
+
+export interface PreparedProductImage {
+  sourceHash: string;
+  variants: ProductImageBuffers;
+}
+
+export function createS3ProductImageClient(options: { region: string; endpoint?: string }): ProductImagePutClient {
+  const client = new S3Client(options);
   return {
     async putObject(input) {
       await client.send(new PutObjectCommand({
@@ -47,9 +60,14 @@ export function createProductImageStorage(options: {
   cloudFrontDomain: string;
 }) {
   return {
+    prepare(source: Buffer): Promise<PreparedProductImage> {
+      return createVariants(source);
+    },
     async store(productId: string, source: Buffer): Promise<{ keys: ProductImageVariants; urls: ProductImageVariants }> {
-      const variants = await createVariants(source);
-      const version = `v1-${createHash("sha256").update(source).digest("hex")}`;
+      return this.storePrepared(productId, await this.prepare(source));
+    },
+    async storePrepared(productId: string, prepared: PreparedProductImage): Promise<{ keys: ProductImageVariants; urls: ProductImageVariants }> {
+      const version = `v1-${prepared.sourceHash}`;
       const safeProductId = encodeURIComponent(productId);
       const keys: ProductImageVariants = {
         256: `products/${safeProductId}/${version}/256.webp`,
@@ -60,46 +78,55 @@ export function createProductImageStorage(options: {
       await Promise.all(PRODUCT_IMAGE_SIZES.map((size) => options.client.putObject({
         bucket: options.bucket,
         key: keys[size],
-        body: variants[size],
+        body: prepared.variants[size],
         contentType: "image/webp",
         cacheControl: PRODUCT_IMAGE_CACHE_CONTROL,
       })));
 
-      const urls: ProductImageVariants = {
+      return { keys, urls: this.urls(keys) };
+    },
+    urls(keys: ProductImageVariants): ProductImageVariants {
+      return {
         256: `https://${options.cloudFrontDomain}/${keys[256]}`,
         512: `https://${options.cloudFrontDomain}/${keys[512]}`,
         1024: `https://${options.cloudFrontDomain}/${keys[1024]}`,
       };
-      return { keys, urls };
     },
   };
 }
 
-async function createVariants(source: Buffer): Promise<ProductImageBuffers> {
-  if (source.byteLength > MAX_FILE_BYTES) throw new Error("Product image exceeds 10 MiB");
+export type ProductImageStorage = ReturnType<typeof createProductImageStorage>;
 
-  const image = sharp(source, { animated: true, failOn: "error", limitInputPixels: MAX_PIXELS }).rotate();
-  const metadata = await image.metadata();
-  if (!metadata.format || !FORMATS.has(metadata.format) || !metadata.width || !metadata.height) {
-    throw new Error("Product image must be a valid JPEG, PNG, or WebP image");
-  }
-  if ((metadata.pages && metadata.pages > 1) || (metadata.format === "png" && isAnimatedPng(source))) {
-    throw new Error("Animated product images are not supported");
-  }
-  if (metadata.width > MAX_SIDE || metadata.height > MAX_SIDE || metadata.width * metadata.height > MAX_PIXELS) {
-    throw new Error("Product image dimensions exceed the allowed limits");
-  }
+async function createVariants(source: Buffer): Promise<PreparedProductImage> {
+  try {
+    if (source.byteLength > MAX_FILE_BYTES) throw new InvalidProductImageError("Product image exceeds 10 MiB");
 
-  const variants = {} as ProductImageBuffers;
-  for (const size of PRODUCT_IMAGE_SIZES) {
-    variants[size] = await image.clone().resize({
-      width: size,
-      height: size,
-      fit: "inside",
-      withoutEnlargement: true,
-    }).webp().toBuffer();
+    const image = sharp(source, { animated: true, failOn: "error", limitInputPixels: MAX_PIXELS }).rotate();
+    const metadata = await image.metadata();
+    if (!metadata.format || !FORMATS.has(metadata.format) || !metadata.width || !metadata.height) {
+      throw new InvalidProductImageError("Product image must be a valid JPEG, PNG, or WebP image");
+    }
+    if ((metadata.pages && metadata.pages > 1) || (metadata.format === "png" && isAnimatedPng(source))) {
+      throw new InvalidProductImageError("Animated product images are not supported");
+    }
+    if (metadata.width > MAX_SIDE || metadata.height > MAX_SIDE || metadata.width * metadata.height > MAX_PIXELS) {
+      throw new InvalidProductImageError("Product image dimensions exceed the allowed limits");
+    }
+
+    const variants = {} as ProductImageBuffers;
+    for (const size of PRODUCT_IMAGE_SIZES) {
+      variants[size] = await image.clone().resize({
+        width: size,
+        height: size,
+        fit: "inside",
+        withoutEnlargement: true,
+      }).webp().toBuffer();
+    }
+    return { sourceHash: createHash("sha256").update(source).digest("hex"), variants };
+  } catch (error) {
+    if (error instanceof InvalidProductImageError) throw error;
+    throw new InvalidProductImageError("Product image is not a valid supported image", { cause: error });
   }
-  return variants;
 }
 
 function isAnimatedPng(source: Buffer): boolean {

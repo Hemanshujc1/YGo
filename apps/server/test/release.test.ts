@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,8 +26,13 @@ it("ADR-0004: a standalone release migrates with its runtime config and serves d
     await run(process.execPath, ["scripts/build.js", directory], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
     });
+    const releaseRequire = createRequire(join(directory, "main.js"));
+    for (const platform of ["linux-x64", "linux-arm64"]) {
+      expect(releaseRequire.resolve(`@img/sharp-${platform}/sharp.node`)).toContain(directory);
+      expect(releaseRequire.resolve(`@img/sharp-libvips-${platform}/binary`)).toContain(directory);
+    }
     const env = {
-      ...process.env, DATABASE_URL: url.href, AUTH_TOKEN_SECRET: "01234567890123456789012345678901", HOST: "127.0.0.1", PORT: "3000",
+      ...process.env, NODE_OPTIONS: "", NODE_PATH: "", DATABASE_URL: url.href, AUTH_TOKEN_SECRET: "01234567890123456789012345678901", HOST: "127.0.0.1", PORT: "3000",
       MAILER: "mailpit", MAIL_FROM: "ygo@example.invalid", MAILPIT_URL: "http://localhost:8025",
     };
     const migrateEnv = { DATABASE_URL: url.href };

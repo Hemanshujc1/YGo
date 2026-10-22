@@ -88,6 +88,15 @@ export const Pincode = z.string().overwrite(withoutSpaces).regex(/^[1-9]\d{5}$/)
 /** An Area's name, trimmed, 1 to 100 characters; unique ignoring case on the server (owner decision on #213). */
 export const AreaName = z.string().trim().min(1).max(100);
 
+/** Master product name, trimmed, 1 to 200 characters (owner decision on #203). */
+export const ProductName = z.string().trim().min(1).max(200);
+
+/** Optional master product brand, trimmed, 1 to 100 characters when present (owner decision on #203). */
+export const ProductBrand = z.string().trim().min(1).max(100).nullable().optional();
+
+/** Base64 product image, capped at the encoded length of 10 MiB (owner decision on #203). */
+export const ProductImage = z.base64().max(13_981_016);
+
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
 export const Pan = z
   .string()

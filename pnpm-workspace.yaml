@@ -14,3 +14,9 @@ minimumReleaseAge: 10080
 # arrives as an ordinary optional dependency, so it is denied, not allowed.
 allowBuilds:
   esbuild: false
+
+# Include Sharp binaries for the CI runner and the ARM64 AWS host (ADR-0005).
+supportedArchitectures:
+  - current
+  - linux-x64
+  - linux-arm64

@@ -118,5 +118,6 @@ export const strings = {
     CATEGORY_NAME_IN_USE: "A category with this name already exists under that parent.",
     AREA_NAME_IN_USE: "Another Area already has this name.",
     PINCODE_IN_OTHER_AREA: "Another Area already has one of these pincodes.",
+    PRODUCT_NAME_IN_USE: "A master product with this name and brand already exists.",
   } satisfies Record<ErrorCode, string>,
 };

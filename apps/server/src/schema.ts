@@ -58,6 +58,29 @@ export const categories = pgTable("categories", {
   uniqueIndex("categories_root_name_idx").on(sql`lower(${table.name})`).where(sql`${table.parentId} IS NULL`),
   uniqueIndex("categories_child_name_idx").on(table.parentId, sql`lower(${table.name})`).where(sql`${table.parentId} IS NOT NULL`),
 ]);
+
+export const masterProducts = pgTable("master_products", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  brand: text("brand"),
+  categoryId: uuid("category_id").notNull().references(() => categories.id),
+  baseUnit: text("base_unit").notNull(),
+  classification: text("classification").notNull(),
+  image256Key: text("image_256_key"),
+  image512Key: text("image_512_key"),
+  image1024Key: text("image_1024_key"),
+  active: boolean("active").notNull().default(true),
+  published: boolean("published").notNull().default(false),
+}, (table) => [
+  check("master_products_name_valid", sql`btrim(${table.name}) <> '' AND char_length(${table.name}) <= 200`),
+  check("master_products_brand_valid", sql`${table.brand} IS NULL OR (btrim(${table.brand}) <> '' AND char_length(${table.brand}) <= 100)`),
+  check("master_products_unit_valid", sql`${table.baseUnit} IN ('each', 'kg', 'l')`),
+  check("master_products_classification_valid", sql`${table.classification} IN ('counted', 'measured')`),
+  check("master_products_unit_classification_valid", sql`(${table.classification} = 'counted' AND ${table.baseUnit} = 'each') OR (${table.classification} = 'measured' AND ${table.baseUnit} IN ('kg', 'l'))`),
+  check("master_products_published_image_valid", sql`NOT ${table.published} OR (${table.image256Key} IS NOT NULL AND ${table.image512Key} IS NOT NULL AND ${table.image1024Key} IS NOT NULL)`),
+  uniqueIndex("master_products_name_brand_idx").on(sql`lower(${table.name})`, sql`coalesce(lower(${table.brand}), '')`),
+  index("master_products_category_id_idx").on(table.categoryId),
+]);
 // An Admin-named group of pincodes (#214). A paused Area takes no new orders but
 // keeps its pincodes, so no other Area can take them.
 export const areas = pgTable("areas", {
