@@ -140,7 +140,8 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
     let stored: Awaited<ReturnType<ProductImageStorage["storePrepared"]>>;
     try {
       stored = await images.storePrepared(id, prepared);
-    } catch {
+    } catch (error) {
+      request.log.error({ err: { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : "Unknown S3 error" } }, "Product image storage failed");
       return reply.code(503).send({ error: { code: "UNAVAILABLE", draftId: id } });
     }
     await pool.query(
@@ -175,7 +176,8 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       }
       try {
         stored = await images.storePrepared(id, prepared);
-      } catch {
+      } catch (error) {
+        request.log.error({ err: { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : "Unknown S3 error" } }, "Product image storage failed");
         return reply.code(503).send({ error: { code: "UNAVAILABLE", draftId: id } });
       }
     }
