@@ -246,8 +246,8 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       }
       await client.query(
         `UPDATE master_products SET name = $1, brand = $2, category_id = $3, base_unit = $4,
-         classification = $5, active = $6, published = CASE WHEN $7 THEN false ELSE published END WHERE id = $8`,
-        [nextName, nextBrand, nextCategory, nextBaseUnit, nextClassification, nextActive, shouldStore, id],
+         classification = $5, active = $6 WHERE id = $7`,
+        [nextName, nextBrand, nextCategory, nextBaseUnit, nextClassification, nextActive, id],
       );
       const action = old.active !== nextActive
         ? nextActive ? ["product.reactivate", "Product reactivated"] : ["product.deactivate", body.reason]

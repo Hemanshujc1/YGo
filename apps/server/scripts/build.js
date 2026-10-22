@@ -18,7 +18,7 @@ await build({
   external: ["pg-native"],
   // Some bundled dependencies are CommonJS and call require().
   banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    js: "import { createRequire as createBundledRequire } from 'node:module'; const require = createBundledRequire(import.meta.url);",
   },
   logLevel: "info",
 });

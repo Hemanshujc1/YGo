@@ -508,16 +508,40 @@ describe("Master product routes", () => {
     expect((await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count).toBe(1);
   });
 
+  it("keeps a published product and its current image when image replacement fails", async () => {
+    const token = await headers();
+    const initial = await image();
+    const created = await create(token, createBody(await groceries(), initial));
+    const id = created.json().id as string;
+    const oldKeys = (await database.pool.query(
+      "SELECT image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
+    )).rows[0];
+    const replacement = await sharp({ create: { width: 48, height: 24, channels: 3, background: "blue" } }).png().toBuffer();
+    failProductImagePuts = true;
+
+    const failed = await edit(token, id, { image: replacement.toString("base64") });
+
+    expect(failed.statusCode).toBe(503);
+    expect((await database.pool.query(
+      "SELECT published, image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
+    )).rows[0]).toMatchObject({ published: true, ...oldKeys });
+    expect((await app.inject({ method: "GET", url: "/v1/admin/products", headers: token })).json().products)
+      .toHaveLength(1);
+  });
+
   it("rejects bad base64, non-images and inputs over 10 MiB before S3", async () => {
     const token = await headers();
     const categoryId = await groceries();
     const source = await image();
     const invalidBase64 = await create(token, { ...createBody(categoryId, source), image: "not base64!" });
+    expect(invalidBase64.statusCode).toBe(400);
     expect(invalidBase64.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
     const notImage = await create(token, { ...createBody(categoryId, source), image: Buffer.from("plain text").toString("base64") });
+    expect(notImage.statusCode).toBe(400);
     expect(notImage.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
     const oversizedSource = Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64");
     const oversized = await create(token, { ...createBody(categoryId, source), image: oversizedSource });
+    expect(oversized.statusCode).toBe(400);
     expect(oversized.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
     expect(productImagePuts).toEqual([]);
     expect((await database.pool.query("SELECT count(*)::int AS count FROM master_products")).rows[0].count).toBe(0);
