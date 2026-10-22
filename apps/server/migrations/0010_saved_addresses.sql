@@ -11,5 +11,5 @@ CREATE TABLE "saved_addresses" (
 );
 --> statement-breakpoint
 ALTER TABLE "saved_addresses" ADD CONSTRAINT "saved_addresses_account_id_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "saved_addresses_account_id_idx" ON "saved_addresses" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "saved_addresses_account_id_saved_at_idx" ON "saved_addresses" USING btree ("account_id","saved_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE UNIQUE INDEX "saved_addresses_home_work_idx" ON "saved_addresses" USING btree ("account_id","label") WHERE "saved_addresses"."label" <> 'other';

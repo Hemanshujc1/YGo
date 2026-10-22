@@ -126,7 +126,7 @@ export const savedAddresses = pgTable("saved_addresses", {
   savedAt: timestamp("saved_at", { withTimezone: true }).notNull(),
 }, (table) => [
   check("saved_addresses_label_valid", sql`${table.label} IN ('home', 'work', 'other')`),
-  index("saved_addresses_account_id_idx").on(table.accountId),
+  index("saved_addresses_account_id_saved_at_idx").on(table.accountId, table.savedAt.desc()),
   uniqueIndex("saved_addresses_home_work_idx").on(table.accountId, table.label).where(sql`${table.label} <> 'other'`),
 ]);
 

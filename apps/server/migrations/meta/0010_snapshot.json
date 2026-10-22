@@ -1,5 +1,5 @@
 {
-  "id": "bfe11492-f228-47d5-8f17-2833313095d1",
+  "id": "cf70952d-21d4-40ab-84c9-79175a28aabb",
   "prevId": "4e7abac1-29a2-46ec-94a9-e50e65caae84",
   "version": "7",
   "dialect": "postgresql",
@@ -965,13 +965,19 @@
         }
       },
       "indexes": {
-        "saved_addresses_account_id_idx": {
-          "name": "saved_addresses_account_id_idx",
+        "saved_addresses_account_id_saved_at_idx": {
+          "name": "saved_addresses_account_id_saved_at_idx",
           "columns": [
             {
               "expression": "account_id",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "saved_at",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],

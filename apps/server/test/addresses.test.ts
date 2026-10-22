@@ -142,7 +142,10 @@ describe("saved addresses", () => {
     const waiting = () => database.pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
     );
-    while (((await waiting()).rows[0]?.n ?? 0) < 5) await new Promise((resolve) => setTimeout(resolve, 20));
+    for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < 5; tries += 1) {
+      if (tries === 100) throw new Error("the five saves never all waited on the lock");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     await blocker.query("COMMIT");
     blocker.release();
     const racing = await pending;
