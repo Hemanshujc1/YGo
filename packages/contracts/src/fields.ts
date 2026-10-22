@@ -85,6 +85,9 @@ export const HandoverOtp = z.string().overwrite(withoutSpaces).regex(/^\d{4}$/);
 /** An Indian postal pincode: 6 digits, the first not 0 (DSC-1). */
 export const Pincode = z.string().overwrite(withoutSpaces).regex(/^[1-9]\d{5}$/);
 
+/** An Area's name, trimmed, 1 to 100 characters; unique ignoring case on the server (owner decision on #213). */
+export const AreaName = z.string().trim().min(1).max(100);
+
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
 export const Pan = z
   .string()

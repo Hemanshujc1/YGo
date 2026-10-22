@@ -88,9 +88,10 @@ function setup(handle: (call: Call) => Response | Promise<Response>, saved: stri
       },
     },
     fetch: (input, init) => {
+      const url = new URL(String(input));
       const call = {
         method: init?.method ?? "GET",
-        path: new URL(String(input)).pathname,
+        path: url.pathname + url.search,
         body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
         auth: new Headers(init?.headers).get("authorization"),
       };
@@ -152,6 +153,29 @@ describe("each call", () => {
       { method: "POST", path: "/v1/auth/sign-out", body: undefined, auth: "Bearer a1" },
     ]);
     expect(stored()).toBeNull();
+  });
+
+  it("checks a pincode and leaves a number, signed in", async () => {
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path === "/v1/waitlist") return answer(204);
+      return answer(200, { serviceable: false });
+    });
+    await client.verifyCode(signIn);
+    expect(await client.checkServiceability("411038")).toEqual({ ok: true, data: { serviceable: false } });
+    expect(await client.joinWaitlist({ pincode: "411038", phone: "+919876543210" })).toEqual({ ok: true, data: undefined });
+    expect(calls.slice(1)).toEqual([
+      { method: "GET", path: "/v1/serviceability?pincode=411038", body: undefined, auth: "Bearer a1" },
+      { method: "POST", path: "/v1/waitlist", body: { pincode: "411038", phone: "+919876543210" }, auth: "Bearer a1" },
+    ]);
+  });
+
+  it("reads a serviceable pincode with its Area name", async () => {
+    const { client } = setup((call) =>
+      call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { serviceable: true, areaName: "Kothrud" }),
+    );
+    await client.verifyCode(signIn);
+    expect(await client.checkServiceability("411038")).toEqual({ ok: true, data: { serviceable: true, areaName: "Kothrud" } });
   });
 
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {

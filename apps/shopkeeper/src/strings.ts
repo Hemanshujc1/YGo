@@ -86,5 +86,7 @@ export const strings = {
     CATEGORY_NAME_IN_USE: "A category with this name already exists.",
     EMAIL_IN_USE: "This email is already used by another account.",
     FORBIDDEN: "This account is not allowed to do that.",
+    AREA_NAME_IN_USE: "Another Area already has this name.",
+    PINCODE_IN_OTHER_AREA: "Another Area already has one of these pincodes.",
   } satisfies Record<ErrorCode, string>,
 };
