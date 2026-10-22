@@ -2,12 +2,14 @@ import {
   Account,
   ErrorEnvelope,
   HealthResponse,
+  Serviceability,
   Session,
   type AppIdentity,
   type ChangeNameBody,
   type RequestCodeBody,
   type SetProfileBody,
   type VerifyCodeBody,
+  type WaitlistBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
 export { createAdminApiClient, type AdminApiClientOptions } from "./admin";
@@ -280,6 +282,16 @@ export function createApiClient({
     /** `PATCH /v1/me`: a new name. */
     async changeName(body: ChangeNameBody): Promise<ApiResult<Account>> {
       return result(await signedIn("PATCH", "/v1/me", body), Account);
+    },
+
+    /** `GET /v1/serviceability?pincode=`: whether the pincode is in an active Area (C15). */
+    async checkServiceability(pincode: string): Promise<ApiResult<Serviceability>> {
+      return result(await signedIn("GET", `/v1/serviceability?pincode=${encodeURIComponent(pincode)}`), Serviceability);
+    },
+
+    /** `POST /v1/waitlist`: "Leave my number" on C03. */
+    async joinWaitlist(body: WaitlistBody): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("POST", "/v1/waitlist", body));
     },
 
     /**

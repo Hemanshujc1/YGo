@@ -13,6 +13,7 @@ export {
 export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";
 export {
   AdminActionReason,
+  AreaName,
   Email,
   FssaiNumber,
   HandoverOtp,
@@ -26,3 +27,13 @@ export {
 export { ADMIN_REFRESH_HEADER, APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity, AppName, AppVersion } from "./headers";
 export { HealthResponse } from "./health";
 export { Category, CategoriesResponse, CategoryName, CategoryParams, CreateCategoryBody, EditCategoryBody } from "./catalog";
+export {
+  Area,
+  AreaParams,
+  AreasResponse,
+  CreateAreaBody,
+  EditAreaBody,
+  Serviceability,
+  ServiceabilityQuery,
+  WaitlistBody,
+} from "./areas";

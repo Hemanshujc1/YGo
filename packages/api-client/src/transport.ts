@@ -14,6 +14,8 @@ interface ApiFailure {
   status: number;
   code: ErrorCode;
   fields?: string[];
+  /** With PINCODE_IN_OTHER_AREA: each pincode and the Area holding it. */
+  conflicts?: ErrorEnvelope["error"]["conflicts"];
 }
 
 export interface Answer {
@@ -82,7 +84,8 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
     if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
-    return { ok: false, status, code: envelope.data.error.code, fields: envelope.data.error.fields };
+    const { code, fields, conflicts } = envelope.data.error;
+    return { ok: false, status, code, fields, conflicts };
   }
 
   function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {
