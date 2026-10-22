@@ -58,10 +58,28 @@ jobs:
 
       - name: Check operational scripts
         run: |
-          bash -n ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh
-          shellcheck ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh
+          bash -n ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh scripts/overlap.sh
+          shellcheck ops/setup-host.sh ops/deploy.sh ops/backup.sh ops/restore.sh ops/monitoring.sh scripts/overlap.sh
           python3 ops/test-monitoring.py
           python3 ops/test-off-aws-check.py
+          python3 scripts/test-gate-lock.py
+
+      # The restore and deployment tests below take over a minute. A pull
+      # request runs them only when it changes what they exercise: the ops
+      # scripts, the workflows, or the server build (turbo traces its sources,
+      # workspace packages and lockfile entries). If turbo cannot answer, they
+      # run. Pushes to main always run them.
+      - name: Find what the pull request changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! server=$(pnpm exec turbo query affected --tasks build --packages @ygo/server --base HEAD^1 --head HEAD | jq '.data.affectedTasks.length'); then
+            server=unknown
+          fi
+          echo "Server build tasks affected: $server"
+          if [[ $server != 0 ]] || git diff --name-only HEAD^1 HEAD | grep -E '^(ops|\.github/workflows)/'; then
+            echo "ops=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check deployment workflow and promotion
         run: |
@@ -71,9 +89,30 @@ jobs:
           "$RUNNER_TEMP/actionlint"
           python3 ops/test-dispatch.py
 
+      # A pull request reuses turbo's cache from main and from its own earlier
+      # runs, so only the tasks whose inputs changed run again. Turbo's hash
+      # covers each task's files, dependencies and lockfile entries; the key
+      # adds this workflow, which turbo cannot see (the Postgres image, the
+      # steps). main restores nothing, so every push to main runs every task,
+      # then saves the results for pull requests.
+      - name: Restore turbo cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-
+
       - run: pnpm gate
 
+      - name: Save turbo cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
+
       - name: Exercise exact production restore script
+        if: github.event_name == 'push' || steps.changes.outputs.ops == 'true'
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSLo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -87,6 +126,7 @@ jobs:
             bash -lc 'dnf -qy install systemd >/dev/null && python3 /ops/test-systemd-compat.py /systemd-args.jsonl'
 
       - name: Exercise exact host deployment script
+        if: github.event_name == 'push' || steps.changes.outputs.ops == 'true'
         run: sudo --preserve-env=PATH,TEST_DATABASE_URL,GITHUB_ACTIONS python3 ops/test-deploy.py
 
   # PRD Q-9: no secret is ever committed. Scans the full history, so a secret

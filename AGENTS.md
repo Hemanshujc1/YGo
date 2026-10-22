@@ -13,8 +13,12 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
 
 - Write the minimum the ticket asks for. One caller gets inline code; handle only the errors that can actually occur.
 - Keep each diff surgical: every changed line traces to the ticket and matches the surrounding style. Report unrelated problems in the PR description, and remove only what your own change made unused.
-- Settle every assumption with the owner before writing code. After claiming the ticket, list each choice the ticket and the docs leave open, in plain words, in the rounds of the `grilling` skill (the owner can also start it with `/grill-me`): numbered questions, each with your recommended answer and its one-line reason, worded so "yes" accepts it. Put a deep technical choice as your decision, what it costs and why, so a "yes" is an informed one. Look facts up yourself and ask only for decisions; a choice the docs already settle needs no question. Wait for the answers, build what was agreed, and record them in the PR's Assumptions section. An open question found mid-work stops the work until it is answered.
-- Before writing code, name the check that proves the ticket is done (a test, a typecheck, a reproduction), and finish when it passes. Put it in the first round of questions.
+- Settle every assumption with the owner before writing code. After claiming the ticket, list each choice the ticket and the docs leave open, in plain words, in the rounds of the `grilling` skill (the owner can also start it with `/grill-me`): numbered questions, each with your recommended answer and its one-line reason, worded so "yes" accepts it. Put a deep technical choice as your decision, what it costs and why, so a "yes" is an informed one. Look facts up yourself and ask only for decisions; a choice the docs or the standing answers already settle needs no question. When no open choice is left, say "No open questions; building with the standing answers" and start. Otherwise wait for the answers and build what was agreed. Record the answers and the standing answers used in the PR's Assumptions section. An open question found mid-work stops the work until it is answered.
+- Standing answers hold for every ticket without being asked; a ticket that needs a different one raises it as a question:
+  - Done check: a test for each new behaviour, plus `pnpm gate`; a screen adds the owner's check in a browser or on a phone. Name it before writing code and finish when it passes.
+  - One PR per ticket, split only past the size limit in `docs/agents/workflow.md`.
+  - Follow the pattern of the nearest existing screen, route or test.
+  - A problem outside the ticket becomes a follow-up issue named in the PR.
 
 ## Where code lives
 
@@ -40,7 +44,7 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 
 ## The gate
 
-`pnpm gate` runs lint, typecheck, test and build across the workspace (ADR-0007). Run it before pushing; CI runs the same command on every pull request and a failure blocks the merge.
+`pnpm gate` runs lint, typecheck, test and build across the workspace (ADR-0007). Run it before pushing; CI runs the same command on every pull request and a failure blocks the merge. On one machine it runs one at a time across every worktree of the clone: a second run prints who holds it and waits, so leave it waiting and run the gate only through `pnpm gate`.
 
 Turborepo may differ from what you remember: read `docs/` inside the installed `turbo` package (`node_modules/.pnpm/turbo@*/node_modules/turbo/docs/`) before changing `turbo.json`.
 
