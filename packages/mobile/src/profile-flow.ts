@@ -1,9 +1,6 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type Account, type ErrorCode, invalidFields, SetProfileBody } from "@ygo/contracts";
 
-/** The code `Phone` puts before every number, shown fixed before `PhoneField`'s box. */
-export const PHONE_PREFIX = "+91";
-
 /**
  * What is wrong on C02, field by field:
  * - `name`: the name broke `PersonName`.

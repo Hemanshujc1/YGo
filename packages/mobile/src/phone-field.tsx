@@ -1,8 +1,10 @@
 import { type Ref, useState } from "react";
 import { TextInput, View } from "react-native";
-import { PHONE_PREFIX } from "./profile-flow";
 import { edgeClass, FieldMessage } from "./sign-in-parts";
 import { Text } from "./text";
+
+/** The code `Phone` puts before every number, shown fixed before the box: a stored number starts with it. */
+export const PHONE_PREFIX = "+91";
 
 type PhoneFieldProps = {
   label: string;
