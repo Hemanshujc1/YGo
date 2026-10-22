@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import { CategoriesResponse, Category, CategoryParams, CreateCategoryBody, EditCategoryBody, ErrorEnvelope } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { adminSignedIn } from "../admin";
+import { adminSignedIn, withAdminTransaction } from "../admin";
 import { deriveKeys } from "../tokens";
 
 const categorySql = `SELECT c.id, c.parent_id AS "parentId", c.name, c.active,
@@ -29,11 +29,7 @@ export function registerCategoryRoutes(app: FastifyInstance, { pool, clock, secr
     const who = await adminSignedIn(request, reply, auth);
     if (!who) return reply;
     const { name, parentId } = request.body as CreateCategoryBody;
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       if (parentId) {
         const parent = await client.query("SELECT 1 FROM categories WHERE id = $1 AND parent_id IS NULL", [parentId]);
         if (!parent.rowCount) return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["parentId"] } });
@@ -45,13 +41,10 @@ export function registerCategoryRoutes(app: FastifyInstance, { pool, clock, secr
       const saved = await category(client, id);
       await client.query("COMMIT");
       return reply.code(201).send(saved);
-    } catch (error) {
+    }).catch((error: unknown) => {
       if ((error as { code?: string }).code === "23505") return reply.code(409).send({ error: { code: "CATEGORY_NAME_IN_USE" } });
       throw error;
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      client.release();
-    }
+    });
   });
 
   app.patch("/v1/admin/categories/:id", { schema: { params: CategoryParams, body: EditCategoryBody, response: { 200: Category, ...response } } }, async (request, reply) => {
@@ -59,11 +52,7 @@ export function registerCategoryRoutes(app: FastifyInstance, { pool, clock, secr
     if (!who) return reply;
     const { id } = request.params as { id: string };
     const body = request.body as EditCategoryBody;
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const old = await client.query<Category>("SELECT id, parent_id AS \"parentId\", name, active FROM categories WHERE id = $1 FOR UPDATE", [id]);
       if (!old.rows[0]) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (old.rows[0].active && body.active === false && !body.reason) return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["reason"] } });
@@ -87,12 +76,9 @@ export function registerCategoryRoutes(app: FastifyInstance, { pool, clock, secr
       const saved = await category(client, id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
-    } catch (error) {
+    }).catch((error: unknown) => {
       if ((error as { code?: string }).code === "23505") return reply.code(409).send({ error: { code: "CATEGORY_NAME_IN_USE" } });
       throw error;
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      client.release();
-    }
+    });
   });
 }

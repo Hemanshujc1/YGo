@@ -12,7 +12,7 @@ import {
   WaitlistBody,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { adminSignedIn } from "../admin";
+import { adminSignedIn, withAdminTransaction } from "../admin";
 import { deriveKeys, signedIn } from "../tokens";
 
 const areaSql = `SELECT a.id, a.name, a.paused,
@@ -56,11 +56,7 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
     const who = await adminSignedIn(request, reply, auth);
     if (!who) return reply;
     const { name, pincodes, reason } = request.body as CreateAreaBody;
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const conflicts = await heldElsewhere(client, pincodes, null);
       if (conflicts.length) return reply.code(409).send({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts } });
       const inserted = await client.query<{ id: string }>("INSERT INTO areas (name) VALUES ($1) RETURNING id", [name]);
@@ -71,13 +67,10 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
       const saved = await area(client, id);
       await client.query("COMMIT");
       return reply.code(201).send(saved);
-    } catch (error) {
+    }).catch((error: unknown) => {
       if ((error as { constraint?: string }).constraint === "areas_name_idx") return reply.code(409).send({ error: { code: "AREA_NAME_IN_USE" } });
       throw error;
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      client.release();
-    }
+    });
   });
 
   app.patch("/v1/admin/areas/:id", { schema: { params: AreaParams, body: EditAreaBody, response: { 200: Area, ...response } } }, async (request, reply) => {
@@ -85,11 +78,7 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
     if (!who) return reply;
     const { id } = request.params as { id: string };
     const { pincodes, paused, reason } = request.body as EditAreaBody;
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const locked = await client.query<Area>(`${areaSql} WHERE a.id = $1 FOR UPDATE OF a`, [id]);
       const old = locked.rows[0];
       if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
@@ -111,10 +100,7 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
       const saved = await area(client, id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      client.release();
-    }
+    });
   });
 
   app.get("/v1/serviceability", { schema: { querystring: ServiceabilityQuery, response: { 200: Serviceability, 400: ErrorEnvelope, 401: ErrorEnvelope } } }, async (request, reply) => {
