@@ -12,6 +12,7 @@ import {
   useRouteError,
   type RouteObject,
 } from "react-router";
+import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { strings } from "./strings";
 
@@ -54,6 +55,9 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
               </Link>
               <Link to="/categories" aria-current={location.pathname === "/categories" ? "page" : undefined} className={`mt-2 block rounded-lg p-3 font-medium ${location.pathname === "/categories" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
                 {strings.categories}
+              </Link>
+              <Link to="/areas" aria-current={location.pathname === "/areas" ? "page" : undefined} className={`mt-2 block rounded-lg p-3 font-medium ${location.pathname === "/areas" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
+                {strings.areas}
               </Link>
             </nav>
           </aside>
@@ -304,6 +308,18 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       },
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/areas",
+      loader: async () => {
+        const result = await api.listAreas();
+        if (result.ok) return result.data.areas;
+        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+        throw new Error(result.code);
+      },
+      element: <Page protectedArea api={api}><Areas api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     { path: "*", element: <Page><Message>{strings.notFound}</Message></Page> },

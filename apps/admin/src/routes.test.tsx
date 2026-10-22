@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { adminRoutes } from "./routes";
@@ -12,6 +12,8 @@ const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@exampl
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
 const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
 const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };
+const kothrud = { id: "00000000-0000-4000-8000-000000000201", name: "Kothrud", pincodes: ["411038"], paused: false };
+const aundh = { id: "00000000-0000-4000-8000-000000000202", name: "Aundh", pincodes: ["411007", "411027"], paused: true };
 
 function setup(path: string, overrides: Record<string, unknown> = {}) {
   const api = {
@@ -198,6 +200,141 @@ describe("Admin web", () => {
   it.each(["UNAUTHENTICATED", "FORBIDDEN"])("redirects a %s category session to sign-in", async (code) => {
     const { router } = setup("/categories", {
       listCategories: vi.fn().mockResolvedValue({ ok: false, status: code === "FORBIDDEN" ? 403 : 401, code }),
+    });
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  it("lists Areas A to Z with their pincodes and a Paused label", async () => {
+    setup("/areas", { listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud, aundh] } }) });
+    await screen.findByRole("heading", { name: strings.areas });
+    expect(screen.getByRole("link", { name: strings.areas }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getAllByRole("list", { name: strings.areaPincodes }).map((list) => list.textContent)).toEqual(["411007411027", "411038"]);
+    expect(screen.getAllByText(strings.areaPaused)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: strings.resumeArea(aundh.name) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.pauseArea(kothrud.name) })).toBeTruthy();
+  });
+
+  it("checks a new Area, shows each refusal, then saves it in A to Z order", async () => {
+    const baner = { id: "00000000-0000-4000-8000-000000000203", name: "Baner", pincodes: ["411045", "411069"], paused: false };
+    const api = {
+      listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [aundh, kothrud] } }),
+      createArea: vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 409, code: "AREA_NAME_IN_USE" })
+        .mockResolvedValueOnce({ ok: false, status: 409, code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: kothrud.name }] })
+        .mockResolvedValueOnce({ ok: true, data: baner }),
+    };
+    setup("/areas", api);
+    await screen.findByRole("heading", { name: strings.areas });
+    fireEvent.click(screen.getByRole("button", { name: strings.newArea }));
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.areaInvalidFields.name)).toBeTruthy();
+    expect(screen.getByText(strings.areaInvalidFields.pincodes)).toBeTruthy();
+    expect(screen.getByText(strings.areaInvalidFields.reason)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.areaName }), { target: { value: " Baner " } });
+    fireEvent.change(screen.getByRole("textbox", { name: strings.areaPincodes }), { target: { value: "411045, 411045" } });
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Launch" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(screen.getByText(strings.areaInvalidFields.pincodes)).toBeTruthy();
+    expect(screen.queryByText(strings.areaInvalidFields.name)).toBeNull();
+    expect(api.createArea).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.areaPincodes }), { target: { value: "411 045,\n411069, 411038\n" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.errors.AREA_NAME_IN_USE)).toBeTruthy();
+    expect(api.createArea).toHaveBeenCalledWith({ name: "Baner", pincodes: ["411045", "411069", "411038"], reason: "Launch" });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.pincodeInArea("411038", kothrud.name))).toBeTruthy();
+    expect(screen.getByText(strings.errors.PINCODE_IN_OTHER_AREA)).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: strings.areaName }) as HTMLInputElement).value).toBe(" Baner ");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.areaPincodes }), { target: { value: "411045, 411069" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.areaSaved);
+    expect(screen.getAllByRole("list", { name: strings.areaPincodes }).map((list) => list.textContent)).toEqual(["411007411027", "411045411069", "411038"]);
+  });
+
+  it("edits an Area's pincodes starting from its current list", async () => {
+    const api = {
+      listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud] } }),
+      editArea: vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 400, code: "VALIDATION_FAILED", fields: ["pincodes.1"] })
+        .mockResolvedValueOnce({ ok: true, data: { ...kothrud, pincodes: ["411038", "411052"] } }),
+    };
+    setup("/areas", api);
+    fireEvent.click(await screen.findByRole("button", { name: strings.editPincodes(kothrud.name) }));
+    expect(screen.getByRole("heading", { name: strings.editPincodes(kothrud.name) })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: strings.areaName })).toBeNull();
+    const pincodes = screen.getByRole("textbox", { name: strings.areaPincodes }) as HTMLTextAreaElement;
+    expect(pincodes.value).toBe("411038");
+    fireEvent.change(pincodes, { target: { value: "411038, 411052" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.areaInvalidFields.reason)).toBeTruthy();
+    expect(api.editArea).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Extend to Warje" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.areaInvalidFields.pincodes)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.areaSaved);
+    expect(api.editArea).toHaveBeenCalledWith(kothrud.id, { pincodes: ["411038", "411052"], reason: "Extend to Warje" });
+    expect(screen.getByRole("list", { name: strings.areaPincodes }).textContent).toBe("411038411052");
+  });
+
+  it("pauses and resumes an Area, each with a reason", async () => {
+    const api = {
+      listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud] } }),
+      editArea: vi.fn()
+        .mockResolvedValueOnce({ ok: true, data: { ...kothrud, paused: true } })
+        .mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" })
+        .mockResolvedValueOnce({ ok: false, status: 400, code: "VALIDATION_FAILED", fields: ["paused"] })
+        .mockResolvedValueOnce({ ok: true, data: kothrud }),
+    };
+    setup("/areas", api);
+    fireEvent.click(await screen.findByRole("button", { name: strings.pauseArea(kothrud.name) }));
+    expect(screen.getByRole("dialog", { name: strings.pauseAreaTitle(kothrud.name) })).toBeTruthy();
+    expect(screen.getByText(strings.pauseAreaNote)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmPause }));
+    expect(await screen.findByText(strings.areaInvalidFields.reason)).toBeTruthy();
+    expect(api.editArea).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: " Monsoon flooding " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmPause }));
+    expect(await screen.findByText(strings.areaPaused)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.editArea).toHaveBeenCalledWith(kothrud.id, { paused: true, reason: "Monsoon flooding" });
+    fireEvent.click(screen.getByRole("button", { name: strings.resumeArea(kothrud.name) }));
+    expect(screen.getByRole("dialog", { name: strings.resumeAreaTitle(kothrud.name) })).toBeTruthy();
+    expect(screen.queryByText(strings.pauseAreaNote)).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Roads open" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    expect(await screen.findByText(strings.errors.UNAVAILABLE)).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: " " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    expect(await screen.findByText(strings.areaInvalidFields.reason)).toBeTruthy();
+    expect(screen.queryByText(strings.errors.UNAVAILABLE)).toBeNull();
+    expect(api.editArea).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Roads open" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    expect(await screen.findByText(strings.errors.VALIDATION_FAILED)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    await waitFor(() => expect(screen.queryByText(strings.areaPaused)).toBeNull());
+    expect(api.editArea).toHaveBeenLastCalledWith(kothrud.id, { paused: false, reason: "Roads open" });
+  });
+
+  it("shows loading, empty and retryable error states for Areas", async () => {
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise((done) => { resolve = done; });
+    const api = vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ ok: true, data: { areas: [] } });
+    setup("/areas", { listAreas: api });
+    expect(screen.getByText(strings.areasLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.failed)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText(strings.noAreas)).toBeTruthy();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["UNAUTHENTICATED", "FORBIDDEN"])("redirects a %s Areas session to sign-in", async (code) => {
+    const { router } = setup("/areas", {
+      listAreas: vi.fn().mockResolvedValue({ ok: false, status: code === "FORBIDDEN" ? 403 : 401, code }),
     });
     await screen.findByRole("heading", { name: strings.signIn });
     expect(router.state.location.pathname).toBe("/sign-in");
