@@ -30,7 +30,8 @@ export type Database = ReturnType<typeof connectDatabase>;
  * without it, as a refusal does, or throwing discards the work, and a throw
  * still reaches the caller. A `ROLLBACK` is always sent afterwards; after a
  * `COMMIT` it changes nothing (Postgres only warns that no transaction is in
- * progress). The connection always goes back to the pool.
+ * progress). The connection goes back to the pool, unless that `ROLLBACK`
+ * fails: then it may still hold an open transaction, so it is closed instead.
  */
 export async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -38,7 +39,7 @@ export async function withTransaction<T>(pool: Pool, work: (client: PoolClient) 
     await client.query("BEGIN");
     return await work(client);
   } finally {
-    await client.query("ROLLBACK").catch(() => undefined);
-    client.release();
+    const rollbackFailure = await client.query("ROLLBACK").then(() => undefined, (error: Error) => error);
+    client.release(rollbackFailure);
   }
 }

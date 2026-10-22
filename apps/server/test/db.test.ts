@@ -39,4 +39,23 @@ describe("withTransaction", () => {
     expect(await rows()).toEqual([1]);
     expect(pool.idleCount).toBe(1);
   });
+
+  it("closes the connection when the rollback fails, instead of pooling it", async () => {
+    // A pool of its own, so closing its connection keeps the temporary table.
+    const lonePool = new pg.Pool({ connectionString: inject("databaseUrl"), max: 1 });
+    const pid = async (client: pg.PoolClient) => (await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+    try {
+      const firstPid = await withTransaction(lonePool, async (client) => {
+        // The socket stays open; only the rollback is refused.
+        const query = client.query.bind(client);
+        client.query = ((text: unknown, ...rest: never[]) =>
+          text === "ROLLBACK" ? Promise.reject(new Error("rollback lost")) : query(text as string, ...rest)) as typeof client.query;
+        return pid(client);
+      });
+      expect(lonePool.totalCount).toBe(0);
+      expect(await withTransaction(lonePool, pid)).not.toBe(firstPid);
+    } finally {
+      await lonePool.end();
+    }
+  });
 });
