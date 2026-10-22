@@ -10,7 +10,7 @@ const lockfile = readFileSync(new URL("../../../pnpm-lock.yaml", import.meta.url
 function installedCopies(name: string): number {
   let inSnapshots = false;
   let copies = 0;
-  for (const line of lockfile.split("\n")) {
+  for (const line of lockfile.split(/\r?\n/)) {
     if (/^\S/.test(line)) inSnapshots = line === "snapshots:";
     else if (inSnapshots && line.startsWith(`  ${name}@`)) copies += 1;
   }
