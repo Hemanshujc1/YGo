@@ -88,6 +88,12 @@ export const Pincode = z.string().overwrite(withoutSpaces).regex(/^[1-9]\d{5}$/)
 /** An Area's name, trimmed, 1 to 100 characters; unique ignoring case on the server (owner decision on #213). */
 export const AreaName = z.string().trim().min(1).max(100);
 
+/** "Flat, house or floor" on a saved address, trimmed, 1 to 100 characters (owner decision on #217). */
+export const AddressFlat = z.string().trim().min(1).max(100);
+
+/** A saved address's area line, the street and locality the phone's map lookup names; trimmed, 1 to 200 characters (#217). */
+export const AddressAreaLine = z.string().trim().min(1).max(200);
+
 /** Master product name, trimmed, 1 to 200 characters (owner decision on #203). */
 export const ProductName = z.string().trim().min(1).max(200);
 

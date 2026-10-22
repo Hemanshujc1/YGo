@@ -170,6 +170,43 @@ describe("each call", () => {
     ]);
   });
 
+  it("lists, saves and removes saved addresses, signed in", async () => {
+    const saved = {
+      id: "00000000-0000-4000-8000-000000000301",
+      label: "home",
+      flat: "Flat 4B",
+      areaLine: "Baner Road, Baner",
+      pincode: "411045",
+      point: { latitude: 18.559, longitude: 73.7868 },
+    } as const;
+    const { id, ...body } = saved;
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.method === "GET") return answer(200, { addresses: [saved] });
+      if (call.method === "POST") return answer(201, saved);
+      return answer(204);
+    });
+    await client.verifyCode(signIn);
+    expect(await client.savedAddresses()).toEqual({ ok: true, data: { addresses: [saved] } });
+    expect(await client.saveAddress(body)).toEqual({ ok: true, data: saved });
+    expect(await client.removeAddress(id)).toEqual({ ok: true, data: undefined });
+    expect(calls.slice(1)).toEqual([
+      { method: "GET", path: "/v1/me/addresses", body: undefined, auth: "Bearer a1" },
+      { method: "POST", path: "/v1/me/addresses", body, auth: "Bearer a1" },
+      { method: "DELETE", path: `/v1/me/addresses/${id}`, body: undefined, auth: "Bearer a1" },
+    ]);
+  });
+
+  it("reads the saved address limit as its code", async () => {
+    const { client } = setup((call) =>
+      call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "ADDRESS_LIMIT_REACHED" } }),
+    );
+    await client.verifyCode(signIn);
+    expect(
+      await client.saveAddress({ label: "other", flat: "2", areaLine: "Baner", pincode: "411045", point: null }),
+    ).toEqual({ ok: false, status: 409, code: "ADDRESS_LIMIT_REACHED" });
+  });
+
   it("reads a serviceable pincode with its Area name", async () => {
     const { client } = setup((call) =>
       call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { serviceable: true, areaName: "Kothrud" }),
