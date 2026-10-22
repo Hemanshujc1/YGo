@@ -3,6 +3,7 @@ import { AdminActionReason, CreateCategoryBody, EditCategoryBody, type Category 
 import { useState, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
 import { ReasonDialog } from "./components/reason-dialog";
+import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -45,7 +46,7 @@ export function Categories({ api }: { api: AdminApi }) {
   function failed(code: string, fields?: string[]) {
     if (code === "CATEGORY_NAME_IN_USE") setErrors({ name: strings.errors.CATEGORY_NAME_IN_USE });
     else if (code === "VALIDATION_FAILED" && fields?.length) {
-      setErrors(Object.fromEntries(fields.map((field) => [field, strings.categoryInvalidFields[field as CategoryField]])));
+      setErrors(fieldMessages(fields, strings.categoryInvalidFields));
     } else setError(strings.errors[code as keyof typeof strings.errors] ?? strings.failed);
   }
 
@@ -55,10 +56,7 @@ export function Categories({ api }: { api: AdminApi }) {
       ? EditCategoryBody.safeParse({ name, parentId })
       : CreateCategoryBody.safeParse({ name, parentId });
     if (!parsed.success) {
-      setErrors(Object.fromEntries(parsed.error.issues.map((issue) => {
-        const field = issue.path[0] as CategoryField;
-        return [field, strings.categoryInvalidFields[field]];
-      })));
+      setErrors(fieldMessages(parsed.error.issues.map((issue) => String(issue.path[0])), strings.categoryInvalidFields));
       return;
     }
     setBusy(true);

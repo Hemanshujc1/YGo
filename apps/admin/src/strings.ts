@@ -1,5 +1,7 @@
 import type { ErrorCode } from "@ygo/contracts";
 
+const invalidReason = "Give a reason (up to 500 characters).";
+
 // Every string the app shows lives here, so translation is a later pass over
 // one file (CONTEXT.md: every string externalised from day one).
 export const strings = {
@@ -62,7 +64,7 @@ export const strings = {
   categoryInvalidFields: {
     name: "Enter a category name (up to 100 characters).",
     parentId: "Choose a top-level parent category.",
-    reason: "Give a reason (up to 500 characters).",
+    reason: invalidReason,
   },
   areas: "Areas",
   areasLoading: "Loading Areas…",
@@ -87,7 +89,7 @@ export const strings = {
   areaInvalidFields: {
     name: "Enter an Area name (up to 100 characters).",
     pincodes: "Enter 1 to 100 six-digit pincodes, each once, separated by commas or new lines.",
-    reason: "Give a reason (up to 500 characters).",
+    reason: invalidReason,
   },
   retry: "Try again",
   notFound: "This page does not exist.",
@@ -96,7 +98,7 @@ export const strings = {
     email: "Enter a valid email address.",
     name: "Enter a valid name (up to 60 letters).",
     phone: "Enter an Indian mobile number.",
-    reason: "Give a reason (up to 500 characters).",
+    reason: invalidReason,
   },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.
