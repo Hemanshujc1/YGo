@@ -3,12 +3,14 @@ import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
+import { createProductImageStorage, type ProductImagePutClient } from "../src/adapters/product-images";
 import { accessToken, deriveKeys } from "../src/tokens";
 
 const rootUrl = inject("databaseUrl");
@@ -19,6 +21,8 @@ const mailer = createLocalMailer();
 let name: string;
 let database: ReturnType<typeof connectDatabase>;
 let app: ReturnType<typeof buildApp>;
+let productImagePuts: Parameters<ProductImagePutClient["putObject"]>[0][];
+let failProductImagePuts: boolean;
 
 beforeEach(async () => {
   name = `ygo_admin_routes_${randomUUID().replaceAll("-", "")}`;
@@ -38,7 +42,19 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, admin);
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, clock, mailer, authTokenSecret: secret });
+  productImagePuts = [];
+  failProductImagePuts = false;
+  const productImages = createProductImageStorage({
+    client: {
+      async putObject(input) {
+        productImagePuts.push(input);
+        if (failProductImagePuts) throw new Error("S3 unavailable");
+      },
+    },
+    bucket: "test-product-images",
+    cloudFrontDomain: "images.ygo.example",
+  });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, productImages });
 });
 
 afterEach(async () => {
@@ -378,5 +394,181 @@ describe("Areas, serviceability and the waitlist", () => {
     expect((await leave("12")).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
     await database.pool.query("DELETE FROM accounts WHERE id = $1", [signed.account.id]);
     expect((await rows()).rowCount).toBe(0);
+  });
+});
+
+describe("Master product routes", () => {
+  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+  async function headers() {
+    return bearer((await signIn("/v1/admin/auth")).json().accessToken as string);
+  }
+  async function image() {
+    return sharp({ create: { width: 40, height: 24, channels: 3, background: "orange" } }).png().toBuffer();
+  }
+  async function groceries() {
+    const result = await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = 'Groceries'");
+    const id = result.rows[0]?.id;
+    if (!id) throw new Error("Seeded Groceries category missing");
+    return id;
+  }
+  function createBody(categoryId: string, source: Buffer, extra: object = {}) {
+    return {
+      name: "  Apples ",
+      categoryId,
+      baseUnit: "each",
+      classification: "counted",
+      image: source.toString("base64"),
+      ...extra,
+    };
+  }
+  function create(headers: Record<string, string>, payload: object) {
+    return app.inject({ method: "POST", url: "/v1/admin/products", headers, payload });
+  }
+  function edit(headers: Record<string, string>, id: string, payload: object) {
+    return app.inject({ method: "PATCH", url: `/v1/admin/products/${id}`, headers, payload });
+  }
+
+  it("requires an Admin web session for list, create and edit", async () => {
+    const categoryId = await groceries();
+    const source = await image();
+    const requests = [
+      { method: "GET" as const, url: "/v1/admin/products" },
+      { method: "POST" as const, url: "/v1/admin/products", payload: createBody(categoryId, source) },
+      { method: "PATCH" as const, url: `/v1/admin/products/${randomUUID()}`, payload: { name: "Apples" } },
+    ];
+    for (const request of requests) expect((await app.inject(request)).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    for (const request of requests) expect((await app.inject({ ...request, headers: bearer(mobile) })).statusCode).toBe(403);
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("creates, lists and edits a product with image keys, category state and one audit row per change", async () => {
+    const token = await headers();
+    const source = await image();
+    const made = await create(token, createBody(await groceries(), source));
+    expect(made.statusCode).toBe(201);
+    expect(made.json()).toMatchObject({
+      name: "Apples", brand: null, baseUnit: "each", classification: "counted", active: true,
+      categoryName: "Groceries", categoryActive: true, categoryEffectiveActive: true,
+      imageUrls: {
+        256: expect.stringMatching(/^https:\/\/images\.ygo\.example\/products\//),
+        512: expect.stringMatching(/^https:\/\/images\.ygo\.example\/products\//),
+        1024: expect.stringMatching(/^https:\/\/images\.ygo\.example\/products\//),
+      },
+    });
+    expect(productImagePuts).toHaveLength(3);
+    const id = made.json().id as string;
+    const originalKeys = await database.pool.query(
+      "SELECT image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1",
+      [id],
+    );
+    expect(Object.values(originalKeys.rows[0] ?? {}).every((key) => typeof key === "string" && key.length > 0)).toBe(true);
+    const list = await app.inject({ method: "GET", url: "/v1/admin/products", headers: token });
+    expect(list.json().products).toHaveLength(1);
+    expect(list.json().products[0]).toMatchObject({ id, name: "Apples", categoryEffectiveActive: true });
+
+    productImagePuts = [];
+    const renamed = await edit(token, id, { name: "Red apples" });
+    expect(renamed.statusCode).toBe(200);
+    expect(productImagePuts).toEqual([]);
+    expect((await database.pool.query(
+      "SELECT image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
+    )).rows).toEqual(originalKeys.rows);
+    expect((await edit(token, id, { active: false })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["reason"] } });
+    expect((await edit(token, id, { active: false, reason: "Seasonal item removed" })).json()).toMatchObject({ active: false });
+    expect((await edit(token, id, { active: true })).json()).toMatchObject({ active: true });
+    const audit = await database.pool.query<{ action: string; reason: string; target_type: string }>(
+      "SELECT action, reason, target_type FROM admin_actions WHERE target_id = $1", [id],
+    );
+    const actions = audit.rows.map((row) => `${row.action}|${row.reason}|${row.target_type}`).sort();
+    expect(actions).toEqual([
+      "product.create|Product created|product",
+      "product.deactivate|Seasonal item removed|product",
+      "product.edit|Product edited|product",
+      "product.reactivate|Product reactivated|product",
+    ]);
+  });
+
+  it("keeps incomplete drafts after an S3 failure and publishes them on retry", async () => {
+    const token = await headers();
+    const source = await image();
+    failProductImagePuts = true;
+    const failed = await create(token, createBody(await groceries(), source));
+    expect(failed.statusCode).toBe(503);
+    expect(failed.json().error).toMatchObject({ code: "UNAVAILABLE", draftId: expect.any(String) });
+    const id = failed.json().error.draftId as string;
+    expect((await database.pool.query("SELECT published FROM master_products WHERE id = $1", [id])).rows[0].published).toBe(false);
+    expect((await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count).toBe(1);
+
+    failProductImagePuts = false;
+    const retry = await edit(token, id, { image: source.toString("base64") });
+    expect(retry.statusCode).toBe(200);
+    expect((await database.pool.query("SELECT published, image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id])).rows[0])
+      .toMatchObject({ published: true });
+    expect((await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count).toBe(1);
+  });
+
+  it("rejects bad base64, non-images and inputs over 10 MiB before S3", async () => {
+    const token = await headers();
+    const categoryId = await groceries();
+    const source = await image();
+    const invalidBase64 = await create(token, { ...createBody(categoryId, source), image: "not base64!" });
+    expect(invalidBase64.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
+    const notImage = await create(token, { ...createBody(categoryId, source), image: Buffer.from("plain text").toString("base64") });
+    expect(notImage.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
+    const oversizedSource = Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64");
+    const oversized = await create(token, { ...createBody(categoryId, source), image: oversizedSource });
+    expect(oversized.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
+    expect(productImagePuts).toEqual([]);
+    expect((await database.pool.query("SELECT count(*)::int AS count FROM master_products")).rows[0].count).toBe(0);
+  });
+
+  it("uses 14 MiB only for product writes and preserves the default 1 MiB limit elsewhere", async () => {
+    const token = await headers();
+    const productBody = { image: "A".repeat(14 * 1024 * 1024) };
+    const tooLargeProduct = await create(token, productBody);
+    expect(tooLargeProduct.statusCode).toBe(413);
+    expect(tooLargeProduct.json()).toEqual({ error: { code: "VALIDATION_FAILED" } });
+    const tooLargeCategory = await app.inject({
+      method: "POST", url: "/v1/admin/categories", headers: token,
+      payload: { name: "x".repeat(1024 * 1024) },
+    });
+    expect(tooLargeCategory.statusCode).toBe(413);
+    expect(tooLargeCategory.json()).toEqual({ error: { code: "VALIDATION_FAILED" } });
+  });
+
+  it("enforces case-insensitive name and brand identity and counted/measured units", async () => {
+    const token = await headers();
+    const categoryId = await groceries();
+    const source = await image();
+    const first = await create(token, createBody(categoryId, source, { brand: "Farm" }));
+    expect(first.statusCode).toBe(201);
+    expect((await create(token, createBody(categoryId, source, { name: "apples", brand: "FARM" }))).json())
+      .toEqual({ error: { code: "PRODUCT_NAME_IN_USE" } });
+    expect((await create(token, createBody(categoryId, source, { baseUnit: "kg", classification: "counted" }))).json())
+      .toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    expect(productImagePuts).toHaveLength(3);
+  });
+
+  it("rejects inactive category assignments but preserves existing associations", async () => {
+    const token = await headers();
+    const categoryId = await groceries();
+    const source = await image();
+    const made = await create(token, createBody(categoryId, source));
+    const id = made.json().id as string;
+    const deactivated = await app.inject({
+      method: "PATCH", url: `/v1/admin/categories/${categoryId}`, headers: token,
+      payload: { active: false, reason: "Category retired" },
+    });
+    expect(deactivated.statusCode).toBe(200);
+
+    productImagePuts = [];
+    const list = await app.inject({ method: "GET", url: "/v1/admin/products", headers: token });
+    expect(list.json().products[0]).toMatchObject({ categoryId, categoryActive: false, categoryEffectiveActive: false });
+    expect((await edit(token, id, { name: "Apples, local" })).statusCode).toBe(200);
+    expect((await create(token, createBody(categoryId, source))).json()).toEqual({
+      error: { code: "VALIDATION_FAILED", fields: ["categoryId"] },
+    });
+    expect(productImagePuts).toEqual([]);
   });
 });

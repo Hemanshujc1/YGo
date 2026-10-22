@@ -64,6 +64,13 @@
       "when": 1792655405743,
       "tag": "0008_areas",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792659257584,
+      "tag": "0009_master_products",
+      "breakpoints": true
     }
   ]
 }

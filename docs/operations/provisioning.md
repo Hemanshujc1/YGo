@@ -52,6 +52,7 @@ After #27, create the Route 53 zone and delegate nameservers at the registrar. P
 server {
     listen 80;
     server_name API_HOST;
+    client_max_body_size 15m;
     location / {
         proxy_pass http://127.0.0.1:PORT;
         proxy_set_header Host $host;
@@ -60,6 +61,8 @@ server {
     }
 }
 ```
+
+The product image JSON body can be up to 14 MiB at the API. Apply this `client_max_body_size 15m;` setting on the host before deploying product image uploads; otherwise Nginx rejects the request before it reaches the server.
 
 Run `sudo nginx -t` then `sudo systemctl reload nginx`. Issue TLS using `sudo /opt/certbot/bin/certbot --nginx --redirect -d <staging-api-name> -d <production-api-name>`; supply the owner's renewal email and accept terms interactively. Certbot's challenge requires public port 80 even after HTTPS redirects.
 
