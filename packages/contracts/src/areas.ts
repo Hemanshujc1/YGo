@@ -62,8 +62,8 @@ export const WaitlistEntry = z.strictObject({
   accountId: z.uuid(),
   accountName: z.string().nullable(),
   accountEmail: z.string(),
-  phone: z.string(),
-  pincode: z.string(),
+  phone: Phone,
+  pincode: Pincode,
   savedAt: z.iso.datetime(),
 });
 export type WaitlistEntry = z.infer<typeof WaitlistEntry>;

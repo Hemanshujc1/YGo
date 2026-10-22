@@ -10,6 +10,7 @@ import {
   Serviceability,
   ServiceabilityQuery,
   WaitlistBody,
+  WaitlistEntry,
 } from "../src/index";
 
 /** The fields a refused value names. */
@@ -137,5 +138,25 @@ describe("WaitlistBody", () => {
 
   it("names a bad pincode or phone", () => {
     expect(fieldsRefused(WaitlistBody, { pincode: "41103", phone: "12345" })).toEqual(["pincode", "phone"]);
+  });
+});
+
+describe("WaitlistEntry", () => {
+  const entry = {
+    accountId: "00000000-0000-4000-8000-000000000201",
+    accountName: "Asha",
+    accountEmail: "asha@example.com",
+    phone: "+919876543210",
+    pincode: "411038",
+    savedAt: "2026-10-22T10:00:00.000Z",
+  };
+
+  it("accepts a valid entry and normalizes its phone and pincode", () => {
+    expect(WaitlistEntry.parse({ ...entry, phone: "98765 43210", pincode: "411 038" })).toEqual(entry);
+  });
+
+  it("rejects an invalid phone or pincode", () => {
+    expect(fieldsRefused(WaitlistEntry, { ...entry, phone: "12345" })).toEqual(["phone"]);
+    expect(fieldsRefused(WaitlistEntry, { ...entry, pincode: "011038" })).toEqual(["pincode"]);
   });
 });
