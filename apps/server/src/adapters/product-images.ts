@@ -46,8 +46,6 @@ export function createProductImageStorage(options: {
   bucket: string;
   cloudFrontDomain: string;
 }) {
-  const domain = options.cloudFrontDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
   return {
     async store(productId: string, source: Buffer): Promise<{ keys: ProductImageVariants; urls: ProductImageVariants }> {
       const variants = await createVariants(source);
@@ -68,9 +66,9 @@ export function createProductImageStorage(options: {
       })));
 
       const urls: ProductImageVariants = {
-        256: `https://${domain}/${keys[256]}`,
-        512: `https://${domain}/${keys[512]}`,
-        1024: `https://${domain}/${keys[1024]}`,
+        256: `https://${options.cloudFrontDomain}/${keys[256]}`,
+        512: `https://${options.cloudFrontDomain}/${keys[512]}`,
+        1024: `https://${options.cloudFrontDomain}/${keys[1024]}`,
       };
       return { keys, urls };
     },
@@ -80,15 +78,19 @@ export function createProductImageStorage(options: {
 async function createVariants(source: Buffer): Promise<ProductImageBuffers> {
   if (source.byteLength > MAX_FILE_BYTES) throw new Error("Product image exceeds 10 MiB");
 
-  const metadata = await sharp(source, { failOn: "error", limitInputPixels: MAX_PIXELS }).metadata();
+  const image = sharp(source, { animated: true, failOn: "error", limitInputPixels: MAX_PIXELS }).rotate();
+  const metadata = await image.metadata();
   if (!metadata.format || !FORMATS.has(metadata.format) || !metadata.width || !metadata.height) {
     throw new Error("Product image must be a valid JPEG, PNG, or WebP image");
+  }
+  if ((metadata.pages && metadata.pages > 1) || (metadata.format === "png" && isAnimatedPng(source))) {
+    throw new Error("Animated product images are not supported");
   }
   if (metadata.width > MAX_SIDE || metadata.height > MAX_SIDE || metadata.width * metadata.height > MAX_PIXELS) {
     throw new Error("Product image dimensions exceed the allowed limits");
   }
 
-  const render = (size: number) => sharp(source, { failOn: "error", limitInputPixels: MAX_PIXELS }).rotate().resize({
+  const render = (size: number) => image.clone().resize({
       width: size,
       height: size,
       fit: "inside",
@@ -96,4 +98,17 @@ async function createVariants(source: Buffer): Promise<ProductImageBuffers> {
     }).webp().toBuffer();
   const [small, medium, large] = await Promise.all([render(256), render(512), render(1024)]);
   return { 256: small, 512: medium, 1024: large };
+}
+
+function isAnimatedPng(source: Buffer): boolean {
+  let offset = 8;
+  while (offset + 12 <= source.length) {
+    const length = source.readUInt32BE(offset);
+    const type = source.toString("ascii", offset + 4, offset + 8);
+    if (offset + 12 + length > source.length) return false;
+    if (type === "acTL") return true;
+    if (type === "IEND") return false;
+    offset += 12 + length;
+  }
+  return false;
 }
