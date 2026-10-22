@@ -24,7 +24,14 @@ export function connectDatabase(url: string) {
 
 export type Database = ReturnType<typeof connectDatabase>;
 
-/** Runs `work` in a transaction; `work` commits, otherwise cleanup rolls back. */
+/**
+ * Runs `work` inside `BEGIN` on one pooled connection. Nothing commits on its
+ * own: `work` sends `COMMIT` itself before answering a success. Returning
+ * without it, as a refusal does, or throwing discards the work, and a throw
+ * still reaches the caller. A `ROLLBACK` is always sent afterwards; after a
+ * `COMMIT` it changes nothing (Postgres only warns that no transaction is in
+ * progress). The connection always goes back to the pool.
+ */
 export async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
