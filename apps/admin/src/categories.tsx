@@ -2,6 +2,7 @@ import { createAdminApiClient } from "@ygo/api-client";
 import { AdminActionReason, CreateCategoryBody, EditCategoryBody, type Category } from "@ygo/contracts";
 import { useState, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
+import { ReasonDialog } from "./components/reason-dialog";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -15,7 +16,6 @@ export function Categories({ api }: { api: AdminApi }) {
   const [screen, setScreen] = useState<"list" | "form" | "deactivate">("list");
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -99,10 +99,9 @@ export function Categories({ api }: { api: AdminApi }) {
     }
   }
 
-  function deactivate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function deactivate(text: string) {
     if (!editing) return;
-    const parsed = AdminActionReason.safeParse(reason);
+    const parsed = AdminActionReason.safeParse(text);
     if (!parsed.success) return setErrors({ reason: strings.categoryInvalidFields.reason });
     void changeActive(editing, false, parsed.data);
   }
@@ -118,7 +117,7 @@ export function Categories({ api }: { api: AdminApi }) {
             {strings.editCategory(category.name)}
           </button>
           <button type="button" disabled={busy} onClick={() => {
-            if (category.active) { setEditing(category); setReason(""); setErrors({}); setError(""); setSaved(false); setScreen("deactivate"); }
+            if (category.active) { setEditing(category); setErrors({}); setError(""); setSaved(false); setScreen("deactivate"); }
             else void changeActive(category, true);
           }} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">
             {category.active ? strings.deactivateCategory(category.name) : strings.reactivateCategory(category.name)}
@@ -159,19 +158,9 @@ export function Categories({ api }: { api: AdminApi }) {
           <button type="button" disabled={busy} onClick={() => setScreen("list")} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
       </form>
     </section>}
-    {screen === "deactivate" && editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4">
-      <section role="dialog" aria-modal="true" aria-labelledby="deactivate-title" className="w-full max-w-[520px] rounded-2xl border border-border bg-raised p-6 shadow-xl">
-      <h2 id="deactivate-title" className="text-body font-semibold">{strings.deactivateCategoryTitle(editing.name)}</h2>
-      {children(editing.id).length > 0 && <p className="mt-3 text-muted">{strings.deactivateParentWarning}</p>}
-      <form onSubmit={deactivate} className="mt-6 space-y-4" noValidate>
-        <div><label htmlFor="category-reason" className="mb-2 block font-medium">{strings.reason}</label>
-          <textarea id="category-reason" autoFocus value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-24 w-full rounded-lg border border-border-strong bg-surface p-3" />
-          {errors.reason && <p role="alert" className="mt-1 text-secondary text-danger">{errors.reason}</p>}</div>
-        {error && <p role="alert" className="text-danger">{error}</p>}
-        <div className="flex gap-3"><button disabled={busy} className="h-10 rounded-lg bg-danger px-4 font-medium text-on-danger disabled:opacity-60">{busy ? strings.saving : strings.confirmDeactivate}</button>
-          <button type="button" disabled={busy} onClick={() => setScreen("list")} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
-      </form>
-      </section>
-    </div>}
+    {screen === "deactivate" && editing && <ReasonDialog title={strings.deactivateCategoryTitle(editing.name)} confirmLabel={strings.confirmDeactivate} danger
+      busy={busy} reasonError={errors.reason} error={error} onConfirm={deactivate} onCancel={() => setScreen("list")}>
+      {children(editing.id).length > 0 && strings.deactivateParentWarning}
+    </ReasonDialog>}
   </>;
 }
