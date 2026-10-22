@@ -25,6 +25,8 @@ import { z } from "zod";
  *   pincodes; `conflicts` names each pincode and the Area holding it.
  * Master products (#203):
  * - PRODUCT_NAME_IN_USE (409): another global product has the same name and brand, ignoring case.
+ * Saved addresses (#217):
+ * - ADDRESS_LIMIT_REACHED (409): the account already has 10 saved addresses.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -45,6 +47,7 @@ export const ErrorCode = z.enum([
   "AREA_NAME_IN_USE",
   "PINCODE_IN_OTHER_AREA",
   "PRODUCT_NAME_IN_USE",
+  "ADDRESS_LIMIT_REACHED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

@@ -12,6 +12,8 @@ export {
 } from "./auth";
 export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";
 export {
+  AddressAreaLine,
+  AddressFlat,
   AdminActionReason,
   AreaName,
   Email,
@@ -53,3 +55,11 @@ export {
   WaitlistEntry,
   WaitlistResponse,
 } from "./areas";
+export {
+  AddressLabel,
+  AddressPoint,
+  SaveAddressBody,
+  SavedAddress,
+  SavedAddressParams,
+  SavedAddressesResponse,
+} from "./addresses";

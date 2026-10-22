@@ -2,11 +2,14 @@ import {
   Account,
   ErrorEnvelope,
   HealthResponse,
+  SavedAddress,
+  SavedAddressesResponse,
   Serviceability,
   Session,
   type AppIdentity,
   type ChangeNameBody,
   type RequestCodeBody,
+  type SaveAddressBody,
   type SetProfileBody,
   type VerifyCodeBody,
   type WaitlistBody,
@@ -292,6 +295,21 @@ export function createApiClient({
     /** `POST /v1/waitlist`: "Leave my number" on C03. */
     async joinWaitlist(body: WaitlistBody): Promise<ApiResult<undefined>> {
       return empty(await signedIn("POST", "/v1/waitlist", body));
+    },
+
+    /** `GET /v1/me/addresses`: the account's saved addresses, newest first. */
+    async savedAddresses(): Promise<ApiResult<SavedAddressesResponse>> {
+      return result(await signedIn("GET", "/v1/me/addresses"), SavedAddressesResponse);
+    },
+
+    /** `POST /v1/me/addresses`: saves a confirmed place. A new Home or Work replaces the old one. */
+    async saveAddress(body: SaveAddressBody): Promise<ApiResult<SavedAddress>> {
+      return result(await signedIn("POST", "/v1/me/addresses", body), SavedAddress);
+    },
+
+    /** `DELETE /v1/me/addresses/:id` */
+    async removeAddress(id: string): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("DELETE", `/v1/me/addresses/${encodeURIComponent(id)}`));
     },
 
     /**
