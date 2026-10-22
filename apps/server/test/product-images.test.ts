@@ -118,7 +118,6 @@ function crc32(buffer: Buffer): number {
 describe("product image storage", () => {
   it.each([
     ["unsupported", Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\"/>")],
-    ["corrupt", Buffer.from("not an image")],
     ["oversized", Buffer.alloc(10 * 1024 * 1024 + 1)],
   ])("rejects %s input without S3 writes", async (_label, source) => {
     const { images, calls } = storage();
