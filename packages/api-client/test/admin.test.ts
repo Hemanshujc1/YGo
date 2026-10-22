@@ -27,6 +27,24 @@ const area = {
   pincodes: ["411029", "411038"],
   paused: false,
 };
+const product = {
+  id: "00000000-0000-4000-8000-000000000301",
+  name: "Apples",
+  brand: "Farm",
+  categoryId: category.id,
+  categoryName: category.name,
+  categoryActive: true,
+  categoryEffectiveActive: true,
+  baseUnit: "each",
+  classification: "counted",
+  imageUrls: {
+    256: "https://images.test/256.webp",
+    512: "https://images.test/512.webp",
+    1024: "https://images.test/1024.webp",
+  },
+  published: true,
+  active: true,
+};
 const denied = { error: { code: "UNAUTHENTICATED" } };
 const forbidden = { error: { code: "FORBIDDEN" } };
 const answer = (status: number, body?: unknown) =>
@@ -170,6 +188,31 @@ describe("Admin browser API client", () => {
       ["/v1/admin/categories", "GET", undefined],
       ["/v1/admin/categories", "POST", { name: "Groceries", parentId: null }],
       [`/v1/admin/categories/${category.id}`, "PATCH", { active: false, reason: "No longer used" }],
+    ]);
+    expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
+  });
+
+  it("lists, creates and edits master products with the Admin session", async () => {
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET") return answer(200, { products: [product] });
+      return answer(method === "POST" ? 201 : 200, product);
+    });
+    const create = {
+      name: product.name,
+      brand: product.brand,
+      categoryId: product.categoryId,
+      baseUnit: "each" as const,
+      classification: "counted" as const,
+      image: "aW1hZ2U=",
+    };
+    expect(await client.listMasterProducts()).toEqual({ ok: true, data: { products: [product] } });
+    expect(await client.createMasterProduct(create)).toEqual({ ok: true, data: product });
+    expect(await client.editMasterProduct(product.id, { name: "Green apples" })).toEqual({ ok: true, data: product });
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      ["/v1/admin/products", "GET", undefined],
+      ["/v1/admin/products", "POST", create],
+      [`/v1/admin/products/${product.id}`, "PATCH", { name: "Green apples" }],
     ]);
     expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
   });
