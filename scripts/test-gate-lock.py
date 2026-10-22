@@ -36,15 +36,43 @@ class GateLockTest(unittest.TestCase):
 
     def test_second_run_waits_for_the_first(self):
         log = os.path.join(self.dir.name, "log")
-        note = "import sys, time; time.sleep(float(sys.argv[2])); open(sys.argv[1], 'a').write(sys.argv[3] + ' %f\\n' % time.time())"
-        first = self.start(sys.executable, "-c", note, log, "1", "first-ended")
+        release = os.path.join(self.dir.name, "release")
+        # The first run holds the lock until the test creates `release`.
+        hold = "import os, sys, time\nwhile not os.path.exists(sys.argv[1]): time.sleep(0.02)\nopen(sys.argv[2], 'a').write('first-ended\\n')"
+        first = self.start(sys.executable, "-c", hold, release, log)
         self.wait_until_held_by(first)
-        second = self.start(sys.executable, "-c", note, log, "0", "second-ran", stderr=subprocess.PIPE)
-        _, waiting = second.communicate(timeout=10)
+        second = self.start("sh", "-c", f"echo second-ran >> {log}", stderr=subprocess.PIPE)
+        self.assertIn(f"Waiting for the gate already running (pid {first.pid}", second.stderr.readline())
+        self.assertFalse(os.path.exists(log))
+        pathlib.Path(release).touch()
+        self.assertEqual(second.wait(timeout=10), 0)
+        second.stderr.close()
         self.assertEqual(first.wait(timeout=10), 0)
-        lines = dict(line.split() for line in pathlib.Path(log).read_text().splitlines())
-        self.assertGreaterEqual(float(lines["second-ran"]), float(lines["first-ended"]))
-        self.assertIn(f"Waiting for the gate already running (pid {first.pid}", waiting)
+        self.assertEqual(pathlib.Path(log).read_text().split(), ["first-ended", "second-ran"])
+
+    def test_ctrl_c_while_waiting_exits_quietly(self):
+        first = self.start("sleep", "30", start_new_session=True)
+        try:
+            self.wait_until_held_by(first)
+            second = self.start("true", stderr=subprocess.PIPE)
+            self.assertIn("Waiting", second.stderr.readline())
+            second.send_signal(signal.SIGINT)
+            self.assertEqual(second.wait(timeout=5), 130)
+            self.assertNotIn("Traceback", second.stderr.read())
+            second.stderr.close()
+        finally:
+            os.killpg(first.pid, signal.SIGKILL)
+            first.wait()
+
+    def test_passes_a_signal_on_to_the_command(self):
+        ready = os.path.join(self.dir.name, "ready")
+        command = "import sys, time\nopen(sys.argv[1], 'w').close()\ntry: time.sleep(30)\nexcept KeyboardInterrupt: sys.exit(7)"
+        run = self.start(sys.executable, "-c", command, ready)
+        deadline = time.time() + 5
+        while not os.path.exists(ready) and time.time() < deadline:
+            time.sleep(0.02)
+        run.send_signal(signal.SIGINT)
+        self.assertEqual(run.wait(timeout=5), 7)
 
     def test_a_killed_holder_frees_the_lock(self):
         first = self.start("sleep", "30", start_new_session=True)

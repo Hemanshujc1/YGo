@@ -73,6 +73,7 @@ jobs:
         id: changes
         if: github.event_name == 'pull_request'
         run: |
+          set -o pipefail
           if ! server=$(pnpm exec turbo query affected --tasks build --packages @ygo/server --base HEAD^1 --head HEAD | jq '.data.affectedTasks.length'); then
             server=unknown
           fi
@@ -89,12 +90,12 @@ jobs:
           "$RUNNER_TEMP/actionlint"
           python3 ops/test-dispatch.py
 
-      # A pull request reuses turbo's cache from main and from its own earlier
-      # runs, so only the tasks whose inputs changed run again. Turbo's hash
-      # covers each task's files, dependencies and lockfile entries; the key
-      # adds this workflow, which turbo cannot see (the Postgres image, the
-      # steps). main restores nothing, so every push to main runs every task,
-      # then saves the results for pull requests.
+      # A pull request reuses turbo's cache from the latest push to main, so
+      # only the tasks whose inputs changed run again. Turbo's hash covers each
+      # task's files, dependencies and lockfile entries; the key adds this
+      # workflow, which turbo cannot see (the Postgres image, the steps). main
+      # restores nothing, so every push to main runs every task, then saves
+      # the results. Only main saves, so the cache never grows past one run.
       - name: Restore turbo cache
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -106,6 +107,7 @@ jobs:
       - run: pnpm gate
 
       - name: Save turbo cache
+        if: github.event_name == 'push'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .turbo/cache
