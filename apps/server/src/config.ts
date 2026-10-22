@@ -16,6 +16,10 @@ const BaseEnv = z.object({
   // The oldest app versions still served (Q-7); 0.0.0 refuses none.
   MIN_CUSTOMER_VERSION: AppVersion.default("0.0.0"),
   MIN_SHOPKEEPER_VERSION: AppVersion.default("0.0.0"),
+  PRODUCT_IMAGE_BUCKET: z.string().min(3).optional(),
+  PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/i).optional(),
+  S3_REGION: z.string().min(1).default("ap-south-1"),
+  S3_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
 });
 
 const Env = z.discriminatedUnion("MAILER", [
@@ -29,7 +33,14 @@ const Env = z.discriminatedUnion("MAILER", [
     MAIL_FROM: z.email(),
     MAILPIT_URL: z.url({ protocol: /^https?$/ }),
   }),
-]);
+]).superRefine((env, context) => {
+  if (Boolean(env.PRODUCT_IMAGE_BUCKET) !== Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN)) {
+    context.addIssue({
+      code: "custom",
+      message: "PRODUCT_IMAGE_BUCKET and PRODUCT_IMAGE_CLOUDFRONT_DOMAIN must be configured together",
+    });
+  }
+});
 
 export type Config = z.infer<typeof Env>;
 

@@ -28,3 +28,19 @@ describe("mail configuration", () => {
     expect(loadConfig({ ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" }).MAILER).toBe("mailpit");
   });
 });
+
+describe("product image configuration", () => {
+  const database = { DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo", AUTH_TOKEN_SECRET: "a-secret-that-is-long-enough-for-tests" };
+  const mailpit = { MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
+
+  it("requires the bucket and CloudFront domain together", () => {
+    expect(() => loadConfig({ ...database, ...mailpit, PRODUCT_IMAGE_BUCKET: "ygo-images" })).toThrow();
+    expect(() => loadConfig({ ...database, ...mailpit, PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com" })).toThrow();
+    expect(loadConfig({
+      ...database,
+      ...mailpit,
+      PRODUCT_IMAGE_BUCKET: "ygo-images",
+      PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com",
+    })).toMatchObject({ S3_REGION: "ap-south-1" });
+  });
+});
