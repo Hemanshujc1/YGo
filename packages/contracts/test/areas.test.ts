@@ -25,6 +25,7 @@ const area = {
   pincodes: ["411029", "411038"],
   paused: false,
 };
+const reason = "Pilot launch";
 const hundred = Array.from({ length: 100 }, (_, i) => String(411000 + i));
 
 describe("Area", () => {
@@ -45,15 +46,16 @@ describe("Area", () => {
 });
 
 describe("CreateAreaBody", () => {
-  it("trims the name and removes spaces from pincodes", () => {
-    expect(CreateAreaBody.parse({ name: "  Kothrud ", pincodes: ["411 038"] })).toEqual({
+  it("trims the name and reason and removes spaces from pincodes", () => {
+    expect(CreateAreaBody.parse({ name: "  Kothrud ", pincodes: ["411 038"], reason: " Pilot launch " })).toEqual({
       name: "Kothrud",
       pincodes: ["411038"],
+      reason,
     });
   });
 
   it("accepts 100 pincodes", () => {
-    expect(CreateAreaBody.parse({ name: "Kothrud", pincodes: hundred }).pincodes).toHaveLength(100);
+    expect(CreateAreaBody.parse({ name: "Kothrud", pincodes: hundred, reason }).pincodes).toHaveLength(100);
   });
 
   it.each([
@@ -64,13 +66,19 @@ describe("CreateAreaBody", () => {
     ["a pincode starting with 0", ["011038"]],
     ["a pincode of five digits", ["41103"]],
   ])("refuses %s", (_, pincodes) => {
-    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes })[0]).toMatch(/^pincodes/);
+    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes, reason })[0]).toMatch(/^pincodes/);
   });
 
   it("refuses a blank name, one over 100 characters, and an unexpected field", () => {
-    expect(fieldsRefused(CreateAreaBody, { name: "   ", pincodes: ["411038"] })).toEqual(["name"]);
-    expect(fieldsRefused(CreateAreaBody, { name: "a".repeat(101), pincodes: ["411038"] })).toEqual(["name"]);
-    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes: ["411038"], reason: "New" })).toEqual(["reason"]);
+    expect(fieldsRefused(CreateAreaBody, { name: "   ", pincodes: ["411038"], reason })).toEqual(["name"]);
+    expect(fieldsRefused(CreateAreaBody, { name: "a".repeat(101), pincodes: ["411038"], reason })).toEqual(["name"]);
+    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes: ["411038"], reason, paused: true })).toEqual(["paused"]);
+  });
+
+  it("refuses a missing, blank or over-long reason", () => {
+    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes: ["411038"] })).toEqual(["reason"]);
+    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes: ["411038"], reason: "   " })).toEqual(["reason"]);
+    expect(fieldsRefused(CreateAreaBody, { name: "Kothrud", pincodes: ["411038"], reason: "a".repeat(501) })).toEqual(["reason"]);
   });
 });
 

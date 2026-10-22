@@ -182,7 +182,7 @@ describe("Admin browser API client", () => {
       if (method === "GET") return answer(200, { areas: [area] });
       return answer(method === "POST" ? 201 : 200, area);
     });
-    const created = { name: "Kothrud", pincodes: ["411029", "411038"] };
+    const created = { name: "Kothrud", pincodes: ["411029", "411038"], reason: "Pilot launch" };
     expect(await client.listAreas()).toEqual({ ok: true, data: { areas: [area] } });
     expect(await client.createArea(created)).toEqual({ ok: true, data: area });
     expect(await client.editArea(area.id, { paused: true, reason: "Monsoon flooding" })).toEqual({ ok: true, data: area });
@@ -204,7 +204,7 @@ describe("Admin browser API client", () => {
         ? answer(200, { accessToken: "access-1", account })
         : answer(409, { error: { code: "PINCODE_IN_OTHER_AREA", conflicts } }),
     );
-    expect(await client.createArea({ name: "Karve Nagar", pincodes: ["411038", "411052"] })).toEqual({
+    expect(await client.createArea({ name: "Karve Nagar", pincodes: ["411038", "411052"], reason: "Second Area" })).toEqual({
       ok: false, status: 409, code: "PINCODE_IN_OTHER_AREA", fields: undefined, conflicts,
     });
   });

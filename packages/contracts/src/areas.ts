@@ -25,8 +25,8 @@ export const AreasResponse = z.strictObject({ areas: z.array(Area) });
 export type AreasResponse = z.infer<typeof AreasResponse>;
 export const AreaParams = z.strictObject({ id: z.uuid() });
 
-/** The server records the creation with the fixed reason "Area created". */
-export const CreateAreaBody = z.strictObject({ name: AreaName, pincodes: AreaPincodes });
+/** The reason goes on the admin action record for the creation (owner decision on #213). */
+export const CreateAreaBody = z.strictObject({ name: AreaName, pincodes: AreaPincodes, reason: AdminActionReason });
 export type CreateAreaBody = z.infer<typeof CreateAreaBody>;
 
 /**
