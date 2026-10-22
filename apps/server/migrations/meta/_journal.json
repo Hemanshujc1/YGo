@@ -71,6 +71,13 @@
       "when": 1792659257584,
       "tag": "0009_master_products",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792692160727,
+      "tag": "0010_saved_addresses",
+      "breakpoints": true
     }
   ]
 }

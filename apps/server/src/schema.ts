@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   index,
   integer,
   pgTable,
@@ -106,6 +107,28 @@ export const waitlistEntries = pgTable("waitlist_entries", {
   phone: text("phone").notNull(),
   savedAt: timestamp("saved_at", { withTimezone: true }).notNull(),
 }, (table) => [primaryKey({ columns: [table.accountId, table.pincode] })]);
+
+// A PostGIS point in metres on the spheroid (ADR-0002). Drizzle has only
+// geometry, so routes read and write it with SQL.
+const geographyPoint = customType<{ data: string }>({ dataType: () => "geography(Point,4326)" });
+
+// A Customer's confirmed places (#217), at most 10 per account, gone with the
+// account. One Home and one Work each; the point is null for a place typed as
+// a pincode with location refused.
+export const savedAddresses = pgTable("saved_addresses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  flat: text("flat").notNull(),
+  areaLine: text("area_line"),
+  pincode: text("pincode").notNull(),
+  point: geographyPoint("point"),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("saved_addresses_label_valid", sql`${table.label} IN ('home', 'work', 'other')`),
+  index("saved_addresses_account_id_idx").on(table.accountId),
+  uniqueIndex("saved_addresses_home_work_idx").on(table.accountId, table.label).where(sql`${table.label} <> 'other'`),
+]);
 
 export const loginCodes = pgTable("login_codes", {
   email: text("email").primaryKey(),

@@ -14,6 +14,7 @@ import type { Database } from "./db";
 import type { Mailer } from "./adapters/mailer";
 import type { Clock } from "./adapters/clock";
 import type { ProductImageStorage } from "./adapters/product-images";
+import { registerAddressRoutes } from "./routes/addresses";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAreaRoutes } from "./routes/areas";
@@ -97,6 +98,7 @@ export function buildApp({
     registerMasterProductRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 
   app.get(
