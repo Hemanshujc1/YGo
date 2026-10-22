@@ -10,7 +10,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { InvalidProductImageError, type PreparedProductImage, type ProductImageStorage, type ProductImageVariants } from "../adapters/product-images";
-import { adminSignedIn } from "../admin";
+import { adminSignedIn, withAdminTransaction } from "../admin";
 import { deriveKeys } from "../tokens";
 
 const productSql = `SELECT p.id, p.name, p.brand, p.category_id AS "categoryId", c.name AS "categoryName",
@@ -101,17 +101,8 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       throw error;
     }
 
-    const client = await pool.connect();
-    let id: string;
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) {
-        await client.query("ROLLBACK");
-        return reply.code(403).send({ error: { code: "FORBIDDEN" } });
-      }
+    const id = await withAdminTransaction(pool, who.accountId, reply, async (client) => {
       if (!await isActiveCategory(client, body.categoryId)) {
-        await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["categoryId"] } });
       }
       const inserted = await client.query<{ id: string }>(
@@ -119,23 +110,21 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [body.name, body.brand ?? null, body.categoryId, body.baseUnit, body.classification],
       );
-      const newId = inserted.rows[0]?.id;
-      if (!newId) throw new Error("Master product insert returned no ID");
-      id = newId;
+      const id = inserted.rows[0]?.id;
+      if (!id) throw new Error("Master product insert returned no ID");
       await client.query(
         "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'product.create', $2, 'product', 'Product created')",
         [who.accountId, id],
       );
       await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      return id;
+    }).catch((error: unknown) => {
       if ((error as { code?: string; constraint?: string }).constraint === "master_products_name_brand_idx") {
         return reply.code(409).send({ error: { code: "PRODUCT_NAME_IN_USE" } });
       }
       throw error;
-    } finally {
-      client.release();
-    }
+    });
+    if (typeof id !== "string") return reply;
 
     let stored: Awaited<ReturnType<ProductImageStorage["storePrepared"]>>;
     try {
@@ -182,28 +171,18 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       }
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
-      if (!member.rowCount) {
-        await client.query("ROLLBACK");
-        return reply.code(403).send({ error: { code: "FORBIDDEN" } });
-      }
+    const committed = await withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const result = await client.query<ProductRow>(`${productSql} WHERE p.id = $1 FOR UPDATE OF p`, [id]);
       const old = result.rows[0];
       if (!old) {
-        await client.query("ROLLBACK");
         return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       }
       const oldKeys = imageKeys(old);
       if (!oldKeys && !stored) {
-        await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
       }
       const nextCategory = body.categoryId ?? old.categoryId;
       if (nextCategory !== old.categoryId && !await isActiveCategory(client, nextCategory)) {
-        await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["categoryId"] } });
       }
       const nextName = body.name ?? old.name;
@@ -212,7 +191,6 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       const nextClassification = body.classification ?? old.classification;
       const nextActive = body.active ?? old.active;
       if ((nextClassification === "counted") !== (nextBaseUnit === "each")) {
-        await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit", "classification"] } });
       }
       const imageChanged = Boolean(stored && stored.keys[256] !== oldKeys?.[256]);
@@ -224,7 +202,6 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
         return reply.code(200).send(await product(client, id, images));
       }
       if (old.active && !nextActive && !body.reason) {
-        await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["reason"] } });
       }
       await client.query(
@@ -244,15 +221,14 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
         );
       }
       await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      return true;
+    }).catch((error: unknown) => {
       if ((error as { constraint?: string }).constraint === "master_products_name_brand_idx") {
         return reply.code(409).send({ error: { code: "PRODUCT_NAME_IN_USE" } });
       }
       throw error;
-    } finally {
-      client.release();
-    }
+    });
+    if (committed !== true) return reply;
 
     const saved = await pool.connect();
     try {
