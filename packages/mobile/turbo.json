@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // test/lockfile.test.ts reads the root lockfile, which turbo otherwise
+      // hashes only for this package's own dependencies.
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/pnpm-lock.yaml"]
+    }
+  }
+}
