@@ -5,6 +5,7 @@ export { SessionGate, type SessionGateWords } from "./session-gate";
 export { sessionStore } from "./session-store";
 export { showSignedOut } from "./signed-out";
 export { SignIn, type SignInProps } from "./sign-in";
+export { PhoneField } from "./phone-field";
 export { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 export type { SignInWords } from "./sign-in-words";
 export { Text } from "./text";
