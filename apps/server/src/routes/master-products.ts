@@ -9,7 +9,7 @@ import {
   MasterProductsResponse,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { InvalidProductImageError, type PreparedProductImage, type ProductImageVariants } from "../adapters/product-images";
+import { InvalidProductImageError, type PreparedProductImage, type ProductImageStorage, type ProductImageVariants } from "../adapters/product-images";
 import { adminSignedIn } from "../admin";
 import { deriveKeys } from "../tokens";
 
@@ -24,19 +24,19 @@ type ProductRow = Omit<MasterProduct, "imageUrls"> & {
   image256Key: string | null;
   image512Key: string | null;
   image1024Key: string | null;
-  published: boolean;
-};
-type ImageStorage = {
-  prepare(source: Buffer): Promise<PreparedProductImage>;
-  storePrepared(productId: string, prepared: PreparedProductImage): Promise<{ keys: ProductImageVariants }>;
-  urls(keys: ProductImageVariants): ProductImageVariants;
 };
 type Auth = { pool: Pool; clock: Clock; secret: string };
 
-async function product(client: PoolClient, id: string, images: ImageStorage): Promise<MasterProduct> {
+async function product(client: PoolClient, id: string, images: ProductImageStorage): Promise<MasterProduct> {
   const result = await client.query<ProductRow>(`${productSql} WHERE p.id = $1`, [id]);
   const row = result.rows[0];
-  if (!row || !row.image256Key || !row.image512Key || !row.image1024Key) throw new Error("Published master product is missing image keys");
+  if (!row) throw new Error("Saved master product missing");
+  return rowToProduct(row, images);
+}
+
+function rowToProduct(row: ProductRow, images: ProductImageStorage): MasterProduct {
+  const keys = imageKeys(row);
+  if (row.published && !keys) throw new Error("Published master product is missing image keys");
   return {
     id: row.id,
     name: row.name,
@@ -47,17 +47,14 @@ async function product(client: PoolClient, id: string, images: ImageStorage): Pr
     categoryEffectiveActive: row.categoryEffectiveActive,
     baseUnit: row.baseUnit,
     classification: row.classification,
-    imageUrls: images.urls({ 256: row.image256Key, 512: row.image512Key, 1024: row.image1024Key }),
+    imageUrls: keys ? images.urls(keys) : null,
+    published: row.published,
     active: row.active,
   };
 }
 
 function invalidImage(reply: FastifyReply) {
   return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
-}
-
-async function prepareImage(images: ImageStorage, encoded: string): Promise<PreparedProductImage> {
-  return images.prepare(Buffer.from(encoded, "base64"));
 }
 
 async function isActiveCategory(client: PoolClient, id: string): Promise<boolean> {
@@ -72,42 +69,20 @@ async function isActiveCategory(client: PoolClient, id: string): Promise<boolean
   return Boolean(parent.rows[0]?.active);
 }
 
-async function member(client: PoolClient, accountId: string): Promise<boolean> {
-  const result = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [accountId]);
-  return Boolean(result.rowCount);
-}
-
 function imageKeys(row: ProductRow): ProductImageVariants | null {
   if (!row.image256Key || !row.image512Key || !row.image1024Key) return null;
   return { 256: row.image256Key, 512: row.image512Key, 1024: row.image1024Key };
 }
 
-export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock, secret, images }: Auth & { images?: ImageStorage }): void {
+export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock, secret, images }: Auth & { images?: ProductImageStorage }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errorResponses = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope, 503: ErrorEnvelope };
 
   app.get("/v1/admin/products", { schema: { response: { 200: MasterProductsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 503: ErrorEnvelope } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
     if (!images) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
-    const rows = await pool.query<ProductRow>(`${productSql} WHERE p.published ORDER BY lower(p.name), lower(COALESCE(p.brand, ''))`);
-    const products = rows.rows.map((row) => {
-      const keys = imageKeys(row);
-      if (!keys) throw new Error("Published master product is missing image keys");
-      return {
-        id: row.id,
-        name: row.name,
-        brand: row.brand,
-        categoryId: row.categoryId,
-        categoryName: row.categoryName,
-        categoryActive: row.categoryActive,
-        categoryEffectiveActive: row.categoryEffectiveActive,
-        baseUnit: row.baseUnit,
-        classification: row.classification,
-        imageUrls: images.urls(keys),
-        active: row.active,
-      };
-    });
-    return { products };
+    const rows = await pool.query<ProductRow>(`${productSql} ORDER BY lower(p.name), lower(COALESCE(p.brand, ''))`);
+    return { products: rows.rows.map((row) => rowToProduct(row, images)) };
   });
 
   app.post("/v1/admin/products", {
@@ -120,7 +95,7 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
     const body = request.body as CreateMasterProductBody;
     let prepared: PreparedProductImage;
     try {
-      prepared = await prepareImage(images, body.image);
+      prepared = await images.prepare(Buffer.from(body.image, "base64"));
     } catch (error) {
       if (error instanceof InvalidProductImageError) return invalidImage(reply);
       throw error;
@@ -130,7 +105,8 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
     let id: string;
     try {
       await client.query("BEGIN");
-      if (!await member(client, who.accountId)) {
+      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
+      if (!member.rowCount) {
         await client.query("ROLLBACK");
         return reply.code(403).send({ error: { code: "FORBIDDEN" } });
       }
@@ -161,7 +137,7 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       client.release();
     }
 
-    let stored: Awaited<ReturnType<ImageStorage["storePrepared"]>>;
+    let stored: Awaited<ReturnType<ProductImageStorage["storePrepared"]>>;
     try {
       stored = await images.storePrepared(id, prepared);
     } catch {
@@ -188,21 +164,27 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
     if (!images) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
     const { id } = request.params as { id: string };
     const body = request.body as EditMasterProductBody;
-    let prepared: PreparedProductImage | undefined;
+    let stored: Awaited<ReturnType<ProductImageStorage["storePrepared"]>> | undefined;
     if (body.image !== undefined) {
+      let prepared: PreparedProductImage;
       try {
-        prepared = await prepareImage(images, body.image);
+        prepared = await images.prepare(Buffer.from(body.image, "base64"));
       } catch (error) {
         if (error instanceof InvalidProductImageError) return invalidImage(reply);
         throw error;
       }
+      try {
+        stored = await images.storePrepared(id, prepared);
+      } catch {
+        return reply.code(503).send({ error: { code: "UNAVAILABLE", draftId: id } });
+      }
     }
 
     const client = await pool.connect();
-    let shouldStore: boolean;
     try {
       await client.query("BEGIN");
-      if (!await member(client, who.accountId)) {
+      const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
+      if (!member.rowCount) {
         await client.query("ROLLBACK");
         return reply.code(403).send({ error: { code: "FORBIDDEN" } });
       }
@@ -213,7 +195,7 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
         return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       }
       const oldKeys = imageKeys(old);
-      if (!oldKeys && !prepared) {
+      if (!oldKeys && !stored) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["image"] } });
       }
@@ -231,8 +213,7 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
         await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit", "classification"] } });
       }
-      const imageChanged = Boolean(prepared && (!oldKeys || !oldKeys[256].includes(`v1-${prepared.sourceHash}`)));
-      shouldStore = Boolean(prepared && (imageChanged || !oldKeys));
+      const imageChanged = Boolean(stored && stored.keys[256] !== oldKeys?.[256]);
       const attributesChanged = nextName !== old.name || nextBrand !== old.brand || nextCategory !== old.categoryId ||
         nextBaseUnit !== old.baseUnit || nextClassification !== old.classification || nextActive !== old.active;
       const changed = attributesChanged || imageChanged;
@@ -246,8 +227,10 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       }
       await client.query(
         `UPDATE master_products SET name = $1, brand = $2, category_id = $3, base_unit = $4,
-         classification = $5, active = $6 WHERE id = $7`,
-        [nextName, nextBrand, nextCategory, nextBaseUnit, nextClassification, nextActive, id],
+         classification = $5, active = $6, image_256_key = $7, image_512_key = $8,
+         image_1024_key = $9, published = true WHERE id = $10`,
+        [nextName, nextBrand, nextCategory, nextBaseUnit, nextClassification, nextActive,
+          stored?.keys[256] ?? oldKeys?.[256], stored?.keys[512] ?? oldKeys?.[512], stored?.keys[1024] ?? oldKeys?.[1024], id],
       );
       const action = old.active !== nextActive
         ? nextActive ? ["product.reactivate", "Product reactivated"] : ["product.deactivate", body.reason]
@@ -269,18 +252,6 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       client.release();
     }
 
-    if (shouldStore && prepared) {
-      let stored: Awaited<ReturnType<ImageStorage["storePrepared"]>>;
-      try {
-        stored = await images.storePrepared(id, prepared);
-      } catch {
-        return reply.code(503).send({ error: { code: "UNAVAILABLE", draftId: id } });
-      }
-      await pool.query(
-        `UPDATE master_products SET image_256_key = $1, image_512_key = $2, image_1024_key = $3, published = true WHERE id = $4`,
-        [stored.keys[256], stored.keys[512], stored.keys[1024], id],
-      );
-    }
     const saved = await pool.connect();
     try {
       return reply.code(200).send(await product(saved, id, images));

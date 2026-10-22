@@ -41,7 +41,8 @@ export const MasterProduct = z.strictObject({
   categoryEffectiveActive: z.boolean(),
   baseUnit: ProductBaseUnit,
   classification: ProductClassification,
-  imageUrls: z.strictObject({ 256: z.url(), 512: z.url(), 1024: z.url() }),
+  imageUrls: z.strictObject({ 256: z.url(), 512: z.url(), 1024: z.url() }).nullable(),
+  published: z.boolean(),
   active: z.boolean(),
 });
 export type MasterProduct = z.infer<typeof MasterProduct>;

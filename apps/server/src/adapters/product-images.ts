@@ -53,20 +53,6 @@ export function createS3ProductImageClient(client: S3Client): ProductImagePutCli
   };
 }
 
-export function createAwsProductImageStorage(options: {
-  bucket: string;
-  cloudFrontDomain: string;
-  region: string;
-  endpoint?: string;
-}) {
-  const client = new S3Client({ region: options.region, endpoint: options.endpoint });
-  return createProductImageStorage({
-    client: createS3ProductImageClient(client),
-    bucket: options.bucket,
-    cloudFrontDomain: options.cloudFrontDomain,
-  });
-}
-
 export function createProductImageStorage(options: {
   client: ProductImagePutClient;
   bucket: string;

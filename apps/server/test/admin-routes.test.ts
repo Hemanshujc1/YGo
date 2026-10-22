@@ -448,7 +448,7 @@ describe("Master product routes", () => {
     const made = await create(token, createBody(await groceries(), source));
     expect(made.statusCode).toBe(201);
     expect(made.json()).toMatchObject({
-      name: "Apples", brand: null, baseUnit: "each", classification: "counted", active: true,
+      name: "Apples", brand: null, baseUnit: "each", classification: "counted", active: true, published: true,
       categoryName: "Groceries", categoryActive: true, categoryEffectiveActive: true,
       imageUrls: {
         256: expect.stringMatching(/^https:\/\/images\.ygo\.example\/products\//),
@@ -500,33 +500,45 @@ describe("Master product routes", () => {
     expect((await database.pool.query("SELECT published FROM master_products WHERE id = $1", [id])).rows[0].published).toBe(false);
     expect((await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count).toBe(1);
 
+    const list = await app.inject({ method: "GET", url: "/v1/admin/products", headers: token });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().products).toEqual([expect.objectContaining({ id, name: "Apples", published: false, imageUrls: null })]);
+
     failProductImagePuts = false;
     const retry = await edit(token, id, { image: source.toString("base64") });
     expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toMatchObject({ published: true, imageUrls: expect.any(Object) });
     expect((await database.pool.query("SELECT published, image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id])).rows[0])
       .toMatchObject({ published: true });
     expect((await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count).toBe(1);
   });
 
-  it("keeps a published product and its current image when image replacement fails", async () => {
+  it("keeps details, image keys and audit rows unchanged when image replacement fails", async () => {
     const token = await headers();
-    const initial = await image();
-    const created = await create(token, createBody(await groceries(), initial));
+    const created = await create(token, createBody(await groceries(), await image()));
     const id = created.json().id as string;
-    const oldKeys = (await database.pool.query(
-      "SELECT image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
-    )).rows[0];
+    const snapshot = async () => ({
+      product: (await database.pool.query(
+        "SELECT name, published, image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
+      )).rows[0],
+      actions: (await database.pool.query("SELECT count(*)::int AS count FROM admin_actions WHERE target_id = $1", [id])).rows[0].count,
+    });
+    const before = await snapshot();
     const replacement = await sharp({ create: { width: 48, height: 24, channels: 3, background: "blue" } }).png().toBuffer();
     failProductImagePuts = true;
 
-    const failed = await edit(token, id, { image: replacement.toString("base64") });
-
-    expect(failed.statusCode).toBe(503);
-    expect((await database.pool.query(
-      "SELECT published, image_256_key, image_512_key, image_1024_key FROM master_products WHERE id = $1", [id],
-    )).rows[0]).toMatchObject({ published: true, ...oldKeys });
-    expect((await app.inject({ method: "GET", url: "/v1/admin/products", headers: token })).json().products)
-      .toHaveLength(1);
+    for (const changes of [{ name: "Blue apples" }, {}]) {
+      const failed = await edit(token, id, { ...changes, image: replacement.toString("base64") });
+      expect(failed.statusCode).toBe(503);
+      expect(await snapshot()).toEqual(before);
+    }
+    failProductImagePuts = false;
+    const saved = await edit(token, id, { name: "Blue apples", image: replacement.toString("base64") });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({ name: "Blue apples", published: true });
+    const after = await snapshot();
+    expect(after.product.image_256_key).not.toBe(before.product.image_256_key);
+    expect(after.actions).toBe(before.actions + 1);
   });
 
   it("rejects bad base64, non-images and inputs over 10 MiB before S3", async () => {

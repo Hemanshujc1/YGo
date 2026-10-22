@@ -1,6 +1,7 @@
+import { S3Client } from "@aws-sdk/client-s3";
 import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
-import { createAwsProductImageStorage } from "./adapters/product-images";
+import { createProductImageStorage, createS3ProductImageClient } from "./adapters/product-images";
 import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
 
@@ -10,11 +11,10 @@ const mailer = config.MAILER === "ses"
   : createMailpitMailer(config.MAIL_FROM, config.MAILPIT_URL);
 const database = connectDatabase(config.DATABASE_URL);
 const productImages = config.PRODUCT_IMAGE_BUCKET && config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN
-  ? createAwsProductImageStorage({
+  ? createProductImageStorage({
+    client: createS3ProductImageClient(new S3Client({ region: config.S3_REGION, endpoint: config.S3_ENDPOINT })),
     bucket: config.PRODUCT_IMAGE_BUCKET,
     cloudFrontDomain: config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN,
-    region: config.S3_REGION,
-    endpoint: config.S3_ENDPOINT,
   })
   : undefined;
 const app = buildApp({
