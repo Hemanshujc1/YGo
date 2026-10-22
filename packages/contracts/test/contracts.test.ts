@@ -17,6 +17,15 @@ describe("ErrorEnvelope", () => {
     expect(ErrorEnvelope.parse(body)).toEqual(body);
   });
 
+  it("carries each pincode another Area holds", () => {
+    const body = { error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: "Kothrud" }] } };
+    expect(ErrorEnvelope.parse(body)).toEqual(body);
+  });
+
+  it("accepts a taken Area name", () => {
+    expect(ErrorEnvelope.parse({ error: { code: "AREA_NAME_IN_USE" } })).toEqual({ error: { code: "AREA_NAME_IN_USE" } });
+  });
+
   it("drops display text instead of passing it on", () => {
     const parsed = ErrorEnvelope.parse({ error: { code: "INTERNAL", message: "Something broke" } });
     expect(parsed).toEqual({ error: { code: "INTERNAL" } });

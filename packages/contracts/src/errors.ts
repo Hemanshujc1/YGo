@@ -18,6 +18,11 @@ import { z } from "zod";
  * Admin accounts (#37), with the status each is sent with:
  * - EMAIL_IN_USE (409): another account has this email.
  * - FORBIDDEN (403): signed in, but not allowed (for example, not an Admin).
+ *
+ * Areas (#213), with the status each is sent with:
+ * - AREA_NAME_IN_USE (409): another Area has this name, ignoring case.
+ * - PINCODE_IN_OTHER_AREA (409): another Area holds one or more of the
+ *   pincodes; `conflicts` names each pincode and the Area holding it.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -35,18 +40,22 @@ export const ErrorCode = z.enum([
   "EMAIL_IN_USE",
   "FORBIDDEN",
   "CATEGORY_NAME_IN_USE",
+  "AREA_NAME_IN_USE",
+  "PINCODE_IN_OTHER_AREA",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
 /**
  * The body of every non-2xx response. With VALIDATION_FAILED, `fields` names
  * each request-body field that broke its rule, as built by `invalidFields`;
- * the client shows its own message for each.
+ * the client shows its own message for each. With PINCODE_IN_OTHER_AREA,
+ * `conflicts` names each pincode another Area holds.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
     code: ErrorCode,
     fields: z.array(z.string()).optional(),
+    conflicts: z.array(z.object({ pincode: z.string(), areaName: z.string() })).optional(),
   }),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

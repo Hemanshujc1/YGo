@@ -1,11 +1,15 @@
 import {
   Account,
   AdminAccountsResponse,
+  Area,
+  AreasResponse,
   BrowserSession,
   CategoriesResponse,
   Category,
   type CreateAdminBody,
+  type CreateAreaBody,
   type CreateCategoryBody,
+  type EditAreaBody,
   type EditCategoryBody,
   type RequestCodeBody,
   type VerifyCodeBody,
@@ -67,7 +71,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -137,6 +141,21 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `PATCH /v1/admin/categories/:id`: edit or change a category's active setting. */
     async editCategory(id: string, body: EditCategoryBody): Promise<ApiResult<Category>> {
       return result(await adminRequest("PATCH", `/v1/admin/categories/${encodeURIComponent(id)}`, body), Category);
+    },
+
+    /** `GET /v1/admin/areas`: every Area with its pincodes. */
+    async listAreas(): Promise<ApiResult<AreasResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/areas"), AreasResponse);
+    },
+
+    /** `POST /v1/admin/areas`: a new Area; a pincode another Area holds answers PINCODE_IN_OTHER_AREA. */
+    async createArea(body: CreateAreaBody): Promise<ApiResult<Area>> {
+      return result(await adminRequest("POST", "/v1/admin/areas", body), Area);
+    },
+
+    /** `PATCH /v1/admin/areas/:id`: new pincodes, or pause / resume, with a reason. */
+    async editArea(id: string, body: EditAreaBody): Promise<ApiResult<Area>> {
+      return result(await adminRequest("PATCH", `/v1/admin/areas/${encodeURIComponent(id)}`, body), Area);
     },
 
     /** Clear local access immediately and ask the server to end the cookie session. */

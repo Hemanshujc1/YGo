@@ -21,6 +21,12 @@ const category = {
   active: true,
   effectiveActive: true,
 };
+const area = {
+  id: "00000000-0000-4000-8000-000000000201",
+  name: "Kothrud",
+  pincodes: ["411029", "411038"],
+  paused: false,
+};
 const denied = { error: { code: "UNAUTHENTICATED" } };
 const forbidden = { error: { code: "FORBIDDEN" } };
 const answer = (status: number, body?: unknown) =>
@@ -168,6 +174,39 @@ describe("Admin browser API client", () => {
     expect(calls.filter(({ path }) => path === "/v1/admin/categories").map(({ headers }) => headers.get("authorization"))).toEqual([
       "Bearer access-1", "Bearer access-2",
     ]);
+  });
+
+  it("lists, creates and edits Areas with the Admin session", async () => {
+    const { client, calls, refreshes } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET") return answer(200, { areas: [area] });
+      return answer(method === "POST" ? 201 : 200, area);
+    });
+    const created = { name: "Kothrud", pincodes: ["411029", "411038"] };
+    expect(await client.listAreas()).toEqual({ ok: true, data: { areas: [area] } });
+    expect(await client.createArea(created)).toEqual({ ok: true, data: area });
+    expect(await client.editArea(area.id, { paused: true, reason: "Monsoon flooding" })).toEqual({ ok: true, data: area });
+    expect(await client.editArea(area.id, { pincodes: ["411029"], reason: "Split off Karve Nagar" })).toEqual({ ok: true, data: area });
+    expect(refreshes()).toHaveLength(1);
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      ["/v1/admin/areas", "GET", undefined],
+      ["/v1/admin/areas", "POST", created],
+      [`/v1/admin/areas/${area.id}`, "PATCH", { paused: true, reason: "Monsoon flooding" }],
+      [`/v1/admin/areas/${area.id}`, "PATCH", { pincodes: ["411029"], reason: "Split off Karve Nagar" }],
+    ]);
+    expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
+  });
+
+  it("passes on each pincode another Area holds", async () => {
+    const conflicts = [{ pincode: "411038", areaName: "Kothrud" }];
+    const { client } = setup(({ path }) =>
+      path.endsWith("/refresh")
+        ? answer(200, { accessToken: "access-1", account })
+        : answer(409, { error: { code: "PINCODE_IN_OTHER_AREA", conflicts } }),
+    );
+    expect(await client.createArea({ name: "Karve Nagar", pincodes: ["411038", "411052"] })).toEqual({
+      ok: false, status: 409, code: "PINCODE_IN_OTHER_AREA", fields: undefined, conflicts,
+    });
   });
 
   it("refreshes after a 401, retries once, and ends the session on a second 401", async () => {

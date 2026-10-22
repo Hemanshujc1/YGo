@@ -22,6 +22,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
     createCategory: vi.fn(),
     editCategory: vi.fn(),
+    listAreas: vi.fn(),
+    createArea: vi.fn(),
+    editArea: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     ...overrides,
   };
