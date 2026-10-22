@@ -62,48 +62,9 @@ function animatedPng(): Buffer {
 
 async function animatedWebp(): Promise<Buffer> {
   const frames = await Promise.all(["red", "blue"].map((background) =>
-    sharp({ create: { width: 2, height: 2, channels: 3, background } }).webp().toBuffer(),
+    sharp({ create: { width: 2, height: 2, channels: 3, background } }).png().toBuffer(),
   ));
-  const frameChunks = frames.map((frame) => {
-    const chunks: Buffer[] = [];
-    for (let offset = 12; offset + 8 <= frame.length;) {
-      const size = frame.readUInt32LE(offset + 4);
-      const end = offset + 8 + size;
-      const paddedEnd = end + (size % 2);
-      const type = frame.toString("ascii", offset, offset + 4);
-      if (type !== "VP8X") chunks.push(frame.subarray(offset, paddedEnd));
-      offset = paddedEnd;
-    }
-    return Buffer.concat(chunks);
-  });
-  const webpChunk = (type: string, data: Buffer) => {
-    const header = Buffer.alloc(8);
-    header.write(type, 0, "ascii");
-    header.writeUInt32LE(data.length, 4);
-    return Buffer.concat([header, data, data.length % 2 ? Buffer.alloc(1) : Buffer.alloc(0)]);
-  };
-  const extendedHeader = Buffer.alloc(10);
-  extendedHeader[0] = 0x02;
-  extendedHeader.writeUIntLE(1, 4, 3);
-  extendedHeader.writeUIntLE(1, 7, 3);
-  const animation = Buffer.alloc(6);
-  const animationFrames = frameChunks.map((chunks) => {
-    const header = Buffer.alloc(16);
-    header.writeUIntLE(1, 6, 3);
-    header.writeUIntLE(1, 9, 3);
-    header.writeUIntLE(100, 12, 3);
-    return webpChunk("ANMF", Buffer.concat([header, chunks]));
-  });
-  const chunks = Buffer.concat([
-    webpChunk("VP8X", extendedHeader),
-    webpChunk("ANIM", animation),
-    ...animationFrames,
-  ]);
-  const riff = Buffer.alloc(12);
-  riff.write("RIFF", 0, "ascii");
-  riff.writeUInt32LE(chunks.length + 4, 4);
-  riff.write("WEBP", 8, "ascii");
-  return Buffer.concat([riff, chunks]);
+  return sharp(frames, { join: { animated: true } }).webp().toBuffer();
 }
 
 function crc32(buffer: Buffer): number {

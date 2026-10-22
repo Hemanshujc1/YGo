@@ -90,14 +90,16 @@ async function createVariants(source: Buffer): Promise<ProductImageBuffers> {
     throw new Error("Product image dimensions exceed the allowed limits");
   }
 
-  const render = (size: number) => image.clone().resize({
+  const variants = {} as ProductImageBuffers;
+  for (const size of PRODUCT_IMAGE_SIZES) {
+    variants[size] = await image.clone().resize({
       width: size,
       height: size,
       fit: "inside",
       withoutEnlargement: true,
     }).webp().toBuffer();
-  const [small, medium, large] = await Promise.all([render(256), render(512), render(1024)]);
-  return { 256: small, 512: medium, 1024: large };
+  }
+  return variants;
 }
 
 function isAnimatedPng(source: Buffer): boolean {
