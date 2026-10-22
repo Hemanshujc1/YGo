@@ -92,7 +92,7 @@ export function Button({
       ) : (
         <>
           {Icon && <Icon size={20} className={colour} />}
-          <Text className={`text-label font-medium tabular-nums ${colour}`}>{label}</Text>
+          <Text className={`shrink text-center text-label font-medium tabular-nums ${colour}`}>{label}</Text>
         </>
       )}
     </Pressable>
