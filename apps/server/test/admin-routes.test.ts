@@ -325,7 +325,7 @@ describe("Areas, serviceability and the waitlist", () => {
     ]);
   });
 
-  it("keeps a pincode in one Area when two Admins save at once", async () => {
+  it("keeps a pincode in one Area when two Admins save at once, without deadlocks", async () => {
     const headers = await adminHeaders();
     const create = (name: string) => app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name, pincodes: ["411038"], reason: "Launch" } });
     const results = await Promise.all([create("Kothrud"), create("Karve Nagar")]);
@@ -333,6 +333,17 @@ describe("Areas, serviceability and the waitlist", () => {
     const lost = results.find((result) => result.statusCode === 409);
     expect(lost?.json()).toEqual({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: won?.json().name }] } });
     expect((await areaActions()).rowCount).toBe(1);
+
+    // Two Areas swapping pincodes at once: each is refused, naming the other, and neither deadlocks.
+    const baner = (await app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name: "Baner", pincodes: ["411045"], reason: "Launch" } })).json();
+    await database.pool.query("CREATE FUNCTION slow_pincode() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.3); RETURN NEW; END; $$");
+    await database.pool.query("CREATE TRIGGER test_slow_pincode BEFORE INSERT ON area_pincodes FOR EACH ROW EXECUTE FUNCTION slow_pincode()");
+    const swap = (id: string, pincode: string) => app.inject({ method: "PATCH", url: `/v1/admin/areas/${id}`, headers, payload: { pincodes: [pincode], reason: "Swap" } });
+    const swapped = await Promise.all([swap(won?.json().id as string, "411045"), swap(baner.id as string, "411038")]);
+    expect(swapped.map((result) => result.json())).toEqual([
+      { error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411045", areaName: "Baner" }] } },
+      { error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: won?.json().name }] } },
+    ]);
   });
 
   it("answers serviceable only for a pincode in an active Area", async () => {

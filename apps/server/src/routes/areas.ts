@@ -25,28 +25,22 @@ async function area(client: PoolClient, id: string): Promise<Area> {
   return row.rows[0];
 }
 
-// Sorted, so two saves never take the same pincodes in opposite orders and deadlock.
-async function savePincodes(client: PoolClient, id: string, pincodes: string[]): Promise<void> {
-  await client.query("INSERT INTO area_pincodes (pincode, area_id) SELECT unnest($1::text[]), $2", [[...pincodes].sort(), id]);
-}
-
 /**
- * Maps a unique-key clash to its error. A pincode clash rolls back first, then
- * names each pincode another Area holds (owner decisions on #213 and #214).
+ * Locks pincode writes so Area saves run one at a time (two Areas swapping
+ * pincodes can't deadlock), then names each pincode another Area holds.
+ * The lock doesn't block reads, so serviceability checks carry on.
  */
-async function clash(error: unknown, client: PoolClient, reply: FastifyReply, pincodes: string[], ownId?: string) {
-  const { code, constraint } = error as { code?: string; constraint?: string };
-  if (code !== "23505") throw error;
-  if (constraint === "areas_name_idx") return reply.code(409).send({ error: { code: "AREA_NAME_IN_USE" } });
-  if (constraint !== "area_pincodes_pkey") throw error;
-  await client.query("ROLLBACK");
+async function heldElsewhere(client: PoolClient, pincodes: string[], ownId: string | null) {
+  await client.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
   const held = await client.query<{ pincode: string; areaName: string }>(
     `SELECT p.pincode, a.name AS "areaName" FROM area_pincodes p JOIN areas a ON a.id = p.area_id
      WHERE p.pincode = ANY($1) AND a.id IS DISTINCT FROM $2 ORDER BY p.pincode`,
     [pincodes, ownId],
   );
-  return reply.code(409).send({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts: held.rows } });
+  return held.rows;
 }
+
+const savePincodes = "INSERT INTO area_pincodes (pincode, area_id) SELECT unnest($1::text[]), $2";
 
 export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
@@ -67,16 +61,19 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
       await client.query("BEGIN");
       const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
       if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+      const conflicts = await heldElsewhere(client, pincodes, null);
+      if (conflicts.length) return reply.code(409).send({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts } });
       const inserted = await client.query<{ id: string }>("INSERT INTO areas (name) VALUES ($1) RETURNING id", [name]);
       const id = inserted.rows[0]?.id;
       if (!id) throw new Error("Area insert returned no ID");
-      await savePincodes(client, id, pincodes);
+      await client.query(savePincodes, [pincodes, id]);
       await client.query("INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'area.create', $2, 'area', $3)", [who.accountId, id, reason]);
       const saved = await area(client, id);
       await client.query("COMMIT");
       return reply.code(201).send(saved);
     } catch (error) {
-      return await clash(error, client, reply, pincodes);
+      if ((error as { constraint?: string }).constraint === "areas_name_idx") return reply.code(409).send({ error: { code: "AREA_NAME_IN_USE" } });
+      throw error;
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       client.release();
@@ -93,15 +90,17 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
       await client.query("BEGIN");
       const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [who.accountId]);
       if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
-      const locked = await client.query("SELECT 1 FROM areas WHERE id = $1 FOR UPDATE", [id]);
-      if (!locked.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-      const old = await area(client, id);
+      const locked = await client.query<Area>(`${areaSql} WHERE a.id = $1 FOR UPDATE OF a`, [id]);
+      const old = locked.rows[0];
+      if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       let action: string;
       if (pincodes) {
         // An edit that changes nothing writes no record (owner decision on #213).
         if ([...pincodes].sort().join() === old.pincodes.join()) return reply.code(200).send(old);
+        const conflicts = await heldElsewhere(client, pincodes, id);
+        if (conflicts.length) return reply.code(409).send({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts } });
         await client.query("DELETE FROM area_pincodes WHERE area_id = $1", [id]);
-        await savePincodes(client, id, pincodes);
+        await client.query(savePincodes, [pincodes, id]);
         action = "area.edit_pincodes";
       } else {
         if (paused === old.paused) return reply.code(200).send(old);
@@ -112,8 +111,6 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
       const saved = await area(client, id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
-    } catch (error) {
-      return await clash(error, client, reply, pincodes ?? [], id);
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       client.release();
