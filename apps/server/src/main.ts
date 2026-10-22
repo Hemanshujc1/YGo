@@ -9,11 +9,14 @@ const mailer = config.MAILER === "ses"
   ? createSesMailer(config.MAIL_FROM, config.AWS_REGION)
   : createMailpitMailer(config.MAIL_FROM, config.MAILPIT_URL);
 const database = connectDatabase(config.DATABASE_URL);
-const productImages = config.PRODUCT_IMAGE_BUCKET && config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN
+const imageBaseUrl = config.PRODUCT_IMAGE_LOCAL_BASE_URL ?? (config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN
+  ? `https://${config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN}`
+  : undefined);
+const productImages = config.PRODUCT_IMAGE_BUCKET && imageBaseUrl
   ? createProductImageStorage({
     client: createS3ProductImageClient({ region: config.S3_REGION, endpoint: config.S3_ENDPOINT }),
     bucket: config.PRODUCT_IMAGE_BUCKET,
-    cloudFrontDomain: config.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN,
+    imageBaseUrl,
   })
   : undefined;
 const app = buildApp({

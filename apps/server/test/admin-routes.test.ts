@@ -52,7 +52,7 @@ beforeEach(async () => {
       },
     },
     bucket: "test-product-images",
-    cloudFrontDomain: "images.ygo.example",
+    imageBaseUrl: "https://images.ygo.example",
   });
   app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, productImages });
 });

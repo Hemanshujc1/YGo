@@ -17,7 +17,7 @@ function storage() {
   };
   return {
     calls,
-    images: createProductImageStorage({ client, bucket: "ygo-product-images", cloudFrontDomain: "images.ygo.example" }),
+    images: createProductImageStorage({ client, bucket: "ygo-product-images", imageBaseUrl: "https://images.ygo.example" }),
   };
 }
 
@@ -141,6 +141,22 @@ describe("product image storage", () => {
       bucket === "ygo-product-images" && contentType === "image/webp" && cacheControl === PRODUCT_IMAGE_CACHE_CONTROL,
     )).toBe(true);
     expect(calls.every((call) => Object.keys(call).sort().join(",") === "body,bucket,cacheControl,contentType,key")).toBe(true);
+  });
+
+  it("builds local image URLs from a base that includes the bucket path", async () => {
+    const calls: Parameters<ProductImagePutClient["putObject"]>[0][] = [];
+    const images = createProductImageStorage({
+      client: { async putObject(input) { calls.push(input); } },
+      bucket: "ygo-product-images",
+      imageBaseUrl: "http://127.0.0.1:8333/ygo-product-images/",
+    });
+    const source = await sharp({ create: { width: 12, height: 8, channels: 3, background: "red" } }).png().toBuffer();
+    const result = await images.store(productId, source);
+
+    expect(result.urls[256]).toBe(`http://127.0.0.1:8333/ygo-product-images/${result.keys[256]}`);
+    expect(result.urls[512]).toBe(`http://127.0.0.1:8333/ygo-product-images/${result.keys[512]}`);
+    expect(result.urls[1024]).toBe(`http://127.0.0.1:8333/ygo-product-images/${result.keys[1024]}`);
+    expect(calls).toHaveLength(3);
   });
 
   it("does not upscale a source smaller than 256 pixels", async () => {
