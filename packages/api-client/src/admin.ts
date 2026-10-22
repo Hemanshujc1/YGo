@@ -7,11 +7,15 @@ import {
   WaitlistResponse,
   CategoriesResponse,
   Category,
+  MasterProduct,
+  MasterProductsResponse,
   type CreateAdminBody,
   type CreateAreaBody,
   type CreateCategoryBody,
+  type CreateMasterProductBody,
   type EditAreaBody,
   type EditCategoryBody,
+  type EditMasterProductBody,
   type RequestCodeBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
@@ -72,7 +76,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -146,6 +150,21 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `PATCH /v1/admin/categories/:id`: edit or change a category's active setting. */
     async editCategory(id: string, body: EditCategoryBody): Promise<ApiResult<Category>> {
       return result(await adminRequest("PATCH", `/v1/admin/categories/${encodeURIComponent(id)}`, body), Category);
+    },
+
+    /** GET /v1/admin/products: the global master-product catalog. */
+    async listMasterProducts(): Promise<ApiResult<MasterProductsResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/products"), MasterProductsResponse);
+    },
+
+    /** POST /v1/admin/products: create and publish a master product with its image. */
+    async createMasterProduct(body: CreateMasterProductBody): Promise<ApiResult<MasterProduct>> {
+      return result(await adminRequest("POST", "/v1/admin/products", body), MasterProduct);
+    },
+
+    /** PATCH /v1/admin/products/:id: edit, replace the image, or change active state. */
+    async editMasterProduct(id: string, body: EditMasterProductBody): Promise<ApiResult<MasterProduct>> {
+      return result(await adminRequest("PATCH", `/v1/admin/products/${encodeURIComponent(id)}`, body), MasterProduct);
     },
 
     /** `GET /v1/admin/areas`: every Area with its pincodes. */

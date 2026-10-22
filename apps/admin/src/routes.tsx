@@ -14,6 +14,7 @@ import {
 } from "react-router";
 import { Areas } from "./areas";
 import { Categories } from "./categories";
+import { Products } from "./products";
 import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 import { Waitlist } from "./waitlist";
@@ -55,6 +56,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
               {[
                 { path: "/accounts", label: strings.accounts },
                 { path: "/categories", label: strings.categories },
+                { path: "/products", label: strings.products },
                 { path: "/areas", label: strings.areas },
                 { path: "/waitlist", label: strings.waitlist },
               ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={location.pathname === path ? "page" : undefined}
@@ -304,6 +306,21 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listCategories(), (data) => data.categories),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/products",
+      loader: async () => {
+        const [products, categories] = await Promise.all([api.listMasterProducts(), api.listCategories()]);
+        if (!products.ok || !categories.ok) {
+          if ((!products.ok && (products.code === "UNAUTHENTICATED" || products.code === "FORBIDDEN")) ||
+            (!categories.ok && (categories.code === "UNAUTHENTICATED" || categories.code === "FORBIDDEN"))) return redirect("/sign-in");
+          throw new Error(strings.failed);
+        }
+        return { products: products.data.products, categories: categories.data.categories };
+      },
+      element: <Page protectedArea api={api}><Products api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.productsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {

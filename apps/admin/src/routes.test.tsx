@@ -12,6 +12,12 @@ const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@exampl
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
 const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
 const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };
+const apple = {
+  id: "00000000-0000-4000-8000-000000000301", name: "Apples", brand: "Farm", categoryId: stationery.id,
+  categoryName: stationery.name, categoryActive: true, categoryEffectiveActive: true, baseUnit: "each", classification: "counted",
+  imageUrls: { 256: "https://images.test/256.webp", 512: "https://images.test/512.webp", 1024: "https://images.test/1024.webp" },
+  published: true, active: true,
+};
 const kothrud = { id: "00000000-0000-4000-8000-000000000201", name: "Kothrud", pincodes: ["411038"], paused: false };
 const aundh = { id: "00000000-0000-4000-8000-000000000202", name: "Aundh", pincodes: ["411007", "411027"], paused: true };
 
@@ -22,6 +28,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder] } }),
     createAccount: vi.fn().mockResolvedValue({ ok: true, data: created }),
     listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
+    listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
+    createMasterProduct: vi.fn(),
+    editMasterProduct: vi.fn(),
     createCategory: vi.fn(),
     editCategory: vi.fn(),
     listAreas: vi.fn(),
@@ -339,6 +348,105 @@ describe("Admin web", () => {
     });
     await screen.findByRole("heading", { name: strings.signIn });
     expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  it("lists and searches master products from the Admin navigation", async () => {
+    setup("/accounts", {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+    });
+    await screen.findByText(founder.email);
+    fireEvent.click(screen.getByRole("link", { name: strings.products }));
+    await screen.findByRole("heading", { name: strings.products });
+    expect(screen.getByRole("link", { name: strings.products }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Apples")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox", { name: strings.searchProducts }), { target: { value: "farm" } });
+    expect(screen.getByText("Apples")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox", { name: strings.searchProducts }), { target: { value: "pear" } });
+    expect(screen.getByText(strings.noProductMatches)).toBeTruthy();
+  });
+
+  it("creates a master product with an image using the contract fields", async () => {
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [groceries, snacks, stationery] } }),
+      createMasterProduct: vi.fn().mockResolvedValue({ ok: true, data: apple }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.newProduct }));
+    expect(screen.getByRole("option", { name: `Groceries${strings.productCategoryInactive}` }).hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText(strings.productName), { target: { value: " Apples " } });
+    fireEvent.change(screen.getByLabelText(strings.productBrand), { target: { value: " Farm " } });
+    fireEvent.change(screen.getByLabelText(strings.productImage), { target: { files: [new File(["image"], "apple.png", { type: "image/png" })] } });
+    await screen.findByRole("img", { name: strings.productImage });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveProduct }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.productSaved);
+    expect(api.createMasterProduct).toHaveBeenCalledWith({
+      name: "Apples", brand: "Farm", categoryId: stationery.id, baseUnit: "each", classification: "counted", image: "aW1hZ2U=",
+    });
+  });
+
+  it("recovers a failed image upload from its unpublished draft and keeps an existing image on edit", async () => {
+    const draft = { ...apple, published: false, imageUrls: null };
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValueOnce({ ok: true, data: { products: [] } })
+        .mockResolvedValueOnce({ ok: true, data: { products: [draft] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      createMasterProduct: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }),
+      editMasterProduct: vi.fn().mockResolvedValue({ ok: true, data: apple }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.newProduct }));
+    fireEvent.change(screen.getByLabelText(strings.productName), { target: { value: apple.name } });
+    fireEvent.change(screen.getByLabelText(strings.productBrand), { target: { value: apple.brand } });
+    fireEvent.change(screen.getByLabelText(strings.productImage), { target: { files: [new File(["image"], "apple.png", { type: "image/png" })] } });
+    await screen.findByRole("img", { name: strings.productImage });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveProduct }));
+    expect(await screen.findByText(strings.productImagePending)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.saveProduct }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.productSaved);
+    expect(api.editMasterProduct).toHaveBeenCalledWith(draft.id, expect.objectContaining({ image: "aW1hZ2U=" }));
+
+    fireEvent.click(screen.getByRole("button", { name: strings.editProduct(apple.name) }));
+    fireEvent.change(screen.getByLabelText(strings.productName), { target: { value: "Green apples" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveProduct }));
+    await waitFor(() => expect(api.editMasterProduct).toHaveBeenCalledTimes(2));
+    expect(api.editMasterProduct).toHaveBeenLastCalledWith(apple.id, expect.not.objectContaining({ image: expect.anything() }));
+  });
+
+  it("requires a reason to deactivate a master product and can reactivate it", async () => {
+    const inactive = { ...apple, active: false };
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      editMasterProduct: vi.fn().mockResolvedValueOnce({ ok: true, data: inactive }).mockResolvedValueOnce({ ok: true, data: apple }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.deactivateProduct }));
+    fireEvent.click(screen.getByRole("dialog").querySelector("button") as HTMLButtonElement);
+    expect(await screen.findByText(strings.productInvalidFields.reason)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: " Discontinued " } });
+    fireEvent.click(screen.getByRole("dialog").querySelector("button") as HTMLButtonElement);
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.productDeactivated);
+    expect(api.editMasterProduct).toHaveBeenCalledWith(apple.id, { active: false, reason: "Discontinued" });
+    fireEvent.click(screen.getByRole("button", { name: strings.reactivateProduct }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.productReactivated);
+    expect(api.editMasterProduct).toHaveBeenLastCalledWith(apple.id, { active: true });
+  });
+
+  it("shows product loading, empty and retryable error states", async () => {
+    let resolve!: (value: unknown) => void;
+    const listMasterProducts = vi.fn().mockReturnValueOnce(new Promise((done) => { resolve = done; }))
+      .mockResolvedValue({ ok: true, data: { products: [] } });
+    setup("/products", { listMasterProducts });
+    expect(screen.getByText(strings.productsLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.failed)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText(strings.noProducts)).toBeTruthy();
   });
 
   it("opens the read-only waitlist from navigation and formats captures in server order", async () => {
