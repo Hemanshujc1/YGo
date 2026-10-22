@@ -12,8 +12,9 @@ import {
 } from "../src/lib/location-flow";
 
 const baner = { postalCode: "411045", district: "Baner", city: "Pune" };
-const locator = (allowed: boolean, addresses: Locator["addresses"]): Locator => ({
+const locator = (allowed: boolean, addresses: Locator["addresses"], servicesOn = true): Locator => ({
   askPermission: async () => allowed,
+  servicesOn: async () => servicesOn,
   addresses,
 });
 
@@ -51,6 +52,19 @@ describe("findPlace", () => {
   it("skips an address whose pincode breaks the rule", async () => {
     const found = await findPlace(locator(true, async () => [{ ...baner, postalCode: "41104" }, { ...baner, postalCode: "411 007" }]));
     expect(found).toEqual({ kind: "found", place: { pincode: "411007", name: "Baner" } });
+  });
+
+  it("says when location is off for the whole phone", async () => {
+    expect(await findPlace(locator(true, async () => [baner], false))).toEqual({ kind: "phone-off" });
+  });
+
+  it("is not found when asking for permission fails", async () => {
+    const failing: Locator = { ...locator(true, async () => [baner]), askPermission: () => Promise.reject(new Error("no activity")) };
+    expect(await findPlace(failing)).toEqual({ kind: "not-found" });
+  });
+
+  it("stops waiting for a position after the timeout", async () => {
+    expect(await findPlace(locator(true, () => new Promise(() => {})), 10)).toEqual({ kind: "not-found" });
   });
 
   it("is not found with no pincode, or when no position comes", async () => {

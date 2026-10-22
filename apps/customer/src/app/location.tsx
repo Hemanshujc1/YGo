@@ -1,6 +1,6 @@
 import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
 import * as Location from "expo-location";
-import { type Href, router } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, KeyboardAvoidingView, Linking, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,20 +25,15 @@ const words = strings.location;
 // While the app is in use only (#216, Q4); the phone's own lookup turns the position into an address, with no map key.
 const locator: Locator = {
   askPermission: async () => (await Location.requestForegroundPermissionsAsync()).granted,
+  servicesOn: () => Location.hasServicesEnabledAsync(),
   addresses: async () => {
     const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     return Location.reverseGeocodeAsync(coords);
   },
 };
 
-/** Opens the next screen in place of every screen on the stack, so Back never returns to an old location. */
-function leaveTo(href: Href) {
-  if (router.canDismiss()) router.dismissAll();
-  router.replace(href);
-}
-
 /** What C15 shows under the field: the pincode broke the rule, a lookup or save failed, or no answer came. */
-type Problem = "invalid" | "not-found" | "not-saved" | Exclude<AreaAnswer, { kind: "served" | "not-served" }>;
+type Problem = "invalid" | "not-found" | "phone-off" | "not-saved" | Exclude<AreaAnswer, { kind: "served" | "not-served" }>;
 
 /** C15 Set location (#216): the phone's current location, or a typed pincode. */
 export default function SetLocation() {
@@ -52,7 +47,8 @@ export default function SetLocation() {
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set before React re-renders, so a second tap never asks twice.
   const working = useRef(false);
-  const asks = useRef(newestOnly()).current;
+  const [asks] = useState(newestOnly);
+  const navigation = useNavigation();
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(() => asks.drop, [asks]);
@@ -71,7 +67,17 @@ export default function SetLocation() {
   if (state.status !== "signed-in") return null;
   const accountId = state.account.id;
 
-  /** Asks the server about the place, saves it for this account, then shows Home or C03. */
+  /**
+   * Back to Home alone on the stack, so Back never returns to an old
+   * location. Home asks about the new place and shows it, or C03.
+   */
+  function goHome() {
+    const homeFirst = navigation.getState()?.routes[0]?.name === "index";
+    if (router.canDismiss()) router.dismissAll();
+    if (!homeFirst) router.replace("/");
+  }
+
+  /** Asks the server about the place and saves it for this account, then goes Home. */
   async function choose(place: Place) {
     setChecking(true);
     const answer = await asks.ask(askArea(api, place.pincode));
@@ -82,9 +88,7 @@ export default function SetLocation() {
       } catch {
         return stop("not-saved");
       }
-      if (answer.kind === "served") leaveTo("/");
-      else leaveTo({ pathname: "/not-serviceable", params: place });
-      return;
+      return goHome();
     }
     stop(answer);
   }
@@ -105,7 +109,7 @@ export default function SetLocation() {
     if (found === stale) return;
     if (found.kind === "found") return choose(found.place);
     setLocationOff(found.kind === "off");
-    stop(found.kind === "off" ? null : "not-found");
+    stop(found.kind === "off" ? null : found.kind);
   }
 
   async function submit() {
@@ -124,7 +128,9 @@ export default function SetLocation() {
         ? words.pincodeInvalid
         : problem === "not-found"
           ? words.notFound
-          : problem === "not-saved"
+          : problem === "phone-off"
+            ? words.phoneOff
+            : problem === "not-saved"
             ? words.notSaved
             : problem.kind === "offline"
               ? words.offline

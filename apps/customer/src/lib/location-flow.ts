@@ -11,6 +11,8 @@ export const placeLabel = (place: Place) => (place.name ? `${place.name}, ${plac
 export interface Locator {
   /** Asks for location while the app is in use (#216, Q4); true when allowed. */
   askPermission(): Promise<boolean>;
+  /** False when location is switched off for the whole phone. */
+  servicesOn(): Promise<boolean>;
   /** The phone's own address lookup for where it is now. Rejects when no position comes. */
   addresses(): Promise<{ postalCode: string | null; district: string | null; city: string | null }[]>;
 }
@@ -18,15 +20,22 @@ export interface Locator {
 /**
  * What "Use my current location" found:
  * - `off`: location was refused, so C15 shows "Location is off for YGo".
- * - `not-found`: no position, or no address with a pincode: "Couldn't find your pincode".
+ * - `phone-off`: location is switched off for the whole phone.
+ * - `not-found`: no position in time, or no address with a pincode: "Couldn't find your pincode".
  */
-export type Found = { kind: "found"; place: Place } | { kind: "off" } | { kind: "not-found" };
+export type Found = { kind: "found"; place: Place } | { kind: "off" | "phone-off" | "not-found" };
 
-export async function findPlace(locator: Locator): Promise<Found> {
-  if (!(await locator.askPermission())) return { kind: "off" };
+/** How long C15 waits for a position before asking for a typed pincode. */
+const findTimeout = 15_000;
+
+export async function findPlace(locator: Locator, timeout = findTimeout): Promise<Found> {
   let addresses;
   try {
-    addresses = await locator.addresses();
+    if (!(await locator.askPermission())) return { kind: "off" };
+    if (!(await locator.servicesOn())) return { kind: "phone-off" };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("timed out")), timeout)));
+    addresses = await Promise.race([locator.addresses(), late]).finally(() => clearTimeout(timer));
   } catch {
     return { kind: "not-found" };
   }

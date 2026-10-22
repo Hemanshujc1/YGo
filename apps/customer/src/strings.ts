@@ -5,6 +5,7 @@ import type { ProfileWords, SignInWords } from "@ygo/mobile";
 // one file (CONTEXT.md: every string externalised from day one).
 export const strings = {
   title: "YGo",
+  back: "Back",
   health: "Server health",
   checking: "Checking…",
   ok: "ok",
@@ -61,7 +62,6 @@ export const strings = {
   account: {
     open: "Account",
     title: "Account",
-    back: "Back",
     name: "Name",
     changeName: "Change name",
     email: "Email",
@@ -87,6 +87,7 @@ export const strings = {
     offBody: "Turn it on in settings, or type your pincode below.",
     openSettings: "Open settings",
     notFound: "Couldn't find your pincode. Type it below.",
+    phoneOff: "Location is off on this phone. Turn it on and try again, or type your pincode below.",
     pincodeLabel: "Pincode",
     pincodeInvalid: "Enter a 6-digit pincode, such as 411045.",
     continue: "Continue",

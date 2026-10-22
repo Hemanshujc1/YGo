@@ -3,7 +3,7 @@ import type { HealthResponse } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatMoney, formatNumber, formatTime } from "@ygo/format";
 import { Button, Text, useSession } from "@ygo/mobile";
 import { Link, router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
@@ -50,7 +50,7 @@ function AreaLine() {
   const accountId = state.status === "signed-in" ? state.account.id : null;
   const [area, setArea] = useState<AreaState>({ kind: "checking" });
   const [attempt, setAttempt] = useState(0);
-  const asks = useRef(newestOnly()).current;
+  const [asks] = useState(newestOnly);
 
   useFocusEffect(
     useCallback(() => {

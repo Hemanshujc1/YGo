@@ -1,13 +1,13 @@
 import type { ErrorCode } from "@ygo/contracts";
 import { formatPhone } from "@ygo/format";
 import { Button, PhoneField, Text, useSession } from "@ygo/mobile";
-import { router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ChevronDown, Map, MapPin } from "../components/icons";
-import { joinOutcome, placeLabel, waitlistBody } from "../lib/location-flow";
+import { joinOutcome, placeLabel, typedPlace, waitlistBody } from "../lib/location-flow";
 import { strings } from "../strings";
 
 const words = strings.notServiceable;
@@ -24,6 +24,8 @@ export default function NotServiceable() {
   // Set before React re-renders, so a second tap never sends twice.
   const working = useRef(false);
 
+  // Opened without a pincode (a link, say): ask for one.
+  if (!typedPlace(pincode)) return <Redirect href="/location" />;
   const place = placeLabel(name ? { pincode, name } : { pincode });
 
   async function leaveNumber() {

@@ -12,7 +12,7 @@ export function TopBar({ title }: { title: string }) {
       {back && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={strings.account.back}
+          accessibilityLabel={strings.back}
           onPress={() => router.back()}
           className="size-12 items-center justify-center rounded-full active:bg-primary-subtle"
         >
