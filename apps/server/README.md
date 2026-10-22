@@ -63,6 +63,10 @@ You need Docker (Docker Desktop or OrbStack) for the database and local email in
 | `MAIL_FROM` | yes | sender email address for both providers |
 | `MAILPIT_URL` | with `MAILER=mailpit` | Mailpit HTTP base URL, e.g. `http://localhost:8025` |
 | `AWS_REGION` | with `MAILER=ses` | `ap-south-1` for the YGo deployment |
+| `PRODUCT_IMAGE_BUCKET` | with product image storage | private S3 bucket name; set together with the CloudFront domain |
+| `PRODUCT_IMAGE_CLOUDFRONT_DOMAIN` | with product image storage | CloudFront distribution hostname, without a scheme |
+| `S3_REGION` | no | `ap-south-1` |
+| `S3_ENDPOINT` | no | unset for AWS; set for an S3-compatible endpoint |
 | `HOST` | no | `127.0.0.1` |
 | `PORT` | no | `3000` |
 | `LOG_LEVEL` | no | `info` |
@@ -81,7 +85,7 @@ Generate a local secret with `openssl rand -hex 32` and put it in the ignored `.
 
 The tests connect to `postgres://ygo:ygo@localhost:5432/ygo`, the container above, to create that database. Point them elsewhere with `TEST_DATABASE_URL`. Its role must be able to create databases and the `postgis` extension, which is not a trusted extension: in practice a superuser, as the container's `ygo` is. CI sets it to its own PostGIS service. With no database reachable, the run stops within seconds with an error naming the address and the reason.
 
-The outside services are interfaces in `src/adapters/`, each with a local implementation for the tests: `FileStorage`, `Mailer`, `IdentityVerifier`, `PushSender`, `SmsSender` and `Clock`. The local `Clock` stands still until a test sets or advances it. Only `src/adapters/` may import `@aws-sdk/*` (ADR-0008).
+The outside services are interfaces in `src/adapters/`, each with a local implementation for the tests: `FileStorage`, `Mailer`, `IdentityVerifier`, `PushSender`, `SmsSender` and `Clock`. Product image storage accepts an injected write interface so tests use a recording fake. The local `Clock` stands still until a test sets or advances it. Only `src/adapters/` may import `@aws-sdk/*` (ADR-0008).
 
 ## Migrations
 
