@@ -85,7 +85,7 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
     if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
     const { code, fields, conflicts } = envelope.data.error;
-    return { ok: false, status, code, fields, ...(conflicts && { conflicts }) };
+    return { ok: false, status, code, fields, conflicts };
   }
 
   function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {
