@@ -5,6 +5,7 @@ import type { ProfileWords, SignInWords } from "@ygo/mobile";
 // one file (CONTEXT.md: every string externalised from day one).
 export const strings = {
   title: "YGo",
+  back: "Back",
   health: "Server health",
   checking: "Checking…",
   ok: "ok",
@@ -61,7 +62,6 @@ export const strings = {
   account: {
     open: "Account",
     title: "Account",
-    back: "Back",
     name: "Name",
     changeName: "Change name",
     email: "Email",
@@ -77,6 +77,45 @@ export const strings = {
       saving: "Saving…",
       cancel: "Cancel",
     },
+  },
+  // C15 Set location (#216). Area and street search come with #217, so only a pincode is typed.
+  location: {
+    title: "Where should shops deliver?",
+    useCurrent: "Use my current location",
+    finding: "Finding where you are",
+    offTitle: "Location is off for YGo",
+    offBody: "Turn it on in settings, or type your pincode below.",
+    openSettings: "Open settings",
+    notFound: "Couldn't find your pincode. Type it below.",
+    phoneOff: "Location is off on this phone. Turn it on and try again, or type your pincode below.",
+    pincodeLabel: "Pincode",
+    pincodeInvalid: "Enter a 6-digit pincode, such as 411045.",
+    continue: "Continue",
+    checking: "Checking…",
+    offline: "Could not check this pincode. Check your connection, then try again.",
+    notSaved: "This phone could not save your location. Try again.",
+  },
+  // The test home's location line (#216), until C04 Home replaces it.
+  area: {
+    checking: "Checking your area…",
+    delivering: (place: string) => `Delivering to ${place}`,
+    change: "Change location",
+    failed: "Couldn't check your area",
+    offline: "Check your connection, then try again.",
+    retry: "Try again",
+  },
+  // C03 Not serviceable yet (#216). "No answer" is C02's.
+  notServiceable: {
+    changeLabel: (place: string) => `${place}. Change location`,
+    title: "Not serviceable yet",
+    body: (place: string) => `YGo has started in a few areas. Shops near ${place} are not open on YGo yet.`,
+    ask: "Tell me when it opens here",
+    phoneLabel: "Phone number",
+    help: "Used only to tell you when shops open near you.",
+    leave: "Leave my number",
+    leaving: "Saving…",
+    thanks: "Thanks. We'll tell you when shops open near you.",
+    change: "Change location",
   },
   // The screen picker's own words (#155, Q3 and Q5).
   session: {

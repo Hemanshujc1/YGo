@@ -13,6 +13,15 @@
       ["expo-navigation-bar", { "enforceContrast": false }],
       ["expo-secure-store", { "configureAndroidBackup": true, "faceIDPermission": false }],
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "YGo uses your location to find your pincode, so it can show shops that deliver to you.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "motionUsagePermission": false
+        }
+      ],
+      [
         "expo-font",
         {
           "ios": {

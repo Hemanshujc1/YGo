@@ -1,15 +1,17 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { HealthResponse } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatMoney, formatNumber, formatTime } from "@ygo/format";
-import { Text } from "@ygo/mobile";
-import { Link } from "expo-router";
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Button, Text, useSession } from "@ygo/mobile";
+import { Link, router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "../api";
+import { api, session } from "../api";
+import { askArea, type AreaAnswer, newestOnly, placeLabel, stale } from "../lib/location-flow";
+import { savedPlace } from "../lib/saved-place";
 import { strings } from "../strings";
 
-// The scaffold screen: the server's health, the way to Account (C23), and the
+// The scaffold screen: the server's health, the way to Account (C23), where shops deliver (#216), and the
 // Inter review specimens (design system, section 10) until real screens replace it.
 
 const prices = [1250, 45.5, 12000, 8];
@@ -30,6 +32,69 @@ function Countdown() {
   const rest = String(seconds % 60).padStart(2, "0");
   return (
     <Text className="text-display font-semibold tabular-nums text-text">{`${minutes}:${rest}`}</Text>
+  );
+}
+
+type AreaState =
+  | { kind: "checking" }
+  | { kind: "served"; label: string }
+  | { kind: "failed"; answer: Extract<AreaAnswer, { kind: "offline" | "error" }> };
+
+/**
+ * Where shops deliver, asked again each time Home opens (#216, Q3): C15 when
+ * no place is saved, C03 when it isn't served. Leaving Home, or another
+ * account signing in, drops an answer still on its way.
+ */
+function AreaLine() {
+  const state = useSession(session);
+  const accountId = state.status === "signed-in" ? state.account.id : null;
+  const [area, setArea] = useState<AreaState>({ kind: "checking" });
+  const [attempt, setAttempt] = useState(0);
+  const [asks] = useState(newestOnly);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!accountId) return;
+      setArea({ kind: "checking" });
+      void (async () => {
+        const place = await asks.ask(savedPlace(accountId));
+        if (place === stale) return;
+        if (!place) return router.replace("/location");
+        const answer = await asks.ask(askArea(api, place.pincode));
+        if (answer === stale) return;
+        if (answer.kind === "served") setArea({ kind: "served", label: placeLabel({ ...place, name: answer.areaName }) });
+        else if (answer.kind === "not-served") router.replace({ pathname: "/not-serviceable", params: place });
+        else setArea({ kind: "failed", answer });
+      })();
+      return asks.drop;
+    }, [accountId, attempt, asks]),
+  );
+
+  const words = strings.area;
+  if (area.kind === "checking") {
+    return (
+      <View className="mt-4 min-h-12 flex-row items-center gap-2">
+        <ActivityIndicator className="text-primary" />
+        <Text className="text-body text-muted">{words.checking}</Text>
+      </View>
+    );
+  }
+  if (area.kind === "failed") {
+    return (
+      <View className="mt-4 items-start">
+        <Text className="text-body font-semibold text-text">{words.failed}</Text>
+        <Text className="text-secondary text-muted">
+          {area.answer.kind === "offline" ? words.offline : strings.errors[area.answer.code]}
+        </Text>
+        <Button label={words.retry} onPress={() => setAttempt((n) => n + 1)} variant="text" />
+      </View>
+    );
+  }
+  return (
+    <View className="mt-4 items-start">
+      <Text className="text-body tabular-nums text-text">{words.delivering(area.label)}</Text>
+      <Button label={words.change} onPress={() => router.push("/location")} variant="text" />
+    </View>
   );
 }
 
@@ -66,6 +131,7 @@ export default function Home() {
           <Text className="text-secondary font-medium text-text">{strings.account.open}</Text>
         </Pressable>
       </Link>
+      <AreaLine />
       <Text className="mt-6 text-secondary text-muted">{strings.health}</Text>
       <Text className="mt-1 text-body text-text">{answer}</Text>
 
