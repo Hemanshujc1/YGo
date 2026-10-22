@@ -56,3 +56,16 @@ export type Serviceability = z.infer<typeof Serviceability>;
 /** "Leave my number" on C03. A repeat for the same pincode replaces the saved phone. */
 export const WaitlistBody = z.strictObject({ pincode: Pincode, phone: Phone });
 export type WaitlistBody = z.infer<typeof WaitlistBody>;
+
+/** Admin's read-only captures, including pincodes that have since become serviceable (#218). */
+export const WaitlistEntry = z.strictObject({
+  accountId: z.uuid(),
+  accountName: z.string().nullable(),
+  accountEmail: z.string(),
+  phone: Phone,
+  pincode: Pincode,
+  savedAt: z.iso.datetime(),
+});
+export type WaitlistEntry = z.infer<typeof WaitlistEntry>;
+export const WaitlistResponse = z.strictObject({ entries: z.array(WaitlistEntry) });
+export type WaitlistResponse = z.infer<typeof WaitlistResponse>;

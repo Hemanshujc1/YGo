@@ -50,4 +50,6 @@ export {
   Serviceability,
   ServiceabilityQuery,
   WaitlistBody,
+  WaitlistEntry,
+  WaitlistResponse,
 } from "./areas";

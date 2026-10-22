@@ -25,6 +25,7 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createCategory: vi.fn(),
     editCategory: vi.fn(),
     listAreas: vi.fn(),
+    listWaitlist: vi.fn().mockResolvedValue({ ok: true, data: { entries: [] } }),
     createArea: vi.fn(),
     editArea: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
@@ -336,6 +337,46 @@ describe("Admin web", () => {
     const { router } = setup("/areas", {
       listAreas: vi.fn().mockResolvedValue({ ok: false, status: code === "FORBIDDEN" ? 403 : 401, code }),
     });
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  it("opens the read-only waitlist from navigation and formats captures in server order", async () => {
+    const entries = [
+      { accountId: founder.id, accountName: founder.name, accountEmail: founder.email, phone: "+919876543212", pincode: "411038", savedAt: "2030-01-01T00:00:00.000Z" },
+      { accountId: created.id, accountName: null, accountEmail: created.email, phone: "+919876543213", pincode: "400001", savedAt: "2029-12-31T00:00:00.000Z" },
+    ];
+    setup("/accounts", { listWaitlist: vi.fn().mockResolvedValue({ ok: true, data: { entries } }) });
+    await screen.findByText(founder.email);
+    fireEvent.click(screen.getByRole("link", { name: strings.waitlist }));
+    await screen.findByRole("heading", { name: strings.waitlist });
+    expect(screen.getByRole("link", { name: strings.waitlist }).getAttribute("aria-current")).toBe("page");
+    const rows = screen.getAllByRole("row");
+    expect(rows[1]?.textContent).toContain("98765 43212");
+    expect(rows[1]?.textContent).toContain("411038");
+    expect(rows[1]?.textContent).toContain(founder.name);
+    expect(rows[1]?.textContent).toContain(founder.email);
+    expect(rows[1]?.textContent).toContain("01/01/2030, 5:30 AM");
+    expect(rows[2]?.textContent).toContain(created.email);
+    expect(rows[2]?.textContent).not.toContain(created.name);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([strings.signOut]);
+  });
+
+  it("shows waitlist loading, an alert with retry, and the empty state", async () => {
+    let resolve!: (value: unknown) => void;
+    const listWaitlist = vi.fn().mockReturnValueOnce(new Promise((done) => { resolve = done; }))
+      .mockResolvedValue({ ok: true, data: { entries: [] } });
+    setup("/waitlist", { listWaitlist });
+    expect(screen.getByText(strings.waitlistLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.failed);
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText(strings.noWaitlist)).toBeTruthy();
+    expect(listWaitlist).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["UNAUTHENTICATED", "FORBIDDEN"])("redirects a %s waitlist session to sign-in", async (code) => {
+    const { router } = setup("/waitlist", { listWaitlist: vi.fn().mockResolvedValue({ ok: false, status: code === "FORBIDDEN" ? 403 : 401, code }) });
     await screen.findByRole("heading", { name: strings.signIn });
     expect(router.state.location.pathname).toBe("/sign-in");
   });

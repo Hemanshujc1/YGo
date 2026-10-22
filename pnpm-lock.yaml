@@ -178,6 +178,9 @@ importers:
       '@ygo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@ygo/format':
+        specifier: workspace:*
+        version: link:../../packages/format
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens

@@ -29,9 +29,9 @@ Every screen in every state is drawn in light and dark. Phones grow to fit their
 |---|---|---|---|
 | Customer app | 24 | 84 | C01–C26 (C12 and C13 were removed, and the gap is kept) |
 | Shopkeeper app | 45 | 174 | S01–S45 |
-| Admin web | 31 | each in all its states, 350 pages counting light and dark | A01–A31 |
+| Admin web | 32 | A01–A31: 350 exported pages counting light and dark; A32 specified below | A01–A32 |
 
-All 100 screens are **Ready** (the status column the skill template asks for). Six screens carry a "wording to confirm" marker in the exports. The owner settled that wording on 14 Oct 2026 (see [Reason lists](#reason-lists)), so the lists below replace whatever the exports show.
+All 101 screens are **Ready** (the status column the skill template asks for). A32 was added in #218 and is specified here rather than in the original exports. Six screens carry a "wording to confirm" marker in the exports. The owner settled that wording on 14 Oct 2026 (see [Reason lists](#reason-lists)), so the lists below replace whatever the exports show.
 
 Screen ids follow the order in which screens were drawn, not the order in which they are used. The tables below are in journey order.
 
@@ -206,7 +206,7 @@ The left nav has these groups:
 
 - Dashboard, Queues (with a count badge), Shops, Catalog, Orders
 - Money: Rate cards, Coupons, Price simulator, Statements, Payments and adjustments, Balances and limits
-- People and places: Customers, Admin accounts, Area Manager payouts, Areas
+- People and places: Customers, Admin accounts, Area Manager payouts, Areas, Waitlist
 
 **Every action that changes something asks for a reason** and is recorded (`ADM-10`).
 
@@ -218,6 +218,12 @@ The **Area Manager** state, drawn on most screens, uses the Area Manager shell (
 - see their own payout
 
 Everything else is absent or labelled "view only" (`ADM-12`).
+
+### Waitlist (Admin only)
+
+| Screen | Purpose and behaviour | States | PRD | Ticket |
+|---|---|---|---|---|
+| **A32 Waitlist** | Read-only `/waitlist`, reached from Waitlist in the left nav. Lists every saved capture, newest first: callback phone, pincode, account name/email and last capture time. Repeats replace the saved phone and time. Captures remain after their pincode becomes serviceable. No grouping, filters, export or Area Manager access | list, empty, loading, error with retry | DSC-5 | [#218](https://github.com/Hemanshujc1/YGo/issues/218) |
 
 ### Overview and shops
 

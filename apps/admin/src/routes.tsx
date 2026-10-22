@@ -16,6 +16,7 @@ import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
+import { Waitlist } from "./waitlist";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
@@ -55,6 +56,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
                 { path: "/accounts", label: strings.accounts },
                 { path: "/categories", label: strings.categories },
                 { path: "/areas", label: strings.areas },
+                { path: "/waitlist", label: strings.waitlist },
               ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={location.pathname === path ? "page" : undefined}
                 className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${location.pathname === path ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
                 {label}
@@ -309,6 +311,13 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listAreas(), (data) => data.areas),
       element: <Page protectedArea api={api}><Areas api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/waitlist",
+      loader: listLoader(() => api.listWaitlist(), (data) => data.entries),
+      element: <Page protectedArea api={api}><Waitlist /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.waitlistLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     { path: "*", element: <Page><Message>{strings.notFound}</Message></Page> },
