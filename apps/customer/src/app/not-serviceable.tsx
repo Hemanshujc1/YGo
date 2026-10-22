@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
-import { ChevronDown, Map, MapPin } from "../components/icons";
+import { ChevronDown, Map, MapPin, User } from "../components/icons";
 import { joinOutcome, placeLabel, typedPlace, waitlistBody } from "../lib/location-flow";
 import { strings } from "../strings";
 
@@ -60,6 +60,15 @@ export default function NotServiceable() {
             {place}
           </Text>
           <ChevronDown size={18} className="text-text" />
+        </Pressable>
+        {/* Until C04's tab bar, the only way to Account and Sign out from here (#216, Q13). */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.account.open}
+          onPress={() => router.push("/account")}
+          className="size-12 items-center justify-center rounded-full active:bg-primary-subtle"
+        >
+          <User className="text-text" />
         </Pressable>
       </View>
 
