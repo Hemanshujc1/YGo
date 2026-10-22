@@ -8,7 +8,7 @@
     "pnpm": ">=12.8.2 <13"
   },
   "scripts": {
-    "gate": "turbo run lint typecheck test build",
+    "gate": "python3 scripts/gate-lock.py turbo run lint typecheck test build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

@@ -12,6 +12,9 @@ Several coding agents and developers work on YGo at once. These rules keep their
 - Every agent uses the same GitHub account, so the pushed branch, not the assignee, shows that an issue is taken.
 - Each agent works only in its own worktree. Never edit files in a folder another agent is using.
 - After claiming, and before writing code, settle the ticket's assumptions and its done check with the owner (AGENTS.md, Writing code).
+- Before writing code, run `scripts/overlap.sh <paths the ticket will edit>` to see which in-flight branches touch the same files.
+  - Edits in separate places of one file, such as a new string or a new route line, go ahead; whoever merges second rebases. A conflicting `pnpm-lock.yaml` is rebuilt with `pnpm install` after the rebase.
+  - When both branches change the same function, component or migration, raise it with the owner in the first round: wait behind a GitHub "blocked by" link, or take another ticket. Shared packages follow section 3.
 - The PR body starts with `Closes #<n>` and follows `.github/pull_request_template.md`.
 
 ## 2. Slice vertically
