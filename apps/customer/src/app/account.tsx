@@ -2,9 +2,6 @@ import type { ApiResult } from "@ygo/api-client";
 import { type Account, ChangeNameBody, type ErrorCode } from "@ygo/contracts";
 import { formatPhone } from "@ygo/format";
 import { Button, edgeClass, FieldMessage, SupportEmail, Text, ThemePicker, useSession } from "@ygo/mobile";
-import { router } from "expo-router";
-import { ChevronLeft, LogOut, Mail, Phone, User } from "lucide-react-native";
-import { cssInterop } from "nativewind";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,12 +15,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session, supportEmail } from "../api";
+import { LogOut, Mail, Phone, User } from "../components/icons";
+import { TopBar } from "../components/top-bar";
 import { strings } from "../strings";
-
-// An icon takes its colour from a text class, such as `text-muted`.
-for (const icon of [ChevronLeft, LogOut, Mail, Phone, User]) {
-  cssInterop(icon, { className: { target: "style", nativeStyleToProp: { color: true } } });
-}
 
 const words = strings.account;
 
@@ -60,19 +54,7 @@ export default function AccountScreen() {
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
-      <View className="min-h-14 flex-row items-center gap-1 p-1">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={words.back}
-          onPress={() => router.back()}
-          className="size-12 items-center justify-center rounded-full active:bg-primary-subtle"
-        >
-          <ChevronLeft className="text-text" />
-        </Pressable>
-        <Text accessibilityRole="header" className="flex-1 px-1 text-headline font-semibold text-text">
-          {words.title}
-        </Text>
-      </View>
+      <TopBar title={words.title} />
 
       <ScrollView
         contentContainerClassName="gap-4 px-4 pt-2"
