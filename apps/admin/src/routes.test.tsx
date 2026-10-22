@@ -437,6 +437,38 @@ describe("Admin web", () => {
     expect(api.editMasterProduct).toHaveBeenLastCalledWith(apple.id, { active: true });
   });
 
+  it("keeps an inactive category selected on edit and sends a blank brand as none", async () => {
+    const pantry = { ...apple, categoryId: groceries.id, categoryName: groceries.name, categoryActive: false, categoryEffectiveActive: false };
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [pantry] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [groceries, stationery] } }),
+      editMasterProduct: vi.fn().mockResolvedValue({ ok: true, data: { ...pantry, brand: null } }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.editProduct(pantry.name) }));
+    expect(screen.getByLabelText<HTMLSelectElement>(strings.productCategory).value).toBe(groceries.id);
+    fireEvent.change(screen.getByLabelText(strings.productBrand), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveProduct }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.productSaved);
+    expect(api.editMasterProduct).toHaveBeenCalledWith(pantry.id, expect.objectContaining({ categoryId: groceries.id, brand: null }));
+  });
+
+  it("shows a failed deactivation once, inside the dialog", async () => {
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      editMasterProduct: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.deactivateProduct }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Discontinued" } });
+    fireEvent.click(screen.getByRole("dialog").querySelector("button") as HTMLButtonElement);
+    expect(await screen.findByText(strings.errors.UNAVAILABLE)).toBeTruthy();
+    expect(screen.getAllByText(strings.errors.UNAVAILABLE)).toHaveLength(1);
+  });
+
   it("shows product loading, empty and retryable error states", async () => {
     let resolve!: (value: unknown) => void;
     const listMasterProducts = vi.fn().mockReturnValueOnce(new Promise((done) => { resolve = done; }))

@@ -5,7 +5,6 @@ import {
   EditMasterProductBody,
   type Category,
   type MasterProduct,
-  type ProductBaseUnit,
 } from "@ygo/contracts";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
@@ -101,7 +100,7 @@ export function Products({ api }: { api: AdminApi }) {
     event.preventDefault();
     const body = {
       name,
-      brand: brand === "" ? null : brand,
+      brand: brand.trim() === "" ? null : brand,
       categoryId,
       baseUnit,
       classification: baseUnit === "each" ? "counted" as const : "measured" as const,
@@ -192,7 +191,7 @@ export function Products({ api }: { api: AdminApi }) {
       {screen === "list" && <button onClick={() => openForm(null)} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.newProduct}</button>}
     </div>
     {saved && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{saved}</p>}
-    {error && screen === "list" && <p role="alert" className="mb-4 text-danger">{error}</p>}
+    {error && screen === "list" && !deactivating && <p role="alert" className="mb-4 text-danger">{error}</p>}
     {screen === "form" ? <section className="max-w-xl rounded-xl border border-border bg-surface p-6">
       <h2 className="text-body font-semibold">{editing ? strings.editProduct(editing.name) : strings.newProduct}</h2>
       <form onSubmit={(event) => void save(event)} className="mt-6 space-y-4" noValidate>
@@ -216,9 +215,9 @@ export function Products({ api }: { api: AdminApi }) {
           {errors.baseUnit && <p role="alert" className="mt-1 text-secondary text-danger">{errors.baseUnit}</p>}
           {errors.classification && <p role="alert" className="mt-1 text-secondary text-danger">{errors.classification}</p>}</div>
         <div><label htmlFor="product-image" className="mb-2 block font-medium">{strings.productImage}</label>
-          <p className="mb-2 text-sm text-muted">{strings.productImageHint}</p>
+          <p className="mb-2 text-secondary text-muted">{strings.productImageHint}</p>
           {(preview || editing?.imageUrls?.[256]) && <img src={preview || editing?.imageUrls?.[256] || ""} alt={strings.productImage} className="mb-3 h-20 w-20 rounded-lg object-cover" />}
-          <input id="product-image" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void chooseImage(event)} className="block w-full text-sm" />
+          <input id="product-image" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void chooseImage(event)} className="block w-full text-secondary" />
           {errors.image && <p role="alert" className="mt-1 text-secondary text-danger">{errors.image}</p>}</div>
         {error && <p role="alert" className="text-danger">{error}</p>}
         <div className="flex gap-3"><button disabled={busy} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{busy ? strings.saving : strings.saveProduct}</button>
@@ -233,8 +232,8 @@ export function Products({ api }: { api: AdminApi }) {
           <div className="flex min-w-0 items-center gap-4">
             {product.imageUrls && <img src={product.imageUrls[256]} alt="" className="h-12 w-12 rounded-lg object-cover" />}
             <div><p className="font-medium">{product.name}{product.brand && <span className="ml-2 text-muted">{product.brand}</span>}</p>
-              <p className="text-sm text-muted">{product.categoryName}{product.categoryEffectiveActive ? "" : strings.productCategoryInactive} · {strings.productUnits[product.baseUnit]}</p>
-              <p className="text-sm text-muted">{!product.published ? strings.productImageIncomplete : product.active ? strings.productActive : strings.productInactive}</p>
+              <p className="text-secondary text-muted">{product.categoryName}{product.categoryEffectiveActive ? "" : strings.productCategoryInactive} · {strings.productUnits[product.baseUnit]}</p>
+              <p className="text-secondary text-muted">{!product.published ? strings.productImageIncomplete : product.active ? strings.productActive : strings.productInactive}</p>
             </div>
           </div>
           <div className="flex gap-2">
