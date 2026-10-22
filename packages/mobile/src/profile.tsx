@@ -3,13 +3,8 @@ import type { Account, ErrorCode, SetProfileBody } from "@ygo/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Keyboard, KeyboardAvoidingView, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  checkProfile,
-  firstWrong,
-  PHONE_PREFIX,
-  type ProfileProblems,
-  saveOutcome,
-} from "./profile-flow";
+import { PhoneField } from "./phone-field";
+import { checkProfile, firstWrong, type ProfileProblems, saveOutcome } from "./profile-flow";
 import { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 import { Text } from "./text";
 
@@ -67,7 +62,7 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [focused, setFocused] = useState<"name" | "phone" | null>(null);
+  const [nameFocused, setNameFocused] = useState(false);
   const [problems, setProblems] = useState<ProfileProblems | null>(null);
   const [busy, setBusy] = useState<"saving" | "signing-out" | null>(null);
   // Set before React re-renders, so a second tap never saves or signs out twice.
@@ -161,8 +156,8 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
               setName(text);
               setProblems((p) => p && { ...p, name: false, other: null });
             }}
-            onFocus={() => setFocused("name")}
-            onBlur={() => setFocused(null)}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => setNameFocused(false)}
             onSubmitEditing={() => phoneInput.current?.focus()}
             submitBehavior="submit"
             editable={!busy}
@@ -172,40 +167,23 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
             autoCorrect={false}
             returnKeyType="next"
             accessibilityLabel={words.nameLabel}
-            className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problems?.name === true, focused === "name")}`}
+            className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problems?.name === true, nameFocused)}`}
           />
           {problems?.name && <FieldMessage text={words.nameInvalid} />}
         </View>
 
-        <View>
-          <Text className="text-label font-medium text-text">{words.phoneLabel}</Text>
-          <View
-            className={`mt-2 h-[52px] flex-row items-center gap-2 rounded-input bg-surface px-4 ${edgeClass(phoneWrong !== null, focused === "phone")}`}
-          >
-            <Text className="text-body tabular-nums text-muted">{PHONE_PREFIX}</Text>
-            <TextInput
-              ref={phoneInput}
-              value={phone}
-              onChangeText={(text) => {
-                setPhone(text);
-                setProblems((p) => p && { ...p, phone: null, other: null });
-              }}
-              onFocus={() => setFocused("phone")}
-              onBlur={() => setFocused(null)}
-              onSubmitEditing={() => void save()}
-              editable={!busy}
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              autoComplete="tel"
-              returnKeyType="done"
-              accessibilityLabel={words.phoneLabel}
-              className="h-full flex-1 font-sans text-body tabular-nums text-text"
-            />
-          </View>
-          {phoneWrong && (
-            <FieldMessage text={phoneWrong === "in-use" ? words.errors.PHONE_IN_USE : words.phoneInvalid} />
-          )}
-        </View>
+        <PhoneField
+          ref={phoneInput}
+          label={words.phoneLabel}
+          value={phone}
+          onChangeText={(text) => {
+            setPhone(text);
+            setProblems((p) => p && { ...p, phone: null, other: null });
+          }}
+          onSubmitEditing={() => void save()}
+          editable={!busy}
+          message={phoneWrong && (phoneWrong === "in-use" ? words.errors.PHONE_IN_USE : words.phoneInvalid)}
+        />
 
         {phoneWrong === "in-use" && (
           <View className="gap-2 rounded-card border border-border bg-surface p-4">
