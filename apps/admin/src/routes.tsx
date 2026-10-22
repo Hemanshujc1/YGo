@@ -1,4 +1,4 @@
-import { createAdminApiClient } from "@ygo/api-client";
+import { createAdminApiClient, type ApiResult } from "@ygo/api-client";
 import { CreateAdminBody, RequestCodeBody, VerifyCodeBody, type Account } from "@ygo/contracts";
 import { useState, type FormEvent, type ReactNode } from "react";
 import {
@@ -14,6 +14,7 @@ import {
 } from "react-router";
 import { Areas } from "./areas";
 import { Categories } from "./categories";
+import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -50,15 +51,14 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
         {protectedArea && (
           <aside className="w-56 shrink-0 border-r border-border bg-surface px-4 py-8">
             <nav aria-label={strings.navigation}>
-              <Link to="/accounts" aria-current={location.pathname === "/accounts" ? "page" : undefined} className={`block rounded-lg p-3 font-medium ${location.pathname === "/accounts" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
-                {strings.accounts}
-              </Link>
-              <Link to="/categories" aria-current={location.pathname === "/categories" ? "page" : undefined} className={`mt-2 block rounded-lg p-3 font-medium ${location.pathname === "/categories" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
-                {strings.categories}
-              </Link>
-              <Link to="/areas" aria-current={location.pathname === "/areas" ? "page" : undefined} className={`mt-2 block rounded-lg p-3 font-medium ${location.pathname === "/areas" ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
-                {strings.areas}
-              </Link>
+              {[
+                { path: "/accounts", label: strings.accounts },
+                { path: "/categories", label: strings.categories },
+                { path: "/areas", label: strings.areas },
+              ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={location.pathname === path ? "page" : undefined}
+                className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${location.pathname === path ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
+                {label}
+              </Link>)}
             </nav>
           </aside>
         )}
@@ -169,12 +169,7 @@ function Accounts({ api }: { api: AdminApi }) {
     event.preventDefault();
     const parsed = CreateAdminBody.safeParse(fields);
     if (!parsed.success) {
-      const next: FieldErrors = {};
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0] as Field;
-        next[field] = strings.invalidFields[field];
-      }
-      setErrors(next);
+      setErrors(fieldMessages(parsed.error.issues.map((issue) => String(issue.path[0])), strings.invalidFields));
       return;
     }
     setBusy(true);
@@ -189,7 +184,7 @@ function Accounts({ api }: { api: AdminApi }) {
       } else if (result.code === "EMAIL_IN_USE") setErrors({ email: strings.errors.EMAIL_IN_USE });
       else if (result.code === "PHONE_IN_USE") setErrors({ phone: strings.errors.PHONE_IN_USE });
       else if (result.code === "VALIDATION_FAILED" && result.fields) {
-        setErrors(Object.fromEntries(result.fields.map((field) => [field, strings.invalidFields[field as Field]])));
+        setErrors(fieldMessages(result.fields, strings.invalidFields));
       } else setError(strings.errors[result.code]);
     } catch {
       setError(strings.failed);
@@ -282,42 +277,36 @@ function RouteError({ api }: { api?: AdminApi }) {
   </Page>;
 }
 
+function listLoader<T, List>(load: () => Promise<ApiResult<T>>, select: (data: T) => List) {
+  return async () => {
+    const result = await load();
+    if (result.ok) return select(result.data);
+    if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(result.code);
+  };
+}
+
 export function adminRoutes(api: AdminApi): RouteObject[] {
   return [
     { path: "/", loader: () => redirect("/accounts") },
     { path: "/sign-in", element: <SignIn api={api} /> },
     {
       path: "/accounts",
-      loader: async () => {
-        const result = await api.listAccounts();
-        if (result.ok) return result.data.accounts;
-        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
-        throw new Error(result.code);
-      },
+      loader: listLoader(() => api.listAccounts(), (data) => data.accounts),
       element: <Accounts api={api} />,
       hydrateFallbackElement: <Page>{strings.loading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/categories",
-      loader: async () => {
-        const result = await api.listCategories();
-        if (result.ok) return result.data.categories;
-        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
-        throw new Error(result.code);
-      },
+      loader: listLoader(() => api.listCategories(), (data) => data.categories),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/areas",
-      loader: async () => {
-        const result = await api.listAreas();
-        if (result.ok) return result.data.areas;
-        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
-        throw new Error(result.code);
-      },
+      loader: listLoader(() => api.listAreas(), (data) => data.areas),
       element: <Page protectedArea api={api}><Areas api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
       errorElement: <RouteError api={api} />,

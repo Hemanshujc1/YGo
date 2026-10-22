@@ -3,6 +3,7 @@ import { CreateAreaBody, EditAreaBody, type Area, type ErrorCode, type ErrorEnve
 import { useState, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
 import { ReasonDialog } from "./components/reason-dialog";
+import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -51,9 +52,8 @@ export function Areas({ api }: { api: AdminApi }) {
       setErrors({ pincodes: strings.errors.PINCODE_IN_OTHER_AREA });
       setConflicts(clashes ?? []);
     } else {
-      // The server names nested fields with dots, such as "pincodes.3".
-      const known = (fields ?? []).map((field) => field.replace(/\..*/, "")).filter((field): field is AreaField => field in strings.areaInvalidFields);
-      if (code === "VALIDATION_FAILED" && known.length) setErrors(Object.fromEntries(known.map((field) => [field, strings.areaInvalidFields[field]])));
+      const messages = fieldMessages(fields ?? [], strings.areaInvalidFields);
+      if (code === "VALIDATION_FAILED" && Object.keys(messages).length) setErrors(messages);
       else setError(strings.errors[code]);
     }
   }
@@ -84,10 +84,7 @@ export function Areas({ api }: { api: AdminApi }) {
     if (!parsed.success) {
       setConflicts([]);
       setError("");
-      setErrors(Object.fromEntries(parsed.error.issues.map((issue) => {
-        const field = issue.path[0] as AreaField;
-        return [field, strings.areaInvalidFields[field]];
-      })));
+      setErrors(fieldMessages(parsed.error.issues.map((issue) => String(issue.path[0])), strings.areaInvalidFields));
       return;
     }
     void send(() => editing
