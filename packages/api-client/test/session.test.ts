@@ -183,7 +183,7 @@ describe("each call", () => {
     const { client, calls } = setup((call) => {
       if (call.path === "/v1/auth/verify") return answer(200, pair(1));
       if (call.method === "GET") return answer(200, { addresses: [saved] });
-      if (call.method === "POST") return answer(200, saved);
+      if (call.method === "POST") return answer(201, saved);
       return answer(204);
     });
     await client.verifyCode(signIn);

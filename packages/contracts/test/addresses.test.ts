@@ -49,8 +49,8 @@ describe("SaveAddressBody", () => {
     expect(SaveAddressBody.parse({ ...home, flat: " Flat 4B, Sai Heights ", pincode: "411 045" })).toEqual(home);
   });
 
-  it("accepts a place without a pin", () => {
-    expect(SaveAddressBody.parse({ ...home, point: null }).point).toBeNull();
+  it("accepts a place without a pin or area line", () => {
+    expect(SaveAddressBody.parse({ ...home, point: null, areaLine: null })).toEqual({ ...home, point: null, areaLine: null });
   });
 
   it("refuses a missing flat or label, and a label it doesn't know", () => {
@@ -94,6 +94,11 @@ describe("SavedAddress", () => {
     expect(SavedAddress.parse({ ...home, id })).toEqual({ ...home, id });
     expect(SavedAddressesResponse.parse({ addresses: [{ ...home, id }] })).toEqual({ addresses: [{ ...home, id }] });
     expect(SavedAddressesResponse.parse({ addresses: [] })).toEqual({ addresses: [] });
+  });
+
+  it("lists a stored row that today's input rules would refuse", () => {
+    const old = { ...home, id, flat: "a".repeat(120), point: { latitude: 5.9, longitude: 73.7 } };
+    expect(SavedAddress.parse(old)).toEqual(old);
   });
 
   it("refuses a saved address without its id or with an extra field", () => {
