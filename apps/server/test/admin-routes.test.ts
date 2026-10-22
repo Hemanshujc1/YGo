@@ -249,3 +249,134 @@ describe("Admin routes and browser sessions", () => {
     expect((await accounts(accessToken(deriveKeys(secret), id, sessionId, clock.now()))).statusCode).toBe(403);
   });
 });
+
+describe("Areas, serviceability and the waitlist", () => {
+  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+  async function adminHeaders() {
+    return bearer((await signIn("/v1/admin/auth")).json().accessToken as string);
+  }
+  function areaActions() {
+    return database.pool.query<{ action: string; target_id: string; reason: string }>(
+      "SELECT action, target_id, reason FROM admin_actions WHERE target_type = 'area' ORDER BY created_at, action",
+    );
+  }
+
+  it("refuses signed-out callers and non-Admins", async () => {
+    const id = randomUUID();
+    const admin = [
+      { method: "GET" as const, url: "/v1/admin/areas" },
+      { method: "POST" as const, url: "/v1/admin/areas", payload: { name: "Kothrud", pincodes: ["411038"], reason: "Launch" } },
+      { method: "PATCH" as const, url: `/v1/admin/areas/${id}`, payload: { paused: true, reason: "Rain" } },
+    ];
+    const customer = [
+      { method: "GET" as const, url: "/v1/serviceability?pincode=411038" },
+      { method: "POST" as const, url: "/v1/waitlist", payload: { pincode: "411038", phone: "+919876543212" } },
+    ];
+    for (const request of [...admin, ...customer]) expect((await app.inject(request)).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    for (const request of admin) expect((await app.inject({ ...request, headers: bearer(mobile) })).statusCode).toBe(403);
+    expect((await database.pool.query("SELECT 1 FROM areas")).rowCount).toBe(0);
+    expect((await areaActions()).rowCount).toBe(0);
+  });
+
+  it("creates and edits Areas, refuses clashes and records each change once with its reason", async () => {
+    const headers = await adminHeaders();
+    const create = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload });
+    const edit = (id: string, payload: object) => app.inject({ method: "PATCH", url: `/v1/admin/areas/${id}`, headers, payload });
+
+    const kothrud = await create({ name: "  Kothrud ", pincodes: ["411038", "411029"], reason: "Launch area" });
+    expect(kothrud.statusCode).toBe(201);
+    expect(kothrud.json()).toMatchObject({ name: "Kothrud", pincodes: ["411029", "411038"], paused: false });
+    const kothrudId = kothrud.json().id as string;
+    expect((await create({ name: "KOTHRUD", pincodes: ["411001"], reason: "Again" })).json()).toEqual({ error: { code: "AREA_NAME_IN_USE" } });
+    expect((await create({ name: "Baner", pincodes: ["411045", "411038", "411029"], reason: "Next" })).json()).toEqual({
+      error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411029", areaName: "Kothrud" }, { pincode: "411038", areaName: "Kothrud" }] },
+    });
+    expect((await database.pool.query("SELECT 1 FROM areas WHERE name = 'Baner'")).rowCount).toBe(0);
+    const baner = await create({ name: "Baner", pincodes: ["411045"], reason: "Second area" });
+    expect(baner.statusCode).toBe(201);
+    const banerId = baner.json().id as string;
+
+    expect((await edit(banerId, { pincodes: ["411045", "411038"], reason: "Grow" })).json()).toEqual({
+      error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: "Kothrud" }] },
+    });
+    expect((await edit(kothrudId, { pincodes: ["411052", "411038"], reason: "Hand 411029 to Baner" })).json())
+      .toMatchObject({ pincodes: ["411038", "411052"] });
+    expect((await edit(banerId, { pincodes: ["411029", "411045"], reason: "Take 411029" })).json())
+      .toMatchObject({ pincodes: ["411029", "411045"] });
+    expect((await edit(kothrudId, { pincodes: ["411038", "411052"], reason: "No change" })).json())
+      .toMatchObject({ pincodes: ["411038", "411052"] });
+    expect((await edit(kothrudId, { paused: true, reason: "Heavy rain" })).json()).toMatchObject({ paused: true });
+    expect((await edit(kothrudId, { paused: true, reason: "Still raining" })).json()).toMatchObject({ paused: true });
+    expect((await edit(kothrudId, { paused: false, reason: "Rain stopped" })).json()).toMatchObject({ paused: false });
+    expect((await edit(randomUUID(), { paused: true, reason: "Missing" })).statusCode).toBe(404);
+
+    const listed = await app.inject({ method: "GET", url: "/v1/admin/areas", headers });
+    expect(listed.json().areas.map((row: { name: string; pincodes: string[] }) => [row.name, row.pincodes])).toEqual([
+      ["Baner", ["411029", "411045"]], ["Kothrud", ["411038", "411052"]],
+    ]);
+    expect((await areaActions()).rows.map((row) => [row.action, row.target_id, row.reason])).toEqual([
+      ["area.create", kothrudId, "Launch area"],
+      ["area.create", banerId, "Second area"],
+      ["area.edit_pincodes", kothrudId, "Hand 411029 to Baner"],
+      ["area.edit_pincodes", banerId, "Take 411029"],
+      ["area.pause", kothrudId, "Heavy rain"],
+      ["area.resume", kothrudId, "Rain stopped"],
+    ]);
+  });
+
+  it("keeps a pincode in one Area when two Admins save at once, without deadlocks", async () => {
+    const headers = await adminHeaders();
+    const create = (name: string) => app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name, pincodes: ["411038"], reason: "Launch" } });
+    const results = await Promise.all([create("Kothrud"), create("Karve Nagar")]);
+    const won = results.find((result) => result.statusCode === 201);
+    const lost = results.find((result) => result.statusCode === 409);
+    expect(lost?.json()).toEqual({ error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: won?.json().name }] } });
+    expect((await areaActions()).rowCount).toBe(1);
+
+    // Two Areas swapping pincodes at once: each is refused, naming the other, and neither deadlocks.
+    const baner = (await app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name: "Baner", pincodes: ["411045"], reason: "Launch" } })).json();
+    await database.pool.query("CREATE FUNCTION slow_pincode() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.3); RETURN NEW; END; $$");
+    await database.pool.query("CREATE TRIGGER test_slow_pincode BEFORE INSERT ON area_pincodes FOR EACH ROW EXECUTE FUNCTION slow_pincode()");
+    const swap = (id: string, pincode: string) => app.inject({ method: "PATCH", url: `/v1/admin/areas/${id}`, headers, payload: { pincodes: [pincode], reason: "Swap" } });
+    const swapped = await Promise.all([swap(won?.json().id as string, "411045"), swap(baner.id as string, "411038")]);
+    expect(swapped.map((result) => result.json())).toEqual([
+      { error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411045", areaName: "Baner" }] } },
+      { error: { code: "PINCODE_IN_OTHER_AREA", conflicts: [{ pincode: "411038", areaName: won?.json().name }] } },
+    ]);
+  });
+
+  it("answers serviceable only for a pincode in an active Area", async () => {
+    const headers = await adminHeaders();
+    clock.advance(30_000);
+    const customer = bearer((await signIn("/v1/auth", "customer@example.com")).json().accessToken as string);
+    const check = async (pincode: string) => (await app.inject({ method: "GET", url: `/v1/serviceability?pincode=${pincode}`, headers: customer })).json();
+    const id = (await app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name: "Kothrud", pincodes: ["411038"], reason: "Launch" } })).json().id as string;
+    const pause = (paused: boolean) => app.inject({ method: "PATCH", url: `/v1/admin/areas/${id}`, headers, payload: { paused, reason: "Weather" } });
+
+    expect(await check("411038")).toEqual({ serviceable: true, areaName: "Kothrud" });
+    expect(await check("400001")).toEqual({ serviceable: false });
+    expect(await check("12")).toEqual({ error: { code: "VALIDATION_FAILED" } });
+    expect((await pause(true)).statusCode).toBe(200);
+    expect(await check("411038")).toEqual({ serviceable: false });
+    const taken = await app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name: "Baner", pincodes: ["411038"], reason: "Take it" } });
+    expect(taken.json().error.code).toBe("PINCODE_IN_OTHER_AREA");
+    expect((await pause(false)).statusCode).toBe(200);
+    expect(await check("411038")).toEqual({ serviceable: true, areaName: "Kothrud" });
+  });
+
+  it("saves Leave my number, replaces the phone on a repeat and goes with the account", async () => {
+    const signed = (await signIn("/v1/auth", "customer@example.com")).json();
+    const leave = (phone: string) => app.inject({ method: "POST", url: "/v1/waitlist", headers: bearer(signed.accessToken as string), payload: { pincode: "400 001", phone } });
+    const rows = () => database.pool.query("SELECT pincode, phone, saved_at FROM waitlist_entries WHERE account_id = $1", [signed.account.id]);
+
+    expect((await leave("+919876543212")).statusCode).toBe(204);
+    expect((await rows()).rows).toEqual([{ pincode: "400001", phone: "+919876543212", saved_at: new Date("2030-01-01T00:00:00.000Z") }]);
+    clock.advance(60_000);
+    expect((await leave("+919876543213")).statusCode).toBe(204);
+    expect((await rows()).rows).toEqual([{ pincode: "400001", phone: "+919876543213", saved_at: new Date("2030-01-01T00:01:00.000Z") }]);
+    expect((await leave("12")).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
+    await database.pool.query("DELETE FROM accounts WHERE id = $1", [signed.account.id]);
+    expect((await rows()).rowCount).toBe(0);
+  });
+});

@@ -5,6 +5,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -57,6 +58,32 @@ export const categories = pgTable("categories", {
   uniqueIndex("categories_root_name_idx").on(sql`lower(${table.name})`).where(sql`${table.parentId} IS NULL`),
   uniqueIndex("categories_child_name_idx").on(table.parentId, sql`lower(${table.name})`).where(sql`${table.parentId} IS NOT NULL`),
 ]);
+// An Admin-named group of pincodes (#214). A paused Area takes no new orders but
+// keeps its pincodes, so no other Area can take them.
+export const areas = pgTable("areas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  paused: boolean("paused").notNull().default(false),
+}, (table) => [
+  check("areas_name_valid", sql`btrim(${table.name}) <> '' AND char_length(${table.name}) <= 100`),
+  uniqueIndex("areas_name_idx").on(sql`lower(${table.name})`),
+]);
+
+// The pincode is the key, so the database keeps each pincode in one Area at most.
+export const areaPincodes = pgTable("area_pincodes", {
+  pincode: text("pincode").primaryKey(),
+  areaId: uuid("area_id").notNull().references(() => areas.id),
+}, (table) => [index("area_pincodes_area_id_idx").on(table.areaId)]);
+
+// "Leave my number" from a pincode no active Area serves. One row per account
+// and pincode; a repeat replaces the phone and the time.
+export const waitlistEntries = pgTable("waitlist_entries", {
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  pincode: text("pincode").notNull(),
+  phone: text("phone").notNull(),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull(),
+}, (table) => [primaryKey({ columns: [table.accountId, table.pincode] })]);
+
 export const loginCodes = pgTable("login_codes", {
   email: text("email").primaryKey(),
   codeHash: text("code_hash").notNull(),
