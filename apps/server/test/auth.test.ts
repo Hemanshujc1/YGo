@@ -460,8 +460,10 @@ describe("sessions", () => {
     expect(await refreshed(h, t3)).toBe("UNAUTHENTICATED");
   });
 
-  it("gives every concurrent refresh of one token the same successor, with one rotation", async () => {
-    for (let run = 0; run < 20; run++) {
+  // One test per round, so each round gets its own timeout under a busy parallel gate (#210).
+  it.each(Array.from({ length: 20 }, (_, run) => run))(
+    "gives every concurrent refresh of one token the same successor, with one rotation (round %i)",
+    async (run) => {
       const h = harness();
       const s = await signIn(h);
       const answers = await Promise.all([1, 2, 3].slice(0, 2 + (run % 2)).map(() => refreshed(h, s.refreshToken)));
@@ -472,9 +474,8 @@ describe("sessions", () => {
       h.clock.advance(30_000);
       expect(await Promise.all([1, 2, 3].map(() => refreshed(h, s.refreshToken)))).toEqual([answers[0], answers[0], answers[0]]);
       expect(await tokenCount(s.sessionId)).toBe(2);
-      await h.app.close();
-    }
-  });
+    },
+  );
 
   it("answers a retry after a lost answer with the same successor", async () => {
     const h = harness();
