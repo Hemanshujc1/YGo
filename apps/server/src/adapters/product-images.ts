@@ -57,7 +57,7 @@ export function createS3ProductImageClient(options: { region: string; endpoint?:
 export function createProductImageStorage(options: {
   client: ProductImagePutClient;
   bucket: string;
-  cloudFrontDomain: string;
+  imageBaseUrl: string;
 }) {
   return {
     prepare(source: Buffer): Promise<PreparedProductImage> {
@@ -86,10 +86,11 @@ export function createProductImageStorage(options: {
       return { keys, urls: this.urls(keys) };
     },
     urls(keys: ProductImageVariants): ProductImageVariants {
+      const baseUrl = options.imageBaseUrl.replace(/\/+$/, "");
       return {
-        256: `https://${options.cloudFrontDomain}/${keys[256]}`,
-        512: `https://${options.cloudFrontDomain}/${keys[512]}`,
-        1024: `https://${options.cloudFrontDomain}/${keys[1024]}`,
+        256: `${baseUrl}/${keys[256]}`,
+        512: `${baseUrl}/${keys[512]}`,
+        1024: `${baseUrl}/${keys[1024]}`,
       };
     },
   };

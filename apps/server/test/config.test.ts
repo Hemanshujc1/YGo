@@ -33,7 +33,7 @@ describe("product image configuration", () => {
   const database = { DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo", AUTH_TOKEN_SECRET: "a-secret-that-is-long-enough-for-tests" };
   const mailpit = { MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
 
-  it("requires the bucket and CloudFront domain together", () => {
+  it("requires the bucket and a CloudFront or local image URL base together", () => {
     expect(() => loadConfig({ ...database, ...mailpit, PRODUCT_IMAGE_BUCKET: "ygo-images" })).toThrow();
     expect(() => loadConfig({ ...database, ...mailpit, PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com" })).toThrow();
     expect(loadConfig({
@@ -42,5 +42,26 @@ describe("product image configuration", () => {
       PRODUCT_IMAGE_BUCKET: "ygo-images",
       PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com",
     })).toMatchObject({ S3_REGION: "ap-south-1" });
+    expect(loadConfig({
+      ...database,
+      ...mailpit,
+      PRODUCT_IMAGE_BUCKET: "ygo-images",
+      PRODUCT_IMAGE_LOCAL_BASE_URL: "http://127.0.0.1:8333/ygo-images",
+      S3_ENDPOINT: "http://127.0.0.1:8333",
+    })).toMatchObject({ S3_REGION: "ap-south-1" });
+    expect(() => loadConfig({
+      ...database,
+      ...mailpit,
+      PRODUCT_IMAGE_BUCKET: "ygo-images",
+      PRODUCT_IMAGE_LOCAL_BASE_URL: "http://127.0.0.1:8333/ygo-images",
+    })).toThrow();
+    expect(() => loadConfig({
+      ...database,
+      ...mailpit,
+      PRODUCT_IMAGE_BUCKET: "ygo-images",
+      PRODUCT_IMAGE_LOCAL_BASE_URL: "http://127.0.0.1:8333/ygo-images",
+      PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com",
+      S3_ENDPOINT: "http://127.0.0.1:8333",
+    })).toThrow();
   });
 });

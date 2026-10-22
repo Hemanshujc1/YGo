@@ -18,6 +18,7 @@ const BaseEnv = z.object({
   MIN_SHOPKEEPER_VERSION: AppVersion.default("0.0.0"),
   PRODUCT_IMAGE_BUCKET: z.string().min(3).optional(),
   PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/i).optional(),
+  PRODUCT_IMAGE_LOCAL_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
   S3_REGION: z.string().min(1).default("ap-south-1"),
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
 });
@@ -34,11 +35,19 @@ const Env = z.discriminatedUnion("MAILER", [
     MAILPIT_URL: z.url({ protocol: /^https?$/ }),
   }),
 ]).superRefine((env, context) => {
-  if (Boolean(env.PRODUCT_IMAGE_BUCKET) !== Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN)) {
+  const hasCloudFront = Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN);
+  const hasLocalBase = Boolean(env.PRODUCT_IMAGE_LOCAL_BASE_URL);
+  if (Boolean(env.PRODUCT_IMAGE_BUCKET) !== (hasCloudFront || hasLocalBase)) {
     context.addIssue({
       code: "custom",
-      message: "PRODUCT_IMAGE_BUCKET and PRODUCT_IMAGE_CLOUDFRONT_DOMAIN must be configured together",
+      message: "PRODUCT_IMAGE_BUCKET and an image URL base must be configured together",
     });
+  }
+  if (hasCloudFront && hasLocalBase) {
+    context.addIssue({ code: "custom", message: "Choose either CloudFront or a local product image URL base" });
+  }
+  if (hasLocalBase && !env.S3_ENDPOINT) {
+    context.addIssue({ code: "custom", message: "PRODUCT_IMAGE_LOCAL_BASE_URL requires S3_ENDPOINT" });
   }
 });
 
