@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import type { Clock } from "./adapters/clock";
+import { withTransaction } from "./db";
 import { signedIn, type AuthKeys, type SignedIn } from "./tokens";
 
 /** Check current membership after validating the session on every Admin request. */
@@ -29,14 +30,9 @@ export async function withAdminTransaction<T>(
   reply: FastifyReply,
   save: (client: PoolClient) => Promise<T>,
 ): Promise<T | FastifyReply> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  return withTransaction(pool, async (client) => {
     const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [accountId]);
     if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
-    return await save(client);
-  } finally {
-    await client.query("ROLLBACK").catch(() => undefined);
-    client.release();
-  }
+    return save(client);
+  });
 }

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
+import pg, { type Pool, type PoolClient } from "pg";
 
 /** The one pool for the process (ADR-0004). No tables yet, and no migration runs here. */
 export function connectDatabase(url: string) {
@@ -23,3 +23,23 @@ export function connectDatabase(url: string) {
 }
 
 export type Database = ReturnType<typeof connectDatabase>;
+
+/**
+ * Runs `work` inside `BEGIN` on one pooled connection. Nothing commits on its
+ * own: `work` sends `COMMIT` itself before answering a success. Returning
+ * without it, as a refusal does, or throwing discards the work, and a throw
+ * still reaches the caller. A `ROLLBACK` is always sent afterwards; after a
+ * `COMMIT` it changes nothing (Postgres only warns that no transaction is in
+ * progress). The connection goes back to the pool, unless that `ROLLBACK`
+ * fails: then it may still hold an open transaction, so it is closed instead.
+ */
+export async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    return await work(client);
+  } finally {
+    const rollbackFailure = await client.query("ROLLBACK").then(() => undefined, (error: Error) => error);
+    client.release(rollbackFailure);
+  }
+}
