@@ -4,6 +4,7 @@ import {
   Area,
   AreasResponse,
   BrowserSession,
+  WaitlistResponse,
   CategoriesResponse,
   Category,
   type CreateAdminBody,
@@ -102,6 +103,10 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
   }
 
   return {
+    /** GET /v1/admin/waitlist: saved callback numbers for expansion planning. */
+    async listWaitlist(): Promise<ApiResult<WaitlistResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/waitlist"), WaitlistResponse);
+    },
     /** `POST /v1/admin/auth/code`: answers the same for Admin and non-Admin email. */
     async requestCode(body: RequestCodeBody): Promise<ApiResult<undefined>> {
       return empty(await send("POST", "/v1/admin/auth/code", body, { credentials: "include" }));

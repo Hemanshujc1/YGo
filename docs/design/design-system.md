@@ -295,6 +295,7 @@ Same tokens as mobile, separate components (ADR-0007, ADR-0009: no UI shared wit
 
 ### 7.1 Patterns the Admin screens added
 
+- **Waitlist** (A32, #218): title and a short expansion note above a read-only surface table. Columns: Callback phone, Pincode, Account, Last captured. Account shows name above email, or email alone when unnamed. Use the existing phone and Asia/Kolkata date/time formatters. Newest captures come first; equal times sort by pincode, then account id. Keep the Admin table's sunken header and horizontal scroll. Empty says "No waitlist captures yet."; loading says "Loading waitlist…"; failures use the shared alert and "Try again". No row actions or Area Manager entry.
 - **Filter chips with counts** (A02): "All 13", "Complaints 2", "Flagged bills 2" and so on. The counts add up to the All count.
 - **Queue item page** (A26 to A31): every queue item page has the same parts, in this order:
   1. a header with the item, its status pills and its age in the queue ("in the queue 3 d")

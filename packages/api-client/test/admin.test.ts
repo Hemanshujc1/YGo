@@ -63,6 +63,21 @@ function setup(handle: (call: Call) => Response | Promise<Response>) {
 }
 
 describe("Admin browser API client", () => {
+  it("lists waitlist captures with an Admin token and validates the response", async () => {
+    const entry = { accountId: account.id, accountName: null, accountEmail: account.email, phone: "+919876543211", pincode: "411038", savedAt: "2030-01-01T00:00:00.000Z" };
+    const { client, calls } = setup(({ path }) => path.endsWith("/refresh")
+      ? answer(200, { accessToken: "access-1", account })
+      : answer(200, { entries: [entry] }));
+    expect(await client.listWaitlist()).toEqual({ ok: true, data: { entries: [entry] } });
+    expect(calls[1]?.path).toBe("/v1/admin/waitlist");
+    expect(calls[1]?.method).toBe("GET");
+    expect(calls[1]?.headers.get("authorization")).toBe("Bearer access-1");
+    const malformed = setup(({ path }) => path.endsWith("/refresh")
+      ? answer(200, { accessToken: "access-1", account })
+      : answer(200, { entries: [{ ...entry, savedAt: "yesterday" }] }));
+    expect(await malformed.client.listWaitlist()).toEqual({ ok: false, status: 200, code: "INTERNAL" });
+  });
+
   it("requests a code and verifies without exposing a refresh token or app headers", async () => {
     const { client, calls } = setup(({ path }) =>
       path.endsWith("/code") ? answer(204) : answer(200, { accessToken: "access-1", account }),

@@ -10,6 +10,8 @@ import {
   Serviceability,
   ServiceabilityQuery,
   WaitlistBody,
+  type WaitlistEntry,
+  WaitlistResponse,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
@@ -45,6 +47,17 @@ const savePincodes = "INSERT INTO area_pincodes (pincode, area_id) SELECT unnest
 export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const response = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
+
+  app.get("/v1/admin/waitlist", { schema: { response: { 200: WaitlistResponse, ...response } } }, async (request, reply) => {
+    if (!await adminSignedIn(request, reply, auth)) return reply;
+    const rows = await pool.query<Omit<WaitlistEntry, "savedAt"> & { savedAt: Date }>(
+      `SELECT w.account_id AS "accountId", a.name AS "accountName", a.email AS "accountEmail",
+       w.phone, w.pincode, w.saved_at AS "savedAt"
+       FROM waitlist_entries w JOIN accounts a ON a.id = w.account_id
+       ORDER BY w.saved_at DESC, w.pincode, w.account_id`,
+    );
+    return { entries: rows.rows.map((row) => ({ ...row, savedAt: row.savedAt.toISOString() })) };
+  });
 
   app.get("/v1/admin/areas", { schema: { response: { 200: AreasResponse, ...response } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;

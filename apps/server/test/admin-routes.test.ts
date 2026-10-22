@@ -280,6 +280,7 @@ describe("Areas, serviceability and the waitlist", () => {
   it("refuses signed-out callers and non-Admins", async () => {
     const id = randomUUID();
     const admin = [
+      { method: "GET" as const, url: "/v1/admin/waitlist" },
       { method: "GET" as const, url: "/v1/admin/areas" },
       { method: "POST" as const, url: "/v1/admin/areas", payload: { name: "Kothrud", pincodes: ["411038"], reason: "Launch" } },
       { method: "PATCH" as const, url: `/v1/admin/areas/${id}`, payload: { paused: true, reason: "Rain" } },
@@ -394,6 +395,39 @@ describe("Areas, serviceability and the waitlist", () => {
     expect((await leave("12")).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
     await database.pool.query("DELETE FROM accounts WHERE id = $1", [signed.account.id]);
     expect((await rows()).rowCount).toBe(0);
+  });
+
+  it("lists all captures newest first, with stable ties, current account details and no read audit", async () => {
+    const headers = await adminHeaders();
+    const list = () => app.inject({ method: "GET", url: "/v1/admin/waitlist", headers });
+    expect((await list()).json()).toEqual({ entries: [] });
+    const mobile = (await signIn("/v1/auth", "customer@example.com")).json();
+    const leave = (phone: string) => app.inject({ method: "POST", url: "/v1/waitlist", headers: bearer(mobile.accessToken), payload: { pincode: "411038", phone } });
+    expect((await leave("+919876543212")).statusCode).toBe(204);
+    const first = "00000000-0000-4000-8000-000000000001";
+    const second = "00000000-0000-4000-8000-000000000002";
+    await database.pool.query("INSERT INTO accounts (id, email, name) VALUES ($1, 'first@example.com', 'First'), ($2, 'second@example.com', NULL)", [first, second]);
+    await database.pool.query(
+      `INSERT INTO waitlist_entries (account_id, pincode, phone, saved_at) VALUES
+       ($1, '400001', '+919876543214', $3), ($2, '400001', '+919876543215', $3), ($1, '400002', '+919876543216', $3)`,
+      [first, second, clock.now()],
+    );
+    clock.advance(60_000);
+    expect((await leave("+919876543213")).statusCode).toBe(204);
+    const area = await app.inject({ method: "POST", url: "/v1/admin/areas", headers, payload: { name: "Kothrud", pincodes: ["411038"], reason: "Expansion" } });
+    expect(area.statusCode).toBe(201);
+    const actions = (await database.pool.query("SELECT * FROM admin_actions")).rows;
+    const listed = await list();
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({ entries: [
+      { accountId: mobile.account.id, accountName: null, accountEmail: "customer@example.com", phone: "+919876543213", pincode: "411038", savedAt: "2030-01-01T00:01:00.000Z" },
+      { accountId: first, accountName: "First", accountEmail: "first@example.com", phone: "+919876543214", pincode: "400001", savedAt: "2030-01-01T00:00:00.000Z" },
+      { accountId: second, accountName: null, accountEmail: "second@example.com", phone: "+919876543215", pincode: "400001", savedAt: "2030-01-01T00:00:00.000Z" },
+      { accountId: first, accountName: "First", accountEmail: "first@example.com", phone: "+919876543216", pincode: "400002", savedAt: "2030-01-01T00:00:00.000Z" },
+    ] });
+    expect((await database.pool.query("SELECT * FROM admin_actions")).rows).toEqual(actions);
+    await database.pool.query("DELETE FROM admin_memberships");
+    expect((await list()).statusCode).toBe(403);
   });
 });
 
