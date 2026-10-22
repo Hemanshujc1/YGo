@@ -159,8 +159,7 @@ export function Categories({ api }: { api: AdminApi }) {
       </form>
     </section>}
     {screen === "deactivate" && editing && <ReasonDialog title={strings.deactivateCategoryTitle(editing.name)} confirmLabel={strings.confirmDeactivate} danger
-      busy={busy} reasonError={errors.reason} error={error} onConfirm={deactivate} onCancel={() => setScreen("list")}>
-      {children(editing.id).length > 0 && strings.deactivateParentWarning}
-    </ReasonDialog>}
+      note={children(editing.id).length > 0 ? strings.deactivateParentWarning : undefined}
+      busy={busy} reasonError={errors.reason} error={error} onConfirm={deactivate} onCancel={() => setScreen("list")} />}
   </>;
 }

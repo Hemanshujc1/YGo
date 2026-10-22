@@ -14,7 +14,8 @@ const byName = (a: Area, b: Area) => a.name.localeCompare(b.name, undefined, { s
 
 export function Areas({ api }: { api: AdminApi }) {
   const loaded = useLoaderData() as Area[];
-  const [areas, setAreas] = useState(loaded);
+  // Sorted here too, so a save never reorders rows the server sorted differently.
+  const [areas, setAreas] = useState(() => [...loaded].sort(byName));
   const [editing, setEditing] = useState<Area | null>(null);
   const [screen, setScreen] = useState<"list" | "form" | "pause">("list");
   const [name, setName] = useState("");
@@ -49,9 +50,12 @@ export function Areas({ api }: { api: AdminApi }) {
     else if (code === "PINCODE_IN_OTHER_AREA") {
       setErrors({ pincodes: strings.errors.PINCODE_IN_OTHER_AREA });
       setConflicts(clashes ?? []);
-    } else if (code === "VALIDATION_FAILED" && fields?.length) {
-      setErrors(Object.fromEntries(fields.map((field) => [field, strings.areaInvalidFields[field as AreaField]])));
-    } else setError(strings.errors[code]);
+    } else {
+      // The server names nested fields with dots, such as "pincodes.3".
+      const known = (fields ?? []).map((field) => field.replace(/\..*/, "")).filter((field): field is AreaField => field in strings.areaInvalidFields);
+      if (code === "VALIDATION_FAILED" && known.length) setErrors(Object.fromEntries(known.map((field) => [field, strings.areaInvalidFields[field]])));
+      else setError(strings.errors[code]);
+    }
   }
 
   async function send(request: () => ReturnType<AdminApi["editArea"]>) {
@@ -79,6 +83,7 @@ export function Areas({ api }: { api: AdminApi }) {
       : CreateAreaBody.safeParse({ name, pincodes: list, reason });
     if (!parsed.success) {
       setConflicts([]);
+      setError("");
       setErrors(Object.fromEntries(parsed.error.issues.map((issue) => {
         const field = issue.path[0] as AreaField;
         return [field, strings.areaInvalidFields[field]];
@@ -93,7 +98,10 @@ export function Areas({ api }: { api: AdminApi }) {
   function changePaused(text: string) {
     if (!editing) return;
     const parsed = EditAreaBody.safeParse({ paused: !editing.paused, reason: text });
-    if (!parsed.success) return setErrors({ reason: strings.areaInvalidFields.reason });
+    if (!parsed.success) {
+      setError("");
+      return setErrors({ reason: strings.areaInvalidFields.reason });
+    }
     void send(() => api.editArea(editing.id, parsed.data));
   }
 
@@ -146,8 +154,7 @@ export function Areas({ api }: { api: AdminApi }) {
     </section>}
     {screen === "pause" && editing && <ReasonDialog title={editing.paused ? strings.resumeAreaTitle(editing.name) : strings.pauseAreaTitle(editing.name)}
       confirmLabel={editing.paused ? strings.confirmResume : strings.confirmPause} danger={!editing.paused}
-      busy={busy} reasonError={errors.reason} error={error} onConfirm={changePaused} onCancel={() => setScreen("list")}>
-      {!editing.paused && strings.pauseAreaNote}
-    </ReasonDialog>}
+      note={editing.paused ? undefined : strings.pauseAreaNote}
+      busy={busy} reasonError={errors.reason} error={error} onConfirm={changePaused} onCancel={() => setScreen("list")} />}
   </>;
 }

@@ -206,7 +206,7 @@ describe("Admin web", () => {
   });
 
   it("lists Areas A to Z with their pincodes and a Paused label", async () => {
-    setup("/areas", { listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [aundh, kothrud] } }) });
+    setup("/areas", { listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud, aundh] } }) });
     await screen.findByRole("heading", { name: strings.areas });
     expect(screen.getByRole("link", { name: strings.areas }).getAttribute("aria-current")).toBe("page");
     expect(screen.getAllByRole("list", { name: strings.areaPincodes }).map((list) => list.textContent)).toEqual(["411007411027", "411038"]);
@@ -255,7 +255,9 @@ describe("Admin web", () => {
   it("edits an Area's pincodes starting from its current list", async () => {
     const api = {
       listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud] } }),
-      editArea: vi.fn().mockResolvedValue({ ok: true, data: { ...kothrud, pincodes: ["411038", "411052"] } }),
+      editArea: vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 400, code: "VALIDATION_FAILED", fields: ["pincodes.1"] })
+        .mockResolvedValueOnce({ ok: true, data: { ...kothrud, pincodes: ["411038", "411052"] } }),
     };
     setup("/areas", api);
     fireEvent.click(await screen.findByRole("button", { name: strings.editPincodes(kothrud.name) }));
@@ -269,6 +271,8 @@ describe("Admin web", () => {
     expect(api.editArea).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Extend to Warje" } });
     fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
+    expect(await screen.findByText(strings.areaInvalidFields.pincodes)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.saveArea }));
     expect((await screen.findByRole("status")).textContent).toBe(strings.areaSaved);
     expect(api.editArea).toHaveBeenCalledWith(kothrud.id, { pincodes: ["411038", "411052"], reason: "Extend to Warje" });
     expect(screen.getByRole("list", { name: strings.areaPincodes }).textContent).toBe("411038411052");
@@ -280,6 +284,7 @@ describe("Admin web", () => {
       editArea: vi.fn()
         .mockResolvedValueOnce({ ok: true, data: { ...kothrud, paused: true } })
         .mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" })
+        .mockResolvedValueOnce({ ok: false, status: 400, code: "VALIDATION_FAILED", fields: ["paused"] })
         .mockResolvedValueOnce({ ok: true, data: kothrud }),
     };
     setup("/areas", api);
@@ -301,6 +306,14 @@ describe("Admin web", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
     expect(await screen.findByText(strings.errors.UNAVAILABLE)).toBeTruthy();
     expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: " " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    expect(await screen.findByText(strings.areaInvalidFields.reason)).toBeTruthy();
+    expect(screen.queryByText(strings.errors.UNAVAILABLE)).toBeNull();
+    expect(api.editArea).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Roads open" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
+    expect(await screen.findByText(strings.errors.VALIDATION_FAILED)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.confirmResume }));
     await waitFor(() => expect(screen.queryByText(strings.areaPaused)).toBeNull());
     expect(api.editArea).toHaveBeenLastCalledWith(kothrud.id, { paused: false, reason: "Roads open" });
