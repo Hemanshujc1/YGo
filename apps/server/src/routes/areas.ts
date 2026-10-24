@@ -15,7 +15,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
-import { deriveKeys, signedIn } from "../tokens";
+import { deriveKeys, mobileSignedIn } from "../tokens";
 
 const areaSql = `SELECT a.id, a.name, a.paused,
   ARRAY(SELECT p.pincode FROM area_pincodes p WHERE p.area_id = a.id ORDER BY p.pincode) AS pincodes
@@ -116,8 +116,8 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
     });
   });
 
-  app.get("/v1/serviceability", { schema: { querystring: ServiceabilityQuery, response: { 200: Serviceability, 400: ErrorEnvelope, 401: ErrorEnvelope } } }, async (request, reply) => {
-    if (!await signedIn(request, reply, auth)) return reply;
+  app.get("/v1/serviceability", { schema: { querystring: ServiceabilityQuery, response: { 200: Serviceability, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, async (request, reply) => {
+    if (!await mobileSignedIn(request, reply, auth)) return reply;
     const { pincode } = request.query as ServiceabilityQuery;
     const row = await pool.query<{ name: string }>(
       "SELECT a.name FROM area_pincodes p JOIN areas a ON a.id = p.area_id WHERE p.pincode = $1 AND NOT a.paused",
@@ -127,8 +127,8 @@ export function registerAreaRoutes(app: FastifyInstance, { pool, clock, secret }
   });
 
   // Saved for any pincode, without a serviceability check (owner decision on #214).
-  app.post("/v1/waitlist", { schema: { body: WaitlistBody, response: { 400: ErrorEnvelope, 401: ErrorEnvelope } } }, async (request, reply) => {
-    const who = await signedIn(request, reply, auth);
+  app.post("/v1/waitlist", { schema: { body: WaitlistBody, response: { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { pincode, phone } = request.body as WaitlistBody;
     await pool.query(

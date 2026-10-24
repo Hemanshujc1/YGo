@@ -124,3 +124,17 @@ export async function signedIn(
   reply.code(401).send({ error: { code: "UNAUTHENTICATED" } });
   return undefined;
 }
+
+/** Customer and shared mobile account routes accept only mobile sessions (#246). */
+export async function mobileSignedIn(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  auth: { pool: Pool; clock: Clock; keys: AuthKeys },
+): Promise<SignedIn | undefined> {
+  const who = await signedIn(request, reply, auth);
+  if (!who) return undefined;
+  const session = await auth.pool.query("SELECT 1 FROM sessions WHERE id = $1 AND kind = 'mobile'", [who.sessionId]);
+  if (session.rowCount) return who;
+  reply.code(403).send({ error: { code: "FORBIDDEN" } });
+  return undefined;
+}

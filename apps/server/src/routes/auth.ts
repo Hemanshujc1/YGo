@@ -22,7 +22,7 @@ import {
   deriveKeys,
   digest,
   sameDigest,
-  signedIn,
+  mobileSignedIn,
   successorToken,
 } from "../tokens";
 
@@ -443,9 +443,9 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
 
   app.post(
     "/v1/auth/sign-out",
-    { schema: { response: { 401: ErrorEnvelope } } },
+    { schema: { response: { 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await signedIn(request, reply, { pool, clock, keys });
+      const who = await mobileSignedIn(request, reply, { pool, clock, keys });
       if (!who) return reply;
       await pool.query("DELETE FROM sessions WHERE id = $1", [who.sessionId]);
       return (reply as FastifyReply).code(204).send();
