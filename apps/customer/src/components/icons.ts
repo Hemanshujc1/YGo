@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronLeft, LogOut, Mail, Map, MapPin, Phone, Search, User } from "lucide-react-native";
+import { Briefcase, ChevronDown, ChevronLeft, House, LogOut, Mail, Map, MapPin, Phone, Search, User } from "lucide-react-native";
 import { cssInterop } from "nativewind";
 
 // An icon takes its colour from a text class, such as `text-muted`.
-for (const icon of [ChevronDown, ChevronLeft, LogOut, Mail, Map, MapPin, Phone, Search, User]) {
+for (const icon of [Briefcase, ChevronDown, ChevronLeft, House, LogOut, Mail, Map, MapPin, Phone, Search, User]) {
   cssInterop(icon, { className: { target: "style", nativeStyleToProp: { color: true } } });
 }
 
-export { ChevronDown, ChevronLeft, LogOut, Mail, Map, MapPin, Phone, Search, User };
+export { Briefcase, ChevronDown, ChevronLeft, House, LogOut, Mail, Map, MapPin, Phone, Search, User };

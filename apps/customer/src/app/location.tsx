@@ -1,7 +1,7 @@
-import { Button, edgeClass, FieldMessage, Text } from "@ygo/mobile";
-import type { AddressPoint } from "@ygo/contracts";
+import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
+import type { AddressLabel, AddressPoint, SavedAddress } from "@ygo/contracts";
 import * as Location from "expo-location";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useNavigation } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,11 +15,23 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MapPin, Search } from "../components/icons";
+import { api, session } from "../api";
+import { Briefcase, House, MapPin, Search } from "../components/icons";
 import { TopBar } from "../components/top-bar";
+import { goHome } from "../lib/go-home";
 import { findPlace, type Locator, newestOnly, refusedSearch, stale } from "../lib/location-flow";
 import { searchPlaces, type Spot } from "../lib/map-place";
 import { phoneGeocoder } from "../lib/phone-geocoder";
+import {
+  addressLine,
+  afterLoad,
+  chooseAddress,
+  loadAddresses,
+  removeSaved,
+  type SavedList,
+  withoutAddress,
+} from "../lib/saved-addresses";
+import { savePlace } from "../lib/saved-place";
 import { strings } from "../strings";
 
 const words = strings.location;
@@ -31,12 +43,21 @@ const locator: Locator = {
   position: async () => (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })).coords,
 };
 
+// A saved row's icon; its title is Confirm's word for the label (#243, Q2).
+const labelIcon = { home: House, work: Briefcase, other: MapPin } satisfies Record<AddressLabel, unknown>;
+
 /** What C15 shows under the field: a lookup found nothing, or a typed pincode broke the rule. */
 type Problem = "invalid" | "not-found" | "phone-off" | "no-results";
 
-/** C15 Set location (#216, #242): the phone's current location, or a search; each ends on Confirm location. */
+/**
+ * C15 Set location (#216, #242, #243): the phone's current location or a
+ * search, each ending on Confirm location; or a saved address, which goes
+ * straight Home.
+ */
 export default function SetLocation() {
   const insets = useSafeAreaInsets();
+  const state = useSession(session);
+  const navigation = useNavigation();
   const [finding, setFinding] = useState(false);
   const [locationOff, setLocationOff] = useState(false);
   const [text, setText] = useState("");
@@ -53,6 +74,28 @@ export default function SetLocation() {
     useCallback(() => {
       leaving.current = false;
     }, []),
+  );
+
+  const [saved, setSaved] = useState<SavedList>({ kind: "loading" });
+  const [loads, setLoads] = useState(0);
+  const [lists] = useState(newestOnly);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [notRemoved, setNotRemoved] = useState<string | null>(null);
+  const [notChosen, setNotChosen] = useState(false);
+  // Set before React re-renders, so one Remove runs at a time.
+  const removingNow = useRef(false);
+
+  // Loaded each time C15 shows (#243, Q5). A list already shown stays while it reloads, and if the reload fails.
+  useFocusEffect(
+    useCallback(() => {
+      setNotChosen(false);
+      setSaved((current) => (current.kind === "loaded" ? current : { kind: "loading" }));
+      void lists.ask(loadAddresses(api)).then((found) => {
+        if (found === stale) return;
+        setSaved((current) => afterLoad(current, found));
+      });
+      return lists.drop;
+    }, [lists, loads]),
   );
 
   // Leaving drops any answer still on its way (#216, Q3).
@@ -120,6 +163,38 @@ export default function SetLocation() {
     if (found === stale) return;
     setResults(found);
     stop(found.length ? null : "no-results");
+  }
+
+  /** A saved row becomes the chosen place and Home checks it, with no Confirm (#243, Q3). */
+  async function choose(address: SavedAddress) {
+    if (leaving.current || state.status !== "signed-in") return;
+    const accountId = state.account.id;
+    leaving.current = true;
+    setNotChosen(false);
+    const done = await chooseAddress((place) => savePlace(accountId, place), address);
+    if (done === "done") return goHome(navigation);
+    leaving.current = false;
+    setNotChosen(true);
+  }
+
+  /**
+   * Removes at once, with no confirm and no retry (#243, Q4). The phone's
+   * chosen place stays. Not while a row is being chosen, so the place going
+   * Home is never one just removed.
+   */
+  async function remove(id: string) {
+    if (removingNow.current || leaving.current) return;
+    removingNow.current = true;
+    setNotRemoved(null);
+    setNotChosen(false);
+    setRemoving(id);
+    const done = await removeSaved(api, id);
+    removingNow.current = false;
+    setRemoving(null);
+    if (done === "failed") return setNotRemoved(id);
+    // A reload still on its way was asked before the remove and would bring the row back.
+    lists.drop();
+    setSaved((current) => withoutAddress(current, id));
   }
 
   const message =
@@ -224,6 +299,78 @@ export default function SetLocation() {
                   </View>
                 </Pressable>
               ))}
+            </View>
+          )}
+
+          {(saved.kind !== "loaded" || saved.addresses.length > 0) && (
+            <View className="gap-2">
+              {/* The heading waits for the list, so an account with none never shows it (#243, Q5). */}
+              {saved.kind === "loaded" && (
+                <Text accessibilityRole="header" className="text-label font-semibold text-text">
+                  {words.savedTitle}
+                </Text>
+              )}
+              {saved.kind === "loading" ? (
+                <View className="min-h-12 flex-row items-center gap-2">
+                  <ActivityIndicator className="text-primary" />
+                  <Text className="text-body text-muted">{words.savedLoading}</Text>
+                </View>
+              ) : saved.kind === "failed" ? (
+                <View className="items-start">
+                  <Text className="text-body text-muted">{words.savedFailed}</Text>
+                  <Button label={words.savedRetry} onPress={() => setLoads((n) => n + 1)} variant="text" />
+                </View>
+              ) : (
+                <View className="overflow-hidden rounded-card border border-border bg-surface">
+                  {saved.addresses.map((address, i) => {
+                    const Icon = labelIcon[address.label];
+                    const title = strings.confirm[address.label];
+                    const line = addressLine(address);
+                    const busy = removing === address.id;
+                    return (
+                      <View key={address.id} className={i > 0 ? "border-t border-border" : ""}>
+                        <View className="min-h-14 flex-row items-center">
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityState={{ disabled: busy }}
+                            disabled={busy}
+                            onPress={() => void choose(address)}
+                            className="flex-1 flex-row items-center gap-3 py-3 pl-4 pr-2 active:bg-primary-subtle"
+                          >
+                            <Icon size={20} className="text-muted" />
+                            <View className="flex-1">
+                              <Text className="text-body font-medium text-text">{title}</Text>
+                              <Text className="text-secondary text-muted">{line}</Text>
+                            </View>
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={words.removeLabel(`${title}, ${line}`)}
+                            accessibilityState={{ disabled: removing !== null, busy }}
+                            disabled={removing !== null}
+                            onPress={() => void remove(address.id)}
+                            className="min-h-12 justify-center px-4 active:bg-danger-subtle"
+                          >
+                            {busy ? (
+                              <ActivityIndicator className="text-danger" />
+                            ) : (
+                              <Text className={`text-label font-medium ${removing ? "text-disabled-text" : "text-danger"}`}>
+                                {words.remove}
+                              </Text>
+                            )}
+                          </Pressable>
+                        </View>
+                        {notRemoved === address.id && (
+                          <View className="px-4 pb-3">
+                            <FieldMessage text={words.notRemoved} />
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+              {notChosen && <FieldMessage text={strings.confirm.notSaved} />}
             </View>
           )}
         </ScrollView>
