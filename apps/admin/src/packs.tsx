@@ -77,8 +77,8 @@ export function Packs({ api, product, onBack }: { api: AdminApi; product: Master
     setError("");
     try {
       const result = editing
-        ? await api.editPack(product.id, editing.id, EditPackBody.parse(parsed.data))
-        : await api.createPack(product.id, CreatePackBody.parse(parsed.data));
+        ? await api.editPack(product.id, editing.id, parsed.data as EditPackBody)
+        : await api.createPack(product.id, parsed.data as CreatePackBody);
       if (result.ok) finish(result.data, strings.packSaved);
       else fail(result.code, result.fields);
     } catch {
@@ -139,8 +139,8 @@ export function Packs({ api, product, onBack }: { api: AdminApi; product: Master
         {packs.length === 0 ? <p className="text-muted">{strings.noPacks}</p> : <ul>{packs.map((pack) => <li key={pack.id} className="flex flex-wrap items-center justify-between gap-4 border-t border-border py-4">
           <div><p className="font-medium">{pack.quantity} {product.baseUnit}</p>
             <p className="text-secondary text-muted">{pack.barcode ?? strings.noBarcode} · {pack.active ? strings.packActive : strings.packInactive}</p></div>
-          <div className="flex gap-2"><button onClick={() => openForm(pack)} className="h-10 rounded-lg border border-border-strong px-3">{strings.editPack(pack.quantity)}</button>
-            <button onClick={() => pack.active ? (setDeactivating(pack), setErrors({}), setError("")) : void changeActive(pack, true)} className="h-10 rounded-lg border border-border-strong px-3">
+          <div className="flex gap-2"><button disabled={busy} onClick={() => openForm(pack)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{strings.editPack(pack.quantity)}</button>
+            <button disabled={busy} onClick={() => pack.active ? (setDeactivating(pack), setErrors({}), setError("")) : void changeActive(pack, true)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">
               {pack.active ? strings.deactivatePack(pack.quantity) : strings.reactivatePack(pack.quantity)}</button></div>
         </li>)}</ul>}
       </section>}

@@ -378,7 +378,8 @@ describe("Admin web", () => {
       listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
       listPacks: vi.fn().mockResolvedValue({ ok: true, data: { packs: [] } }),
       createPack: vi.fn().mockResolvedValue({ ok: true, data: applePack }),
-      editPack: vi.fn().mockResolvedValueOnce({ ok: true, data: changed }).mockResolvedValueOnce({ ok: true, data: inactive }),
+      editPack: vi.fn().mockResolvedValueOnce({ ok: true, data: changed }).mockResolvedValueOnce({ ok: true, data: inactive })
+        .mockResolvedValueOnce({ ok: true, data: changed }),
     };
     setup("/products", api);
     await screen.findByRole("heading", { name: strings.products });
@@ -406,6 +407,9 @@ describe("Admin web", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.confirmDeactivatePack }));
     expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.packDeactivated);
     expect(api.editPack).toHaveBeenLastCalledWith(apple.id, applePack.id, { active: false, reason: "Discontinued" });
+    fireEvent.click(screen.getByRole("button", { name: strings.reactivatePack("3") }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.packReactivated);
+    expect(api.editPack).toHaveBeenLastCalledWith(apple.id, applePack.id, { active: true });
   });
 
   it("shows duplicate barcode on the pack field and keeps the form", async () => {
