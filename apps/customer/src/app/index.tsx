@@ -63,7 +63,7 @@ function AreaLine() {
         const answer = await asks.ask(askArea(api, place.pincode));
         if (answer === stale) return;
         if (answer.kind === "served") setArea({ kind: "served", label: placeLabel({ ...place, name: answer.areaName }) });
-        else if (answer.kind === "not-served") router.replace({ pathname: "/not-serviceable", params: place });
+        else if (answer.kind === "not-served") router.replace({ pathname: "/not-serviceable", params: { pincode: place.pincode, name: place.name } });
         else setArea({ kind: "failed", answer });
       })();
       return asks.drop;

@@ -1,3 +1,4 @@
+import { AddressAreaLine, AddressPoint } from "@ygo/contracts";
 import * as SecureStore from "expo-secure-store";
 import { type Place, typedPlace } from "./location-flow";
 
@@ -6,13 +7,25 @@ import { type Place, typedPlace } from "./location-flow";
 // display preferences only, and a pincode says where someone lives.
 const key = (accountId: string) => `place.${accountId}`;
 
-/** The account's saved place; null when none is saved, or the phone can't read it back whole, so C15 asks again. */
+/**
+ * The account's saved place; null when none is saved, or the phone can't read
+ * its pincode back, so C15 asks again. A place kept before #242 has no pin or
+ * area line, and still reads.
+ */
 export async function savedPlace(accountId: string): Promise<Place | null> {
   try {
     const value = await SecureStore.getItemAsync(key(accountId));
-    const saved: Partial<Place> = value ? JSON.parse(value) : {};
-    const place = typedPlace(saved.pincode ?? "");
-    return place && (typeof saved.name === "string" ? { ...place, name: saved.name } : place);
+    const saved: Record<string, unknown> = value ? JSON.parse(value) : {};
+    const place = typedPlace(typeof saved.pincode === "string" ? saved.pincode : "");
+    if (!place) return null;
+    const point = AddressPoint.safeParse(saved.point);
+    const areaLine = AddressAreaLine.safeParse(saved.areaLine);
+    return {
+      ...place,
+      ...(typeof saved.name === "string" && { name: saved.name }),
+      ...(areaLine.success && { areaLine: areaLine.data }),
+      ...(point.success && { point: point.data }),
+    };
   } catch {
     return null;
   }
