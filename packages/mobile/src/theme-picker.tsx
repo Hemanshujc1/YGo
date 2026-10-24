@@ -1,10 +1,9 @@
 import type { ThemeChoice } from "@ygo/contracts";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
-import type { AppSession } from "./session";
+import { type AppSession, useTheme } from "./session";
 import { FieldMessage } from "./sign-in-parts";
 import { Text } from "./text";
-import { phoneTheme } from "./theme";
 
 export type ThemePickerWords = { label: string; notSaved: string } & Record<ThemeChoice, string>;
 
@@ -12,27 +11,17 @@ const themes: ThemeChoice[] = ["system", "light", "dark"];
 
 /**
  * "Theme" over System / Light / Dark (C23, #193). A tap changes the app at
- * once and saves the choice to the account. If the save fails, the old theme
- * comes back with `notSaved` (#195). Taps wait while a save is under way, so
- * the account always ends with the last choice shown.
+ * once and saves the choice to the account; the session holds both (#195).
+ * If the save fails, the old theme comes back with `notSaved`. Taps wait
+ * while a save is under way.
  */
 export function ThemePicker({ session, words }: { session: AppSession; words: ThemePickerWords }) {
-  const [theme, setTheme] = useState(phoneTheme.saved);
-  const [saving, setSaving] = useState(false);
+  const { choice: theme, saving } = useTheme(session);
   const [failed, setFailed] = useState(false);
 
   async function choose(choice: ThemeChoice) {
-    if (choice === theme) return;
-    const before = theme;
-    setTheme(choice);
     setFailed(false);
-    setSaving(true);
-    const saved = await session.chooseTheme(choice);
-    setSaving(false);
-    if (!saved) {
-      setTheme(before);
-      setFailed(true);
-    }
+    setFailed(!(await session.chooseTheme(choice)));
   }
 
   return (
@@ -50,7 +39,9 @@ export function ThemePicker({ session, words }: { session: AppSession; words: Th
             accessibilityRole="radio"
             accessibilityState={{ checked: theme === choice, disabled: saving }}
             disabled={saving}
-            onPress={() => void choose(choice)}
+            onPress={() => {
+              if (choice !== theme) void choose(choice);
+            }}
             className={`min-h-12 flex-1 items-center justify-center ${i > 0 ? "border-l border-border" : ""} ${
               theme === choice ? "bg-primary-subtle" : "bg-surface"
             }`}

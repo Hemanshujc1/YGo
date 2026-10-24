@@ -160,15 +160,64 @@ describe("the theme", () => {
     expect(theme.now).toBe("system");
   });
 
-  it("changes at once and saves the choice to the account", async () => {
+  it("changes at once, saves the choice to the account, and keeps the account it answers", async () => {
     const api = fakeApi(async () => ({ ok: true, data: full }));
+    api.setTheme.mockResolvedValueOnce({ ok: true, data: dark });
     const theme = fakeTheme();
     const session = start(api, theme);
+    session.signedIn(full);
     const saving = session.chooseTheme("dark");
     expect(theme.now).toBe("dark");
+    expect(session.theme()).toEqual({ choice: "dark", saving: true });
     expect(await saving).toBe(true);
     expect(api.setTheme).toHaveBeenCalledExactlyOnceWith({ theme: "dark" });
+    expect(session.theme()).toEqual({ choice: "dark", saving: false });
+    expect(session.get()).toEqual({ status: "signed-in", account: dark });
+  });
+
+  it("runs one save at a time", async () => {
+    let answer!: (value: ApiResult<Account>) => void;
+    const api = fakeApi(async () => ({ ok: true, data: full }));
+    api.setTheme.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const theme = fakeTheme();
+    const session = start(api, theme);
+    const first = session.chooseTheme("dark");
+    const second = session.chooseTheme("light");
+    expect(second).toBe(first);
+    answer({ ok: true, data: dark });
+    expect(await second).toBe(true);
+    expect(api.setTheme).toHaveBeenCalledOnce();
     expect(theme.now).toBe("dark");
+  });
+
+  it("keeps a saved choice over an older account that answers during the save", async () => {
+    let answer!: (value: ApiResult<Account>) => void;
+    const api = fakeApi(async () => ({ ok: true, data: full }));
+    api.setTheme.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const theme = fakeTheme();
+    const session = start(api, theme);
+    session.signedIn(full);
+    const saving = session.chooseTheme("dark");
+    // A new name saved meanwhile answers the account as it was before the theme.
+    session.signedIn({ ...full, name: "Asha K" });
+    expect(theme.now).toBe("system");
+    answer({ ok: true, data: { ...dark, name: "Asha K" } });
+    await saving;
+    expect(theme.now).toBe("dark");
+    expect(session.get()).toEqual({ status: "signed-in", account: { ...dark, name: "Asha K" } });
+  });
+
+  it("keeps an account's theme that answers during a save that then fails", async () => {
+    let answer!: (value: ApiResult<Account>) => void;
+    const api = fakeApi(async () => ({ ok: true, data: full }));
+    api.setTheme.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const theme = fakeTheme("system");
+    const session = start(api, theme);
+    const saving = session.chooseTheme("dark");
+    session.signedIn({ ...full, theme: "light" });
+    answer({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await saving).toBe(false);
+    expect(session.theme()).toEqual({ choice: "light", saving: false });
   });
 
   it.each([
@@ -181,6 +230,10 @@ describe("the theme", () => {
     const session = start(api, theme);
     expect(await session.chooseTheme("dark")).toBe(false);
     expect(theme.now).toBe("light");
+    expect(session.theme()).toEqual({ choice: "light", saving: false });
     expect(api.setTheme).toHaveBeenCalledOnce();
+    // A later choice is a new save.
+    expect(await session.chooseTheme("dark")).toBe(true);
+    expect(api.setTheme).toHaveBeenCalledTimes(2);
   });
 });

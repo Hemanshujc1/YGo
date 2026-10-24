@@ -26,6 +26,9 @@ interface SessionApi {
   signOut(): Promise<void>;
 }
 
+/** The theme the app shows, and whether a choice is being saved. */
+export type ThemeView = { choice: ThemeChoice; saving: boolean };
+
 /** This phone's copy of the theme: `phoneTheme` in the apps. */
 interface ThemeCopy {
   saved(): ThemeChoice;
@@ -49,12 +52,48 @@ export function createSession(api: SessionApi, theme: ThemeCopy) {
   const changed = listeners();
   // Each change bumps it, so a launch check that answers after a sign-in or a sign-out is dropped.
   let turn = 0;
+  // The theme the app shows, and whether the picker's save is under way.
+  let shown: ThemeView = { choice: theme.saved(), saving: false };
+  // Each theme shown bumps it, so a failed save never puts its old theme over a newer one.
+  let themeTurn = 0;
+  let saving: Promise<boolean> | null = null;
+
+  function show(next: ThemeView) {
+    if (next.choice !== shown.choice) {
+      themeTurn++;
+      theme.keep(next.choice);
+    }
+    shown = next;
+  }
 
   function move(next: SessionState) {
-    if ("account" in next) theme.keep(next.account.theme);
+    if ("account" in next) show({ ...shown, choice: next.account.theme });
     turn++;
     state = next;
     changed.notify();
+  }
+
+  async function saveTheme(choice: ThemeChoice): Promise<boolean> {
+    const before = shown.choice;
+    show({ choice, saving: true });
+    changed.notify();
+    const mine = themeTurn;
+    let saved = false;
+    try {
+      const answer = await api.setTheme({ theme: choice });
+      if (answer.ok) {
+        saved = true;
+        // The newest account, theme included; an answer that landed meanwhile may hold the old one.
+        if ("account" in state) state = { ...state, account: answer.data };
+        show({ choice: answer.data.theme, saving: false });
+      }
+    } catch {
+      // No answer: the same as a refusal.
+    }
+    if (!saved) show({ choice: mine === themeTurn ? before : shown.choice, saving: false });
+    saving = null;
+    changed.notify();
+    return saved;
   }
 
   stopLast();
@@ -88,21 +127,18 @@ export function createSession(api: SessionApi, theme: ThemeCopy) {
       move(byAccount(account));
     },
 
+    /** The theme the app shows, for the picker. */
+    theme: () => shown,
+
     /**
      * The theme picker: the app changes at once, then the account saves it.
      * Resolves false, with the old theme back, when the save fails; nothing
-     * retries by itself (#195, Q3).
+     * retries by itself (#195, Q3). One save runs at a time: a choice made
+     * meanwhile gets the running save's answer.
      */
-    async chooseTheme(choice: ThemeChoice): Promise<boolean> {
-      const before = theme.saved();
-      theme.keep(choice);
-      try {
-        if ((await api.setTheme({ theme: choice })).ok) return true;
-      } catch {
-        // No answer: the same as a refusal.
-      }
-      theme.keep(before);
-      return false;
+    chooseTheme(choice: ThemeChoice): Promise<boolean> {
+      saving ??= saveTheme(choice);
+      return saving;
     },
 
     /**
@@ -135,4 +171,9 @@ export type AppSession = ReturnType<typeof createSession>;
 /** The current state; the screen re-renders when it changes. */
 export function useSession(session: AppSession): SessionState {
   return useSyncExternalStore(session.subscribe, session.get);
+}
+
+/** The theme the app shows; the picker re-renders when it changes. */
+export function useTheme(session: AppSession): ThemeView {
+  return useSyncExternalStore(session.subscribe, session.theme);
 }
