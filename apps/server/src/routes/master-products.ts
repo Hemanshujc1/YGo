@@ -190,6 +190,10 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       const nextBaseUnit = body.baseUnit ?? old.baseUnit;
       const nextClassification = body.classification ?? old.classification;
       const nextActive = body.active ?? old.active;
+      if (nextBaseUnit !== old.baseUnit) {
+        const packs = await client.query("SELECT 1 FROM packs WHERE product_id = $1 LIMIT 1", [id]);
+        if (packs.rowCount) return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+      }
       if ((nextClassification === "counted") !== (nextBaseUnit === "each")) {
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit", "classification"] } });
       }

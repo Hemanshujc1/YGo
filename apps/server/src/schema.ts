@@ -5,6 +5,7 @@ import {
   customType,
   index,
   integer,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -82,6 +83,19 @@ export const masterProducts = pgTable("master_products", {
   uniqueIndex("master_products_name_brand_idx").on(sql`lower(${table.name})`, sql`coalesce(lower(${table.brand}), '')`),
   index("master_products_category_id_idx").on(table.categoryId),
 ]);
+export const packs = pgTable("packs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  productId: uuid("product_id").notNull().references(() => masterProducts.id),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  barcode: text("barcode"),
+  active: boolean("active").notNull().default(true),
+}, (table) => [
+  check("packs_quantity_positive", sql`${table.quantity} > 0 AND ${table.quantity} <> 'NaN'::numeric`),
+  check("packs_barcode_valid", sql`${table.barcode} IS NULL OR ${table.barcode} ~ '^(?:[0-9]{8}|[0-9]{12}|[0-9]{13})$'`),
+  uniqueIndex("packs_product_quantity_idx").on(table.productId, table.quantity),
+  uniqueIndex("packs_barcode_idx").on(table.barcode),
+]);
+
 // An Admin-named group of pincodes (#214). A paused Area takes no new orders but
 // keeps its pincodes, so no other Area can take them.
 export const areas = pgTable("areas", {
