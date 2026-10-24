@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YGo Admin</title>
+    <script>
+      // The theme last used in this browser, before the page draws (#263); src/theme.tsx keeps it.
+      try {
+        const theme = localStorage.getItem("ygo-admin-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

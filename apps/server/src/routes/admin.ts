@@ -1,12 +1,39 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope } from "@ygo/contracts";
+import { Account, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn } from "../admin";
 import { deriveKeys } from "../tokens";
 
 export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
+
+  // Admin's own account. /v1/me stays mobile-only (#246); the theme column is shared (#263).
+  app.get(
+    "/v1/admin/me",
+    { schema: { response: { 200: Account, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const result = await pool.query<Account>("SELECT id, email, name, phone, theme FROM accounts WHERE id = $1", [who.accountId]);
+      return reply.code(200).send(result.rows[0]);
+    },
+  );
+
+  app.put(
+    "/v1/admin/me/theme",
+    { schema: { body: SetThemeBody, response: { 200: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const { theme } = request.body as SetThemeBody;
+      const result = await pool.query<Account>(
+        "UPDATE accounts SET theme = $1 WHERE id = $2 RETURNING id, email, name, phone, theme",
+        [theme, who.accountId],
+      );
+      return reply.code(200).send(result.rows[0]);
+    },
+  );
 
   app.get(
     "/v1/admin/accounts",

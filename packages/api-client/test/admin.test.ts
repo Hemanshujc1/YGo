@@ -166,6 +166,24 @@ describe("Admin browser API client", () => {
     ]);
   });
 
+  it("reads the Admin's own account and saves its theme (#263)", async () => {
+    const dark = { ...account, theme: "dark" };
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      return answer(200, method === "GET" ? account : dark);
+    });
+    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(await client.setTheme({ theme: "dark" })).toEqual({ ok: true, data: dark });
+    expect(calls.slice(1).map(({ path, method, body, headers }) => [path, method, body, headers.get("authorization")])).toEqual([
+      ["/v1/admin/me", "GET", undefined, "Bearer access-1"],
+      ["/v1/admin/me/theme", "PUT", { theme: "dark" }, "Bearer access-1"],
+    ]);
+    const malformed = setup(({ path }) => path.endsWith("/refresh")
+      ? answer(200, { accessToken: "access-1", account })
+      : answer(200, { ...account, theme: "blue" }));
+    expect(await malformed.client.setTheme({ theme: "dark" })).toEqual({ ok: false, status: 200, code: "INTERNAL" });
+  });
+
   it("parses a created Admin account", async () => {
     const { client } = setup(({ path }) =>
       path.endsWith("/verify")

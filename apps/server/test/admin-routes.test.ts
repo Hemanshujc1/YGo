@@ -264,6 +264,39 @@ describe("Admin routes and browser sessions", () => {
     await database.pool.query("INSERT INTO sessions (id, account_id, kind, expires_at) VALUES ($1, $2, 'admin_web', $3)", [sessionId, id, new Date("2030-02-01")]);
     expect((await accounts(accessToken(deriveKeys(secret), id, sessionId, clock.now()))).statusCode).toBe(403);
   });
+
+  it("reads and saves the Admin's own theme, shared with the mobile apps (#263)", async () => {
+    const me = (token?: string) => app.inject({ method: "GET", url: "/v1/admin/me", headers: token ? { authorization: `Bearer ${token}` } : {} });
+    const setTheme = (token: string | undefined, payload: object) => app.inject({
+      method: "PUT", url: "/v1/admin/me/theme", headers: token ? { authorization: `Bearer ${token}` } : {}, payload,
+    });
+    expect((await me()).statusCode).toBe(401);
+    expect((await setTheme(undefined, { theme: "dark" })).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken as string;
+    expect((await me(mobile)).statusCode).toBe(403);
+    expect((await setTheme(mobile, { theme: "dark" })).statusCode).toBe(403);
+
+    clock.advance(30_000);
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    expect((await me(token)).json()).toMatchObject({ email: admin.email, name: admin.name, phone: admin.phone, theme: "system" });
+    const saved = await setTheme(token, { theme: "dark" });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({ email: admin.email, theme: "dark" });
+    expect((await me(token)).json()).toMatchObject({ theme: "dark" });
+    // One value per person: the phone apps see it, and their change reaches Admin.
+    const phoneHeaders = { authorization: `Bearer ${mobile}` };
+    expect((await app.inject({ method: "GET", url: "/v1/me", headers: phoneHeaders })).json()).toMatchObject({ theme: "dark" });
+    await app.inject({ method: "PUT", url: "/v1/me/theme", headers: phoneHeaders, payload: { theme: "light" } });
+    expect((await me(token)).json()).toMatchObject({ theme: "light" });
+
+    for (const payload of [{ theme: "blue" }, {}, { theme: "dark", extra: 1 }]) {
+      expect((await setTheme(token, payload)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: [Object.keys(payload).find((name) => name !== "theme") ?? "theme"] } });
+    }
+    await database.pool.query("DELETE FROM admin_memberships WHERE account_id = (SELECT id FROM accounts WHERE email = $1)", [admin.email]);
+    expect((await me(token)).statusCode).toBe(403);
+    expect((await setTheme(token, { theme: "dark" })).statusCode).toBe(403);
+    expect((await database.pool.query("SELECT theme FROM accounts WHERE email = $1", [admin.email])).rows[0]).toEqual({ theme: "light" });
+  });
 });
 
 describe("Areas, serviceability and the waitlist", () => {

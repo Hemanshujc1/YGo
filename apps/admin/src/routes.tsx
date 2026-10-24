@@ -15,6 +15,7 @@ import {
 import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { Products } from "./products";
+import { adminTheme, ThemePicker } from "./theme";
 import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 import { Waitlist } from "./waitlist";
@@ -44,9 +45,12 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
       <header className="border-b border-border bg-surface px-8 py-5">
         <div className="flex items-center justify-between gap-4">
           <Link to="/accounts" className="text-title font-semibold text-brand">{strings.title}</Link>
-          {protectedArea && api && <button disabled={signingOut} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
-            {signingOut ? strings.signingOut : strings.signOut}
-          </button>}
+          {protectedArea && api && <div className="flex items-center gap-4">
+            <ThemePicker api={api} />
+            <button disabled={signingOut} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
+              {signingOut ? strings.signingOut : strings.signOut}
+            </button>
+          </div>}
         </div>
       </header>
       <div className={protectedArea ? "flex" : ""}>
@@ -111,8 +115,10 @@ function SignIn({ api }: { api: AdminApi }) {
     setError("");
     try {
       const result = await api.verifyCode(parsed.data);
-      if (result.ok) void navigate("/accounts");
-      else setError(strings.errors[result.code]);
+      if (result.ok) {
+        adminTheme(api).account(result.data);
+        void navigate("/accounts");
+      } else setError(strings.errors[result.code]);
     } catch {
       setError(strings.failed);
     } finally {
