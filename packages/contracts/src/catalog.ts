@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminActionReason, PackBarcode, PackQuantity, ProductBrand, ProductImage, ProductName } from "./fields";
+import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, ProductBrand, ProductImage, ProductName } from "./fields";
 
 /** Admin-managed global categories (#200, CAT-5); two levels at most. */
 export const CategoryName = z.string().trim().min(1).max(100);
@@ -86,15 +86,24 @@ export const PacksResponse = z.strictObject({ packs: z.array(Pack) });
 export type PacksResponse = z.infer<typeof PacksResponse>;
 export const ProductPacksParams = z.strictObject({ productId: z.uuid() });
 export const PackParams = ProductPacksParams.extend({ id: z.uuid() });
+
+function validPackQuantity(body: { baseUnit?: z.infer<typeof ProductBaseUnit>; quantity?: string }): boolean {
+  return body.baseUnit !== "each" || body.quantity === undefined || CountedPackQuantity.safeParse(body.quantity).success;
+}
+
 export const CreatePackBody = z.strictObject({
+  baseUnit: ProductBaseUnit,
   quantity: PackQuantity,
   barcode: PackBarcode.nullable().default(null),
-});
+}).refine(validPackQuantity, { path: ["quantity"] });
 export type CreatePackBody = z.infer<typeof CreatePackBody>;
 export const EditPackBody = z.strictObject({
+  baseUnit: ProductBaseUnit.optional(),
   quantity: PackQuantity.optional(),
   barcode: PackBarcode.nullable().optional(),
   active: z.boolean().optional(),
   reason: AdminActionReason.optional(),
-}).refine((body) => Object.keys(body).some((key) => key !== "reason"));
+}).refine((body) => Object.keys(body).some((key) => key !== "reason" && key !== "baseUnit"))
+  .refine((body) => body.quantity === undefined || body.baseUnit !== undefined, { path: ["baseUnit"] })
+  .refine(validPackQuantity, { path: ["quantity"] });
 export type EditPackBody = z.infer<typeof EditPackBody>;
