@@ -7,7 +7,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ChevronDown, Map, MapPin, User } from "../components/icons";
-import { joinOutcome, placeLabel, typedPlace, waitlistBody } from "../lib/location-flow";
+import { placeLabel, sentOutcome, typedPlace, waitlistBody } from "../lib/location-flow";
 import { strings } from "../strings";
 
 const words = strings.notServiceable;
@@ -35,7 +35,7 @@ export default function NotServiceable() {
     working.current = true;
     setOutcome(null);
     setSaving(true);
-    const next = await joinOutcome(() => api.joinWaitlist(body));
+    const next = await sentOutcome(() => api.joinWaitlist(body));
     working.current = false;
     setSaving(false);
     setOutcome(next);
