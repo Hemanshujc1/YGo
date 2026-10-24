@@ -34,12 +34,14 @@ describe("readPin", () => {
     });
   });
 
-  it("falls back to the address's name, then the city, when there is no street", async () => {
+  it("falls back to the address's name, then the city, when a part is missing or empty", async () => {
     const named = await readPin(geocoder(async () => [], async () => [{ ...prabhat, street: null }]), shivajiNagar);
     expect(named?.title).toBe("12, Shivaji Nagar");
     const bare = { postalCode: "411005", street: null, name: null, district: null, city: "Pune" };
     const cityOnly = await readPin(geocoder(async () => [], async () => [bare]), shivajiNagar);
     expect(cityOnly).toMatchObject({ place: { name: "Pune", areaLine: "Pune" }, title: "Pune", detail: "Pune 411005" });
+    const emptyDistrict = await readPin(geocoder(async () => [], async () => [{ ...prabhat, district: "" }]), shivajiNagar);
+    expect(emptyDistrict?.place.name).toBe("Pune");
   });
 
   it("is null when no address there has a pincode, the lookup fails, or the pin is outside India", async () => {
@@ -70,12 +72,33 @@ describe("searchPlaces", () => {
           searched = text;
           return points;
         },
-        async (point) => (point.latitude === 18.51 ? [] : [prabhat]),
+        async (point) => (point.latitude === 18.51 ? [] : [{ ...prabhat, street: `Road ${point.latitude}` }]),
       ),
       " 411005 ",
     );
     expect(searched).toBe("411005");
     expect(spots.map((spot) => spot.place.point?.latitude)).toEqual([18.5, 18.52, 18.53, 18.54]);
+  });
+
+  it("lists matches that name the same place once, and keeps only the pin's latitude and longitude", async () => {
+    // The phone's geocoder adds altitude and accuracy, which the server's strict point refuses.
+    const found = { ...shivajiNagar, altitude: 560, accuracy: 100 };
+    const spots = await searchPlaces(geocoder(async () => [found, { ...found, latitude: 18.52 }]), "411005");
+    expect(spots).toHaveLength(1);
+    expect(spots[0]?.place.point).toEqual(shivajiNagar);
+  });
+
+  it("looks the matches up one at a time", async () => {
+    let running = 0;
+    let most = 0;
+    const slow = async () => {
+      most = Math.max(most, ++running);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      running--;
+      return [prabhat];
+    };
+    await searchPlaces(geocoder(async () => [shivajiNagar, shivajiNagar, shivajiNagar], slow), "Pune");
+    expect(most).toBe(1);
   });
 });
 

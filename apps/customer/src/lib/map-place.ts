@@ -25,19 +25,25 @@ export type Spot = { place: Place; title: string; detail: string };
 const searchLimit = 5;
 const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): part is string => !!part))];
 
-/** The spot at a point, from the first address with a pincode; null when there is none, or the point is outside India. */
-async function spotAt(geocoder: Geocoder, point: AddressPoint): Promise<Spot | null> {
-  if (!AddressPoint.safeParse(point).success) return null;
-  for (const address of await geocoder.addresses(point)) {
+/**
+ * The spot at a point, from the first address with a pincode; null when there
+ * is none, or the point is outside India. Only latitude and longitude are kept:
+ * the phone's results also carry altitude, accuracy or zoom, which the server's
+ * strict `AddressPoint` refuses.
+ */
+async function spotAt(geocoder: Geocoder, { latitude, longitude }: AddressPoint): Promise<Spot | null> {
+  const point = AddressPoint.safeParse({ latitude, longitude });
+  if (!point.success) return null;
+  for (const address of await geocoder.addresses(point.data)) {
     const pincode = Pincode.safeParse(address.postalCode ?? "");
     if (!pincode.success) continue;
-    const street = address.street ?? address.name;
+    const street = address.street || address.name;
     const title = unique([street, address.district]).join(", ");
     const areaLine = unique([street, address.district, address.city]).join(", ").slice(0, 200).trim();
-    const name = address.district ?? address.city;
+    const name = address.district || address.city;
     return {
-      place: { pincode: pincode.data, point, ...(name && { name }), ...(areaLine && { areaLine }) },
-      title: title || (address.city ?? pincode.data),
+      place: { pincode: pincode.data, point: point.data, ...(name && { name }), ...(areaLine && { areaLine }) },
+      title: title || address.city || pincode.data,
       detail: unique([address.city, pincode.data]).join(" "),
     };
   }
@@ -53,15 +59,26 @@ export async function readPin(geocoder: Geocoder, point: AddressPoint): Promise<
   }
 }
 
-/** Up to 5 matches for the search field, each with a pincode (#242, Q4); empty when nothing is found. */
+/**
+ * Up to 5 matches for the search field, each with a pincode and named once
+ * (#242, Q4); empty when nothing is found. The matches are looked up one at a
+ * time, since the phone's geocoder handles one request at a time and limits
+ * how many an app sends.
+ */
 export async function searchPlaces(geocoder: Geocoder, text: string): Promise<Spot[]> {
+  let points;
   try {
-    const points = (await geocoder.find(text.trim())).slice(0, searchLimit);
-    const spots = await Promise.all(points.map((point) => readPin(geocoder, point)));
-    return spots.filter((spot): spot is Spot => spot !== null);
+    points = (await geocoder.find(text.trim())).slice(0, searchLimit);
   } catch {
     return [];
   }
+  const spots = new Map<string, Spot>();
+  for (const point of points) {
+    const spot = await readPin(geocoder, point);
+    const named = spot && `${spot.title}\n${spot.detail}`;
+    if (named && !spots.has(named)) spots.set(named, spot);
+  }
+  return [...spots.values()];
 }
 
 /** Confirm's body for the server, or null when "Flat, house or floor" breaks the server's rule (#217, answer 7). */
