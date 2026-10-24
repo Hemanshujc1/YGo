@@ -78,6 +78,13 @@
       "when": 1792692757960,
       "tag": "0010_saved_addresses",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792841536315,
+      "tag": "0011_catalog_packs",
+      "breakpoints": true
     }
   ]
 }

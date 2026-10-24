@@ -24,8 +24,8 @@ This document carries the domain: what the product does and what the words mean.
 **Bargain**: A customer's offer of a price per unit for a chosen quantity on a bargain-enabled product, matched instantly against the shop's hidden floor price.
 **Floor price**: The Owner's hidden minimum price per unit for a bargain-enabled product. Never shown to customers.
 **Slot**: An owner-defined delivery time window with a maximum order capacity, used by Scheduled delivery.
-**Master product**: An admin-owned catalog entry: name, brand, category, image, optional barcode, and its packs. Shops list it; they do not create it.
-**Pack**: A canonical sellable size of a master product ("1 kg", "12 bananas"), defined on the master product. A shop chooses which packs it stocks and prices each one. Price, stock, bargain toggle and floor price all sit on the shop's pack row.
+**Master product**: An admin-owned catalog entry: name, brand, category, image, and its packs. Shops list it; they do not create it.
+**Pack**: A canonical sellable size of a master product ("1 kg", "12 bananas"), defined on the master product, with zero or one optional barcode unique across all packs, including inactive ones. A shop chooses which packs it stocks and prices each one. Price, stock, bargain toggle and floor price all sit on the shop's pack row.
 **Quantity-price option**: A shop's own priced quantity on its listing ("2 pav for Rs 6"), carrying a quantity in the master's base unit. Additional to packs, never a replacement for them, and it holds no stock of its own.
 **Reservation**: Stock held for an accepted order. Available stock is on-hand minus reserved. A reservation becomes a decrement on delivery or pickup and is released on any other terminal state.
 **Commission**: The platform's share of a delivered order's eligible product value. Delivered orders only; pickup orders and counter bills carry none.
