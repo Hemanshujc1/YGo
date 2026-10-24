@@ -9,7 +9,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
-import { deriveKeys, signedIn } from "../tokens";
+import { deriveKeys, mobileSignedIn } from "../tokens";
 
 /** At most 10 per account (owner decision on #217). */
 const LIMIT = 10;
@@ -22,16 +22,16 @@ const addressSql = `SELECT id, label, flat, area_line AS "areaLine", pincode,
 export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
 
-  app.get("/v1/me/addresses", { schema: { response: { 200: SavedAddressesResponse, 401: ErrorEnvelope } } }, async (request, reply) => {
-    const who = await signedIn(request, reply, auth);
+  app.get("/v1/me/addresses", { schema: { response: { 200: SavedAddressesResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const rows = await pool.query<SavedAddress>(`${addressSql} WHERE account_id = $1 ORDER BY saved_at DESC, id`, [who.accountId]);
     return { addresses: rows.rows };
   });
 
   // The pincode and the point are checked by the contract; no lookups (owner decision on #217).
-  app.post("/v1/me/addresses", { schema: { body: SaveAddressBody, response: { 201: SavedAddress, 400: ErrorEnvelope, 401: ErrorEnvelope, 409: ErrorEnvelope } } }, async (request, reply) => {
-    const who = await signedIn(request, reply, auth);
+  app.post("/v1/me/addresses", { schema: { body: SaveAddressBody, response: { 201: SavedAddress, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 409: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { label, flat, areaLine, pincode, point } = request.body as SaveAddressBody;
     return withTransaction(pool, async (client) => {
@@ -54,8 +54,8 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
     });
   });
 
-  app.delete("/v1/me/addresses/:id", { schema: { params: SavedAddressParams, response: { 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope } } }, async (request, reply) => {
-    const who = await signedIn(request, reply, auth);
+  app.delete("/v1/me/addresses/:id", { schema: { params: SavedAddressParams, response: { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { id } = request.params as { id: string };
     const removed = await pool.query("DELETE FROM saved_addresses WHERE id = $1 AND account_id = $2", [id, who.accountId]);

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { Account, ChangeNameBody, ErrorEnvelope, SetProfileBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { deriveKeys, signedIn } from "../tokens";
+import { deriveKeys, mobileSignedIn } from "../tokens";
 
 interface ProfileOptions {
   pool: Pool;
@@ -16,9 +16,9 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
 
   app.get(
     "/v1/me",
-    { schema: { response: { 200: Account, 401: ErrorEnvelope } } },
+    { schema: { response: { 200: Account, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await signedIn(request, reply, auth);
+      const who = await mobileSignedIn(request, reply, auth);
       if (!who) return reply;
       const result = await pool.query<Account>("SELECT id, email, name, phone FROM accounts WHERE id = $1", [who.accountId]);
       return reply.code(200).send(result.rows[0]);
@@ -27,9 +27,9 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
 
   app.put(
     "/v1/me/profile",
-    { schema: { body: SetProfileBody, response: { 200: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 409: ErrorEnvelope } } },
+    { schema: { body: SetProfileBody, response: { 200: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 409: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await signedIn(request, reply, auth);
+      const who = await mobileSignedIn(request, reply, auth);
       if (!who) return reply;
       const { name, phone } = request.body as SetProfileBody;
       try {
@@ -54,7 +54,7 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
     "/v1/me",
     { schema: { body: ChangeNameBody, response: { 200: Account, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await signedIn(request, reply, auth);
+      const who = await mobileSignedIn(request, reply, auth);
       if (!who) return reply;
       const { name } = request.body as ChangeNameBody;
       const result = await pool.query<Account>(

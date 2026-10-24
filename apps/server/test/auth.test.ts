@@ -641,3 +641,80 @@ describe("profile routes", () => {
     }
   });
 });
+
+describe("mobile route session access", () => {
+  const address = { label: "home", flat: "Flat 4B", areaLine: null, pincode: "411045", point: null };
+  const phone = "+919876543210";
+  const requests = (id: string, number: string) => [
+    { method: "GET", url: "/v1/me" },
+    { method: "PUT", url: "/v1/me/profile", payload: { name: "Changed name", phone: number } },
+    { method: "PATCH", url: "/v1/me", payload: { name: "Changed name" } },
+    { method: "GET", url: "/v1/serviceability?pincode=411045" },
+    { method: "POST", url: "/v1/waitlist", payload: { pincode: "411045", phone: "+919000000000" } },
+    { method: "GET", url: "/v1/me/addresses" },
+    { method: "POST", url: "/v1/me/addresses", payload: { ...address, label: "other", flat: "Changed flat" } },
+    { method: "DELETE", url: `/v1/me/addresses/${id}` },
+    { method: "POST", url: "/v1/auth/sign-out" },
+  ] as const;
+
+  it("refuses Admin web sessions on every mobile route without changing account data or signing out", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const number = `+919${randomInt(1_000_000_000).toString().padStart(9, "0")}`;
+    const mobile = { authorization: `Bearer ${s.accessToken}` };
+    const profile = await h.app.inject({ method: "PUT", url: "/v1/me/profile", headers: mobile, payload: { name: "Asha Kulkarni", phone: number } });
+    expect(profile.statusCode).toBe(200);
+    const saved = await h.app.inject({ method: "POST", url: "/v1/me/addresses", headers: mobile, payload: address });
+    expect(saved.statusCode).toBe(201);
+    expect((await h.app.inject({ method: "POST", url: "/v1/waitlist", headers: mobile, payload: { pincode: "411045", phone } })).statusCode).toBe(204);
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [s.account.id]);
+    const adminId = randomUUID();
+    await database.pool.query("INSERT INTO sessions (id, account_id, kind, expires_at) VALUES ($1, $2, 'admin_web', $3)",
+      [adminId, s.account.id, new Date(h.clock.now().getTime() + DAY_MS)]);
+    const headers = { authorization: `Bearer ${accessToken(keys, s.account.id, adminId, h.clock.now())}` };
+
+    for (const request of requests(saved.json().id, number)) {
+      const answer = await h.app.inject({ ...request, headers });
+      expect(answer.statusCode, `${request.method} ${request.url}`).toBe(403);
+      expect(answer.json()).toEqual({ error: { code: "FORBIDDEN" } });
+    }
+    expect((await h.app.inject({ method: "GET", url: "/v1/me", headers: mobile })).json()).toEqual(profile.json());
+    expect((await h.app.inject({ method: "GET", url: "/v1/me/addresses", headers: mobile })).json()).toEqual({ addresses: [saved.json()] });
+    const waitlist = await database.pool.query("SELECT pincode, phone FROM waitlist_entries WHERE account_id = $1", [s.account.id]);
+    expect(waitlist.rows).toEqual([{ pincode: "411045", phone }]);
+    expect(await sessionExists(adminId)).toBe(true);
+    expect((await h.app.inject({ method: "GET", url: "/v1/admin/accounts", headers })).statusCode).toBe(200);
+    expect((await signOut(h, s.accessToken)).statusCode).toBe(204);
+  });
+
+  it("allows a mobile session on every mobile route even when the account is an Admin", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [s.account.id]);
+    const headers = { authorization: `Bearer ${s.accessToken}` };
+    const number = `+919${randomInt(1_000_000_000).toString().padStart(9, "0")}`;
+    const saved = await h.app.inject({ method: "POST", url: "/v1/me/addresses", headers, payload: address });
+    expect(saved.statusCode).toBe(201);
+    const expected = [200, 200, 200, 200, 204, 200, 201, 204, 204];
+    for (const [index, request] of requests(saved.json().id, number).entries()) {
+      const answer = await h.app.inject({ ...request, headers });
+      expect(answer.statusCode, `${request.method} ${request.url}`).toBe(expected[index]);
+    }
+    expect(await sessionExists(s.sessionId)).toBe(false);
+  });
+
+  it("keeps missing, bad, expired and revoked sessions unauthenticated on every mobile route", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    const expired = accessToken(keys, s.account.id, s.sessionId, new Date(h.clock.now().getTime() - DAY_MS));
+    await database.pool.query("DELETE FROM sessions WHERE id = $1", [s.sessionId]);
+    for (const token of [undefined, "bad.token", expired, s.accessToken]) {
+      const headers = token ? { authorization: `Bearer ${token}` } : {};
+      for (const request of requests(randomUUID(), phone)) {
+        const answer = await h.app.inject({ ...request, headers });
+        expect(answer.statusCode, `${request.method} ${request.url}`).toBe(401);
+        expect(answer.json()).toEqual({ error: { code: "UNAUTHENTICATED" } });
+      }
+    }
+  });
+});
