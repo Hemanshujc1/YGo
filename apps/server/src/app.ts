@@ -20,6 +20,7 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerAreaRoutes } from "./routes/areas";
 import { registerCategoryRoutes } from "./routes/categories";
 import { registerMasterProductRoutes } from "./routes/master-products";
+import { registerCatalogImportRoutes } from "./routes/catalog-import";
 import { registerPackRoutes } from "./routes/packs";
 import { registerProfileRoutes } from "./routes/profile";
 
@@ -97,6 +98,7 @@ export function buildApp({
     registerAdminRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCategoryRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerMasterProductRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
+    registerCatalogImportRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerPackRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
