@@ -4,6 +4,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import sharp from "sharp";
+import { zipSync } from "fflate";
+import { CATALOG_IMPORT_CSV_FIELDS, CATALOG_IMPORT_FILE_LIMITS } from "@ygo/contracts";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
@@ -861,6 +863,128 @@ describe("Master product routes", () => {
     expect((await create(token, createBody(categoryId, source))).json()).toEqual({
       error: { code: "VALIDATION_FAILED", fields: ["categoryId"] },
     });
+    expect(productImagePuts).toEqual([]);
+  });
+});
+
+
+describe("Catalog CSV import preview", () => {
+  const row = (overrides: Record<string, string> = {}) => ({ productCode: "apple", name: "Apples", brand: "", parentCategoryName: "", categoryName: "Groceries", baseUnit: "each", classification: "counted", quantity: "1", barcode: "", ...overrides });
+  const csv = (rows: ReturnType<typeof row>[]) => [CATALOG_IMPORT_CSV_FIELDS.join(","), ...rows.map((r) => CATALOG_IMPORT_CSV_FIELDS.map((field) => `"${r[field].replaceAll('"', '""')}"`).join(","))].join("\r\n");
+  async function token() { return { authorization: `Bearer ${(await signIn("/v1/admin/auth")).json().accessToken}` }; }
+  async function image() { return sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } }).png().toBuffer(); }
+  function preview(headers: Record<string, string>, text: string, entries: Record<string, Uint8Array> = {}, options: { zip?: Buffer; omitZip?: boolean; extra?: boolean } = {}) {
+    const part = (name: string, bytes: Uint8Array) => Buffer.concat([Buffer.from(`--ygo-import\r\nContent-Disposition: form-data; name="${name}"; filename="file"\r\nContent-Type: application/octet-stream\r\n\r\n`), bytes, Buffer.from("\r\n")]);
+    return app.inject({ method: "POST", url: "/v1/admin/catalog/import/preview", headers: { ...headers, "content-type": "multipart/form-data; boundary=ygo-import" }, payload: Buffer.concat([
+      part("catalogCsv", Buffer.from(text)), ...(options.omitZip ? [] : [part("imagesZip", options.zip ?? zipSync(entries))]),
+      ...(options.extra ? [part("unknown", Buffer.from("x"))] : []), Buffer.from("--ygo-import--\r\n"),
+    ]) });
+  }
+
+  it("requires an Admin web session before reading uploads", async () => {
+    expect((await preview({}, csv([row()]))).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken;
+    expect((await preview({ authorization: `Bearer ${mobile}` }, csv([row()]))).statusCode).toBe(403);
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("accepts Finder's one-folder ZIP, ignores metadata, and counts products and packs", async () => {
+    const result = await preview(await token(), csv([row({ name: 'Apples, "local"\nred' }), row({ name: 'Apples, "local"\nred', quantity: "2" })]), {
+      "Photos/apple.PNG": await image(), "Photos/.DS_Store": Buffer.from("metadata"), "__MACOSX/Photos/._apple.PNG": Buffer.from("resource fork"),
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toEqual({ rowCount: 2, productCount: 1, packCount: 2, errors: [] });
+    expect(productImagePuts).toEqual([]);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM master_products")).rows[0].n).toBe(0);
+  });
+
+  it("finds every invalid row and decodes images even when rows already fail", async () => {
+    const result = await preview(await token(), csv([row({ quantity: "1.5", name: "Apples\nred" }), row({ productCode: "pear", name: "Pears", categoryName: "Unknown" }), row({ quantity: "2" })]), {
+      "apple.png": Buffer.from("not an image"), "pear.png": Buffer.from("also invalid"),
+    });
+    expect(result.json().errors).toEqual(expect.arrayContaining([
+      { rowNumber: 2, reason: "INVALID_ROW", field: "quantity" },
+      { rowNumber: 3, reason: "CATEGORY_NOT_FOUND", field: "categoryName" },
+      { rowNumber: 3, reason: "INVALID_PRODUCT_IMAGE", field: "productCode" },
+      { rowNumber: 4, reason: "INVALID_PRODUCT_IMAGE", field: "productCode" },
+    ]));
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("matches database identities and pack quantities; ignores existing product images without replacing them", async () => {
+    const category = (await database.pool.query("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0].id;
+    const product = (await database.pool.query("INSERT INTO master_products (name, brand, category_id, base_unit, classification, image_256_key) VALUES ('Apples', 'Farm', $1, 'each', 'counted', 'original-image') RETURNING id", [category])).rows[0].id;
+    await database.pool.query("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, 1, '12345678')", [product]);
+    const headers = await token();
+    const same = row({ name: "APPLES", brand: "farm", categoryName: "gROCERIES", quantity: "1.000", barcode: " 12345678 " });
+    expect((await preview(headers, csv([same]), { "apple.png": await image() })).json()).toEqual({ rowCount: 1, productCount: 1, packCount: 1, errors: [] });
+    expect((await preview(headers, csv([same, row({ brand: "Farm", quantity: "2" })]))).json().errors).toEqual([]);
+    const result = await preview(headers, csv([same, row({ brand: "Farm", quantity: "1" }), row({ brand: "Farm", quantity: "3", barcode: "12345678" }), row({ brand: "Farm", baseUnit: "kg", classification: "measured" })]));
+    expect(result.json().errors.map((e: { reason: string }) => e.reason)).toEqual(expect.arrayContaining(["DUPLICATE_PACK", "BARCODE_CONFLICT", "PRODUCT_DETAILS_MISMATCH"]));
+    expect(productImagePuts).toEqual([]);
+    expect((await database.pool.query("SELECT image_256_key FROM master_products WHERE id = $1", [product])).rows[0].image_256_key).toBe("original-image");
+  });
+
+  it("rejects file failures with multipart field names", async () => {
+    const headers = await token();
+    for (const text of ["name\nApples", csv([row()]).replace("barcode", "unknown"), csv([row()]).replace("barcode", "name"), '"unterminated']) {
+      expect((await preview(headers, text)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["catalogCsv"] } });
+    }
+    expect((await preview(headers, csv([row()]), {}, { omitZip: true })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    const invalidLayouts: Record<string, Uint8Array>[] = [{ "deep/folder/apple.png": await image() }, { "apple.png": await image(), "apple.JPG": await image() }, { "orphan.png": await image() }, { "apple.txt": Buffer.from("x") }, { "apple.png": await image(), "Photos/pear.png": await image() }, { "One/apple.png": await image(), "Two/pear.png": await image() }];
+    for (const entries of invalidLayouts) {
+      expect((await preview(headers, csv([row()]), entries)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    }
+    expect((await preview(headers, csv([row()]), {}, { zip: Buffer.from("broken zip") })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect((await preview(headers, "x".repeat(CATALOG_IMPORT_FILE_LIMITS.csvBytes + 1))).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["catalogCsv"] } });
+    expect((await preview(headers, csv([row()]), { "apple.png": Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes + 1) })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("accepts measured packs and resolves child categories through a case-insensitive parent", async () => {
+    const parent = (await database.pool.query("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0].id;
+    await database.pool.query("INSERT INTO categories (name, parent_id) VALUES ('Flour', $1)", [parent]);
+    const measured = row({ parentCategoryName: "GROCERIES", categoryName: "flour", baseUnit: "kg", classification: "measured", quantity: "0.125" });
+    const headers = await token();
+    expect((await preview(headers, csv([measured]), { "apple.webp": await image() })).json().errors).toEqual([]);
+    await database.pool.query("UPDATE categories SET active = false WHERE id = $1", [parent]);
+    expect((await preview(headers, csv([measured]), { "apple.png": await image() })).json().errors).toContainEqual({ rowNumber: 2, reason: "CATEGORY_NOT_FOUND", field: "categoryName" });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("checks byte limits on ZIP uploads and total expanded image data", async () => {
+    const headers = await token();
+    const tooLargeZip = await preview(headers, csv([row()]), {}, { zip: Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imagesZipBytes + 1) });
+    expect(tooLargeZip.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    const entries = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`p${i}.png`, Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes)]));
+    expect((await preview(headers, csv([row()]), entries)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    // A dishonest ZIP header must not bypass the limits on actual expanded bytes.
+    const dishonest = Buffer.from(zipSync({ "apple.png": Buffer.concat([await image(), Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes)]) }));
+    dishonest.writeUInt32LE(80, 22);
+    dishonest.writeUInt32LE(80, dishonest.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 24);
+    expect((await preview(headers, csv([row()]), {}, { zip: dishonest })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("rejects duplicate/extra/missing parts and truncated multipart or ZIP data", async () => {
+    const headers = await token();
+    expect((await preview(headers, csv([row()]), {}, { extra: true })).statusCode).toBe(400);
+    const missing = await app.inject({ method: "POST", url: "/v1/admin/catalog/import/preview", headers, payload: {} });
+    expect(missing.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["catalogCsv", "imagesZip"] } });
+    const boundary = await app.inject({ method: "POST", url: "/v1/admin/catalog/import/preview", headers: { ...headers, "content-type": "multipart/form-data" }, payload: Buffer.from("bad") });
+    expect(boundary.statusCode).toBe(400);
+    expect((await preview(headers, csv([row()]), {}, { zip: Buffer.from(zipSync({ "apple.png": await image() })).subarray(0, 40) })).json())
+      .toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+  });
+
+  it("reports within-file product/code conflicts, duplicate packs, barcodes and missing images", async () => {
+    const result = await preview(await token(), csv([
+      row({ barcode: "12345678" }), row({ productCode: "pear", name: "Pears", barcode: "12345678" }),
+      row({ quantity: "1.000" }), row({ name: "Bananas" }), row({ productCode: "second", baseUnit: "kg", classification: "measured" }),
+    ]));
+    expect(result.json().errors.map((e: { reason: string }) => e.reason)).toEqual(expect.arrayContaining([
+      "DUPLICATE_PRODUCT_CODE", "DUPLICATE_PACK", "BARCODE_CONFLICT", "PRODUCT_DETAILS_MISMATCH", "MISSING_PRODUCT_IMAGE",
+    ]));
     expect(productImagePuts).toEqual([]);
   });
 });

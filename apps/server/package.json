@@ -14,10 +14,13 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1150.0",
     "@aws-sdk/client-sesv2": "3.1150.0",
+    "@fastify/multipart": "10.1.4",
     "@smithy/node-http-handler": "4.12.1",
     "@ygo/contracts": "workspace:*",
+    "csv-parse": "7.0.3",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.5",
+    "fflate": "0.8.3",
     "pg": "8.23.1",
     "sharp": "0.35.5",
     "zod": "4.6.5"
