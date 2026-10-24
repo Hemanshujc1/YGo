@@ -61,7 +61,10 @@ export const CatalogImportCsvRow = z.strictObject({
   /** Repeated across pack rows for one product; ZIP entry is <productCode>.jpg|png|webp (extension case-insensitive). */
   productCode: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
   name: ProductName,
-  brand: z.string().trim().max(100).transform((value) => value || null),
+  brand: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? null : value,
+    ProductBrand,
+  ).refine((value) => value !== undefined).transform((value) => value ?? null),
   parentCategoryName: z.string().trim().max(100).transform((value) => value || null),
   categoryName: CategoryName,
   baseUnit: ProductBaseUnit,

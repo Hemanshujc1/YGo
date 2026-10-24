@@ -62,6 +62,7 @@ describe("catalog import contracts (#41)", () => {
       { ...csvRow, productCode: "" },
       { ...csvRow, productCode: "APPLE.01" },
       { ...csvRow, productCode: "APPLE 01" },
+      { ...csvRow, brand: "B".repeat(101) },
     ]) {
       expect(CatalogImportCsvRow.safeParse(row).success).toBe(false);
     }
