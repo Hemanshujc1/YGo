@@ -124,11 +124,12 @@ describe("saved addresses", () => {
     const { headers } = await customer("asha@example.com");
     const gym = { ...home, label: "other", flat: "Gym" };
     const first = (await save(headers, gym)).json();
+    const pinless = { ...gym, areaLine: null, point: null };
+    const firstPinless = (await save(headers, pinless)).json();
     const retry = await save(headers, { ...gym, flat: " Gym " });
     expect(retry.statusCode).toBe(201);
     expect(retry.json()).toEqual(first);
-    const pinless = { ...gym, areaLine: null, point: null };
-    const firstPinless = (await save(headers, pinless)).json();
+    expect(await list(headers)).toEqual([first, firstPinless]);
     expect((await save(headers, pinless)).json()).toEqual(firstPinless);
     expect(await list(headers)).toEqual([firstPinless, first]);
 
