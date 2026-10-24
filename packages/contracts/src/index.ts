@@ -53,6 +53,9 @@ export {
   PackParams,
   CreatePackBody,
   EditPackBody,
+  CatalogImportRowError,
+  CatalogImportPreviewResponse,
+  CatalogImportResponse,
 } from "./catalog";
 export {
   Area,

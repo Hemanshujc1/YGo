@@ -107,3 +107,28 @@ export const EditPackBody = z.strictObject({
   .refine((body) => body.quantity === undefined || body.baseUnit !== undefined, { path: ["baseUnit"] })
   .refine(validPackQuantity, { path: ["quantity"] });
 export type EditPackBody = z.infer<typeof EditPackBody>;
+
+/** A row-level problem found while checking an Admin catalog import file. */
+export const CatalogImportRowError = z.strictObject({
+  rowNumber: z.number().int().positive(),
+  reason: z.string().trim().min(1),
+});
+export type CatalogImportRowError = z.infer<typeof CatalogImportRowError>;
+
+/** Summary returned after validating the whole CSV and companion image ZIP. */
+export const CatalogImportPreviewResponse = z.strictObject({
+  rowCount: z.number().int().nonnegative(),
+  productCount: z.number().int().nonnegative(),
+  packCount: z.number().int().nonnegative(),
+  errors: z.array(CatalogImportRowError),
+});
+export type CatalogImportPreviewResponse = z.infer<typeof CatalogImportPreviewResponse>;
+
+/** Counts for catalog records created or already present after an import. */
+export const CatalogImportResponse = z.strictObject({
+  productsCreated: z.number().int().nonnegative(),
+  productsSkipped: z.number().int().nonnegative(),
+  packsCreated: z.number().int().nonnegative(),
+  packsSkipped: z.number().int().nonnegative(),
+});
+export type CatalogImportResponse = z.infer<typeof CatalogImportResponse>;
