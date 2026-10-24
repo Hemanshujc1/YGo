@@ -447,18 +447,20 @@ describe("Catalog pack routes (#205)", () => {
   }
   const path = (id: string) => `/v1/admin/products/${id}/packs`;
   function create(id: string, token: Record<string, string>, payload: object) {
-    return app.inject({ method: "POST", url: path(id), headers: token, payload });
+    return app.inject({ method: "POST", url: path(id), headers: token, payload: { baseUnit: "each", ...payload } });
   }
   function edit(productId: string, id: string, token: Record<string, string>, payload: object) {
-    return app.inject({ method: "PATCH", url: `${path(productId)}/${id}`, headers: token, payload });
+    return app.inject({ method: "PATCH", url: `${path(productId)}/${id}`, headers: token, payload: {
+      ...("quantity" in payload ? { baseUnit: "each" } : {}), ...payload,
+    } });
   }
 
   it("requires a live Admin web session and current membership on every route", async () => {
     const id = await product();
     const requests = [
       { method: "GET" as const, url: path(id) },
-      { method: "POST" as const, url: path(id), payload: { quantity: "1" } },
-      { method: "PATCH" as const, url: `${path(id)}/${randomUUID()}`, payload: { quantity: "2" } },
+      { method: "POST" as const, url: path(id), payload: { baseUnit: "each", quantity: "1" } },
+      { method: "PATCH" as const, url: `${path(id)}/${randomUUID()}`, payload: { baseUnit: "each", quantity: "2" } },
     ];
     const check = async (token: Record<string, string>, status: number) => {
       for (const request of requests) expect((await app.inject({ ...request, headers: token })).statusCode).toBe(status);
@@ -538,13 +540,37 @@ describe("Catalog pack routes (#205)", () => {
     }
     for (const unit of ["kg", "l"]) {
       const measured = await product(unit);
-      expect((await create(measured, token, { quantity: "0.001" })).json()).toMatchObject({ quantity: "0.001" });
-      const fractional = await create(measured, token, { quantity: "1.125" });
+      expect((await create(measured, token, { baseUnit: unit, quantity: "0.001" })).json()).toMatchObject({ quantity: "0.001" });
+      const fractional = await create(measured, token, { baseUnit: unit, quantity: "1.125" });
       expect(fractional.statusCode).toBe(201);
-      expect((await edit(measured, fractional.json().id as string, token, { quantity: "999999999.999" })).json()).toMatchObject({ quantity: "999999999.999" });
+      expect((await edit(measured, fractional.json().id as string, token, { baseUnit: unit, quantity: "999999999.999" })).json()).toMatchObject({ quantity: "999999999.999" });
     }
     await expect(database.pool.query("INSERT INTO packs (product_id, quantity) VALUES ($1, 0)", [id])).rejects.toMatchObject({ code: "23514" });
     await expect(database.pool.query("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, 2, 'bad')", [id])).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("checks request unit context against the stored parent on create and edit", async () => {
+    const id = await product();
+    const measured = await product("kg");
+    const token = await headers();
+    const pack = (await create(id, token, { quantity: "1" })).json().id as string;
+    const wrongUnits = [
+      await create(id, token, { baseUnit: "kg", quantity: "0.125" }),
+      await edit(id, pack, token, { baseUnit: "l", quantity: "0.125" }),
+      await edit(id, pack, token, { baseUnit: "kg", barcode: "01234567" }),
+      await create(measured, token, { baseUnit: "l", quantity: "0.125" }),
+    ];
+    for (const response of wrongUnits) {
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    }
+    for (const request of [{ method: "POST" as const, url: path(id) }, { method: "PATCH" as const, url: `${path(id)}/${pack}` }]) {
+      const response = await app.inject({ ...request, headers: token, payload: { quantity: "2" } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    }
+    expect((await database.pool.query("SELECT product_id, quantity, barcode FROM packs")).rows).toEqual([{ product_id: id, quantity: "1.000", barcode: null }]);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type = 'pack'")).rows[0].n).toBe(1);
   });
 
   it("rejects missing or mismatched parents and offers no deletion route", async () => {
@@ -566,7 +592,7 @@ describe("Catalog pack routes (#205)", () => {
     const token = await headers();
     const changeUnit = (unit: string) => app.inject({ method: "PATCH", url: `/v1/admin/products/${id}`, headers: token, payload: { baseUnit: unit } });
     expect((await changeUnit("l")).statusCode).toBe(200);
-    const pack = (await create(id, token, { quantity: "1" })).json().id as string;
+    const pack = (await create(id, token, { baseUnit: "l", quantity: "1" })).json().id as string;
     expect((await changeUnit("kg")).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
     await edit(id, pack, token, { active: false, reason: "Retired" });
     expect((await changeUnit("kg")).statusCode).toBe(400);
@@ -577,7 +603,7 @@ describe("Catalog pack routes (#205)", () => {
     const id = await product("kg");
     const token = await headers();
     const [made, changed] = await Promise.all([
-      create(id, token, { quantity: "0.125" }),
+      create(id, token, { baseUnit: "kg", quantity: "0.125" }),
       app.inject({ method: "PATCH", url: `/v1/admin/products/${id}`, headers: token, payload: { baseUnit: "each", classification: "counted" } }),
     ]);
     const parent = (await database.pool.query("SELECT base_unit FROM master_products WHERE id = $1", [id])).rows[0];

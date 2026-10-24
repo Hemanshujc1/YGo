@@ -37,6 +37,9 @@ export function registerPackRoutes(app: FastifyInstance, { pool, clock, secret }
       // The product lock also serializes pack writes against base-unit changes.
       const parent = await client.query<{ base_unit: string }>("SELECT base_unit FROM master_products WHERE id = $1 FOR UPDATE", [productId]);
       if (!parent.rows[0]) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (body.baseUnit !== parent.rows[0].base_unit) {
+        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+      }
       if (parent.rows[0].base_unit === "each" && !CountedPackQuantity.safeParse(body.quantity).success) {
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["quantity"] } });
       }
@@ -57,6 +60,9 @@ export function registerPackRoutes(app: FastifyInstance, { pool, clock, secret }
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const parent = await client.query<{ base_unit: string }>("SELECT base_unit FROM master_products WHERE id = $1 FOR UPDATE", [productId]);
       if (!parent.rows[0]) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (body.baseUnit !== undefined && body.baseUnit !== parent.rows[0].base_unit) {
+        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+      }
       const result = await client.query<Pack>(`SELECT ${packColumns} FROM packs WHERE id = $1 AND product_id = $2 FOR UPDATE`, [id, productId]);
       const old = result.rows[0];
       if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
