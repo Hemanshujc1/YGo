@@ -116,9 +116,18 @@ export async function previewCatalogImport(
     CATALOG_IMPORT_CSV_FIELDS.some((field) => !header.includes(field))) throw new CatalogImportFileError(["catalogCsv"]);
   const errors: CatalogImportRowError[] = [];
   const rows: ImportRow[] = [];
+  const identities: Pick<ImportRow, "rowNumber" | "productCode" | "name" | "brand">[] = [];
   records.forEach((record, index) => {
     const rowNumber = index + 2;
-    const parsed = CatalogImportCsvRow.safeParse(Object.fromEntries(header.map((field, i) => [field, record[i]])));
+    const raw = Object.fromEntries(header.map((field, i) => [field, record[i]]));
+    // Other invalid fields must not hide a product-code conflict.
+    const code = CatalogImportCsvRow.shape.productCode.safeParse(raw.productCode);
+    // PostgreSQL text cannot represent NUL; preserve invalid-row errors without querying such identities.
+    if (code.success && typeof raw.name === "string" && typeof raw.brand === "string" && !raw.name.includes("\0") && !raw.brand.includes("\0")) {
+      // Compare readable identities even when name/brand themselves fail validation.
+      identities.push({ rowNumber, productCode: code.data, name: raw.name.trim(), brand: raw.brand.trim() || null });
+    }
+    const parsed = CatalogImportCsvRow.safeParse(raw);
     if (record.length !== header.length) errors.push({ rowNumber, reason: "INVALID_ROW" });
     else if (parsed.success) rows.push({ ...parsed.data, rowNumber });
     else for (const field of new Set(parsed.error.issues.map((issue) => CatalogImportCsvField.safeParse(issue.path[0]).data))) {
@@ -126,6 +135,16 @@ export async function previewCatalogImport(
     }
   });
   // PostgreSQL lower() supplies the identity, matching the catalog's unique indexes exactly.
+  const codeRows = await db.query<{ rowNumber: number; productCode: string; identity: string }>(
+    `SELECT "rowNumber", "productCode", json_build_array(lower(name), lower(COALESCE(brand, '')))::text AS identity
+     FROM jsonb_to_recordset($1::jsonb) AS r("rowNumber" int, "productCode" text, name text, brand text)
+     ORDER BY "rowNumber"`, [JSON.stringify(identities)],
+  );
+  const codes = new Map<string, string>();
+  for (const row of codeRows.rows) {
+    if (codes.has(row.productCode) && codes.get(row.productCode) !== row.identity) errors.push({ rowNumber: row.rowNumber, reason: "DUPLICATE_PRODUCT_CODE", field: "productCode" });
+    codes.set(row.productCode, row.identity);
+  }
   const resolved = await db.query<ResolvedRow>(`SELECT r.*, json_build_array(lower(r.name), lower(COALESCE(r.brand, '')))::text AS identity,
     c.id AS "categoryId", (c.active AND COALESCE(parent.active, true)) AS "categoryActive",
     p.id AS "productId", p.category_id AS "productCategoryId", p.base_unit AS "productUnit", p.classification AS "productClassification",
@@ -138,14 +157,11 @@ export async function previewCatalogImport(
     LEFT JOIN master_products p ON lower(p.name) = lower(r.name) AND COALESCE(lower(p.brand), '') = COALESCE(lower(r.brand), '')
     LEFT JOIN packs pack ON pack.product_id = p.id AND pack.quantity = r.quantity::numeric
     LEFT JOIN packs barcode ON barcode.barcode = r.barcode ORDER BY r."rowNumber"`, [JSON.stringify(rows)]);
-  const codes = new Map<string, string>();
   const products = new Map<string, ResolvedRow>();
   const packs = new Set<string>();
   const barcodes = new Map<string, string>();
   for (const row of resolved.rows) {
     const add = (reason: CatalogImportRowError["reason"], field?: CatalogImportCsvField) => errors.push({ rowNumber: row.rowNumber, reason, ...(field ? { field } : {}) });
-    if (codes.has(row.productCode) && codes.get(row.productCode) !== row.identity) add("DUPLICATE_PRODUCT_CODE", "productCode");
-    codes.set(row.productCode, row.identity);
     const previous = products.get(row.identity);
     if (!row.categoryId || (!row.productId && !row.categoryActive)) add("CATEGORY_NOT_FOUND", "categoryName");
     if ((row.productId && (row.productCategoryId !== row.categoryId || row.productUnit !== row.baseUnit || row.productClassification !== row.classification)) ||
@@ -171,5 +187,6 @@ export async function previewCatalogImport(
     if (invalid.has(row.productCode)) errors.push({ rowNumber: row.rowNumber, reason: "INVALID_PRODUCT_IMAGE", field: "productCode" });
     else if (!row.productId && !sources.has(row.productCode)) errors.push({ rowNumber: row.rowNumber, reason: "MISSING_PRODUCT_IMAGE", field: "productCode" });
   }
+  errors.sort((a, b) => a.rowNumber - b.rowNumber || a.reason.localeCompare(b.reason) || (a.field ?? "").localeCompare(b.field ?? ""));
   return { rowCount: records.length, productCount: products.size, packCount: packs.size, errors };
 }

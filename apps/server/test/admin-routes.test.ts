@@ -977,6 +977,51 @@ describe("Catalog CSV import preview", () => {
       .toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
   });
 
+  it.each([
+    ["quantity", { name: "Pears", quantity: "1.5" }],
+    ["barcode", { brand: "Other", barcode: "bad" }],
+    ["name", { name: "P".repeat(201) }],
+    ["brand", { brand: "B".repeat(101) }],
+  ])("reports code conflicts alongside invalid %s errors in either row order", async (field, malformed) => {
+    const headers = await token();
+    const entries = { "apple.png": await image() };
+    for (const invalidRow of [2, 3]) {
+      const rows = invalidRow === 2 ? [row(malformed), row()] : [row(), row(malformed)];
+      const result = await preview(headers, csv(rows), entries);
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toEqual({ rowCount: 2, productCount: 1, packCount: 1, errors: [
+        ...(invalidRow === 2 ? [{ rowNumber: 2, reason: "INVALID_ROW", field }] : []),
+        { rowNumber: 3, reason: "DUPLICATE_PRODUCT_CODE", field: "productCode" },
+        ...(invalidRow === 3 ? [{ rowNumber: 3, reason: "INVALID_ROW", field }] : []),
+      ] });
+    }
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("checks identities for malformed records without counting them or inventing conflicts", async () => {
+    const headers = await token();
+    const entries = { "apple.png": await image() };
+    const invalid = await preview(headers, csv([row({ quantity: "1.5" }), row({ name: "Pears", barcode: "bad" })]), entries);
+    expect(invalid.json()).toEqual({ rowCount: 2, productCount: 0, packCount: 0, errors: [
+      { rowNumber: 2, reason: "INVALID_ROW", field: "quantity" },
+      { rowNumber: 3, reason: "DUPLICATE_PRODUCT_CODE", field: "productCode" },
+      { rowNumber: 3, reason: "INVALID_ROW", field: "barcode" },
+    ] });
+    const same = await preview(headers, csv([row({ name: " APPLES ", brand: " ", quantity: "1.5" }), row()]), entries);
+    expect(same.json().errors).toEqual([{ rowNumber: 2, reason: "INVALID_ROW", field: "quantity" }]);
+    const malformed = csv([row({ name: "Pears" }), row()]).split("\r\n");
+    malformed[1] += ",extra";
+    expect((await preview(headers, malformed.join("\r\n"), entries)).json().errors).toEqual([
+      { rowNumber: 2, reason: "INVALID_ROW" }, { rowNumber: 3, reason: "DUPLICATE_PRODUCT_CODE", field: "productCode" },
+    ]);
+    for (const malformedIdentity of [{ name: "Apples\0", brand: "" }, { name: "Apples", brand: "Farm\0" }]) {
+      const unreadable = await preview(headers, csv([row({ ...malformedIdentity, quantity: "1.5" })]), entries);
+      expect(unreadable.statusCode).toBe(200);
+      expect(unreadable.json().errors).toEqual([{ rowNumber: 2, reason: "INVALID_ROW", field: "quantity" }]);
+    }
+    expect(productImagePuts).toEqual([]);
+  });
+
   it("reports within-file product/code conflicts, duplicate packs, barcodes and missing images", async () => {
     const result = await preview(await token(), csv([
       row({ barcode: "12345678" }), row({ productCode: "pear", name: "Pears", barcode: "12345678" }),
