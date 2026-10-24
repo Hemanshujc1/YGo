@@ -7,6 +7,7 @@ import {
   placeLabel,
   sentOutcome,
   stale,
+  refusedSearch,
   typedPlace,
   waitlistBody,
 } from "../src/lib/location-flow";
@@ -66,6 +67,22 @@ describe("typedPlace", () => {
     expect(typedPlace("011045")).toBeNull();
     expect(typedPlace("41104")).toBeNull();
     expect(typedPlace("")).toBeNull();
+  });
+});
+
+describe("refusedSearch", () => {
+  it("clears a place name as the field turns into Pincode, with no error yet", () => {
+    expect(refusedSearch("Baner Road", false)).toEqual({ place: null, text: "", invalid: false });
+    expect(refusedSearch("41104", false)).toEqual({ place: null, text: "", invalid: false });
+  });
+
+  it("keeps a valid pincode as typed and opens Confirm with it", () => {
+    expect(refusedSearch(" 411045 ", false)).toEqual({ place: { pincode: "411045" }, text: " 411045 ", invalid: false });
+    expect(refusedSearch("411045", true)).toEqual({ place: { pincode: "411045" }, text: "411045", invalid: false });
+  });
+
+  it("keeps a wrong pincode typed in Pincode mode, with the error", () => {
+    expect(refusedSearch("41104", true)).toEqual({ place: null, text: "41104", invalid: true });
   });
 });
 

@@ -11,6 +11,8 @@ export interface Geocoder {
 }
 
 export type GeoAddress = {
+  /** "IN" for India; null when the phone doesn't say. */
+  isoCountryCode: string | null;
   postalCode: string | null;
   street: string | null;
   name: string | null;
@@ -26,15 +28,19 @@ const searchLimit = 5;
 const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): part is string => !!part))];
 
 /**
- * The spot at a point, from the first address with a pincode; null when there
- * is none, or the point is outside India. Only latitude and longitude are kept:
- * the phone's results also carry altitude, accuracy or zoom, which the server's
- * strict `AddressPoint` refuses.
+ * The spot at a point, from the first address in India with a pincode; null
+ * when there is none, or the point is outside India. The box `AddressPoint`
+ * checks also holds parts of Nepal, China and other neighbours, whose postal
+ * codes can look like a pincode, so an address the phone names as in another
+ * country is skipped; one with no country is kept. Only latitude and
+ * longitude are kept: the phone's results also carry altitude, accuracy or
+ * zoom, which the server's strict `AddressPoint` refuses.
  */
 async function spotAt(geocoder: Geocoder, { latitude, longitude }: AddressPoint): Promise<Spot | null> {
   const point = AddressPoint.safeParse({ latitude, longitude });
   if (!point.success) return null;
   for (const address of await geocoder.addresses(point.data)) {
+    if (address.isoCountryCode && address.isoCountryCode.toUpperCase() !== "IN") continue;
     const pincode = Pincode.safeParse(address.postalCode ?? "");
     if (!pincode.success) continue;
     const street = address.street || address.name;

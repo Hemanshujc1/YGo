@@ -55,6 +55,18 @@ export function typedPlace(text: string): Place | null {
   return pincode.success ? { pincode: pincode.data } : null;
 }
 
+/**
+ * A search on Android just refused location, or already in Pincode mode (#217,
+ * answer 6): a valid pincode opens Confirm and is kept as typed. Otherwise a
+ * place name typed for search is cleared as the field turns into Pincode, with
+ * no error yet; in Pincode mode the text stays and breaks the rule.
+ */
+export function refusedSearch(text: string, pincodeMode: boolean): { place: Place | null; text: string; invalid: boolean } {
+  const place = typedPlace(text);
+  if (place) return { place, text, invalid: false };
+  return pincodeMode ? { place: null, text, invalid: true } : { place: null, text: "", invalid: false };
+}
+
 /** The server's answer for a pincode: served, not served (C03), no answer, or a refusal. */
 export type AreaAnswer =
   | { kind: "served"; areaName: string }

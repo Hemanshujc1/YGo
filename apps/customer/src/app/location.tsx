@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MapPin, Search } from "../components/icons";
 import { TopBar } from "../components/top-bar";
-import { findPlace, type Locator, newestOnly, stale, typedPlace } from "../lib/location-flow";
+import { findPlace, type Locator, newestOnly, refusedSearch, stale } from "../lib/location-flow";
 import { searchPlaces, type Spot } from "../lib/map-place";
 import { phoneGeocoder } from "../lib/phone-geocoder";
 import { strings } from "../strings";
@@ -109,11 +109,11 @@ export default function SetLocation() {
     const allowed = Platform.OS === "ios" || (!locationOff && (await asks.ask(locator.askPermission().catch(() => false))));
     if (allowed === stale) return;
     if (!allowed) {
+      const refused = refusedSearch(text, locationOff);
+      setText(refused.text);
       setLocationOff(true);
-      const place = typedPlace(text);
-      // Just refused: the field turns into Pincode and the notice asks for one, so no error yet for a place name.
-      stop(place || !locationOff ? null : "invalid");
-      if (place) openConfirm({ pincode: place.pincode });
+      stop(refused.invalid ? "invalid" : null);
+      if (refused.place) openConfirm({ pincode: refused.place.pincode });
       return;
     }
     const found = await asks.ask(searchPlaces(phoneGeocoder, text));
