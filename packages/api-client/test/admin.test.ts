@@ -45,6 +45,7 @@ const product = {
   published: true,
   active: true,
 };
+const pack = { id: "00000000-0000-4000-8000-000000000401", productId: product.id, quantity: "2", barcode: "12345678", active: true };
 const denied = { error: { code: "UNAUTHENTICATED" } };
 const forbidden = { error: { code: "FORBIDDEN" } };
 const answer = (status: number, body?: unknown) =>
@@ -213,6 +214,24 @@ describe("Admin browser API client", () => {
       ["/v1/admin/products", "GET", undefined],
       ["/v1/admin/products", "POST", create],
       [`/v1/admin/products/${product.id}`, "PATCH", { name: "Green apples" }],
+    ]);
+    expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
+  });
+
+  it("lists, creates and edits packs with the Admin session", async () => {
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET") return answer(200, { packs: [pack] });
+      return answer(method === "POST" ? 201 : 200, pack);
+    });
+    const create = { baseUnit: "each" as const, quantity: "2", barcode: pack.barcode };
+    expect(await client.listPacks(product.id)).toEqual({ ok: true, data: { packs: [pack] } });
+    expect(await client.createPack(product.id, create)).toEqual({ ok: true, data: pack });
+    expect(await client.editPack(product.id, pack.id, { active: false, reason: "Discontinued" })).toEqual({ ok: true, data: pack });
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      [`/v1/admin/products/${product.id}/packs`, "GET", undefined],
+      [`/v1/admin/products/${product.id}/packs`, "POST", create],
+      [`/v1/admin/products/${product.id}/packs/${pack.id}`, "PATCH", { active: false, reason: "Discontinued" }],
     ]);
     expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
   });

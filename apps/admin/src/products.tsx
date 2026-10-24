@@ -10,6 +10,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
 import { ReasonDialog } from "./components/reason-dialog";
 import { fieldMessages } from "./lib/field-messages";
+import { Packs } from "./packs";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -35,6 +36,7 @@ export function Products({ api }: { api: AdminApi }) {
   const [products, setProducts] = useState(loaded.products);
   const [screen, setScreen] = useState<"list" | "form">("list");
   const [editing, setEditing] = useState<MasterProduct | null>(null);
+  const [packing, setPacking] = useState<MasterProduct | null>(null);
   const [deactivating, setDeactivating] = useState<MasterProduct | null>(null);
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
@@ -185,6 +187,8 @@ export function Products({ api }: { api: AdminApi }) {
   const query = search.trim().toLowerCase();
   const visible = products.filter((product) => `${product.name} ${product.brand ?? ""}`.toLowerCase().includes(query));
 
+  if (packing) return <Packs api={api} product={packing} onBack={() => setPacking(null)} />;
+
   return <>
     <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div><h1 className="text-title-large font-semibold">{strings.products}</h1><p className="mt-2 text-muted">{strings.productIntro}</p></div>
@@ -237,6 +241,7 @@ export function Products({ api }: { api: AdminApi }) {
             </div>
           </div>
           <div className="flex gap-2">
+            {product.published && <button type="button" onClick={() => setPacking(product)} className="h-10 rounded-lg border border-border-strong px-3">{strings.managePacks(product.name)}</button>}
             <button type="button" disabled={busy} onClick={() => openForm(product)} className="h-10 rounded-lg border border-border-strong px-3">{!product.published ? strings.retryProductImage(product.name) : strings.editProduct(product.name)}</button>
             {product.published && <button type="button" disabled={busy} onClick={() => product.active ? (setDeactivating(product), setErrors({}), setError("")) : void changeActive(product, true)}
               className="h-10 rounded-lg border border-border-strong px-3">{product.active ? strings.deactivateProduct : strings.reactivateProduct}</button>}
