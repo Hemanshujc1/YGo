@@ -11,6 +11,7 @@ import {
   type RequestCodeBody,
   type SaveAddressBody,
   type SetProfileBody,
+  type SetThemeBody,
   type VerifyCodeBody,
   type WaitlistBody,
 } from "@ygo/contracts";
@@ -285,6 +286,11 @@ export function createApiClient({
     /** `PATCH /v1/me`: a new name. */
     async changeName(body: ChangeNameBody): Promise<ApiResult<Account>> {
       return result(await signedIn("PATCH", "/v1/me", body), Account);
+    },
+
+    /** `PUT /v1/me/theme`: the account's theme, shared by both mobile apps. */
+    async setTheme(body: SetThemeBody): Promise<ApiResult<Account>> {
+      return result(await signedIn("PUT", "/v1/me/theme", body), Account);
     },
 
     /** `GET /v1/serviceability?pincode=`: whether the pincode is in an active Area (C15). */
