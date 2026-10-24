@@ -18,6 +18,7 @@ const apple = {
   imageUrls: { 256: "https://images.test/256.webp", 512: "https://images.test/512.webp", 1024: "https://images.test/1024.webp" },
   published: true, active: true,
 };
+const applePack = { id: "00000000-0000-4000-8000-000000000401", productId: apple.id, quantity: "2", barcode: "12345678", active: true };
 const kothrud = { id: "00000000-0000-4000-8000-000000000201", name: "Kothrud", pincodes: ["411038"], paused: false };
 const aundh = { id: "00000000-0000-4000-8000-000000000202", name: "Aundh", pincodes: ["411007", "411027"], paused: true };
 
@@ -31,6 +32,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
     createMasterProduct: vi.fn(),
     editMasterProduct: vi.fn(),
+    listPacks: vi.fn().mockResolvedValue({ ok: true, data: { packs: [] } }),
+    createPack: vi.fn(),
+    editPack: vi.fn(),
     createCategory: vi.fn(),
     editCategory: vi.fn(),
     listAreas: vi.fn(),
@@ -364,6 +368,107 @@ describe("Admin web", () => {
     expect(screen.getByText("Apples")).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: strings.searchProducts }), { target: { value: "pear" } });
     expect(screen.getByText(strings.noProductMatches)).toBeTruthy();
+  });
+
+  it("loads packs, creates a counted pack, edits it and deactivates with a reason", async () => {
+    const changed = { ...applePack, quantity: "3", barcode: null };
+    const inactive = { ...changed, active: false };
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listPacks: vi.fn().mockResolvedValue({ ok: true, data: { packs: [] } }),
+      createPack: vi.fn().mockResolvedValue({ ok: true, data: applePack }),
+      editPack: vi.fn().mockResolvedValueOnce({ ok: true, data: changed }).mockResolvedValueOnce({ ok: true, data: inactive })
+        .mockResolvedValueOnce({ ok: true, data: changed }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.managePacks(apple.name) }));
+    expect(await screen.findByText(strings.noPacks)).toBeTruthy();
+    expect(api.listPacks).toHaveBeenCalledWith(apple.id);
+    fireEvent.click(screen.getByRole("button", { name: strings.newPack }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packQuantity("each") }), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByText(strings.packInvalidFields.quantity)).toBeTruthy();
+    expect(api.createPack).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packQuantity("each") }), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packBarcode }), { target: { value: applePack.barcode } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.packSaved);
+    expect(api.createPack).toHaveBeenCalledWith(apple.id, { baseUnit: "each", quantity: "2", barcode: applePack.barcode });
+    fireEvent.click(screen.getByRole("button", { name: strings.editPack("2") }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packQuantity("each") }), { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packBarcode }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByText(`${strings.noBarcode} · ${strings.packActive}`)).toBeTruthy();
+    expect(api.editPack).toHaveBeenCalledWith(apple.id, applePack.id, { baseUnit: "each", quantity: "3", barcode: null });
+    fireEvent.click(screen.getByRole("button", { name: strings.deactivatePack("3") }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Discontinued" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.confirmDeactivatePack }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.packDeactivated);
+    expect(api.editPack).toHaveBeenLastCalledWith(apple.id, applePack.id, { active: false, reason: "Discontinued" });
+    fireEvent.click(screen.getByRole("button", { name: strings.reactivatePack("3") }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.packReactivated);
+    expect(api.editPack).toHaveBeenLastCalledWith(apple.id, applePack.id, { active: true });
+  });
+
+  it("shows duplicate barcode on the pack field and keeps the form", async () => {
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      createPack: vi.fn().mockResolvedValue({ ok: false, status: 409, code: "BARCODE_IN_USE" }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.managePacks(apple.name) }));
+    await screen.findByText(strings.noPacks);
+    fireEvent.click(screen.getByRole("button", { name: strings.newPack }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packQuantity("each") }), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("textbox", { name: strings.packBarcode }), { target: { value: applePack.barcode } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByText(strings.errors.BARCODE_IN_USE)).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.savePack })).toBeTruthy();
+  });
+
+  it("allows three decimal places for a measured pack and rejects a fourth", async () => {
+    const rice = { ...apple, id: "00000000-0000-4000-8000-000000000302", name: "Rice", baseUnit: "kg", classification: "measured" };
+    const pack = { ...applePack, productId: rice.id, quantity: "0.125", barcode: null };
+    const api = {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [rice] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      createPack: vi.fn().mockResolvedValue({ ok: true, data: pack }),
+    };
+    setup("/products", api);
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.managePacks(rice.name) }));
+    await screen.findByText(strings.noPacks);
+    fireEvent.click(screen.getByRole("button", { name: strings.newPack }));
+    const input = screen.getByRole("textbox", { name: strings.packQuantity("kg") });
+    fireEvent.change(input, { target: { value: "0.1255" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByText(strings.packInvalidFields.quantity)).toBeTruthy();
+    expect(api.createPack).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "0.125" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.savePack }));
+    expect(await screen.findByText("0.125 kg")).toBeTruthy();
+    expect(api.createPack).toHaveBeenCalledWith(rice.id, { baseUnit: "kg", quantity: "0.125", barcode: null });
+  });
+
+  it("shows pack loading and retries a failed list", async () => {
+    let resolve!: (value: unknown) => void;
+    const listPacks = vi.fn().mockReturnValueOnce(new Promise((done) => { resolve = done; }))
+      .mockResolvedValue({ ok: true, data: { packs: [applePack] } });
+    setup("/products", {
+      listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [apple] } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }), listPacks,
+    });
+    await screen.findByRole("heading", { name: strings.products });
+    fireEvent.click(screen.getByRole("button", { name: strings.managePacks(apple.name) }));
+    expect(screen.getByText(strings.packsLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.errors.UNAVAILABLE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText("2 each")).toBeTruthy();
   });
 
   it("creates a master product with an image using the contract fields", async () => {
