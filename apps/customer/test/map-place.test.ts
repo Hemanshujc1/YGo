@@ -88,6 +88,18 @@ describe("searchPlaces", () => {
     expect(spots[0]?.place.point).toEqual(shivajiNagar);
   });
 
+  it("keeps a later match when looking up an earlier one fails", async () => {
+    const later = { latitude: 18.53, longitude: 73.84 };
+    const spots = await searchPlaces(
+      geocoder(
+        async () => [shivajiNagar, later],
+        async (point) => (point.latitude === shivajiNagar.latitude ? Promise.reject(new Error("rate limited")) : [prabhat]),
+      ),
+      "Prabhat Road",
+    );
+    expect(spots.map((spot) => spot.place.point)).toEqual([later]);
+  });
+
   it("looks the matches up one at a time", async () => {
     let running = 0;
     let most = 0;
