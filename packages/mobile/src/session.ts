@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { Account } from "@ygo/contracts";
+import type { Account, SetThemeBody, ThemeChoice } from "@ygo/contracts";
 import { useSyncExternalStore } from "react";
 import { listeners } from "./listeners";
 import { onSignedOut } from "./signed-out";
@@ -22,7 +22,17 @@ export type SessionState =
 /** The calls the session makes: the app's own client. */
 interface SessionApi {
   me(): Promise<ApiResult<Account>>;
+  setTheme(body: SetThemeBody): Promise<ApiResult<Account>>;
   signOut(): Promise<void>;
+}
+
+/** The theme the app shows, and whether a choice is being saved. */
+export type ThemeView = { choice: ThemeChoice; saving: boolean };
+
+/** This phone's copy of the theme: `phoneTheme` in the apps. */
+interface ThemeCopy {
+  saved(): ThemeChoice;
+  keep(choice: ThemeChoice): void;
 }
 
 const byAccount = (account: Account): SessionState =>
@@ -32,20 +42,58 @@ const byAccount = (account: Account): SessionState =>
 let stopLast = () => {};
 
 /**
- * One per app, beside its client: `createSession(api)`. A new one takes
- * `showSignedOut` from the last, so Fast Refresh and tests never pile up
- * listeners.
+ * One per app, beside its client: `createSession(api, phoneTheme)`. A new one
+ * takes `showSignedOut` from the last, so Fast Refresh and tests never pile up
+ * listeners. Each account the server answers sets the app's theme, since the
+ * account's choice wins over the phone's copy (#195, Q2).
  */
-export function createSession(api: SessionApi) {
+export function createSession(api: SessionApi, theme: ThemeCopy) {
   let state: SessionState = { status: "checking" };
   const changed = listeners();
   // Each change bumps it, so a launch check that answers after a sign-in or a sign-out is dropped.
   let turn = 0;
+  // The theme the app shows, and whether the picker's save is under way.
+  let shown: ThemeView = { choice: theme.saved(), saving: false };
+  // Each theme shown bumps it, so a failed save never puts its old theme over a newer one.
+  let themeTurn = 0;
+  let saving: Promise<boolean> | null = null;
+
+  function show(next: ThemeView) {
+    if (next.choice !== shown.choice) {
+      themeTurn++;
+      theme.keep(next.choice);
+    }
+    shown = next;
+  }
 
   function move(next: SessionState) {
+    if ("account" in next) show({ ...shown, choice: next.account.theme });
     turn++;
     state = next;
     changed.notify();
+  }
+
+  async function saveTheme(choice: ThemeChoice): Promise<boolean> {
+    const before = shown.choice;
+    show({ choice, saving: true });
+    changed.notify();
+    const mine = themeTurn;
+    let saved = false;
+    try {
+      const answer = await api.setTheme({ theme: choice });
+      if (answer.ok) {
+        saved = true;
+        // The newest account, theme included; an answer that landed meanwhile may hold the old one.
+        if ("account" in state) state = { ...state, account: answer.data };
+        show({ choice: answer.data.theme, saving: false });
+      }
+    } catch {
+      // No answer: the same as a refusal.
+    }
+    if (!saved) show({ choice: mine === themeTurn ? before : shown.choice, saving: false });
+    saving = null;
+    changed.notify();
+    return saved;
   }
 
   stopLast();
@@ -79,6 +127,20 @@ export function createSession(api: SessionApi) {
       move(byAccount(account));
     },
 
+    /** The theme the app shows, for the picker. */
+    theme: () => shown,
+
+    /**
+     * The theme picker: the app changes at once, then the account saves it.
+     * Resolves false, with the old theme back, when the save fails; nothing
+     * retries by itself (#195, Q3). One save runs at a time: a choice made
+     * meanwhile gets the running save's answer.
+     */
+    chooseTheme(choice: ThemeChoice): Promise<boolean> {
+      saving ??= saveTheme(choice);
+      return saving;
+    },
+
     /**
      * Sign out, then C01. The client forgets the session the moment this is
      * called (#161). Resolves false, and marks the state `notCleared`, when
@@ -109,4 +171,9 @@ export type AppSession = ReturnType<typeof createSession>;
 /** The current state; the screen re-renders when it changes. */
 export function useSession(session: AppSession): SessionState {
   return useSyncExternalStore(session.subscribe, session.get);
+}
+
+/** The theme the app shows; the picker re-renders when it changes. */
+export function useTheme(session: AppSession): ThemeView {
+  return useSyncExternalStore(session.subscribe, session.theme);
 }

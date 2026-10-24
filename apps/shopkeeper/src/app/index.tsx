@@ -21,7 +21,7 @@ export default function NotLinked() {
         <Text className="mt-4 text-secondary text-muted">{strings.notLinked.signedInAs(state.account.email)}</Text>
       )}
       <View className="mt-8">
-        <ThemePicker words={strings.theme} />
+        <ThemePicker session={session} words={strings.theme} />
       </View>
       <Pressable
         accessibilityRole="button"

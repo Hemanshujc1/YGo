@@ -47,7 +47,7 @@ export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
 
 /**
  * The signed-in account, from `GET /v1/me`. Name and phone are null until the
- * profile is set. Plain strings, not the field rules: those check what a
+ * profile is set. `theme` is `system` until the person chooses one. Plain strings, not the field rules: those check what a
  * person types, and a rule made stricter later must not break an account
  * saved under the old one.
  */
@@ -56,6 +56,7 @@ export const Account = z.object({
   email: z.string(),
   name: z.string().nullable(),
   phone: z.string().nullable(),
+  theme: ThemeChoice,
 });
 export type Account = z.infer<typeof Account>;
 

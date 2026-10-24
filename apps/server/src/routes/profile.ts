@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, ChangeNameBody, ErrorEnvelope, SetProfileBody } from "@ygo/contracts";
+import { Account, ChangeNameBody, ErrorEnvelope, SetProfileBody, SetThemeBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
@@ -20,7 +20,7 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
     async (request, reply) => {
       const who = await mobileSignedIn(request, reply, auth);
       if (!who) return reply;
-      const result = await pool.query<Account>("SELECT id, email, name, phone FROM accounts WHERE id = $1", [who.accountId]);
+      const result = await pool.query<Account>("SELECT id, email, name, phone, theme FROM accounts WHERE id = $1", [who.accountId]);
       return reply.code(200).send(result.rows[0]);
     },
   );
@@ -36,7 +36,7 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
         const result = await pool.query<Account>(
           `UPDATE accounts SET name = $1, phone = $2
            WHERE id = $3 AND (phone IS NULL OR phone = $2)
-           RETURNING id, email, name, phone`,
+           RETURNING id, email, name, phone, theme`,
           [name, phone, who.accountId],
         );
         if (!result.rows[0]) return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["phone"] } });
@@ -59,10 +59,26 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
       const { name } = request.body as ChangeNameBody;
       const result = await pool.query<Account>(
         `UPDATE accounts SET name = $1 WHERE id = $2 AND name IS NOT NULL AND phone IS NOT NULL
-         RETURNING id, email, name, phone`,
+         RETURNING id, email, name, phone, theme`,
         [name, who.accountId],
       );
       if (!result.rows[0]) return reply.code(403).send({ error: { code: "PROFILE_REQUIRED" } });
+      return reply.code(200).send(result.rows[0]);
+    },
+  );
+
+  // Open before the profile is set, like GET: the theme is a display choice, not account data.
+  app.put(
+    "/v1/me/theme",
+    { schema: { body: SetThemeBody, response: { 200: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await mobileSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const { theme } = request.body as SetThemeBody;
+      const result = await pool.query<Account>(
+        "UPDATE accounts SET theme = $1 WHERE id = $2 RETURNING id, email, name, phone, theme",
+        [theme, who.accountId],
+      );
       return reply.code(200).send(result.rows[0]);
     },
   );

@@ -615,6 +615,41 @@ describe("profile routes", () => {
     expect((await call(h, "GET", "/v1/me", s.accessToken)).json()).toEqual(repeat.json());
   });
 
+  it("starts the theme at System, saves a choice before the profile is set, and signs in with it on another phone", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    expect(s.account.theme).toBe("system");
+    const set = await call(h, "PUT", "/v1/me/theme", s.accessToken, { theme: "dark" });
+    expect(set.statusCode).toBe(200);
+    expect(Account.parse(set.json())).toEqual({ ...s.account, theme: "dark" });
+    expect((await call(h, "GET", "/v1/me", s.accessToken)).json()).toEqual(set.json());
+
+    // The other phone: a new sign-in to the same email, after the resend wait.
+    h.clock.advance(30_000);
+    await h.requestCode(s.account.email);
+    const mail = inbox(h.mailer).findLast((sent) => sent.to === s.account.email);
+    if (!mail) throw new Error("Expected a sent test email");
+    const other = Session.parse((await h.verify(s.account.email, codeFrom(mail))).json());
+    expect(other.account.theme).toBe("dark");
+
+    const profile = await call(h, "PUT", "/v1/me/profile", other.accessToken, { name: "Asha Kulkarni", phone: phone() });
+    expect(profile.json()).toMatchObject({ theme: "dark" });
+    const light = await call(h, "PUT", "/v1/me/theme", other.accessToken, { theme: "light" });
+    expect(light.json()).toMatchObject({ name: "Asha Kulkarni", theme: "light" });
+    expect((await call(h, "PATCH", "/v1/me", s.accessToken, { name: "Meera Shah" })).json()).toMatchObject({ theme: "light" });
+  });
+
+  it("refuses a theme that is not System, Light or Dark, and keeps the saved one", async () => {
+    const h = harness();
+    const s = await signIn(h);
+    for (const payload of [{ theme: "Dark" }, { theme: "blue" }, {}]) {
+      const answer = await call(h, "PUT", "/v1/me/theme", s.accessToken, payload);
+      expect(answer.statusCode).toBe(400);
+      expect(answer.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["theme"] } });
+    }
+    expect((await call(h, "GET", "/v1/me", s.accessToken)).json()).toMatchObject({ theme: "system" });
+  });
+
   it("maps a concurrent phone uniqueness clash to PHONE_IN_USE", async () => {
     const h = harness();
     const [first, second] = await Promise.all([signIn(h), signIn(h)]);
@@ -632,6 +667,7 @@ describe("profile routes", () => {
       ["GET", "/v1/me", undefined],
       ["PUT", "/v1/me/profile", { name: "Asha Kulkarni", phone: "+919876543210" }],
       ["PATCH", "/v1/me", { name: "Asha Kulkarni" }],
+      ["PUT", "/v1/me/theme", { theme: "dark" }],
     ] as const) {
       for (const token of [undefined, "bad.token"]) {
         const answer = await call(h, method, url, token, payload);
@@ -654,6 +690,7 @@ describe("mobile route session access", () => {
     { method: "GET", url: "/v1/me/addresses" },
     { method: "POST", url: "/v1/me/addresses", payload: { ...address, label: "other", flat: "Changed flat" } },
     { method: "DELETE", url: `/v1/me/addresses/${id}` },
+    { method: "PUT", url: "/v1/me/theme", payload: { theme: "dark" } },
     { method: "POST", url: "/v1/auth/sign-out" },
   ] as const;
 
@@ -695,7 +732,7 @@ describe("mobile route session access", () => {
     const number = `+919${randomInt(1_000_000_000).toString().padStart(9, "0")}`;
     const saved = await h.app.inject({ method: "POST", url: "/v1/me/addresses", headers, payload: address });
     expect(saved.statusCode).toBe(201);
-    const expected = [200, 200, 200, 200, 204, 200, 201, 204, 204];
+    const expected = [200, 200, 200, 200, 204, 200, 201, 204, 200, 204];
     for (const [index, request] of requests(saved.json().id, number).entries()) {
       const answer = await h.app.inject({ ...request, headers });
       expect(answer.statusCode, `${request.method} ${request.url}`).toBe(expected[index]);

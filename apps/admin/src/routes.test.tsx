@@ -7,8 +7,8 @@ import { strings } from "./strings";
 
 afterEach(cleanup);
 
-const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210" };
-const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211" };
+const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system" };
+const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211", theme: "system" };
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
 const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
 const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };

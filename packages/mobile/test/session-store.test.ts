@@ -174,7 +174,7 @@ describe("makeSessionStore when the marker's storage fails", () => {
 describe("sessionStore behind the client", () => {
   let issued = 0;
   const body = { email: "asha@example.com", code: "123456" };
-  const account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: body.email, name: "Asha", phone: "+919876543210" };
+  const account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: body.email, name: "Asha", phone: "+919876543210", theme: "system" };
 
   function client() {
     const fetch = async (url: string | URL | Request) => {

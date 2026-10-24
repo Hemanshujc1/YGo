@@ -7,6 +7,7 @@ const account: Account = {
   email: "asha@example.com",
   name: "Asha Kulkarni",
   phone: "+919876543210",
+  theme: "system",
 };
 const none = { name: false, phone: null, other: null };
 

@@ -268,14 +268,14 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
 
         const accountResult = browser
           ? await client.query<Account>(
-              `SELECT a.id, a.email, a.name, a.phone FROM accounts a
+              `SELECT a.id, a.email, a.name, a.phone, a.theme FROM accounts a
                JOIN admin_memberships m ON m.account_id = a.id WHERE a.email = $1`,
               [email],
             )
           : await client.query<Account>(
               `INSERT INTO accounts (email) VALUES ($1)
                ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-               RETURNING id, email, name, phone`,
+               RETURNING id, email, name, phone, theme`,
               [email],
             );
         const account = accountResult.rows[0];
@@ -398,7 +398,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
           }
         }
         const accountResult = await client.query<Account>(
-          "SELECT id, email, name, phone FROM accounts WHERE id = $1",
+          "SELECT id, email, name, phone, theme FROM accounts WHERE id = $1",
           [session.account_id],
         );
         const account = accountResult.rows[0];

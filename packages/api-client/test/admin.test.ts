@@ -6,6 +6,7 @@ const account = {
   email: "asha@example.com",
   name: "Asha Kulkarni",
   phone: "+919876543210",
+  theme: "system",
 };
 const createBody = {
   email: account.email,

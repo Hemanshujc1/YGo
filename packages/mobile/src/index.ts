@@ -10,5 +10,5 @@ export { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 export type { SignInWords } from "./sign-in-words";
 export { Text } from "./text";
 export { showUpdateRequired } from "./update-signal";
-export { applySavedTheme } from "./theme";
+export { applySavedTheme, phoneTheme } from "./theme";
 export { ThemePicker, type ThemePickerWords } from "./theme-picker";

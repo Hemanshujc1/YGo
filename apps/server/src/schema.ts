@@ -23,7 +23,9 @@ export const accounts = pgTable("accounts", {
   phone: text("phone").unique(),
   phoneVerified: boolean("phone_verified").notNull().default(false),
   role: text("role").notNull().default("customer"),
-});
+  // System, Light or Dark, shared by both mobile apps (#195).
+  theme: text("theme").notNull().default("system"),
+}, (table) => [check("accounts_theme_valid", sql`${table.theme} IN ('system', 'light', 'dark')`)]);
 
 // Admin authority is independent of the account's customer role and of tokens.
 export const adminMemberships = pgTable("admin_memberships", {

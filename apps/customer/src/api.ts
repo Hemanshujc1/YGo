@@ -1,6 +1,6 @@
 import { createApiClient } from "@ygo/api-client";
 import { Email } from "@ygo/contracts";
-import { createSession, sessionStore, showSignedOut, showUpdateRequired } from "@ygo/mobile";
+import { createSession, phoneTheme, sessionStore, showSignedOut, showUpdateRequired } from "@ygo/mobile";
 import Constants from "expo-constants";
 
 // A phone has no page origin to fall back on, so a missing URL is a setup
@@ -29,4 +29,4 @@ export const api = createApiClient({
   onSignedOut: showSignedOut,
 });
 
-export const session = createSession(api);
+export const session = createSession(api, phoneTheme);

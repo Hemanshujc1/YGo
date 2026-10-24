@@ -67,7 +67,13 @@ export const strings = {
     signedInAs: (email: string) => `Signed in as ${email}`,
   },
   // On the not-linked screen until S36 More is built (#193).
-  theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
+  theme: {
+    label: "Theme",
+    system: "System",
+    light: "Light",
+    dark: "Dark",
+    notSaved: "Couldn't save the theme. Check your connection, then try again.",
+  },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.
   errors: {
