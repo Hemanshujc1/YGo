@@ -1,22 +1,23 @@
 import type { ApiResult } from "@ygo/api-client";
 import { ThemeChoice, type Account, type SetThemeBody } from "@ygo/contracts";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { strings } from "./strings";
 
-/** Also read by the script in index.html, which applies the theme before the page draws. */
-const key = "ygo-admin-theme";
+/** Also read by the script in index.html, which applies the theme before the page draws (a test checks it). */
+export const themeKey = "ygo-admin-theme";
 const themes: ThemeChoice[] = ["system", "light", "dark"];
 
 type ThemeApi = {
   me(): Promise<ApiResult<Account>>;
   setTheme(body: SetThemeBody): Promise<ApiResult<Account>>;
 };
-type ThemeView = { choice: ThemeChoice; saving: boolean };
+// `failed`: the last save failed. Kept here, not in the picker, so it outlives a page change.
+type ThemeView = { choice: ThemeChoice; saving: boolean; failed: boolean };
 
 /** This browser's copy, for the next page load and the sign-in page. */
 function saved(): ThemeChoice {
   try {
-    const parsed = ThemeChoice.safeParse(localStorage.getItem(key));
+    const parsed = ThemeChoice.safeParse(localStorage.getItem(themeKey));
     return parsed.success ? parsed.data : "system";
   } catch {
     return "system";
@@ -25,7 +26,7 @@ function saved(): ThemeChoice {
 
 function keep(choice: ThemeChoice) {
   try {
-    localStorage.setItem(key, choice);
+    localStorage.setItem(themeKey, choice);
   } catch {
     // Storage blocked: the theme still applies until the page reloads.
   }
@@ -40,8 +41,10 @@ function keep(choice: ThemeChoice) {
  * One save runs at a time, and nothing retries by itself.
  */
 function createAdminTheme(api: ThemeApi) {
-  let shown: ThemeView = { choice: saved(), saving: false };
+  let shown: ThemeView = { choice: saved(), saving: false, failed: false };
   let saving: Promise<boolean> | null = null;
+  // The account's theme when it answers during a save; a failed save shows it, not the older one.
+  let heard: ThemeChoice | null = null;
   let loading: Promise<void> | null = null;
   const listeners = new Set<() => void>();
 
@@ -53,16 +56,19 @@ function createAdminTheme(api: ThemeApi) {
 
   async function save(choice: ThemeChoice): Promise<boolean> {
     const before = shown.choice;
-    show({ choice, saving: true });
+    show({ choice, saving: true, failed: false });
     let answer: ApiResult<Account> | null = null;
     try {
       answer = await api.setTheme({ theme: choice });
     } catch {
       // No answer: the same as a refusal.
     }
+    const ok = answer?.ok ?? false;
+    const back = heard ?? before;
     saving = null;
-    show({ choice: answer?.ok ? answer.data.theme : before, saving: false });
-    return answer?.ok ?? false;
+    heard = null;
+    show({ choice: answer?.ok ? answer.data.theme : back, saving: false, failed: !ok });
+    return ok;
   }
 
   const theme = {
@@ -73,13 +79,17 @@ function createAdminTheme(api: ThemeApi) {
     view: () => shown,
     /** An account from the server. During a save, the save's own answer is newer. */
     account(account: Account) {
-      if (!saving) show({ choice: account.theme, saving: false });
+      if (saving) heard = account.theme;
+      else show({ choice: account.theme, saving: false, failed: false });
     },
-    /** Once per page load, from the signed-in pages: the account's theme wins. */
+    /** Once per page load, from the signed-in pages: the account's theme wins. A failure tries again on the next page. */
     load() {
       loading ??= api.me().then(
-        (answer) => { if (answer.ok) theme.account(answer.data); },
-        () => undefined,
+        (answer) => {
+          if (answer.ok) theme.account(answer.data);
+          else loading = null;
+        },
+        () => { loading = null; },
       );
     },
     /** Resolves false, with the old theme back, when the save fails. */
@@ -108,24 +118,19 @@ export function adminTheme(api: ThemeApi): AdminTheme {
 /** System / Light / Dark in the header of the signed-in pages. */
 export function ThemePicker({ api }: { api: ThemeApi }) {
   const theme = adminTheme(api);
-  const { choice, saving } = useSyncExternalStore(theme.subscribe, theme.view);
-  const [failed, setFailed] = useState(false);
+  const { choice, saving, failed } = useSyncExternalStore(theme.subscribe, theme.view);
 
   useEffect(() => theme.load(), [theme]);
-
-  async function choose(next: ThemeChoice) {
-    setFailed(false);
-    setFailed(!(await theme.choose(next)));
-  }
 
   return (
     <div className="flex items-center gap-3">
       {failed && <p role="alert" className="text-secondary text-danger">{strings.themeNotSaved}</p>}
-      <div role="radiogroup" aria-label={strings.theme} aria-busy={saving}
+      {/* Toggle buttons, not radios: each is its own Tab stop and needs no arrow keys. */}
+      <div role="group" aria-label={strings.theme} aria-busy={saving}
         className="flex overflow-hidden rounded-lg border border-border-strong">
         {themes.map((option, index) => (
-          <button key={option} type="button" role="radio" aria-checked={choice === option} disabled={saving}
-            onClick={() => { if (option !== choice) void choose(option); }}
+          <button key={option} type="button" aria-pressed={choice === option} disabled={saving}
+            onClick={() => { if (option !== choice) void theme.choose(option); }}
             className={`h-10 px-3 font-medium ${index ? "border-l border-border " : ""}${
               choice === option ? "bg-primary-subtle text-on-primary-subtle" : "bg-surface text-text"}`}>
             {strings.themes[option]}
