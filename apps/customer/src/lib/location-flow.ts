@@ -1,8 +1,12 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type ErrorCode, Pincode, type Serviceability, WaitlistBody } from "@ygo/contracts";
+import { type AddressPoint, type ErrorCode, Pincode, type Serviceability, WaitlistBody } from "@ygo/contracts";
 
-/** Where shops should deliver: the pincode, and the place name when the phone's location gave one (#216, Q6). */
-export type Place = { pincode: string; name?: string };
+/**
+ * Where shops should deliver: the pincode, and the place name when the phone's
+ * location gave one (#216, Q6). A place confirmed on the map also keeps its
+ * pin and area line (#242, Q10).
+ */
+export type Place = { pincode: string; name?: string; areaLine?: string; point?: AddressPoint };
 
 /** "Baner, 411045", or the pincode alone when it was typed. */
 export const placeLabel = (place: Place) => (place.name ? `${place.name}, ${place.pincode}` : place.pincode);
@@ -81,10 +85,10 @@ export function waitlistBody(pincode: string, phone: string): WaitlistBody | nul
   return parsed.success ? parsed.data : null;
 }
 
-/** What happened to "Leave my number": saved, or the message to show under the button (#216, Q7). */
-export async function joinOutcome(join: () => Promise<ApiResult<undefined>>): Promise<"saved" | "offline" | ErrorCode> {
+/** What happened to "Leave my number" or a saved address: saved, or the message to show (#216, Q7). */
+export async function sentOutcome(send: () => Promise<ApiResult<unknown>>): Promise<"saved" | "offline" | ErrorCode> {
   try {
-    const answer = await join();
+    const answer = await send();
     return answer.ok ? "saved" : answer.code;
   } catch {
     return "offline";

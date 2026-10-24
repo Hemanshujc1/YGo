@@ -103,6 +103,15 @@ export const ProductBrand = z.string().trim().min(1).max(100).nullable().optiona
 /** Base64 product image, capped at the encoded length of 10 MiB (owner decision on #203). */
 export const ProductImage = z.base64().max(13_981_016);
 
+/** Positive base-unit decimal string, NUMERIC(12,3), without binary floats (ADR-0002, owner decision on #205). */
+export const PackQuantity = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/).refine((value) => /[1-9]/.test(value));
+
+/** Counted products require a whole base-unit quantity (#205). */
+export const CountedPackQuantity = PackQuantity.refine((value) => !/\.\d*[1-9]/.test(value));
+
+/** Optional EAN/UPC digits, compared exactly with leading zeros preserved; no checksum conversion (#205). */
+export const PackBarcode = z.string().regex(/^(?:\d{8}|\d{12}|\d{13})$/);
+
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
 export const Pan = z
   .string()

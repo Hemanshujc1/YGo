@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   askArea,
   findPlace,
-  joinOutcome,
   type Locator,
   newestOnly,
   placeLabel,
+  sentOutcome,
   stale,
   typedPlace,
   waitlistBody,
@@ -122,11 +122,11 @@ describe("waitlistBody", () => {
   });
 });
 
-describe("joinOutcome", () => {
+describe("sentOutcome", () => {
   it("is saved, a refusal's code, or offline", async () => {
-    expect(await joinOutcome(async () => ({ ok: true, data: undefined }))).toBe("saved");
-    expect(await joinOutcome(async () => ({ ok: false, status: 429, code: "TOO_MANY_REQUESTS" }))).toBe("TOO_MANY_REQUESTS");
-    expect(await joinOutcome(() => Promise.reject(new TypeError("Network request failed")))).toBe("offline");
+    expect(await sentOutcome(async () => ({ ok: true, data: undefined }))).toBe("saved");
+    expect(await sentOutcome(async () => ({ ok: false, status: 429, code: "TOO_MANY_REQUESTS" }))).toBe("TOO_MANY_REQUESTS");
+    expect(await sentOutcome(() => Promise.reject(new TypeError("Network request failed")))).toBe("offline");
   });
 });
 
