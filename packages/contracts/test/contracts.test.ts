@@ -22,6 +22,25 @@ describe("ErrorEnvelope", () => {
     expect(ErrorEnvelope.parse(body)).toEqual(body);
   });
 
+  it("carries row errors when catalog rows change between preview and commit", () => {
+    const body = {
+      error: {
+        code: "CATALOG_IMPORT_ROWS_INVALID",
+        rowErrors: [{ rowNumber: 2, reason: "CATEGORY_NOT_FOUND", field: "categoryName" }],
+      },
+    };
+    expect(ErrorEnvelope.parse(body)).toEqual(body);
+    expect(ErrorEnvelope.safeParse({ error: { code: "CATALOG_IMPORT_ROWS_INVALID" } }).success).toBe(false);
+  });
+
+  it("uses the multipart part name for catalog file-level validation failures", () => {
+    for (const part of ["catalogCsv", "imagesZip"]) {
+      expect(ErrorEnvelope.parse({ error: { code: "VALIDATION_FAILED", fields: [part] } })).toEqual({
+        error: { code: "VALIDATION_FAILED", fields: [part] },
+      });
+    }
+  });
+
   it("accepts a taken Area name", () => {
     expect(ErrorEnvelope.parse({ error: { code: "AREA_NAME_IN_USE" } })).toEqual({ error: { code: "AREA_NAME_IN_USE" } });
   });

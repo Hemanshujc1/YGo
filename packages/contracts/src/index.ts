@@ -62,6 +62,7 @@ export {
   CatalogImportCsvRow,
   CatalogImportRowErrorReason,
   CatalogImportRowError,
+  CatalogImportRowErrors,
   CatalogImportPreviewResponse,
   CatalogImportResponse,
 } from "./catalog";

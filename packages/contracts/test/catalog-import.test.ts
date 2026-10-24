@@ -60,9 +60,12 @@ describe("catalog import contracts (#41)", () => {
       { ...csvRow, quantity: "1.1234" },
       { ...csvRow, barcode: "123456789" },
       { ...csvRow, productCode: "" },
+      { ...csvRow, productCode: "APPLE.01" },
+      { ...csvRow, productCode: "APPLE 01" },
     ]) {
       expect(CatalogImportCsvRow.safeParse(row).success).toBe(false);
     }
+    expect(CatalogImportCsvRow.parse({ ...csvRow, barcode: " 012345678901 " }).barcode).toBe("012345678901");
   });
 
   it("accepts preview row errors and nonnegative integer counts", () => {
@@ -83,6 +86,7 @@ describe("catalog import contracts (#41)", () => {
   it("rejects invalid row errors and counts", () => {
     for (const value of [
       { rowNumber: 0, reason: "INVALID_ROW" },
+      { rowNumber: 1, reason: "INVALID_ROW" },
       { rowNumber: 1.5, reason: "INVALID_ROW" },
       { rowNumber: 2, reason: "not-a-reason-code" },
       { rowNumber: 2, reason: "INVALID_ROW", field: "not-a-column" },

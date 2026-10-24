@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CatalogImportRowErrors } from "./catalog";
 
 /**
  * Every machine code the API returns. The server never sends display text
@@ -28,6 +29,9 @@ import { z } from "zod";
  * Catalog packs (#205):
  * - PACK_QUANTITY_IN_USE (409): this product already has that pack quantity, including inactive packs.
  * - BARCODE_IN_USE (409): another global pack holds this barcode, including inactive packs.
+ * Catalog import (#258):
+ * - CATALOG_IMPORT_ROWS_INVALID (409): rows became invalid between preview and commit; `rowErrors` contains the same list shape as preview.
+ * - File-level import failures use VALIDATION_FAILED (400). Missing CSV/ZIP parts name the missing part; missing or unknown CSV columns name `catalogCsv`; unreadable ZIPs name `imagesZip`; an oversized file names the part that exceeded its limit.
  * Saved addresses (#217):
  * - ADDRESS_LIMIT_REACHED (409): the account already has 10 saved addresses.
  */
@@ -53,14 +57,16 @@ export const ErrorCode = z.enum([
   "PACK_QUANTITY_IN_USE",
   "BARCODE_IN_USE",
   "ADDRESS_LIMIT_REACHED",
+  "CATALOG_IMPORT_ROWS_INVALID",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
 /**
  * The body of every non-2xx response. With VALIDATION_FAILED, `fields` names
- * each request-body field that broke its rule, as built by `invalidFields`;
+ * each request-body field or multipart file part that broke its rule, as built by `invalidFields`;
  * the client shows its own message for each. With PINCODE_IN_OTHER_AREA,
- * `conflicts` names each pincode another Area holds.
+ * `conflicts` names each pincode another Area holds. With CATALOG_IMPORT_ROWS_INVALID,
+ * `rowErrors` uses the same CatalogImportRowError shape as a preview response.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
@@ -68,7 +74,8 @@ export const ErrorEnvelope = z.object({
     fields: z.array(z.string()).optional(),
     conflicts: z.array(z.object({ pincode: z.string(), areaName: z.string() })).optional(),
     draftId: z.uuid().optional(),
-  }),
+    rowErrors: CatalogImportRowErrors.optional(),
+  }).refine((error) => error.code !== "CATALOG_IMPORT_ROWS_INVALID" || error.rowErrors !== undefined),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;
 
