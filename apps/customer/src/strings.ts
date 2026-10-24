@@ -172,6 +172,8 @@ export const strings = {
     AREA_NAME_IN_USE: "Another Area already has this name.",
     PINCODE_IN_OTHER_AREA: "Another Area already has one of these pincodes.",
     PRODUCT_NAME_IN_USE: "A master product with this name and brand already exists.",
+    PACK_QUANTITY_IN_USE: "This product already has a pack of this size.",
+    BARCODE_IN_USE: "Another pack already has this barcode.",
     ADDRESS_LIMIT_REACHED: "You have 10 saved addresses. Remove one to save another.",
   } satisfies Record<ErrorCode, string>,
 };
