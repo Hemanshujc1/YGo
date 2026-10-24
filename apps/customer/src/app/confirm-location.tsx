@@ -1,6 +1,6 @@
 import { type AddressLabel, AddressPoint } from "@ygo/contracts";
 import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
-import { router, useLocalSearchParams, useNavigation } from "expo-router";
+import { useLocalSearchParams, useNavigation } from "expo-router";
 import { cssInterop } from "nativewind";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, TextInput, View } from "react-native";
@@ -11,6 +11,7 @@ import { MapPin } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { askArea, newestOnly, stale, typedPlace } from "../lib/location-flow";
 import { addressBody, type Confirmed, confirmAddress, readPin, type Spot } from "../lib/map-place";
+import { goHome } from "../lib/go-home";
 import { phoneGeocoder } from "../lib/phone-geocoder";
 import { savePlace } from "../lib/saved-place";
 import { strings } from "../strings";
@@ -99,16 +100,6 @@ export default function ConfirmLocation() {
   const accountId = state.account.id;
   const place = start ? (reading ? null : spot?.place ?? null) : typed;
 
-  /**
-   * Back to Home alone on the stack, so Back never returns to an old
-   * location. Home asks about the new place and shows it, or C03.
-   */
-  function goHome() {
-    const homeFirst = navigation.getState()?.routes[0]?.name === "index";
-    if (router.canDismiss()) router.dismissAll();
-    if (!homeFirst) router.replace("/");
-  }
-
   async function confirm() {
     if (working.current || !place) return;
     const body = addressBody(place, label, flat);
@@ -131,7 +122,7 @@ export default function ConfirmLocation() {
     working.current = false;
     setSaving(false);
     // Any failure stays here with its message; nothing is chosen and nothing retries by itself.
-    if (done.kind === "done") return goHome();
+    if (done.kind === "done") return goHome(navigation.getState()?.routes[0]?.name);
     setProblem(done);
   }
 

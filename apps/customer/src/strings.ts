@@ -103,6 +103,14 @@ export const strings = {
     search: "Search",
     searching: "Searching…",
     noResults: "Couldn't find that place. Try another name or the pincode.",
+    // C15's saved addresses (#243). The labels are Confirm's own words.
+    savedTitle: "Saved addresses",
+    savedLoading: "Loading saved addresses…",
+    savedFailed: "Couldn't load saved addresses.",
+    savedRetry: "Try again",
+    remove: "Remove",
+    removeLabel: (address: string) => `Remove ${address}`,
+    notRemoved: "Couldn't remove this address. Check your connection, then try again.",
   },
   // C15's Confirm location (#242).
   confirm: {
