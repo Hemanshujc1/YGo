@@ -37,18 +37,38 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
     return withTransaction(pool, async (client) => {
       // One save at a time per account, so two can't both pass the limit.
       await client.query("SELECT 1 FROM accounts WHERE id = $1 FOR NO KEY UPDATE", [who.accountId]);
-      // A new Home or Work replaces the old one, so it never meets the limit.
-      if (label !== "other") await client.query("DELETE FROM saved_addresses WHERE account_id = $1 AND label = $2", [who.accountId, label]);
-      const count = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM saved_addresses WHERE account_id = $1", [who.accountId]);
-      if ((count.rows[0]?.n ?? 0) >= LIMIT) return reply.code(409).send({ error: { code: "ADDRESS_LIMIT_REACHED" } });
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO saved_addresses (account_id, label, flat, area_line, pincode, point, saved_at)
-         VALUES ($1, $2, $3, $4, $5,
-           CASE WHEN $6::float8 IS NULL THEN NULL ELSE ST_SetSRID(ST_MakePoint($7::float8, $6::float8), 4326)::geography END, $8)
-         RETURNING id`,
-        [who.accountId, label, flat, areaLine, pincode, point?.latitude ?? null, point?.longitude ?? null, clock.now()],
-      );
-      const saved = await client.query<SavedAddress>(`${addressSql} WHERE id = $1`, [inserted.rows[0]?.id]);
+      let id: string | undefined;
+      if (label !== "other") {
+        // A new Home or Work replaces the old one, which frees its place under the limit.
+        await client.query("DELETE FROM saved_addresses WHERE account_id = $1 AND label = $2", [who.accountId, label]);
+      } else {
+        // An Other the same in every field is a retried save: it answers the one
+        // already saved, now the newest, even at the limit (#242, review of #249).
+        const same = await client.query<{ id: string }>(
+          `UPDATE saved_addresses SET saved_at = $7 WHERE id = (
+             SELECT id FROM saved_addresses
+             WHERE account_id = $1 AND label = 'other' AND flat = $2 AND area_line IS NOT DISTINCT FROM $3 AND pincode = $4
+               AND CASE WHEN $5::float8 IS NULL THEN point IS NULL
+                 ELSE ST_Y(point::geometry) = $5::float8 AND ST_X(point::geometry) = $6::float8 END
+             LIMIT 1)
+           RETURNING id`,
+          [who.accountId, flat, areaLine, pincode, point?.latitude ?? null, point?.longitude ?? null, clock.now()],
+        );
+        id = same.rows[0]?.id;
+      }
+      if (!id) {
+        const count = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM saved_addresses WHERE account_id = $1", [who.accountId]);
+        if ((count.rows[0]?.n ?? 0) >= LIMIT) return reply.code(409).send({ error: { code: "ADDRESS_LIMIT_REACHED" } });
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO saved_addresses (account_id, label, flat, area_line, pincode, point, saved_at)
+           VALUES ($1, $2, $3, $4, $5,
+             CASE WHEN $6::float8 IS NULL THEN NULL ELSE ST_SetSRID(ST_MakePoint($7::float8, $6::float8), 4326)::geography END, $8)
+           RETURNING id`,
+          [who.accountId, label, flat, areaLine, pincode, point?.latitude ?? null, point?.longitude ?? null, clock.now()],
+        );
+        id = inserted.rows[0]?.id;
+      }
+      const saved = await client.query<SavedAddress>(`${addressSql} WHERE id = $1`, [id]);
       await client.query("COMMIT");
       return reply.code(201).send(saved.rows[0]);
     });
