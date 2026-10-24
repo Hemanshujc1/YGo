@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { adminRoutes } from "./routes";
 import { strings } from "./strings";
+import { themeKey } from "./theme";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  delete document.documentElement.dataset.theme;
+});
 
 const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system" };
 const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211", theme: "system" };
@@ -42,6 +48,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createArea: vi.fn(),
     editArea: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+    me: vi.fn().mockResolvedValue({ ok: true, data: founder }),
+    setTheme: vi.fn(),
     ...overrides,
   };
   const router = createMemoryRouter(adminRoutes(api as Parameters<typeof adminRoutes>[0]), { initialEntries: [path] });
@@ -604,7 +612,9 @@ describe("Admin web", () => {
     expect(rows[1]?.textContent).toContain("01/01/2030, 5:30 AM");
     expect(rows[2]?.textContent).toContain(created.email);
     expect(rows[2]?.textContent).not.toContain(created.name);
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([strings.signOut]);
+    // Read-only: the header's theme and Sign out are the only buttons.
+    expect(screen.getAllByRole("button").map((button) => button.textContent))
+      .toEqual([strings.themes.system, strings.themes.light, strings.themes.dark, strings.signOut]);
   });
 
   it("shows waitlist loading, an alert with retry, and the empty state", async () => {
@@ -633,3 +643,153 @@ function fillCreate() {
   fireEvent.change(screen.getByLabelText(strings.phone), { target: { value: created.phone } });
   fireEvent.change(screen.getByLabelText(strings.reason), { target: { value: "Coverage" } });
 }
+
+describe("Admin theme (#263)", () => {
+  const picker = () => screen.findByRole("group", { name: strings.theme });
+  const option = (choice: "system" | "light" | "dark") => screen.getByRole("button", { name: strings.themes[choice] });
+  const shown = () => document.documentElement.dataset.theme;
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+  };
+
+  it("shows no picker before sign-in, then takes the account's theme on sign-in", async () => {
+    // The account load never answers here, so only the sign-in answer can set the theme.
+    setup("/sign-in", {
+      verifyCode: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
+      me: vi.fn().mockReturnValue(new Promise(() => undefined)),
+    });
+    expect(screen.queryByRole("group", { name: strings.theme })).toBeNull();
+    fireEvent.change(screen.getByLabelText(strings.email), { target: { value: founder.email } });
+    fireEvent.click(screen.getByRole("button", { name: strings.sendCode }));
+    fireEvent.change(await screen.findByLabelText(strings.code), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.verify }));
+    await picker();
+    expect(shown()).toBe("dark");
+    expect(localStorage.getItem(themeKey)).toBe("dark");
+  });
+
+  it("starts from this browser's copy, then the account's theme wins on load", async () => {
+    localStorage.setItem(themeKey, "light");
+    const me = deferred<unknown>();
+    const { api } = setup("/accounts", { me: vi.fn().mockReturnValue(me.promise) });
+    await picker();
+    expect(option("light").getAttribute("aria-pressed")).toBe("true");
+    me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
+    await waitFor(() => expect(option("dark").getAttribute("aria-pressed")).toBe("true"));
+    expect(shown()).toBe("dark");
+    expect(api.me).toHaveBeenCalledOnce();
+  });
+
+  it("applies a choice at once, saves it, and allows one save at a time", async () => {
+    const save = deferred<unknown>();
+    const { api } = setup("/accounts", { setTheme: vi.fn().mockReturnValue(save.promise) });
+    await picker();
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
+    fireEvent.click(option("dark"));
+    expect(shown()).toBe("dark");
+    expect(option("light")).toHaveProperty("disabled", true);
+    fireEvent.click(option("light"));
+    expect(api.setTheme).toHaveBeenCalledOnce();
+    expect(api.setTheme).toHaveBeenCalledWith({ theme: "dark" });
+    save.resolve({ ok: true, data: { ...founder, theme: "dark" } });
+    await waitFor(() => expect(option("light")).toHaveProperty("disabled", false));
+    expect(shown()).toBe("dark");
+    expect(localStorage.getItem(themeKey)).toBe("dark");
+    expect(screen.queryByText(strings.themeNotSaved)).toBeNull();
+  });
+
+  it("goes back to the system theme without the attribute", async () => {
+    localStorage.setItem(themeKey, "dark");
+    document.documentElement.dataset.theme = "dark";
+    setup("/accounts", {
+      me: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
+      setTheme: vi.fn().mockResolvedValue({ ok: true, data: founder }),
+    });
+    await picker();
+    fireEvent.click(option("system"));
+    await waitFor(() => expect(option("system").getAttribute("aria-pressed")).toBe("true"));
+    expect(shown()).toBeUndefined();
+    expect(localStorage.getItem(themeKey)).toBe("system");
+  });
+
+  it.each([
+    ["refused", () => Promise.resolve({ ok: false, status: 503, code: "UNAVAILABLE" })],
+    ["unanswered", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ])("puts the old theme back with a message when the save is %s, and never retries", async (_name, answer) => {
+    const { api } = setup("/accounts", { setTheme: vi.fn(answer) });
+    await picker();
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
+    fireEvent.click(option("dark"));
+    expect(shown()).toBe("dark");
+    expect(await screen.findByText(strings.themeNotSaved)).toBeTruthy();
+    expect(option("system").getAttribute("aria-pressed")).toBe("true");
+    expect(shown()).toBeUndefined();
+    expect(localStorage.getItem(themeKey)).toBe("system");
+    expect(api.setTheme).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a choice under way when the account answers during the save", async () => {
+    const me = deferred<unknown>();
+    const save = deferred<unknown>();
+    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    await picker();
+    fireEvent.click(option("dark"));
+    me.resolve({ ok: true, data: { ...founder, theme: "light" } });
+    await new Promise((done) => setTimeout(done));
+    expect(shown()).toBe("dark");
+    save.resolve({ ok: true, data: { ...founder, theme: "dark" } });
+    await waitFor(() => expect(option("dark")).toHaveProperty("disabled", false));
+    expect(shown()).toBe("dark");
+  });
+
+  it("goes back to the account's theme, not the older one, when a save fails after the account answered", async () => {
+    const me = deferred<unknown>();
+    const save = deferred<unknown>();
+    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    await picker();
+    fireEvent.click(option("light"));
+    me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
+    await new Promise((done) => setTimeout(done));
+    save.resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.themeNotSaved)).toBeTruthy();
+    expect(shown()).toBe("dark");
+  });
+
+  it("loads the account's theme again on the next page when the first load fails", async () => {
+    const me = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" })
+      .mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } });
+    const { router } = setup("/accounts", { me });
+    await picker();
+    await waitFor(() => expect(me).toHaveBeenCalledOnce());
+    expect(shown()).toBeUndefined();
+    await router.navigate("/waitlist");
+    await waitFor(() => expect(shown()).toBe("dark"));
+    expect(me).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the save message after moving to another page", async () => {
+    const save = deferred<unknown>();
+    const { router } = setup("/accounts", { setTheme: vi.fn().mockReturnValue(save.promise) });
+    await picker();
+    fireEvent.click(option("dark"));
+    await router.navigate("/waitlist");
+    save.resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.themeNotSaved)).toBeTruthy();
+    expect(shown()).toBeUndefined();
+  });
+
+  it("applies this browser's theme before the page draws, with the key the app keeps", () => {
+    const html = readFileSync("index.html", "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    expect(script).toContain(`"${themeKey}"`);
+    for (const [kept, attribute] of [["dark", "dark"], ["light", "light"], ["system", undefined], ["blue", undefined]] as const) {
+      delete document.documentElement.dataset.theme;
+      localStorage.setItem(themeKey, kept);
+      new Function(script)();
+      expect(document.documentElement.dataset.theme).toBe(attribute);
+    }
+  });
+});

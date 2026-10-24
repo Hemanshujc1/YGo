@@ -21,6 +21,7 @@ import {
   type CreatePackBody,
   type EditPackBody,
   type RequestCodeBody,
+  type SetThemeBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
@@ -80,7 +81,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | SetThemeBody): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -129,6 +130,16 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       started.ended = true;
       current = life(answered.data.accessToken);
       return { ok: true, data: answered.data.account };
+    },
+
+    /** `GET /v1/admin/me`: the signed-in Admin's own account, theme included. */
+    async me(): Promise<ApiResult<Account>> {
+      return result(await adminRequest("GET", "/v1/admin/me"), Account);
+    },
+
+    /** `PUT /v1/admin/me/theme`: save the theme on the account, shared with the mobile apps (#263). */
+    async setTheme(body: SetThemeBody): Promise<ApiResult<Account>> {
+      return result(await adminRequest("PUT", "/v1/admin/me/theme", body), Account);
     },
 
     /** `GET /v1/admin/accounts`: Admin memberships and their accounts. */
