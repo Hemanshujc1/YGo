@@ -431,6 +431,195 @@ describe("Areas, serviceability and the waitlist", () => {
   });
 });
 
+describe("Catalog pack routes (#205)", () => {
+  async function product(baseUnit = "each") {
+    const made = await database.pool.query<{ id: string }>(
+      `INSERT INTO master_products (name, category_id, base_unit, classification, image_256_key, image_512_key, image_1024_key, published)
+       SELECT $1, id, $2, $3, 'small', 'medium', 'large', true FROM categories WHERE name = 'Groceries' RETURNING id`,
+      [randomUUID(), baseUnit, baseUnit === "each" ? "counted" : "measured"],
+    );
+    const id = made.rows[0]?.id;
+    if (!id) throw new Error("Test product missing");
+    return id;
+  }
+  async function headers() {
+    return { authorization: `Bearer ${(await signIn("/v1/admin/auth")).json().accessToken as string}` };
+  }
+  const path = (id: string) => `/v1/admin/products/${id}/packs`;
+  function create(id: string, token: Record<string, string>, payload: object) {
+    return app.inject({ method: "POST", url: path(id), headers: token, payload: { baseUnit: "each", ...payload } });
+  }
+  function edit(productId: string, id: string, token: Record<string, string>, payload: object) {
+    return app.inject({ method: "PATCH", url: `${path(productId)}/${id}`, headers: token, payload: {
+      ...("quantity" in payload ? { baseUnit: "each" } : {}), ...payload,
+    } });
+  }
+
+  it("requires a live Admin web session and current membership on every route", async () => {
+    const id = await product();
+    const requests = [
+      { method: "GET" as const, url: path(id) },
+      { method: "POST" as const, url: path(id), payload: { baseUnit: "each", quantity: "1" } },
+      { method: "PATCH" as const, url: `${path(id)}/${randomUUID()}`, payload: { baseUnit: "each", quantity: "2" } },
+    ];
+    const check = async (token: Record<string, string>, status: number) => {
+      for (const request of requests) expect((await app.inject({ ...request, headers: token })).statusCode).toBe(status);
+    };
+    await check({}, 401);
+    await check({ authorization: `Bearer ${(await signIn("/v1/auth")).json().accessToken as string}` }, 403);
+    clock.advance(30_000);
+    const token = await headers();
+    await database.pool.query("DELETE FROM admin_memberships");
+    await check(token, 403);
+    await database.pool.query("DELETE FROM sessions");
+    await check(token, 401);
+    expect((await database.pool.query("SELECT * FROM packs")).rows).toEqual([]);
+    expect((await database.pool.query("SELECT * FROM admin_actions WHERE target_type = 'pack'")).rows).toEqual([]);
+  });
+
+  it("creates, lists, edits, deactivates and reactivates packs on inactive drafts with audit records", async () => {
+    const id = await product();
+    const token = await headers();
+    await database.pool.query("UPDATE master_products SET active = false, published = false WHERE id = $1", [id]);
+    const made = await create(id, token, { quantity: "12", barcode: "012345678901" });
+    expect(made.statusCode).toBe(201);
+    const pack = made.json().id as string;
+    expect(made.json()).toEqual({ id: pack, productId: id, quantity: "12.000", barcode: "012345678901", active: true });
+    expect((await create(id, token, { quantity: "1" })).json()).toMatchObject({ barcode: null });
+    expect((await create(id, token, { quantity: "2" })).statusCode).toBe(201);
+    expect((await edit(id, pack, token, { quantity: "24", barcode: "0012345678901" })).json()).toMatchObject({ quantity: "24.000", barcode: "0012345678901" });
+    expect((await edit(id, pack, token, { active: false })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["reason"] } });
+    expect((await edit(id, pack, token, { active: false, reason: " Retired size " })).json()).toMatchObject({ active: false });
+    const list = await app.inject({ method: "GET", url: path(id), headers: token });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().packs.map((row: { quantity: string }) => row.quantity)).toEqual(["1.000", "2.000", "24.000"]);
+    expect(list.json().packs[2]).toMatchObject({ id: pack, active: false });
+    expect((await edit(id, pack, token, { active: true })).json()).toMatchObject({ active: true });
+    expect((await edit(id, pack, token, { barcode: null })).json()).toMatchObject({ barcode: null });
+    expect((await edit(id, pack, token, { quantity: "24.0", active: true })).statusCode).toBe(200);
+    const audit = await database.pool.query("SELECT action, reason, target_type, actor_id FROM admin_actions WHERE target_id = $1", [pack]);
+    expect(audit.rows.map((row) => `${row.action}|${row.reason}|${row.target_type}`).sort()).toEqual([
+      "pack.create|Pack created|pack", "pack.deactivate|Retired size|pack", "pack.edit|Pack edited|pack",
+      "pack.edit|Pack edited|pack", "pack.reactivate|Pack reactivated|pack",
+    ]);
+    const actor = (await database.pool.query("SELECT id FROM accounts WHERE email = $1", [admin.email])).rows[0].id;
+    expect(audit.rows.every((row) => row.actor_id === actor)).toBe(true);
+  });
+
+  it("reserves inactive barcodes globally and quantities per product in the API and database", async () => {
+    const id = await product();
+    const other = await product();
+    const token = await headers();
+    const pack = (await create(id, token, { quantity: "1", barcode: "01234567" })).json().id as string;
+    await edit(id, pack, token, { active: false, reason: "Discontinued" });
+    const duplicate = await create(other, token, { quantity: "2", barcode: "01234567" });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json()).toEqual({ error: { code: "BARCODE_IN_USE" } });
+    expect((await create(id, token, { quantity: "1.000" })).json()).toEqual({ error: { code: "PACK_QUANTITY_IN_USE" } });
+    const second = (await create(other, token, { quantity: "1" })).json().id as string;
+    expect((await edit(other, second, token, { barcode: "01234567" })).statusCode).toBe(409);
+    const third = (await create(id, token, { quantity: "2" })).json().id as string;
+    expect((await edit(id, third, token, { quantity: "1" })).json()).toEqual({ error: { code: "PACK_QUANTITY_IN_USE" } });
+    await expect(database.pool.query("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, 3, '01234567')", [other])).rejects.toMatchObject({ code: "23505", constraint: "packs_barcode_idx" });
+    await expect(database.pool.query("INSERT INTO packs (product_id, quantity) VALUES ($1, 1)", [id])).rejects.toMatchObject({ code: "23505", constraint: "packs_product_quantity_idx" });
+    expect((await database.pool.query("SELECT barcode FROM packs WHERE id = $1", [second])).rows[0].barcode).toBeNull();
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type = 'pack'")).rows[0].n).toBe(4);
+    const simultaneous = await Promise.all([id, other].map((parent) => create(parent, token, { quantity: "3", barcode: "123456789012" })));
+    expect(simultaneous.map((response) => response.statusCode).sort()).toEqual([201, 409]);
+    expect((await create(id, token, { quantity: "4", barcode: "0123456789012" })).statusCode).toBe(201);
+  });
+
+  it("checks whole counted quantities, exact measured decimals and a single barcode", async () => {
+    const id = await product();
+    const token = await headers();
+    expect((await create(id, token, { quantity: "0.125" })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["quantity"] } });
+    const pack = (await create(id, token, { quantity: "1" })).json().id as string;
+    expect((await edit(id, pack, token, { quantity: "1.5" })).statusCode).toBe(400);
+    for (const payload of [{ quantity: "0" }, { quantity: "1.0001" }, { quantity: 1 }, { quantity: "2", barcode: "bad" }, { quantity: "2", barcode: ["12345678"] }, { quantity: "2", barcodes: [] }]) {
+      expect((await create(id, token, payload)).statusCode).toBe(400);
+    }
+    for (const unit of ["kg", "l"]) {
+      const measured = await product(unit);
+      expect((await create(measured, token, { baseUnit: unit, quantity: "0.001" })).json()).toMatchObject({ quantity: "0.001" });
+      const fractional = await create(measured, token, { baseUnit: unit, quantity: "1.125" });
+      expect(fractional.statusCode).toBe(201);
+      expect((await edit(measured, fractional.json().id as string, token, { baseUnit: unit, quantity: "999999999.999" })).json()).toMatchObject({ quantity: "999999999.999" });
+    }
+    await expect(database.pool.query("INSERT INTO packs (product_id, quantity) VALUES ($1, 0)", [id])).rejects.toMatchObject({ code: "23514" });
+    await expect(database.pool.query("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, 2, 'bad')", [id])).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("checks request unit context against the stored parent on create and edit", async () => {
+    const id = await product();
+    const measured = await product("kg");
+    const token = await headers();
+    const pack = (await create(id, token, { quantity: "1" })).json().id as string;
+    const wrongUnits = [
+      await create(id, token, { baseUnit: "kg", quantity: "0.125" }),
+      await edit(id, pack, token, { baseUnit: "l", quantity: "0.125" }),
+      await edit(id, pack, token, { baseUnit: "kg", barcode: "01234567" }),
+      await create(measured, token, { baseUnit: "l", quantity: "0.125" }),
+    ];
+    for (const response of wrongUnits) {
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    }
+    for (const request of [{ method: "POST" as const, url: path(id) }, { method: "PATCH" as const, url: `${path(id)}/${pack}` }]) {
+      const response = await app.inject({ ...request, headers: token, payload: { quantity: "2" } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    }
+    expect((await database.pool.query("SELECT product_id, quantity, barcode FROM packs")).rows).toEqual([{ product_id: id, quantity: "1.000", barcode: null }]);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type = 'pack'")).rows[0].n).toBe(1);
+  });
+
+  it("rejects missing or mismatched parents and offers no deletion route", async () => {
+    const id = await product();
+    const token = await headers();
+    const pack = (await create(id, token, { quantity: "1" })).json().id as string;
+    const missing = randomUUID();
+    expect((await app.inject({ method: "GET", url: path(missing), headers: token })).statusCode).toBe(404);
+    expect((await create(missing, token, { quantity: "1" })).statusCode).toBe(404);
+    expect((await edit(missing, pack, token, { active: false, reason: "Remove" })).statusCode).toBe(404);
+    expect((await edit(await product(), pack, token, { quantity: "2" })).statusCode).toBe(404);
+    expect((await edit(id, missing, token, { quantity: "2" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: `${path(id)}/${pack}`, headers: token })).statusCode).toBe(404);
+    expect((await database.pool.query("SELECT id FROM packs WHERE id = $1", [pack])).rowCount).toBe(1);
+  });
+
+  it("prevents base-unit changes once any active or inactive pack exists", async () => {
+    const id = await product("kg");
+    const token = await headers();
+    const changeUnit = (unit: string) => app.inject({ method: "PATCH", url: `/v1/admin/products/${id}`, headers: token, payload: { baseUnit: unit } });
+    expect((await changeUnit("l")).statusCode).toBe(200);
+    const pack = (await create(id, token, { baseUnit: "l", quantity: "1" })).json().id as string;
+    expect((await changeUnit("kg")).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["baseUnit"] } });
+    await edit(id, pack, token, { active: false, reason: "Retired" });
+    expect((await changeUnit("kg")).statusCode).toBe(400);
+    expect((await changeUnit("l")).statusCode).toBe(200);
+  });
+
+  it("serializes a concurrent unit change and counted-pack creation", async () => {
+    const id = await product("kg");
+    const token = await headers();
+    const [made, changed] = await Promise.all([
+      create(id, token, { baseUnit: "kg", quantity: "0.125" }),
+      app.inject({ method: "PATCH", url: `/v1/admin/products/${id}`, headers: token, payload: { baseUnit: "each", classification: "counted" } }),
+    ]);
+    const parent = (await database.pool.query("SELECT base_unit FROM master_products WHERE id = $1", [id])).rows[0];
+    const packs = (await database.pool.query("SELECT quantity FROM packs WHERE product_id = $1", [id])).rows;
+    if (parent.base_unit === "each") {
+      expect(changed.statusCode).toBe(200);
+      expect(made.statusCode).toBe(400);
+      expect(packs).toEqual([]);
+    } else {
+      expect(made.statusCode).toBe(201);
+      expect(changed.statusCode).toBe(400);
+      expect(packs).toEqual([{ quantity: "0.125" }]);
+    }
+  });
+});
+
 describe("Master product routes", () => {
   const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
   async function headers() {
