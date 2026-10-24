@@ -1,54 +1,59 @@
-import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
+import { Button, edgeClass, FieldMessage, Text } from "@ygo/mobile";
+import type { AddressPoint } from "@ygo/contracts";
 import * as Location from "expo-location";
-import { router, useNavigation } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Linking, ScrollView, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, session } from "../api";
-import { MapPin } from "../components/icons";
-import { TopBar } from "../components/top-bar";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  askArea,
-  type AreaAnswer,
-  findPlace,
-  type Locator,
-  newestOnly,
-  type Place,
-  stale,
-  typedPlace,
-} from "../lib/location-flow";
-import { savePlace } from "../lib/saved-place";
+  ActivityIndicator,
+  AppState,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MapPin, Search } from "../components/icons";
+import { TopBar } from "../components/top-bar";
+import { findPlace, type Locator, newestOnly, refusedSearch, stale } from "../lib/location-flow";
+import { searchPlaces, type Spot } from "../lib/map-place";
+import { phoneGeocoder } from "../lib/phone-geocoder";
 import { strings } from "../strings";
 
 const words = strings.location;
 
-// While the app is in use only (#216, Q4); the phone's own lookup turns the position into an address, with no map key.
+// While the app is in use only (#216, Q4).
 const locator: Locator = {
   askPermission: async () => (await Location.requestForegroundPermissionsAsync()).granted,
   servicesOn: () => Location.hasServicesEnabledAsync(),
-  addresses: async () => {
-    const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    return Location.reverseGeocodeAsync(coords);
-  },
+  position: async () => (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })).coords,
 };
 
-/** What C15 shows under the field: the pincode broke the rule, a lookup or save failed, or no answer came. */
-type Problem = "invalid" | "not-found" | "phone-off" | "not-saved" | Exclude<AreaAnswer, { kind: "served" | "not-served" }>;
+/** What C15 shows under the field: a lookup found nothing, or a typed pincode broke the rule. */
+type Problem = "invalid" | "not-found" | "phone-off" | "no-results";
 
-/** C15 Set location (#216): the phone's current location, or a typed pincode. */
+/** C15 Set location (#216, #242): the phone's current location, or a search; each ends on Confirm location. */
 export default function SetLocation() {
   const insets = useSafeAreaInsets();
-  const state = useSession(session);
   const [finding, setFinding] = useState(false);
   const [locationOff, setLocationOff] = useState(false);
-  const [pincode, setPincode] = useState("");
+  const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<Spot[]>([]);
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set before React re-renders, so a second tap never asks twice.
   const working = useRef(false);
   const [asks] = useState(newestOnly);
-  const navigation = useNavigation();
+  // Set when Confirm opens, cleared back on C15, so a double tap opens one Confirm.
+  const leaving = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      leaving.current = false;
+    }, []),
+  );
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(() => asks.drop, [asks]);
@@ -63,40 +68,23 @@ export default function SetLocation() {
     return () => listener.remove();
   }, [locationOff]);
 
-  // The gate shows the app only when signed in; this tells TypeScript.
-  if (state.status !== "signed-in") return null;
-  const accountId = state.account.id;
+  // Android looks places up only with location allowed, so with it refused the field takes a pincode (#217, answer 6).
+  const pincodeOnly = Platform.OS === "android" && locationOff;
 
-  /**
-   * Back to Home alone on the stack, so Back never returns to an old
-   * location. Home asks about the new place and shows it, or C03.
-   */
-  function goHome() {
-    const homeFirst = navigation.getState()?.routes[0]?.name === "index";
-    if (router.canDismiss()) router.dismissAll();
-    if (!homeFirst) router.replace("/");
+  /** Opens Confirm location over C15, so Back returns to the results (#242, Q5). */
+  function openConfirm(params: { latitude: string; longitude: string } | { pincode: string }) {
+    if (leaving.current) return;
+    leaving.current = true;
+    router.push({ pathname: "/confirm-location", params });
   }
 
-  /** Asks the server about the place and saves it for this account, then goes Home. */
-  async function choose(place: Place) {
-    setChecking(true);
-    const answer = await asks.ask(askArea(api, place.pincode));
-    if (answer === stale) return;
-    if (answer.kind === "served" || answer.kind === "not-served") {
-      try {
-        await savePlace(accountId, place);
-      } catch {
-        return stop("not-saved");
-      }
-      return goHome();
-    }
-    stop(answer);
-  }
+  const confirmAt = (point: AddressPoint) =>
+    openConfirm({ latitude: String(point.latitude), longitude: String(point.longitude) });
 
   function stop(next: Problem | null) {
     working.current = false;
     setFinding(false);
-    setChecking(false);
+    setSearching(false);
     setProblem(next);
   }
 
@@ -107,34 +95,44 @@ export default function SetLocation() {
     setFinding(true);
     const found = await asks.ask(findPlace(locator));
     if (found === stale) return;
-    if (found.kind === "found") return choose(found.place);
     setLocationOff(found.kind === "off");
-    stop(found.kind === "off" ? null : found.kind);
+    stop(found.kind === "found" || found.kind === "off" ? null : found.kind);
+    if (found.kind === "found") confirmAt(found.point);
   }
 
-  async function submit() {
-    if (working.current) return;
-    const place = typedPlace(pincode);
-    if (!place) return setProblem("invalid");
+  async function search() {
+    if (working.current || !text.trim()) return;
     working.current = true;
     setProblem(null);
-    await choose(place);
+    setResults([]);
+    setSearching(true);
+    const allowed = Platform.OS === "ios" || (!locationOff && (await asks.ask(locator.askPermission().catch(() => false))));
+    if (allowed === stale) return;
+    if (!allowed) {
+      const refused = refusedSearch(text, locationOff);
+      setText(refused.text);
+      setLocationOff(true);
+      stop(refused.invalid ? "invalid" : null);
+      if (refused.place) openConfirm({ pincode: refused.place.pincode });
+      return;
+    }
+    const found = await asks.ask(searchPlaces(phoneGeocoder, text));
+    if (found === stale) return;
+    setResults(found);
+    stop(found.length ? null : "no-results");
   }
 
   const message =
-    problem === null
-      ? null
-      : problem === "invalid"
-        ? words.pincodeInvalid
-        : problem === "not-found"
-          ? words.notFound
-          : problem === "phone-off"
-            ? words.phoneOff
-            : problem === "not-saved"
-            ? words.notSaved
-            : problem.kind === "offline"
-              ? words.offline
-              : strings.errors[problem.code];
+    problem === "invalid"
+      ? words.pincodeInvalid
+      : problem === "not-found"
+        ? words.notFound
+        : problem === "phone-off"
+          ? words.phoneOff
+          : problem === "no-results"
+            ? words.noResults
+            : null;
+  const label = pincodeOnly ? words.pincodeLabel : words.searchLabel;
 
   return (
     // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard.
@@ -164,7 +162,7 @@ export default function SetLocation() {
                 <MapPin size={20} className="mt-0.5 text-on-warning-subtle" />
                 <View className="flex-1">
                   <Text className="text-body font-semibold text-on-warning-subtle">{words.offTitle}</Text>
-                  <Text className="text-secondary text-on-warning-subtle">{words.offBody}</Text>
+                  <Text className="text-secondary text-on-warning-subtle">{Platform.OS === "android" ? words.offBody : words.offBodySearch}</Text>
                 </View>
               </View>
               <Button label={words.openSettings} onPress={() => void Linking.openSettings()} variant="secondary" />
@@ -173,7 +171,7 @@ export default function SetLocation() {
             <Button
               label={words.useCurrent}
               onPress={() => void useCurrent()}
-              disabled={checking}
+              disabled={searching}
               variant="secondary"
               icon={MapPin}
               alignStart
@@ -181,33 +179,53 @@ export default function SetLocation() {
           )}
 
           <View>
-            <Text className="text-label font-medium text-text">{words.pincodeLabel}</Text>
+            <Text className="text-label font-medium text-text">{label}</Text>
             <TextInput
-              value={pincode}
-              onChangeText={(text) => {
-                setPincode(text);
+              value={text}
+              onChangeText={(next) => {
+                setText(next);
                 setProblem(null);
               }}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              onSubmitEditing={() => void submit()}
-              editable={!checking}
-              keyboardType="number-pad"
-              textContentType="postalCode"
-              autoComplete="postal-code"
-              maxLength={7}
-              returnKeyType="done"
-              accessibilityLabel={words.pincodeLabel}
-              className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body tabular-nums text-text ${edgeClass(problem === "invalid", focused)}`}
+              onSubmitEditing={() => void search()}
+              editable={!searching}
+              keyboardType={pincodeOnly ? "number-pad" : "default"}
+              textContentType={pincodeOnly ? "postalCode" : "fullStreetAddress"}
+              autoComplete={pincodeOnly ? "postal-code" : "street-address"}
+              maxLength={pincodeOnly ? 7 : 100}
+              returnKeyType="search"
+              accessibilityLabel={label}
+              className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem === "invalid", focused)}`}
             />
             {message && <FieldMessage text={message} />}
           </View>
 
           <Button
-            label={checking ? words.checking : words.continue}
-            onPress={() => void submit()}
-            disabled={checking}
+            label={searching ? words.searching : words.search}
+            onPress={() => void search()}
+            disabled={searching}
+            icon={Search}
           />
+
+          {results.length > 0 && (
+            <View className="overflow-hidden rounded-card border border-border bg-surface">
+              {results.map((spot, i) => (
+                <Pressable
+                  key={`${spot.title}\n${spot.detail}`}
+                  accessibilityRole="button"
+                  onPress={() => spot.place.point && confirmAt(spot.place.point)}
+                  className={`min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-primary-subtle ${i > 0 ? "border-t border-border" : ""}`}
+                >
+                  <MapPin size={20} className="text-muted" />
+                  <View className="flex-1">
+                    <Text className="text-body font-medium text-text">{spot.title}</Text>
+                    <Text className="text-secondary text-muted">{spot.detail}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </ScrollView>
       )}
     </KeyboardAvoidingView>

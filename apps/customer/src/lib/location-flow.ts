@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type AddressPoint, type ErrorCode, Pincode, type Serviceability, WaitlistBody } from "@ygo/contracts";
+import { AddressPoint, type ErrorCode, Pincode, type Serviceability, WaitlistBody } from "@ygo/contracts";
 
 /**
  * Where shops should deliver: the pincode, and the place name when the phone's
@@ -17,45 +17,54 @@ export interface Locator {
   askPermission(): Promise<boolean>;
   /** False when location is switched off for the whole phone. */
   servicesOn(): Promise<boolean>;
-  /** The phone's own address lookup for where it is now. Rejects when no position comes. */
-  addresses(): Promise<{ postalCode: string | null; district: string | null; city: string | null }[]>;
+  /** Where the phone is now. Rejects when no position comes. */
+  position(): Promise<{ latitude: number; longitude: number }>;
 }
 
 /**
  * What "Use my current location" found:
+ * - `found`: where the phone is, where Confirm opens the pin (#242, Q7).
  * - `off`: location was refused, so C15 shows "Location is off for YGo".
  * - `phone-off`: location is switched off for the whole phone.
- * - `not-found`: no position in time, or no address with a pincode: "Couldn't find your pincode".
+ * - `not-found`: no position in time, or one outside India: "Couldn't find your pincode".
  */
-export type Found = { kind: "found"; place: Place } | { kind: "off" | "phone-off" | "not-found" };
+export type Found = { kind: "found"; point: AddressPoint } | { kind: "off" | "phone-off" | "not-found" };
 
 /** How long C15 waits for a position before asking for a typed pincode. */
 const findTimeout = 15_000;
 
 export async function findPlace(locator: Locator, timeout = findTimeout): Promise<Found> {
-  let addresses;
+  let position;
   try {
     if (!(await locator.askPermission())) return { kind: "off" };
     if (!(await locator.servicesOn())) return { kind: "phone-off" };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("timed out")), timeout)));
-    addresses = await Promise.race([locator.addresses(), late]).finally(() => clearTimeout(timer));
+    position = await Promise.race([locator.position(), late]).finally(() => clearTimeout(timer));
   } catch {
     return { kind: "not-found" };
   }
-  for (const address of addresses) {
-    const pincode = Pincode.safeParse(address.postalCode ?? "");
-    if (!pincode.success) continue;
-    const name = address.district ?? address.city;
-    return { kind: "found", place: name ? { pincode: pincode.data, name } : { pincode: pincode.data } };
-  }
-  return { kind: "not-found" };
+  // Latitude and longitude only: the phone's position also carries altitude and accuracy.
+  const point = AddressPoint.safeParse({ latitude: position.latitude, longitude: position.longitude });
+  return point.success ? { kind: "found", point: point.data } : { kind: "not-found" };
 }
 
 /** A typed pincode checked with the server's own rule (#216, Q5); null when it breaks it. */
 export function typedPlace(text: string): Place | null {
   const pincode = Pincode.safeParse(text);
   return pincode.success ? { pincode: pincode.data } : null;
+}
+
+/**
+ * A search on Android just refused location, or already in Pincode mode (#217,
+ * answer 6): a valid pincode opens Confirm and is kept as typed. Otherwise a
+ * place name typed for search is cleared as the field turns into Pincode, with
+ * no error yet; in Pincode mode the text stays and breaks the rule.
+ */
+export function refusedSearch(text: string, pincodeMode: boolean): { place: Place | null; text: string; invalid: boolean } {
+  const place = typedPlace(text);
+  if (place) return { place, text, invalid: false };
+  return pincodeMode ? { place: null, text, invalid: true } : { place: null, text: "", invalid: false };
 }
 
 /** The server's answer for a pincode: served, not served (C03), no answer, or a refusal. */

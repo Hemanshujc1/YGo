@@ -7,15 +7,16 @@ import {
   placeLabel,
   sentOutcome,
   stale,
+  refusedSearch,
   typedPlace,
   waitlistBody,
 } from "../src/lib/location-flow";
 
-const baner = { postalCode: "411045", district: "Baner", city: "Pune" };
-const locator = (allowed: boolean, addresses: Locator["addresses"], servicesOn = true): Locator => ({
+const baner = { latitude: 18.559, longitude: 73.786 };
+const locator = (allowed: boolean, position: Locator["position"], servicesOn = true): Locator => ({
   askPermission: async () => allowed,
   servicesOn: async () => servicesOn,
-  addresses,
+  position,
 });
 
 describe("findPlace", () => {
@@ -24,42 +25,30 @@ describe("findPlace", () => {
     const found = await findPlace(
       locator(false, async () => {
         asked = true;
-        return [baner];
+        return baner;
       }),
     );
     expect(found).toEqual({ kind: "off" });
     expect(asked).toBe(false);
   });
 
-  it("finds the pincode and the place name", async () => {
-    expect(await findPlace(locator(true, async () => [baner]))).toEqual({
+  it("finds where the phone is, as latitude and longitude only", async () => {
+    expect(await findPlace(locator(true, async () => ({ ...baner, altitude: 560, accuracy: 12 })))).toEqual({
       kind: "found",
-      place: { pincode: "411045", name: "Baner" },
+      point: baner,
     });
   });
 
-  it("falls back to the city, then to the pincode alone", async () => {
-    expect(await findPlace(locator(true, async () => [{ ...baner, district: null }]))).toEqual({
-      kind: "found",
-      place: { pincode: "411045", name: "Pune" },
-    });
-    expect(await findPlace(locator(true, async () => [{ postalCode: "411045", district: null, city: null }]))).toEqual({
-      kind: "found",
-      place: { pincode: "411045" },
-    });
-  });
-
-  it("skips an address whose pincode breaks the rule", async () => {
-    const found = await findPlace(locator(true, async () => [{ ...baner, postalCode: "41104" }, { ...baner, postalCode: "411 007" }]));
-    expect(found).toEqual({ kind: "found", place: { pincode: "411007", name: "Baner" } });
+  it("is not found outside India", async () => {
+    expect(await findPlace(locator(true, async () => ({ latitude: 51.5, longitude: -0.12 })))).toEqual({ kind: "not-found" });
   });
 
   it("says when location is off for the whole phone", async () => {
-    expect(await findPlace(locator(true, async () => [baner], false))).toEqual({ kind: "phone-off" });
+    expect(await findPlace(locator(true, async () => baner, false))).toEqual({ kind: "phone-off" });
   });
 
   it("is not found when asking for permission fails", async () => {
-    const failing: Locator = { ...locator(true, async () => [baner]), askPermission: () => Promise.reject(new Error("no activity")) };
+    const failing: Locator = { ...locator(true, async () => baner), askPermission: () => Promise.reject(new Error("no activity")) };
     expect(await findPlace(failing)).toEqual({ kind: "not-found" });
   });
 
@@ -67,9 +56,7 @@ describe("findPlace", () => {
     expect(await findPlace(locator(true, () => new Promise(() => {})), 10)).toEqual({ kind: "not-found" });
   });
 
-  it("is not found with no pincode, or when no position comes", async () => {
-    expect(await findPlace(locator(true, async () => []))).toEqual({ kind: "not-found" });
-    expect(await findPlace(locator(true, async () => [{ ...baner, postalCode: null }]))).toEqual({ kind: "not-found" });
+  it("is not found when no position comes", async () => {
     expect(await findPlace(locator(true, () => Promise.reject(new Error("no position"))))).toEqual({ kind: "not-found" });
   });
 });
@@ -80,6 +67,22 @@ describe("typedPlace", () => {
     expect(typedPlace("011045")).toBeNull();
     expect(typedPlace("41104")).toBeNull();
     expect(typedPlace("")).toBeNull();
+  });
+});
+
+describe("refusedSearch", () => {
+  it("clears a place name as the field turns into Pincode, with no error yet", () => {
+    expect(refusedSearch("Baner Road", false)).toEqual({ place: null, text: "", invalid: false });
+    expect(refusedSearch("41104", false)).toEqual({ place: null, text: "", invalid: false });
+  });
+
+  it("keeps a valid pincode as typed and opens Confirm with it", () => {
+    expect(refusedSearch(" 411045 ", false)).toEqual({ place: { pincode: "411045" }, text: " 411045 ", invalid: false });
+    expect(refusedSearch("411045", true)).toEqual({ place: { pincode: "411045" }, text: "411045", invalid: false });
+  });
+
+  it("keeps a wrong pincode typed in Pincode mode, with the error", () => {
+    expect(refusedSearch("41104", true)).toEqual({ place: null, text: "41104", invalid: true });
   });
 });
 

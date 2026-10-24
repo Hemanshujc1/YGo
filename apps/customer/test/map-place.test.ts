@@ -4,6 +4,7 @@ import type { AreaAnswer, Place } from "../src/lib/location-flow";
 import { addressBody, confirmAddress, type GeoAddress, type Geocoder, readPin, searchPlaces } from "../src/lib/map-place";
 
 const prabhat: GeoAddress = {
+  isoCountryCode: "IN",
   postalCode: "411005",
   street: "Prabhat Road",
   name: "12",
@@ -37,7 +38,7 @@ describe("readPin", () => {
   it("falls back to the address's name, then the city, when a part is missing or empty", async () => {
     const named = await readPin(geocoder(async () => [], async () => [{ ...prabhat, street: null }]), shivajiNagar);
     expect(named?.title).toBe("12, Shivaji Nagar");
-    const bare = { postalCode: "411005", street: null, name: null, district: null, city: "Pune" };
+    const bare = { isoCountryCode: "IN", postalCode: "411005", street: null, name: null, district: null, city: "Pune" };
     const cityOnly = await readPin(geocoder(async () => [], async () => [bare]), shivajiNagar);
     expect(cityOnly).toMatchObject({ place: { name: "Pune", areaLine: "Pune" }, title: "Pune", detail: "Pune 411005" });
     const emptyDistrict = await readPin(geocoder(async () => [], async () => [{ ...prabhat, district: "" }]), shivajiNagar);
@@ -48,6 +49,20 @@ describe("readPin", () => {
     expect(await readPin(geocoder(async () => [], async () => [{ ...prabhat, postalCode: "SW1A 1AA" }]), shivajiNagar)).toBeNull();
     expect(await readPin(geocoder(async () => [], () => Promise.reject(new Error("rate limited"))), shivajiNagar)).toBeNull();
     expect(await readPin(geocoder(async () => []), { latitude: 51.5, longitude: -0.12 })).toBeNull();
+  });
+
+  it("is null for an address the phone names as outside India, even inside India's box with a pincode-like code", async () => {
+    // Lhasa sits inside AddressPoint's box, and its postal code 850000 passes the pincode rule.
+    const lhasa = { latitude: 29.65, longitude: 91.1 };
+    const china: GeoAddress = { isoCountryCode: "CN", postalCode: "850000", street: "Beijing Middle Road", name: null, district: "Chengguan", city: "Lhasa" };
+    expect(await readPin(geocoder(async () => [], async () => [china]), lhasa)).toBeNull();
+    expect(await readPin(geocoder(async () => [], async () => [{ ...china, isoCountryCode: "cn" }]), lhasa)).toBeNull();
+  });
+
+  it("keeps an address with no country, and skips a foreign one for an Indian one at the same spot", async () => {
+    expect((await readPin(geocoder(async () => [], async () => [{ ...prabhat, isoCountryCode: null }]), shivajiNagar))?.place.pincode).toBe("411005");
+    const nepal: GeoAddress = { ...prabhat, isoCountryCode: "NP", postalCode: "560001" };
+    expect((await readPin(geocoder(async () => [], async () => [nepal, { ...prabhat, isoCountryCode: "in" }]), shivajiNagar))?.place.pincode).toBe("411005");
   });
 });
 
@@ -86,6 +101,17 @@ describe("searchPlaces", () => {
     const spots = await searchPlaces(geocoder(async () => [found, { ...found, latitude: 18.52 }]), "411005");
     expect(spots).toHaveLength(1);
     expect(spots[0]?.place.point).toEqual(shivajiNagar);
+  });
+
+  it("drops a match the phone names as outside India, even with a six-digit postal code", async () => {
+    const lhasa = { latitude: 29.65, longitude: 91.1 };
+    const china: GeoAddress = { isoCountryCode: "CN", postalCode: "850000", street: "Beijing Middle Road", name: null, district: "Chengguan", city: "Lhasa" };
+    const spots = await searchPlaces(
+      geocoder(async () => [lhasa, shivajiNagar], async (point) => (point.latitude === lhasa.latitude ? [china] : [prabhat])),
+      "Chengguan",
+    );
+    expect(spots.map((spot) => spot.place.point)).toEqual([shivajiNagar]);
+    expect(await searchPlaces(geocoder(async () => [lhasa], async () => [china]), "Lhasa")).toEqual([]);
   });
 
   it("keeps a later match when looking up an earlier one fails", async () => {
