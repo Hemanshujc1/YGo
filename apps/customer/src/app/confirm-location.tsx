@@ -10,8 +10,8 @@ import { api, session } from "../api";
 import { MapPin } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { askArea, newestOnly, stale, typedPlace } from "../lib/location-flow";
-import { addressBody, type Confirmed, confirmAddress, readPin, type Spot } from "../lib/map-place";
 import { goHome } from "../lib/go-home";
+import { addressBody, type Confirmed, confirmAddress, readPin, type Spot } from "../lib/map-place";
 import { phoneGeocoder } from "../lib/phone-geocoder";
 import { savePlace } from "../lib/saved-place";
 import { strings } from "../strings";
@@ -122,7 +122,7 @@ export default function ConfirmLocation() {
     working.current = false;
     setSaving(false);
     // Any failure stays here with its message; nothing is chosen and nothing retries by itself.
-    if (done.kind === "done") return goHome(navigation.getState()?.routes[0]?.name);
+    if (done.kind === "done") return goHome(navigation);
     setProblem(done);
   }
 

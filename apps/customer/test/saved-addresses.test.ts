@@ -1,7 +1,7 @@
 import type { SavedAddress } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
 import type { Place } from "../src/lib/location-flow";
-import { addressLine, chooseAddress, loadAddresses, removeSaved } from "../src/lib/saved-addresses";
+import { addressLine, afterLoad, chooseAddress, loadAddresses, removeSaved, type SavedList, withoutAddress } from "../src/lib/saved-addresses";
 
 const home: SavedAddress = {
   id: "0b6f3f1e-8f2a-4d6e-9a51-5c1d2e3f4a5b",
@@ -33,6 +33,26 @@ describe("loadAddresses", () => {
   });
 });
 
+describe("afterLoad", () => {
+  it("shows the new list", () => {
+    expect(afterLoad({ kind: "loading" }, [home])).toEqual({ kind: "loaded", addresses: [home] });
+    expect(afterLoad({ kind: "loaded", addresses: [home] }, [typed])).toEqual({ kind: "loaded", addresses: [typed] });
+  });
+
+  it("keeps a list already shown when a reload fails, and fails otherwise", () => {
+    const shown: SavedList = { kind: "loaded", addresses: [home] };
+    expect(afterLoad(shown, null)).toBe(shown);
+    expect(afterLoad({ kind: "loading" }, null)).toEqual({ kind: "failed" });
+  });
+});
+
+describe("withoutAddress", () => {
+  it("takes the removed row out of the list shown", () => {
+    expect(withoutAddress({ kind: "loaded", addresses: [typed, home] }, home.id)).toEqual({ kind: "loaded", addresses: [typed] });
+    expect(withoutAddress({ kind: "failed" }, home.id)).toEqual({ kind: "failed" });
+  });
+});
+
 describe("chooseAddress", () => {
   it("keeps the place with its pin and area line", async () => {
     const kept: Place[] = [];
@@ -43,6 +63,13 @@ describe("chooseAddress", () => {
   it("keeps the pincode alone for a place saved without a pin", async () => {
     const kept: Place[] = [];
     expect(await chooseAddress(async (place) => void kept.push(place), typed)).toBe("done");
+    expect(kept).toEqual([{ pincode: "411005" }]);
+  });
+
+  it("leaves out a pin or area line that breaks today's rules", async () => {
+    const kept: Place[] = [];
+    const old = { ...home, areaLine: "   ", point: { latitude: 51.5, longitude: -0.12 } };
+    expect(await chooseAddress(async (place) => void kept.push(place), old)).toBe("done");
     expect(kept).toEqual([{ pincode: "411005" }]);
   });
 
