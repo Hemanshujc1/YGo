@@ -9,6 +9,8 @@ import {
   Category,
   MasterProduct,
   MasterProductsResponse,
+  Pack,
+  PacksResponse,
   type CreateAdminBody,
   type CreateAreaBody,
   type CreateCategoryBody,
@@ -16,6 +18,8 @@ import {
   type EditAreaBody,
   type EditCategoryBody,
   type EditMasterProductBody,
+  type CreatePackBody,
+  type EditPackBody,
   type RequestCodeBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
@@ -76,7 +80,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -165,6 +169,18 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** PATCH /v1/admin/products/:id: edit, replace the image, or change active state. */
     async editMasterProduct(id: string, body: EditMasterProductBody): Promise<ApiResult<MasterProduct>> {
       return result(await adminRequest("PATCH", `/v1/admin/products/${encodeURIComponent(id)}`, body), MasterProduct);
+    },
+
+    async listPacks(productId: string): Promise<ApiResult<PacksResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/products/${encodeURIComponent(productId)}/packs`), PacksResponse);
+    },
+
+    async createPack(productId: string, body: CreatePackBody): Promise<ApiResult<Pack>> {
+      return result(await adminRequest("POST", `/v1/admin/products/${encodeURIComponent(productId)}/packs`, body), Pack);
+    },
+
+    async editPack(productId: string, id: string, body: EditPackBody): Promise<ApiResult<Pack>> {
+      return result(await adminRequest("PATCH", `/v1/admin/products/${encodeURIComponent(productId)}/packs/${encodeURIComponent(id)}`, body), Pack);
     },
 
     /** `GET /v1/admin/areas`: every Area with its pincodes. */
