@@ -66,7 +66,7 @@ export const CatalogImportCsvRow = z.strictObject({
   baseUnit: ProductBaseUnit,
   classification: ProductClassification,
   quantity: PackQuantity,
-  barcode: z.string().trim().max(13).transform((value) => value || null).pipe(PackBarcode.nullable()),
+  barcode: z.union([PackBarcode, z.literal("")]).transform((value) => value || null),
 }).refine((row) => (row.classification === "counted") === (row.baseUnit === "each"), {
   path: ["classification"],
 }).refine((row) => row.baseUnit !== "each" || CountedPackQuantity.safeParse(row.quantity).success, {
