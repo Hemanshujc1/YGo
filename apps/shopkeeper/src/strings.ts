@@ -98,5 +98,6 @@ export const strings = {
     PACK_QUANTITY_IN_USE: "This product already has a pack of this size.",
     BARCODE_IN_USE: "Another pack already has this barcode.",
     ADDRESS_LIMIT_REACHED: "You have 10 saved addresses. Remove one to save another.",
+    CATALOG_IMPORT_ROWS_INVALID: "The catalog changed. Try again.",
   } satisfies Record<ErrorCode, string>,
 };

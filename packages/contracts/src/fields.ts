@@ -100,8 +100,11 @@ export const ProductName = z.string().trim().min(1).max(200);
 /** Optional master product brand, trimmed, 1 to 100 characters when present (owner decision on #203). */
 export const ProductBrand = z.string().trim().min(1).max(100).nullable().optional();
 
-/** Base64 product image, capped at the encoded length of 10 MiB (owner decision on #203). */
-export const ProductImage = z.base64().max(13_981_016);
+/** Source product image size cap (owner decision on #203). */
+export const PRODUCT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Base64 product image, capped at the encoded length of PRODUCT_IMAGE_MAX_BYTES (#203). */
+export const ProductImage = z.base64().max(Math.ceil(PRODUCT_IMAGE_MAX_BYTES / 3) * 4);
 
 /** Positive base-unit decimal string, NUMERIC(12,3), without binary floats (ADR-0002, owner decision on #205). */
 export const PackQuantity = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/).refine((value) => /[1-9]/.test(value));
