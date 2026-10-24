@@ -29,6 +29,7 @@ export {
   PackBarcode,
   PackQuantity,
   CountedPackQuantity,
+  PRODUCT_IMAGE_MAX_BYTES,
   UpiId,
 } from "./fields";
 export { ADMIN_REFRESH_HEADER, APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity, AppName, AppVersion } from "./headers";
@@ -53,6 +54,17 @@ export {
   PackParams,
   CreatePackBody,
   EditPackBody,
+  CATALOG_IMPORT_FILE_FIELDS,
+  CATALOG_IMPORT_FILE_LIMITS,
+  CATALOG_IMPORT_CSV_FIELDS,
+  CatalogImportFileField,
+  CatalogImportCsvField,
+  CatalogImportCsvRow,
+  CatalogImportRowErrorReason,
+  CatalogImportRowError,
+  CatalogImportRowErrors,
+  CatalogImportPreviewResponse,
+  CatalogImportResponse,
 } from "./catalog";
 export {
   Area,
