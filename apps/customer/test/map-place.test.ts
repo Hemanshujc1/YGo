@@ -182,4 +182,24 @@ describe("confirmAddress", () => {
     const failing = { ...run.steps, keep: () => Promise.reject(new Error("keychain locked")) };
     expect(await confirmAddress(failing, place, body)).toEqual({ kind: "not-saved" });
   });
+
+  it("sends the same body again when Confirm is retried after the phone can't keep it or the answer is lost", async () => {
+    const other = addressBody({ pincode: "411005", areaLine: "Prabhat Road", point: shivajiNagar }, "other", " Flat 4B ");
+    if (!other) throw new Error("expected a body");
+    const sent: SaveAddressBody[] = [];
+    const served = { kind: "served", areaName: "Shivaji Nagar" } as const;
+    const saveAddress = async (sentBody: SaveAddressBody) => (sent.push(sentBody), { ok: true as const, data: {} });
+    const keepFails = { askArea: async () => served, saveAddress, keep: () => Promise.reject(new Error("keychain locked")) };
+    const lost = {
+      askArea: async () => served,
+      saveAddress: (sentBody: SaveAddressBody) => (sent.push(sentBody), Promise.reject(new TypeError("Network request failed"))),
+      keep: async () => {},
+    };
+    const works = { askArea: async () => served, saveAddress, keep: async () => {} };
+
+    expect(await confirmAddress(keepFails, place, other)).toEqual({ kind: "not-saved" });
+    expect(await confirmAddress(lost, place, other)).toEqual({ kind: "offline" });
+    expect(await confirmAddress(works, place, other)).toEqual({ kind: "done" });
+    expect(sent).toEqual([other, other, other]);
+  });
 });

@@ -101,6 +101,13 @@ export type Confirmed = { kind: "done" } | { kind: "not-saved" } | Extract<AreaA
  * the server, then keep the place on the phone. A served or not-served place
  * is saved alike; any failure stops before the place is kept, so it is never
  * chosen.
+ *
+ * Retrying (#242, review of #249): on any failure Confirm stays open with its
+ * message and nothing retries by itself. The customer taps Confirm again, which
+ * sends the same body. That is safe even when the first save reached the server
+ * (the phone failed to keep it, or the answer was lost offline): the server
+ * replaces a Home or Work address, and answers an identical Other address with
+ * the one it already has, so a retry never adds a second address.
  */
 export async function confirmAddress(
   steps: {
