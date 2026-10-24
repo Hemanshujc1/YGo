@@ -438,7 +438,9 @@ describe("Catalog pack routes (#205)", () => {
        SELECT $1, id, $2, $3, 'small', 'medium', 'large', true FROM categories WHERE name = 'Groceries' RETURNING id`,
       [randomUUID(), baseUnit, baseUnit === "each" ? "counted" : "measured"],
     );
-    return made.rows[0]!.id;
+    const id = made.rows[0]?.id;
+    if (!id) throw new Error("Test product missing");
+    return id;
   }
   async function headers() {
     return { authorization: `Bearer ${(await signIn("/v1/admin/auth")).json().accessToken as string}` };
