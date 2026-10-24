@@ -22,6 +22,9 @@ const words = strings.confirm;
 // Street level when the map opens (#242, Q6).
 const streetLevel = { latitudeDelta: 0.004, longitudeDelta: 0.004 };
 
+// The phone's geocoder limits how often an app may ask, so a read waits until the map has rested this long.
+const settle = 600;
+
 /** "Flat, house or floor" broke the rule, or Confirm failed and stays open (#242, review of #249). */
 type Problem = "flat" | Exclude<Confirmed, { kind: "done" }>;
 
@@ -51,10 +54,14 @@ export default function ConfirmLocation() {
   const working = useRef(false);
   const [reads] = useState(newestOnly);
   const [saves] = useState(newestOnly);
+  const wait = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The spot last read: Android reports the opening region too, which needs no second read.
+  const last = useRef(start);
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(
     () => () => {
+      clearTimeout(wait.current);
       reads.drop();
       saves.drop();
     },
@@ -68,6 +75,18 @@ export default function ConfirmLocation() {
     if (found === stale) return;
     setSpot(found);
     setReading(false);
+  }
+
+  /** The map stopped at a new spot: read it once the map has rested, and drop an old save failure, which was for the last spot. */
+  function moved(point: AddressPoint) {
+    const before = last.current;
+    if (before && Math.abs(before.latitude - point.latitude) < 1e-6 && Math.abs(before.longitude - point.longitude) < 1e-6) return;
+    last.current = point;
+    clearTimeout(wait.current);
+    reads.drop();
+    setReading(true);
+    setProblem((now) => (now === "flat" ? now : null));
+    wait.current = setTimeout(() => void read(point), settle);
   }
 
   // The first spot, read once when the screen opens, before the map reports where it stopped.
@@ -137,7 +156,12 @@ export default function ConfirmLocation() {
           <MapView
             className="flex-1"
             initialRegion={{ ...start, ...streetLevel }}
-            onRegionChangeComplete={({ latitude, longitude }) => void read({ latitude, longitude })}
+            onRegionChangeComplete={({ latitude, longitude }) => moved({ latitude, longitude })}
+            // Held still while saving, so the spot on screen is the one being saved.
+            scrollEnabled={!saving}
+            zoomEnabled={!saving}
+            rotateEnabled={!saving}
+            pitchEnabled={!saving}
             toolbarEnabled={false}
           />
           {/* The pin stays in the middle and its point marks the spot (#242, Q6). */}

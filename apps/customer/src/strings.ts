@@ -85,6 +85,8 @@ export const strings = {
     finding: "Finding where you are",
     offTitle: "Location is off for YGo",
     offBody: "Turn it on in settings, or type your pincode below.",
+    // iOS looks places up with location refused, so the field below still searches.
+    offBodySearch: "Turn it on in settings, or search for your area below.",
     openSettings: "Open settings",
     notFound: "Couldn't find your location. Search for it below.",
     phoneOff: "Location is off on this phone. Turn it on and try again, or search for your area below.",

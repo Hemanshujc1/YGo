@@ -1,8 +1,8 @@
 import { Button, edgeClass, FieldMessage, Text } from "@ygo/mobile";
 import type { AddressPoint } from "@ygo/contracts";
 import * as Location from "expo-location";
-import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -34,10 +34,6 @@ const locator: Locator = {
 /** What C15 shows under the field: a lookup found nothing, or a typed pincode broke the rule. */
 type Problem = "invalid" | "not-found" | "phone-off" | "no-results";
 
-/** Opens Confirm location over C15 with the pin at a spot, so Back returns to the results (#242, Q5). */
-const confirmAt = (point: AddressPoint) =>
-  router.push({ pathname: "/confirm-location", params: { latitude: String(point.latitude), longitude: String(point.longitude) } });
-
 /** C15 Set location (#216, #242): the phone's current location, or a search; each ends on Confirm location. */
 export default function SetLocation() {
   const insets = useSafeAreaInsets();
@@ -51,6 +47,13 @@ export default function SetLocation() {
   // Set before React re-renders, so a second tap never asks twice.
   const working = useRef(false);
   const [asks] = useState(newestOnly);
+  // Set when Confirm opens, cleared back on C15, so a double tap opens one Confirm.
+  const leaving = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      leaving.current = false;
+    }, []),
+  );
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(() => asks.drop, [asks]);
@@ -67,6 +70,16 @@ export default function SetLocation() {
 
   // Android looks places up only with location allowed, so with it refused the field takes a pincode (#217, answer 6).
   const pincodeOnly = Platform.OS === "android" && locationOff;
+
+  /** Opens Confirm location over C15, so Back returns to the results (#242, Q5). */
+  function openConfirm(params: { latitude: string; longitude: string } | { pincode: string }) {
+    if (leaving.current) return;
+    leaving.current = true;
+    router.push({ pathname: "/confirm-location", params });
+  }
+
+  const confirmAt = (point: AddressPoint) =>
+    openConfirm({ latitude: String(point.latitude), longitude: String(point.longitude) });
 
   function stop(next: Problem | null) {
     working.current = false;
@@ -88,7 +101,7 @@ export default function SetLocation() {
   }
 
   async function search() {
-    if (working.current) return;
+    if (working.current || !text.trim()) return;
     working.current = true;
     setProblem(null);
     setResults([]);
@@ -98,8 +111,9 @@ export default function SetLocation() {
     if (!allowed) {
       setLocationOff(true);
       const place = typedPlace(text);
-      stop(place ? null : "invalid");
-      if (place) router.push({ pathname: "/confirm-location", params: { pincode: place.pincode } });
+      // Just refused: the field turns into Pincode and the notice asks for one, so no error yet for a place name.
+      stop(place || !locationOff ? null : "invalid");
+      if (place) openConfirm({ pincode: place.pincode });
       return;
     }
     const found = await asks.ask(searchPlaces(phoneGeocoder, text));
@@ -148,7 +162,7 @@ export default function SetLocation() {
                 <MapPin size={20} className="mt-0.5 text-on-warning-subtle" />
                 <View className="flex-1">
                   <Text className="text-body font-semibold text-on-warning-subtle">{words.offTitle}</Text>
-                  <Text className="text-secondary text-on-warning-subtle">{words.offBody}</Text>
+                  <Text className="text-secondary text-on-warning-subtle">{Platform.OS === "android" ? words.offBody : words.offBodySearch}</Text>
                 </View>
               </View>
               <Button label={words.openSettings} onPress={() => void Linking.openSettings()} variant="secondary" />
