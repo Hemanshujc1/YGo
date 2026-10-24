@@ -39,6 +39,18 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
       await client.query("SELECT 1 FROM accounts WHERE id = $1 FOR NO KEY UPDATE", [who.accountId]);
       // A new Home or Work replaces the old one, so it never meets the limit.
       if (label !== "other") await client.query("DELETE FROM saved_addresses WHERE account_id = $1 AND label = $2", [who.accountId, label]);
+      // An Other the same in every field is a retried save, so it answers the
+      // one already saved, even at the limit (#242, review of #249).
+      else {
+        const same = await client.query<SavedAddress>(
+          `${addressSql} WHERE account_id = $1 AND label = 'other' AND flat = $2 AND area_line IS NOT DISTINCT FROM $3 AND pincode = $4
+             AND CASE WHEN $5::float8 IS NULL THEN point IS NULL
+               ELSE ST_Y(point::geometry) = $5::float8 AND ST_X(point::geometry) = $6::float8 END
+           LIMIT 1`,
+          [who.accountId, flat, areaLine, pincode, point?.latitude ?? null, point?.longitude ?? null],
+        );
+        if (same.rows[0]) return reply.code(201).send(same.rows[0]);
+      }
       const count = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM saved_addresses WHERE account_id = $1", [who.accountId]);
       if ((count.rows[0]?.n ?? 0) >= LIMIT) return reply.code(409).send({ error: { code: "ADDRESS_LIMIT_REACHED" } });
       const inserted = await client.query<{ id: string }>(

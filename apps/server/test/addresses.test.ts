@@ -111,13 +111,37 @@ describe("saved addresses", () => {
     expect(await list(headers)).toEqual([]);
   });
 
-  it("replaces Home with a new Home and Work with a new Work, and keeps every Other", async () => {
+  it("replaces Home with a new Home and Work with a new Work, and keeps every different Other", async () => {
     const { headers } = await customer("asha@example.com");
     await save(headers, home);
     const work = (await save(headers, { ...home, label: "work", flat: "Office 12" })).json();
-    const others = [(await save(headers, { ...home, label: "other", flat: "Gym" })).json(), (await save(headers, { ...home, label: "other", flat: "Gym" })).json()];
+    const others = [(await save(headers, { ...home, label: "other", flat: "Gym" })).json(), (await save(headers, { ...home, label: "other", flat: "Gym, 2nd floor" })).json()];
     const newHome = (await save(headers, { ...home, flat: "Flat 9A" })).json();
     expect(await list(headers)).toEqual([newHome, ...others.reverse(), work]);
+  });
+
+  it("answers a retried Other with the one already saved, and saves it again when any field differs", async () => {
+    const { headers } = await customer("asha@example.com");
+    const gym = { ...home, label: "other", flat: "Gym" };
+    const first = (await save(headers, gym)).json();
+    const retry = await save(headers, { ...gym, flat: " Gym " });
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json()).toEqual(first);
+    const pinless = { ...gym, areaLine: null, point: null };
+    const firstPinless = (await save(headers, pinless)).json();
+    expect((await save(headers, pinless)).json()).toEqual(firstPinless);
+    expect(await list(headers)).toEqual([firstPinless, first]);
+
+    const differing = [
+      { ...gym, flat: "Gym 2" },
+      { ...gym, flat: "gym" },
+      { ...gym, areaLine: "Baner Road" },
+      { ...gym, pincode: "411046" },
+      { ...gym, point: { latitude: 18.5591, longitude: 73.7868 } },
+      { ...gym, point: null },
+    ];
+    for (const body of differing) expect((await save(headers, body)).json().id).not.toBe(first.id);
+    expect(await list(headers)).toHaveLength(2 + differing.length);
   });
 
   it("keeps at most 10, though a new Home still replaces the old one", async () => {
@@ -130,27 +154,51 @@ describe("saved addresses", () => {
     expect(await list(headers)).toHaveLength(10);
   });
 
-  it("lets only one of several saves at once take the last place", async () => {
+  it("answers a retried Other at the limit with the one already saved", async () => {
     const { headers } = await customer("asha@example.com");
-    for (let n = 0; n < 9; n += 1) await save(headers, { ...home, label: "other", flat: `Flat ${n}` });
-    // Hold back every insert until all five saves are waiting, so they overlap.
+    const saved = [];
+    for (let n = 0; n < 10; n += 1) saved.push((await save(headers, { ...home, label: "other", flat: `Flat ${n}` })).json());
+    const retry = await save(headers, { ...home, label: "other", flat: "Flat 3" });
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json()).toEqual(saved[3]);
+    expect((await save(headers, { ...home, label: "other", flat: "Flat 10" })).statusCode).toBe(409);
+    expect(await list(headers)).toHaveLength(10);
+  });
+
+  /** Sends the saves so they overlap: each is held on a lock until all of them wait. */
+  async function atOnce(headers: Record<string, string>, bodies: Body[]) {
     const blocker = await database.pool.connect();
     await blocker.query("BEGIN");
     await blocker.query("LOCK TABLE saved_addresses IN SHARE MODE");
-    const pending = Promise.all(Array.from({ length: 5 }, () => save(headers, { ...home, label: "other" })));
+    const pending = Promise.all(bodies.map((body) => save(headers, body)));
     // Outside the blocker's transaction, which would see one fixed snapshot of the activity.
     const waiting = () => database.pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
     );
-    for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < 5; tries += 1) {
-      if (tries === 100) throw new Error("the five saves never all waited on the lock");
+    for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < bodies.length; tries += 1) {
+      if (tries === 100) throw new Error("the saves never all waited on the lock");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     await blocker.query("COMMIT");
     blocker.release();
-    const racing = await pending;
+    return pending;
+  }
+
+  it("lets only one of several saves at once take the last place", async () => {
+    const { headers } = await customer("asha@example.com");
+    for (let n = 0; n < 9; n += 1) await save(headers, { ...home, label: "other", flat: `Flat ${n}` });
+    const racing = await atOnce(headers, Array.from({ length: 5 }, (_, n) => ({ ...home, label: "other", flat: `Racer ${n}` })));
     expect(racing.map((result) => result.statusCode).sort()).toEqual([201, 409, 409, 409, 409]);
     expect(await list(headers)).toHaveLength(10);
+  });
+
+  it("saves the same Other once when it is sent several times at once", async () => {
+    const { headers } = await customer("asha@example.com");
+    const racing = await atOnce(headers, Array.from({ length: 5 }, () => ({ ...home, label: "other" })));
+    expect(racing.map((result) => result.statusCode)).toEqual([201, 201, 201, 201, 201]);
+    const saved = await list(headers);
+    expect(saved).toHaveLength(1);
+    expect(racing.map((result) => result.json())).toEqual(Array(5).fill(saved[0]));
   });
 
   it("keeps each account's addresses to itself and deletes them with the account", async () => {

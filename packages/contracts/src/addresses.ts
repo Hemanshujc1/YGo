@@ -8,7 +8,9 @@ import { AddressAreaLine, AddressFlat, Pincode } from "./fields";
 
 /**
  * A new Home or Work replaces the account's old one, so it never meets the
- * 10-address limit; Other can repeat (owner decision on #217).
+ * 10-address limit; Other can repeat (owner decision on #217). Saving an
+ * Other the same in every field answers the one already saved, so a retried
+ * save never adds a second (#242).
  */
 export const AddressLabel = z.enum(["home", "work", "other"]);
 export type AddressLabel = z.infer<typeof AddressLabel>;
