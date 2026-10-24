@@ -8,6 +8,8 @@ export {
   RequestCodeBody,
   Session,
   SetProfileBody,
+  SetThemeBody,
+  ThemeChoice,
   VerifyCodeBody,
 } from "./auth";
 export { ErrorCode, ErrorEnvelope, invalidFields } from "./errors";

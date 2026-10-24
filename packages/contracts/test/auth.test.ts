@@ -12,6 +12,7 @@ import {
   RequestCodeBody,
   Session,
   SetProfileBody,
+  SetThemeBody,
   VerifyCodeBody,
 } from "../src/index";
 
@@ -86,6 +87,18 @@ describe("ChangeNameBody", () => {
 
   it("refuses a phone sent with it, since the phone changes only through support", () => {
     expect(fieldsRefused(ChangeNameBody, { name: "Asha K", phone: "+919876543210" })).toEqual(["phone"]);
+  });
+});
+
+describe("SetThemeBody", () => {
+  it("accepts System, Light and Dark", () => {
+    for (const theme of ["system", "light", "dark"]) expect(SetThemeBody.parse({ theme })).toEqual({ theme });
+  });
+
+  it("names any other theme, and refuses extra fields", () => {
+    expect(fieldsRefused(SetThemeBody, { theme: "Dark" })).toEqual(["theme"]);
+    expect(fieldsRefused(SetThemeBody, {})).toEqual(["theme"]);
+    expect(SetThemeBody.safeParse({ theme: "dark", name: "Asha" }).success).toBe(false);
   });
 });
 

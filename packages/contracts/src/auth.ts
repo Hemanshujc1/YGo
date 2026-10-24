@@ -28,6 +28,14 @@ export type SetProfileBody = z.infer<typeof SetProfileBody>;
 export const ChangeNameBody = z.strictObject({ name: PersonName });
 export type ChangeNameBody = z.infer<typeof ChangeNameBody>;
 
+/** The person's theme: follow the phone's setting, or always Light or Dark (FR-ACC-13). One per account, shared by both mobile apps (#195). */
+export const ThemeChoice = z.enum(["system", "light", "dark"]);
+export type ThemeChoice = z.infer<typeof ThemeChoice>;
+
+/** `PUT /v1/me/theme`: the account's new theme. Answers the `Account`. */
+export const SetThemeBody = z.strictObject({ theme: ThemeChoice });
+export type SetThemeBody = z.infer<typeof SetThemeBody>;
+
 /** `POST /v1/admin/accounts`: create an Admin account and record why. Answers 201 with the `Account`. */
 export const CreateAdminBody = z.strictObject({
   email: Email,

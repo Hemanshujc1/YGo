@@ -137,6 +137,7 @@ describe("each call", () => {
     await client.me();
     await client.setProfile({ name: "Asha Kulkarni", phone: "+919876543210" });
     await client.changeName({ name: "Asha K" });
+    expect(await client.setTheme({ theme: "dark" })).toEqual({ ok: true, data: account });
     await client.signOut();
 
     expect(calls).toEqual([
@@ -150,6 +151,7 @@ describe("each call", () => {
         auth: "Bearer a1",
       },
       { method: "PATCH", path: "/v1/me", body: { name: "Asha K" }, auth: "Bearer a1" },
+      { method: "PUT", path: "/v1/me/theme", body: { theme: "dark" }, auth: "Bearer a1" },
       { method: "POST", path: "/v1/auth/sign-out", body: undefined, auth: "Bearer a1" },
     ]);
     expect(stored()).toBeNull();
