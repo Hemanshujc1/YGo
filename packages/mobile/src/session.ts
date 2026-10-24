@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { Account } from "@ygo/contracts";
+import type { Account, SetThemeBody, ThemeChoice } from "@ygo/contracts";
 import { useSyncExternalStore } from "react";
 import { listeners } from "./listeners";
 import { onSignedOut } from "./signed-out";
@@ -22,7 +22,14 @@ export type SessionState =
 /** The calls the session makes: the app's own client. */
 interface SessionApi {
   me(): Promise<ApiResult<Account>>;
+  setTheme(body: SetThemeBody): Promise<ApiResult<Account>>;
   signOut(): Promise<void>;
+}
+
+/** This phone's copy of the theme: `phoneTheme` in the apps. */
+interface ThemeCopy {
+  saved(): ThemeChoice;
+  keep(choice: ThemeChoice): void;
 }
 
 const byAccount = (account: Account): SessionState =>
@@ -32,17 +39,19 @@ const byAccount = (account: Account): SessionState =>
 let stopLast = () => {};
 
 /**
- * One per app, beside its client: `createSession(api)`. A new one takes
- * `showSignedOut` from the last, so Fast Refresh and tests never pile up
- * listeners.
+ * One per app, beside its client: `createSession(api, phoneTheme)`. A new one
+ * takes `showSignedOut` from the last, so Fast Refresh and tests never pile up
+ * listeners. Each account the server answers sets the app's theme, since the
+ * account's choice wins over the phone's copy (#195, Q2).
  */
-export function createSession(api: SessionApi) {
+export function createSession(api: SessionApi, theme: ThemeCopy) {
   let state: SessionState = { status: "checking" };
   const changed = listeners();
   // Each change bumps it, so a launch check that answers after a sign-in or a sign-out is dropped.
   let turn = 0;
 
   function move(next: SessionState) {
+    if ("account" in next) theme.keep(next.account.theme);
     turn++;
     state = next;
     changed.notify();
@@ -77,6 +86,23 @@ export function createSession(api: SessionApi) {
     /** After C14's code is accepted, or C02 saves: the account the server answered. */
     signedIn(account: Account) {
       move(byAccount(account));
+    },
+
+    /**
+     * The theme picker: the app changes at once, then the account saves it.
+     * Resolves false, with the old theme back, when the save fails; nothing
+     * retries by itself (#195, Q3).
+     */
+    async chooseTheme(choice: ThemeChoice): Promise<boolean> {
+      const before = theme.saved();
+      theme.keep(choice);
+      try {
+        if ((await api.setTheme({ theme: choice })).ok) return true;
+      } catch {
+        // No answer: the same as a refusal.
+      }
+      theme.keep(before);
+      return false;
     },
 
     /**

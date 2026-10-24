@@ -85,6 +85,13 @@
       "when": 1792841536315,
       "tag": "0011_catalog_packs",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792851296714,
+      "tag": "0012_account_theme",
+      "breakpoints": true
     }
   ]
 }

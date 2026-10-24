@@ -14,7 +14,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
     async (request, reply) => {
       if (!await adminSignedIn(request, reply, auth)) return reply;
       const accounts = await pool.query<Account>(
-        "SELECT a.id, a.email, a.name, a.phone FROM accounts a JOIN admin_memberships m ON m.account_id = a.id ORDER BY a.email",
+        "SELECT a.id, a.email, a.name, a.phone, a.theme FROM accounts a JOIN admin_memberships m ON m.account_id = a.id ORDER BY a.email",
       );
       return reply.code(200).send({ accounts: accounts.rows });
     },
@@ -45,7 +45,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
           return reply.code(409).send({ error: { code: existing.rows[0].email === email ? "EMAIL_IN_USE" : "PHONE_IN_USE" } });
         }
         const inserted = await client.query<Account>(
-          "INSERT INTO accounts (email, name, phone) VALUES ($1, $2, $3) RETURNING id, email, name, phone",
+          "INSERT INTO accounts (email, name, phone) VALUES ($1, $2, $3) RETURNING id, email, name, phone, theme",
           [email, name, phone],
         );
         const account = inserted.rows[0];

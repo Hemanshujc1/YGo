@@ -1,14 +1,12 @@
+import type { ThemeChoice } from "@ygo/contracts";
 import { Appearance } from "react-native";
 import { createMMKV } from "react-native-mmkv";
-
-/** The person's theme. Saved on this phone until sign-in moves it to the account (#34). */
-export type ThemeChoice = "system" | "light" | "dark";
 
 // MMKV holds display preferences only (ADR-0001).
 const display = createMMKV({ id: "display" });
 const key = "theme";
 
-export function savedTheme(): ThemeChoice {
+function savedTheme(): ThemeChoice {
   const value = display.getString(key);
   return value === "light" || value === "dark" ? value : "system";
 }
@@ -23,7 +21,15 @@ export function applySavedTheme() {
   applyTheme(savedTheme());
 }
 
-export function chooseTheme(choice: ThemeChoice) {
-  display.set(key, choice);
-  applyTheme(choice);
-}
+/**
+ * This phone's copy of the account's theme (#195), for `createSession`. It
+ * opens the app in the right theme before the server answers, and keeps the
+ * last one while signed out.
+ */
+export const phoneTheme = {
+  saved: savedTheme,
+  keep(choice: ThemeChoice) {
+    display.set(key, choice);
+    applyTheme(choice);
+  },
+};

@@ -28,6 +28,7 @@ const account = {
   email: "asha@example.com",
   name: "Asha Kulkarni",
   phone: "+919876543210",
+  theme: "system",
 };
 
 describe("RequestCodeBody", () => {
@@ -119,6 +120,10 @@ describe("Account", () => {
 
   it("refuses an id that is not a UUID", () => {
     expect(Account.safeParse({ ...account, id: "42" }).success).toBe(false);
+  });
+
+  it("names a theme that is not System, Light or Dark", () => {
+    expect(fieldsRefused(Account, { ...account, theme: "blue" })).toEqual(["theme"]);
   });
 });
 

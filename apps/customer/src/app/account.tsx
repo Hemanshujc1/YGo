@@ -82,7 +82,7 @@ export default function AccountScreen() {
           {words.changeContactEnd}
         </Text>
 
-        <ThemePicker words={strings.theme} />
+        <ThemePicker session={session} words={strings.theme} />
 
         <View className="overflow-hidden rounded-card border border-border bg-surface">
           <Row icon={<Mail className="text-muted" />}>

@@ -1,0 +1,2 @@
+ALTER TABLE "accounts" ADD COLUMN "theme" text DEFAULT 'system' NOT NULL;--> statement-breakpoint
+ALTER TABLE "accounts" ADD CONSTRAINT "accounts_theme_valid" CHECK ("accounts"."theme" IN ('system', 'light', 'dark'));

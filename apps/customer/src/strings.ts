@@ -10,7 +10,13 @@ export const strings = {
   checking: "Checking…",
   ok: "ok",
   unreachable: "The server cannot be reached.",
-  theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
+  theme: {
+    label: "Theme",
+    system: "System",
+    light: "Light",
+    dark: "Dark",
+    notSaved: "Couldn't save the theme. Check your connection, then try again.",
+  },
   update: {
     title: "Update YGo",
     button: "Update",

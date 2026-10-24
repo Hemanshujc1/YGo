@@ -17,7 +17,7 @@ import {
 const sent = { wall: 1_000_000, steady: 5_000 };
 /** `ms` later on both clocks. */
 const after = (ms: number) => ({ wall: sent.wall + ms, steady: sent.steady + ms });
-const account: Account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: "asha@example.com", name: null, phone: null };
+const account: Account = { id: "6f1c1d1e-0000-4000-8000-000000000001", email: "asha@example.com", name: null, phone: null, theme: "system" };
 
 describe("secondsLeft", () => {
   it("counts down 30 seconds from the send", () => {
