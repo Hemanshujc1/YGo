@@ -1,5 +1,18 @@
 import { z } from "zod";
-import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, ProductBrand, ProductImage, ProductName } from "./fields";
+import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, PRODUCT_IMAGE_MAX_BYTES, ProductBrand, ProductImage, ProductName } from "./fields";
+
+/** CSV and image ZIP names used as multipart file fields by the Admin import endpoints. */
+export const CATALOG_IMPORT_FILE_FIELDS = ["catalogCsv", "imagesZip"] as const;
+export const CatalogImportFileField = z.enum(CATALOG_IMPORT_FILE_FIELDS);
+export type CatalogImportFileField = z.infer<typeof CatalogImportFileField>;
+
+/** Byte limits enforced while reading the upload and expanding the image ZIP. */
+export const CATALOG_IMPORT_FILE_LIMITS = {
+  csvBytes: 10 * 1024 * 1024,
+  imagesZipBytes: 100 * 1024 * 1024,
+  expandedImagesBytes: 100 * 1024 * 1024,
+  imageBytes: PRODUCT_IMAGE_MAX_BYTES,
+} as const;
 
 /** Admin-managed global categories (#200, CAT-5); two levels at most. */
 export const CategoryName = z.string().trim().min(1).max(100);
@@ -27,6 +40,39 @@ export type EditCategoryBody = z.infer<typeof EditCategoryBody>;
 /** The canonical unit is `each` for counted products, or kg/l for measured products. */
 export const ProductBaseUnit = z.enum(["each", "kg", "l"]);
 export const ProductClassification = z.enum(["counted", "measured"]);
+
+/** Column names in the one-row-per-pack CSV template. */
+export const CATALOG_IMPORT_CSV_FIELDS = [
+  "productCode",
+  "name",
+  "brand",
+  "parentCategoryName",
+  "categoryName",
+  "baseUnit",
+  "classification",
+  "quantity",
+  "barcode",
+] as const;
+export const CatalogImportCsvField = z.enum(CATALOG_IMPORT_CSV_FIELDS);
+export type CatalogImportCsvField = z.infer<typeof CatalogImportCsvField>;
+
+/** CSV row read by the Admin importer; empty optional cells normalize to null. */
+export const CatalogImportCsvRow = z.strictObject({
+  productCode: z.string().trim().min(1).max(100),
+  name: ProductName,
+  brand: z.string().trim().max(100).transform((value) => value || null),
+  parentCategoryName: z.string().trim().max(100).transform((value) => value || null),
+  categoryName: CategoryName,
+  baseUnit: ProductBaseUnit,
+  classification: ProductClassification,
+  quantity: PackQuantity,
+  barcode: z.string().trim().max(13).transform((value) => value || null).pipe(PackBarcode.nullable()),
+}).refine((row) => (row.classification === "counted") === (row.baseUnit === "each"), {
+  path: ["classification"],
+}).refine((row) => row.baseUnit !== "each" || CountedPackQuantity.safeParse(row.quantity).success, {
+  path: ["quantity"],
+});
+export type CatalogImportCsvRow = z.infer<typeof CatalogImportCsvRow>;
 
 export const MasterProduct = z.strictObject({
   id: z.uuid(),
@@ -108,10 +154,24 @@ export const EditPackBody = z.strictObject({
   .refine(validPackQuantity, { path: ["quantity"] });
 export type EditPackBody = z.infer<typeof EditPackBody>;
 
+/** Machine-readable row reasons; Admin maps these to its own display strings. */
+export const CatalogImportRowErrorReason = z.enum([
+  "INVALID_ROW",
+  "DUPLICATE_PRODUCT_CODE",
+  "CATEGORY_NOT_FOUND",
+  "PRODUCT_DETAILS_MISMATCH",
+  "DUPLICATE_PACK",
+  "BARCODE_CONFLICT",
+  "MISSING_PRODUCT_IMAGE",
+  "INVALID_PRODUCT_IMAGE",
+]);
+export type CatalogImportRowErrorReason = z.infer<typeof CatalogImportRowErrorReason>;
+
 /** A row-level problem found while checking an Admin catalog import file. */
 export const CatalogImportRowError = z.strictObject({
   rowNumber: z.number().int().positive(),
-  reason: z.string().trim().min(1),
+  reason: CatalogImportRowErrorReason,
+  field: CatalogImportCsvField.optional(),
 });
 export type CatalogImportRowError = z.infer<typeof CatalogImportRowError>;
 

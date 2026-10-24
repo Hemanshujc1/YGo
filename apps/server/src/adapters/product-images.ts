@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { PRODUCT_IMAGE_MAX_BYTES } from "@ygo/contracts";
 import sharp from "sharp";
 
 export const PRODUCT_IMAGE_SIZES = [256, 512, 1024] as const;
 export const PRODUCT_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable";
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_PIXELS = 24_000_000;
 const MAX_SIDE = 8_000;
 const FORMATS = new Set(["jpeg", "png", "webp"]);
@@ -100,7 +100,7 @@ export type ProductImageStorage = ReturnType<typeof createProductImageStorage>;
 
 async function createVariants(source: Buffer): Promise<PreparedProductImage> {
   try {
-    if (source.byteLength > MAX_FILE_BYTES) throw new InvalidProductImageError("Product image exceeds 10 MiB");
+    if (source.byteLength > PRODUCT_IMAGE_MAX_BYTES) throw new InvalidProductImageError("Product image exceeds 10 MiB");
 
     const image = sharp(source, { animated: true, failOn: "error", limitInputPixels: MAX_PIXELS }).rotate();
     const metadata = await image.metadata();
