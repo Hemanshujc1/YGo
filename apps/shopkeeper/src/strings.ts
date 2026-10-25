@@ -60,13 +60,59 @@ export const strings = {
     notCleared:
       "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
   },
-  // The signed-in screen until #40 and #58 link accounts to shops (#157).
-  notLinked: {
-    title: "You're not linked to a shop yet",
-    body: "Your shop's orders will show here once you're linked to a shop.",
-    signedInAs: (email: string) => `Signed in as ${email}`,
+  // The shop application (#294): loading it, Start, S17, and a sent one until S18 (#292).
+  application: {
+    loadFailed: "Could not load your shop application. Check your connection, then try again.",
+    retry: "Try again",
+    start: {
+      title: "Bring your shop to YGo",
+      body: "Tell us about your shop. You can save it and finish later.",
+      button: "Start my shop application",
+      staff: "Joining a shop as staff? That's coming soon.",
+      offline: "Could not start. Check your connection, then try again.",
+    },
+    form: {
+      title: "Shop application",
+      lead: "Fill in every field to send it. Save a draft to finish later.",
+      groups: { shop: "Shop", owner: "Owner", licences: "Licence numbers", payments: "Payments" },
+      shopName: { label: "Shop name", invalid: "Enter your shop's name, up to 100 characters." },
+      address: { label: "Shop address", invalid: "Enter your shop's address, up to 300 characters." },
+      pincode: { label: "Pincode", invalid: "Enter a 6-digit pincode, such as 411038." },
+      ownerName: { label: "Owner's legal name", invalid: "Enter your name in letters, such as Asha Kulkarni." },
+      entityType: { label: "Business type", invalid: "Choose your business type." },
+      pan: { label: "PAN", invalid: "Enter a PAN such as ABCDE1234F: 5 letters, 4 digits, 1 letter." },
+      fssaiNumber: { label: "FSSAI licence number", invalid: "Enter the 14-digit number on your FSSAI licence." },
+      fssaiExpiry: { label: "FSSAI licence valid until", invalid: "Enter the date as DD/MM/YYYY, such as 31/03/2027." },
+      upiId: { label: "UPI ID", invalid: "Enter a UPI ID such as asha@okhdfcbank." },
+      datePlaceholder: "DD/MM/YYYY",
+      entityTypes: { proprietorship: "Proprietorship", partnership_firm: "Partnership firm", llp: "LLP", company: "Company" },
+      radius: {
+        label: "Service radius",
+        hint: "How far from your shop you deliver.",
+        value: (km: string) => `${km} km`,
+        less: "Smaller radius",
+        more: "Larger radius",
+      },
+      phone: "Phone",
+      email: "Email",
+      fromAccount: "From your account.",
+      save: "Save draft",
+      saving: "Saving…",
+      saved: "Draft saved.",
+      wrong: "Check the fields marked above.",
+      offline: "Could not save. Check your connection, then try again.",
+    },
+    sent: {
+      title: "Application sent",
+      body: "We're checking it and will be in touch. To change anything, write to support.",
+    },
+    signOut: {
+      title: "Sign out?",
+      body: "Changes you haven't saved will be lost.",
+      cancel: "Cancel",
+    },
   },
-  // On the not-linked screen until S36 More is built (#193).
+  // On the Start screen and at the end of S17 until S36 More is built (#193, #294).
   theme: {
     label: "Theme",
     system: "System",
