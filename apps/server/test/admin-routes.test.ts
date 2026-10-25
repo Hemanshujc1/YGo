@@ -774,9 +774,6 @@ describe("Master product routes", () => {
     expect(list.json().products).toEqual([expect.objectContaining({ id, name: "Apples", published: false, imageUrls: null })]);
 
     failProductImagePuts = false;
-  productImageDeletes = [];
-  failProductImageDeletes = false;
-  onProductImagePut = undefined;
     const retry = await edit(token, id, { image: source.toString("base64") });
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).toMatchObject({ published: true, imageUrls: expect.any(Object) });
@@ -805,9 +802,6 @@ describe("Master product routes", () => {
       expect(await snapshot()).toEqual(before);
     }
     failProductImagePuts = false;
-  productImageDeletes = [];
-  failProductImageDeletes = false;
-  onProductImagePut = undefined;
     const saved = await edit(token, id, { name: "Blue apples", image: replacement.toString("base64") });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({ name: "Blue apples", published: true });
@@ -950,13 +944,35 @@ describe("Catalog CSV import preview", () => {
       await editor.query("BEGIN");
       await editor.query("UPDATE categories SET active = false WHERE name = 'Groceries'");
       importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => r);
-      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_locks
-        WHERE relation = 'categories'::regclass AND mode = 'ExclusiveLock' AND NOT granted`)).rows[0].n).toBe(1);
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0].n).toBe(1);
       await editor.query("COMMIT");
       const result = await importing;
       expect(result.statusCode).toBe(409);
       expect(result.json()).toEqual({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: [{ rowNumber: 2, reason: "CATEGORY_NOT_FOUND", field: "categoryName" }] } });
       expect(productImagePuts).toEqual([]);
+    } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
+  });
+
+  it("lets an in-flight product edit finish when it needs a category lock next", async () => {
+    const headers = await token();
+    const source = await image();
+    const editor = await database.pool.connect();
+    let importing: ReturnType<typeof preview> | undefined;
+    try {
+      const category = (await editor.query("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0].id;
+      await editor.query("INSERT INTO master_products (name, category_id, base_unit, classification) VALUES ('Existing', $1, 'each', 'counted')", [category]);
+      await editor.query("BEGIN");
+      await editor.query("SELECT 1 FROM master_products WHERE name = 'Existing' FOR UPDATE");
+      importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => r);
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0].n).toBe(1);
+      await editor.query("SET LOCAL lock_timeout = '1s'");
+      await editor.query("SELECT 1 FROM categories WHERE id = $1 FOR UPDATE", [category]);
+      await editor.query("UPDATE master_products SET name = 'Edited' WHERE name = 'Existing'");
+      await editor.query("COMMIT");
+      expect((await importing).statusCode).toBe(200);
+      expect((await database.pool.query("SELECT count(*)::int AS n FROM master_products WHERE name = 'Edited'")).rows[0].n).toBe(1);
     } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
   });
 

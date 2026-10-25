@@ -30,7 +30,20 @@ export function registerCatalogImportRoutes(app: FastifyInstance, options: { poo
         if (checked.preview.errors.length) return reply.code(409).send({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: checked.preview.errors } });
         return await withAdminTransaction(options.pool, who.accountId, reply, async (client) => {
           // Reads remain available; block catalog writes and row locks until COMMIT/ROLLBACK.
-          await client.query("LOCK TABLE categories, master_products, packs IN EXCLUSIVE MODE");
+          // Existing edits lock these tables in different orders. Never wait holding a partial set.
+          for (;;) {
+            await client.query("SAVEPOINT catalog_import_lock");
+            try {
+              await client.query("LOCK TABLE categories, master_products, packs IN EXCLUSIVE MODE NOWAIT");
+              await client.query("RELEASE SAVEPOINT catalog_import_lock");
+              break;
+            } catch (error) {
+              if ((error as { code?: string }).code !== "55P03") throw error;
+              await client.query("ROLLBACK TO SAVEPOINT catalog_import_lock");
+              await client.query("RELEASE SAVEPOINT catalog_import_lock");
+              await client.query("SELECT pg_sleep(0.05) /* catalog import lock retry */");
+            }
+          }
           const current = await validateCatalogImport(files, client, images, preparedImages);
           if (current.preview.errors.length) return reply.code(409).send({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: current.preview.errors } });
           const result = { productsCreated: 0, productsSkipped: 0, packsCreated: 0, packsSkipped: 0 };
@@ -42,7 +55,8 @@ export function registerCatalogImportRoutes(app: FastifyInstance, options: { poo
               products.set(row.identity, productId);
               if (row.productId) result.productsSkipped++;
               else {
-                const prepared = preparedImages.get(row.productCode)!;
+                const prepared = preparedImages.get(row.productCode);
+                if (!prepared) throw new Error("Validated product image is missing");
                 // Track keys before uploading so partial failures are cleaned up too.
                 uploaded.push(images.keys(productId, prepared));
                 let stored: Awaited<ReturnType<ProductImageStorage["storePrepared"]>>;
@@ -63,7 +77,9 @@ export function registerCatalogImportRoutes(app: FastifyInstance, options: { poo
             if (row.packId) result.packsSkipped++;
             else {
               const saved = await client.query<{ id: string }>("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, $2, $3) RETURNING id", [productId, row.quantity, row.barcode]);
-              await client.query("INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'pack.create', $2, 'pack', 'Pack created')", [who.accountId, saved.rows[0]!.id]);
+              const packId = saved.rows[0]?.id;
+              if (!packId) throw new Error("Pack insert returned no ID");
+              await client.query("INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'pack.create', $2, 'pack', 'Pack created')", [who.accountId, packId]);
               result.packsCreated++;
             }
           }
