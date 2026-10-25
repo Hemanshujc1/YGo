@@ -7,7 +7,7 @@ import {
   type MasterProduct,
 } from "@ygo/contracts";
 import { useState, type ChangeEvent, type FormEvent } from "react";
-import { useLoaderData } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { ReasonDialog } from "./components/reason-dialog";
 import { fieldMessages } from "./lib/field-messages";
 import { Packs } from "./packs";
@@ -192,7 +192,7 @@ export function Products({ api }: { api: AdminApi }) {
   return <>
     <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div><h1 className="text-title-large font-semibold">{strings.products}</h1><p className="mt-2 text-muted">{strings.productIntro}</p></div>
-      {screen === "list" && <button onClick={() => openForm(null)} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.newProduct}</button>}
+      {screen === "list" && <div className="flex gap-3"><Link to="/products/import" className="flex h-10 items-center rounded-lg border border-border-strong px-4">{strings.catalogImport.title}</Link><button onClick={() => openForm(null)} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.newProduct}</button></div>}
     </div>
     {saved && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{saved}</p>}
     {error && screen === "list" && !deactivating && <p role="alert" className="mb-4 text-danger">{error}</p>}
