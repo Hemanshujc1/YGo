@@ -29,8 +29,8 @@ describe("findPlace", () => {
     });
   });
 
-  it("gives no accuracy when the phone gives none", async () => {
-    for (const accuracy of [null, undefined]) {
+  it("gives no accuracy when the phone gives none or one that is not a distance", async () => {
+    for (const accuracy of [null, undefined, 0, -1, Number.NaN]) {
       expect(await findPlace(locator(true, async () => ({ ...baner, accuracy })))).toEqual({ kind: "found", point: baner, accuracy: null });
     }
   });

@@ -35,5 +35,7 @@ export async function findPlace(locator: Locator, timeout = findTimeout): Promis
   }
   // Latitude and longitude only: the phone's position also carries altitude and more.
   const point = AddressPoint.safeParse({ latitude: position.latitude, longitude: position.longitude });
-  return point.success ? { kind: "found", point: point.data, accuracy: position.accuracy ?? null } : { kind: "not-found" };
+  // Android gives 0 and iOS a negative number when the fix has no accuracy.
+  const accuracy = position.accuracy != null && Number.isFinite(position.accuracy) && position.accuracy > 0 ? position.accuracy : null;
+  return point.success ? { kind: "found", point: point.data, accuracy } : { kind: "not-found" };
 }
