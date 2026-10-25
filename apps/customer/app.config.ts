@@ -1,11 +1,12 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import app from "./app.json";
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
   return {
     ...config,
-    name: config.name!,
-    slug: config.slug!,
+    name: config.name ?? app.expo.name,
+    slug: config.slug ?? app.expo.slug,
     ios: { ...config.ios, usesAppleSignIn: true },
     plugins: [
       ...(config.plugins ?? []),
