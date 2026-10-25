@@ -145,7 +145,7 @@ export const strings = {
         live: { name: "Live", line: "Admin makes your shop Live, and customers nearby can order." },
       },
       marks: { done: "Done", current: "Now", later: "Not yet" },
-      sentOn: (date: string) => `Sent ${date}`,
+      sentOn: (date: string) => `Sent ${date}.`,
       support: "To change anything, write to support.",
       refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },

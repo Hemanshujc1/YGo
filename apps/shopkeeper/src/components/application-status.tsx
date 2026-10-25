@@ -2,11 +2,12 @@ import type { ShopApplication } from "@ygo/contracts";
 import { formatDate } from "@ygo/format";
 import { Text } from "@ygo/mobile";
 import { View } from "react-native";
-import { steps } from "../lib/application-status";
+import { type Step, steps } from "../lib/application-status";
 import { strings } from "../strings";
 import { Circle, CircleArrowRight, CircleCheck } from "./icons";
 
 const words = strings.application.status;
+const stepWords: Record<Step, { name: string; line: string; next?: string }> = words.steps;
 const icons = { done: CircleCheck, current: CircleArrowRight, later: Circle };
 const iconColour = { done: "text-success", current: "text-on-primary-subtle", later: "text-muted" };
 
@@ -32,16 +33,17 @@ export function ApplicationStatus({ application, refreshFailed }: { application:
       )}
       <View className="gap-1">
         {steps(application.state).map(({ step, mark }) => {
-          const { name, line, ...rest } = words.steps[step];
-          const next = mark === "current" && "next" in rest ? rest.next : null;
-          const sentOn = step === "submitted" && application.submittedAt ? words.sentOn(formatDate(application.submittedAt)) : null;
-          const Icon = icons[mark];
           const current = mark === "current";
+          const { name, line, next } = stepWords[step];
+          const shownNext = current ? next : null;
+          const sentOn = step === "submitted" && application.submittedAt ? words.sentOn(formatDate(application.submittedAt)) : null;
+          const lineClass = `text-secondary ${current ? "text-on-primary-subtle" : "text-muted"}`;
+          const Icon = icons[mark];
           return (
             <View
               key={step}
               accessible
-              accessibilityLabel={[name, words.marks[mark], line, sentOn, next].filter(Boolean).join(". ")}
+              accessibilityLabel={[`${name}, ${words.marks[mark]}.`, line, sentOn, shownNext].filter(Boolean).join(" ")}
               className={`flex-row gap-3 rounded-card p-3 ${current ? "bg-primary-subtle" : ""}`}
             >
               <Icon size={24} className={iconColour[mark]} />
@@ -49,9 +51,9 @@ export function ApplicationStatus({ application, refreshFailed }: { application:
                 <Text className={`text-body font-semibold ${current ? "text-on-primary-subtle" : mark === "later" ? "text-muted" : "text-text"}`}>
                   {name}
                 </Text>
-                <Text className={`text-secondary ${current ? "text-on-primary-subtle" : "text-muted"}`}>{line}</Text>
-                {sentOn && <Text className={`text-secondary ${current ? "text-on-primary-subtle" : "text-muted"}`}>{sentOn}</Text>}
-                {next && <Text className="text-secondary font-semibold text-on-primary-subtle">{next}</Text>}
+                <Text className={lineClass}>{line}</Text>
+                {sentOn && <Text className={lineClass}>{sentOn}</Text>}
+                {shownNext && <Text className="text-secondary font-semibold text-on-primary-subtle">{shownNext}</Text>}
               </View>
             </View>
           );

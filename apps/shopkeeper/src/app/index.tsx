@@ -1,7 +1,7 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
-import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, RefreshControl, type RefreshControlProps, ScrollView, View } from "react-native";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ApplicationForm } from "../components/application-form";
@@ -27,26 +27,24 @@ export default function Home() {
   // Set before React re-renders, so a second tap never starts twice.
   const working = useRef(false);
 
-  async function fetchApplication() {
-    setLoad({ kind: "loading" });
+  // The first load shows a spinner in place of the screen; a refresh keeps
+  // the steps on screen while it looks, and after a failed look (#292, Q5).
+  async function fetchApplication(refresh = false) {
+    if (refresh) {
+      setRefreshing(true);
+      setRefreshFailed(null);
+    } else setLoad({ kind: "loading" });
     const answer = await api.shopApplication().catch(() => null);
+    setRefreshing(false);
     if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data.application });
-    setLoad({ kind: "failed", message: answer ? strings.errors[answer.code] : words.loadFailed });
+    const message = answer ? strings.errors[answer.code] : refresh ? words.status.refreshFailed : words.loadFailed;
+    if (refresh) setRefreshFailed(message);
+    else setLoad({ kind: "failed", message });
   }
 
   useEffect(() => {
     void fetchApplication();
   }, []);
-
-  // Keeps the steps on screen while it looks, and after a failed look.
-  async function refresh() {
-    setRefreshing(true);
-    setRefreshFailed(null);
-    const answer = await api.shopApplication().catch(() => null);
-    setRefreshing(false);
-    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data.application });
-    setRefreshFailed(answer ? strings.errors[answer.code] : words.status.refreshFailed);
-  }
 
   async function start() {
     if (working.current) return;
@@ -90,7 +88,7 @@ export default function Home() {
 
   if (application) {
     return (
-      <Plain refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}>
+      <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
       </Plain>
     );
@@ -114,11 +112,12 @@ export default function Home() {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshControl }: { children: ReactNode; refreshControl?: ReactElement<RefreshControlProps> }) {
+function Plain({ children, refreshing = false, onRefresh }: { children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
-      refreshControl={refreshControl}
+      // The offset keeps Android's spinner below the status bar, as the app draws edge to edge.
+      refreshControl={onRefresh && <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={insets.top} />}
       className="flex-1 bg-bg"
       contentContainerClassName="grow justify-center gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
