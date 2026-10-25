@@ -11,7 +11,7 @@ const words = strings.application.signOut;
  * With changes not yet saved it asks first, in the YGo design rather than
  * the phone's own alert.
  */
-export function SignOut({ unsaved = false }: { unsaved?: boolean }) {
+export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boolean; disabled?: boolean }) {
   const [asking, setAsking] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -27,6 +27,7 @@ export function SignOut({ unsaved = false }: { unsaved?: boolean }) {
         label={strings.profile.signOut}
         onPress={() => (unsaved ? setAsking(true) : signOut())}
         busy={signingOut}
+        disabled={disabled}
         variant="secondary"
       />
       <Modal transparent visible={asking} animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => setAsking(false)}>

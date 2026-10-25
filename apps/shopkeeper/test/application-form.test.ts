@@ -1,6 +1,6 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { changed, draftBody, isoDate, shown, stepRadius, typedFrom } from "../src/lib/application-form";
+import { changed, draftBody, isoDate, shown, stepRadius, typedDate, typedFrom } from "../src/lib/application-form";
 
 const draft: ShopApplication = {
   id: "8f6c1f0e-1d2b-4c3a-9e8f-7a6b5c4d3e2f",
@@ -27,6 +27,13 @@ describe("typedFrom", () => {
     const typed = typedFrom({ ...draft, pan: "ABCDE1234F", fssaiExpiry: "2027-03-31", entityType: "llp" });
     expect(typed).toMatchObject({ shopName: "", ownerName: "Asha Kulkarni", pan: "ABCDE1234F", fssaiExpiry: "31/03/2027" });
     expect(typed).toMatchObject({ entityType: "llp", serviceRadiusMetres: 2000 });
+  });
+});
+
+describe("typedDate", () => {
+  it("shows a saved date as DD/MM/YYYY, which isoDate reads back unchanged", () => {
+    expect(typedDate("2027-04-03")).toBe("03/04/2027");
+    expect(isoDate(typedDate("2027-04-03"))).toBe("2027-04-03");
   });
 });
 

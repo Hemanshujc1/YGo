@@ -28,8 +28,9 @@ const inputs: Record<TextField, TextInputProps> = {
  * S17 Shop application while it is a Draft (#294): one scrolling form in four
  * groups with Save draft. Each field is checked with the server's rule on
  * Save draft, and an empty one is fine (#276, Q5). Location and Send join in #295.
+ * `onSent` reloads when Save draft finds it was sent from another phone.
  */
-export function ApplicationForm({ application }: { application: ShopApplication }) {
+export function ApplicationForm({ application, onSent }: { application: ShopApplication; onSent: () => void }) {
   const insets = useSafeAreaInsets();
   const [saved, setSaved] = useState(() => typedFrom(application));
   const [typed, setTyped] = useState(saved);
@@ -49,6 +50,7 @@ export function ApplicationForm({ application }: { application: ShopApplication 
 
   async function save() {
     if (working.current) return;
+    setJustSaved(false);
     const draft = draftBody(typed);
     if (!draft.ok) {
       setWrong(draft.wrong);
@@ -62,6 +64,7 @@ export function ApplicationForm({ application }: { application: ShopApplication 
     setSaving(false);
     if (!answer) return setMessage(words.offline);
     if (!answer.ok) {
+      if (answer.code === "SHOP_APPLICATION_SENT") return onSent();
       const named = shown(answer.fields);
       setWrong(named);
       return setMessage(named.length > 0 ? words.wrong : strings.errors[answer.code]);
@@ -184,7 +187,7 @@ export function ApplicationForm({ application }: { application: ShopApplication 
 
         <View className="gap-8 border-t border-border pt-8">
           <ThemePicker session={session} words={strings.theme} />
-          <SignOut unsaved={changed(typed, saved)} />
+          <SignOut unsaved={changed(typed, saved)} disabled={saving} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -1,5 +1,4 @@
 import { SaveShopApplicationBody, ServiceRadiusMetres, type ShopApplication, type ShopEntityType } from "@ygo/contracts";
-import { formatDate } from "@ygo/format";
 
 /** The S17 fields typed as text. Business type and service radius are picked; location joins in #295. */
 export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
@@ -16,10 +15,16 @@ export function typedFrom(application: ShopApplication): Typed {
   const typed = Object.fromEntries(textFields.map((field) => [field, application[field] ?? ""])) as Record<TextField, string>;
   return {
     ...typed,
-    fssaiExpiry: application.fssaiExpiry ? formatDate(application.fssaiExpiry) : "",
+    fssaiExpiry: application.fssaiExpiry ? typedDate(application.fssaiExpiry) : "",
     entityType: application.entityType,
     serviceRadiusMetres: application.serviceRadiusMetres,
   };
+}
+
+/** A saved YYYY-MM-DD date as DD/MM/YYYY, rearranged rather than formatted, so isoDate always reads it back. */
+export function typedDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 /** A typed DD/MM/YYYY date as YYYY-MM-DD. Anything without three parts is kept as typed, so the date rule refuses it. */
