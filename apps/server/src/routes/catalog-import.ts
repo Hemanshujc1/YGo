@@ -31,7 +31,12 @@ export function registerCatalogImportRoutes(app: FastifyInstance, options: { poo
         return await withAdminTransaction(options.pool, who.accountId, reply, async (client) => {
           // Reads remain available; block catalog writes and row locks until COMMIT/ROLLBACK.
           // Existing edits lock these tables in different orders. Never wait holding a partial set.
+          const lockDeadline = options.clock.now().getTime() + 5_000;
           for (;;) {
+            if (options.clock.now().getTime() >= lockDeadline) {
+              reply.code(503);
+              return { error: { code: "UNAVAILABLE" } };
+            }
             await client.query("SAVEPOINT catalog_import_lock");
             try {
               await client.query("LOCK TABLE categories, master_products, packs IN EXCLUSIVE MODE NOWAIT");

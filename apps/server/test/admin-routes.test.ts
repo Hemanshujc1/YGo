@@ -954,6 +954,48 @@ describe("Catalog CSV import preview", () => {
     } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
   });
 
+  it("bounds the overall catalog lock wait and rolls back before returning unavailable", async () => {
+    const headers = await token();
+    const source = await image();
+    const editor = await database.pool.connect();
+    let importing: ReturnType<typeof preview> | undefined;
+    let completed = false;
+    try {
+      await editor.query("BEGIN");
+      await editor.query("LOCK TABLE master_products IN ROW EXCLUSIVE MODE");
+      importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => { completed = true; return r; });
+      const waitForRetry = async (previous?: string) => {
+        let observed: { pid: number; started: string } | undefined;
+        await expect.poll(async () => {
+          observed = (await database.pool.query<{ pid: number; started: string }>(`SELECT pid, query_start::text AS started FROM pg_stat_activity
+            WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0];
+          return observed !== undefined && observed.started !== previous;
+        }).toBe(true);
+        if (!observed) throw new Error("Import retry was not observed");
+        return observed;
+      };
+      const first = await waitForRetry();
+      // Let retries run in between advances: the budget must not reset per attempt.
+      clock.advance(2_500);
+      const second = await waitForRetry(first.started);
+      clock.advance(2_499);
+      await waitForRetry(second.started);
+      clock.advance(1);
+      await expect.poll(() => completed).toBe(true);
+      const result = await importing;
+      expect(result.statusCode).toBe(503);
+      expect(result.json()).toEqual({ error: { code: "UNAVAILABLE" } });
+      expect((await editor.query("SELECT xact_start FROM pg_stat_activity WHERE pid = $1", [first.pid])).rows[0].xact_start).toBeNull();
+      expect((await editor.query("SELECT count(*)::int AS n FROM pg_locks WHERE pid = $1 AND relation IN ('categories'::regclass, 'master_products'::regclass, 'packs'::regclass, 'admin_memberships'::regclass)", [first.pid])).rows[0].n).toBe(0);
+      for (const table of ["master_products", "packs"]) expect((await database.pool.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n).toBe(0);
+      expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type IN ('product', 'pack')")).rows[0].n).toBe(0);
+      expect(productImagePuts).toEqual([]);
+      expect(productImageDeletes).toEqual([]);
+      await editor.query("ROLLBACK");
+      expect((await preview(headers, csv([row()]), { "apple.png": source }, { commit: true })).statusCode).toBe(200);
+    } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
+  });
+
   it("lets an in-flight product edit finish when it needs a category lock next", async () => {
     const headers = await token();
     const source = await image();
