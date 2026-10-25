@@ -14,6 +14,7 @@ import {
 } from "react-router";
 import { Areas } from "./areas";
 import { Categories } from "./categories";
+import { CatalogImport } from "./catalog-import";
 import { Products } from "./products";
 import { adminTheme, ThemePicker } from "./theme";
 import { fieldMessages } from "./lib/field-messages";
@@ -63,8 +64,8 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
                 { path: "/products", label: strings.products },
                 { path: "/areas", label: strings.areas },
                 { path: "/waitlist", label: strings.waitlist },
-              ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={location.pathname === path ? "page" : undefined}
-                className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${location.pathname === path ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
+              ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "page" : undefined}
+                className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
                 {label}
               </Link>)}
             </nav>
@@ -312,6 +313,13 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listCategories(), (data) => data.categories),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/products/import",
+      loader: listLoader(() => api.me(), (data) => data),
+      element: <Page protectedArea api={api}><CatalogImport api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.checking}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {

@@ -65,6 +65,18 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
 }
 
 describe("Admin web", () => {
+  it("opens the protected import page from Products and keeps Products selected", async () => {
+    setup("/products");
+    fireEvent.click(await screen.findByRole("link", { name: strings.catalogImport.title }));
+    await screen.findByRole("heading", { name: strings.catalogImport.title });
+    expect(screen.getByRole("link", { name: strings.products }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("redirects an unauthenticated import-page visit to sign-in", async () => {
+    setup("/products/import", { me: vi.fn().mockResolvedValue({ ok: false, code: "UNAUTHENTICATED" }) });
+    await screen.findByRole("heading", { name: strings.signIn });
+  });
+
   it("requests a code, verifies it, and opens protected accounts", async () => {
     const { api, router } = setup("/sign-in");
     fireEvent.change(screen.getByLabelText(strings.email), { target: { value: " FOUNDER@example.com " } });

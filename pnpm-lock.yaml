@@ -184,6 +184,9 @@ importers:
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
+      csv-parse:
+        specifier: 7.0.3
+        version: 7.0.3
       react:
         specifier: 19.3.0
         version: 19.3.0
