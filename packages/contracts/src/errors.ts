@@ -34,6 +34,12 @@ import { CatalogImportRowErrors } from "./catalog";
  * - File-level import failures use VALIDATION_FAILED (400). Missing CSV/ZIP parts name the missing part; missing or unknown CSV columns name `catalogCsv`; unreadable ZIPs name `imagesZip`; an oversized file names the part that exceeded its limit.
  * Saved addresses (#217):
  * - ADDRESS_LIMIT_REACHED (409): the account already has 10 saved addresses.
+ * Shop application (#40):
+ * - SHOP_APPLICATION_EXISTS (409): the account already has a shop application or shop link (ACC-4).
+ * - SHOP_APPLICATION_SENT (409): the Owner saved or sent an application that is no longer a Draft.
+ * - PINCODE_NOT_IN_AREA (409): the shop's pincode is in no Area, at Send or in an Admin correction.
+ * - SHOP_STATE_CHANGE_REFUSED (409): Start review on anything but Submitted, or Approve on anything but Under Review.
+ * - A Draft is the Owner's own: Admin calls on one answer NOT_FOUND.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -58,6 +64,10 @@ export const ErrorCode = z.enum([
   "BARCODE_IN_USE",
   "ADDRESS_LIMIT_REACHED",
   "CATALOG_IMPORT_ROWS_INVALID",
+  "SHOP_APPLICATION_EXISTS",
+  "SHOP_APPLICATION_SENT",
+  "PINCODE_NOT_IN_AREA",
+  "SHOP_STATE_CHANGE_REFUSED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

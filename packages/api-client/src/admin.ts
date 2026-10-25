@@ -15,6 +15,9 @@ import {
   MasterProductsResponse,
   Pack,
   PacksResponse,
+  ShopApplication,
+  ShopApplicationsResponse,
+  type CorrectShopApplicationBody,
   type CreateAdminBody,
   type CreateAreaBody,
   type CreateCategoryBody,
@@ -85,7 +88,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | SetThemeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | SetThemeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -227,6 +230,31 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `PATCH /v1/admin/areas/:id`: new pincodes, or pause / resume, with a reason. */
     async editArea(id: string, body: EditAreaBody): Promise<ApiResult<Area>> {
       return result(await adminRequest("PATCH", `/v1/admin/areas/${encodeURIComponent(id)}`, body), Area);
+    },
+
+    /** `GET /v1/admin/shop-applications`: sent applications, the longest waiting first (A06). */
+    async listShopApplications(): Promise<ApiResult<ShopApplicationsResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/shop-applications"), ShopApplicationsResponse);
+    },
+
+    /** `GET /v1/admin/shop-applications/:id` (A07). */
+    async getShopApplication(id: string): Promise<ApiResult<ShopApplication>> {
+      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}`), ShopApplication);
+    },
+
+    /** `PATCH /v1/admin/shop-applications/:id`: correct fields with a reason. */
+    async correctShopApplication(id: string, body: CorrectShopApplicationBody): Promise<ApiResult<ShopApplication>> {
+      return result(await adminRequest("PATCH", `/v1/admin/shop-applications/${encodeURIComponent(id)}`, body), ShopApplication);
+    },
+
+    /** `POST /v1/admin/shop-applications/:id/start-review`: Submitted to Under Review. */
+    async startShopApplicationReview(id: string): Promise<ApiResult<ShopApplication>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/start-review`), ShopApplication);
+    },
+
+    /** `POST /v1/admin/shop-applications/:id/approve`: Under Review to Approved. */
+    async approveShopApplication(id: string): Promise<ApiResult<ShopApplication>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/approve`), ShopApplication);
     },
 
     /** Clear local access immediately and ask the server to end the cookie session. */

@@ -209,5 +209,9 @@ export const strings = {
     BARCODE_IN_USE: "Another pack already has this barcode.",
     ADDRESS_LIMIT_REACHED: "You have 10 saved addresses. Remove one to save another.",
     CATALOG_IMPORT_ROWS_INVALID: "The catalog changed. Try again.",
+    SHOP_APPLICATION_EXISTS: "You've already started a shop application.",
+    SHOP_APPLICATION_SENT: "Your application has been sent, so it can't be changed here. Write to support to change it.",
+    PINCODE_NOT_IN_AREA: "YGo isn't in your area yet.",
+    SHOP_STATE_CHANGE_REFUSED: "This application has moved on. Refresh to see where it is.",
   } satisfies Record<ErrorCode, string>,
 };
