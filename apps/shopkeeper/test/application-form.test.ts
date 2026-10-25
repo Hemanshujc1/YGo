@@ -1,6 +1,6 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { changed, draftBody, isoDate, shown, stepRadius, typedDate, typedFrom } from "../src/lib/application-form";
+import { changed, draftBody, expired, isoDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
 
 const draft: ShopApplication = {
   id: "8f6c1f0e-1d2b-4c3a-9e8f-7a6b5c4d3e2f",
@@ -26,7 +26,11 @@ describe("typedFrom", () => {
   it("shows empty fields blank and the FSSAI expiry as DD/MM/YYYY", () => {
     const typed = typedFrom({ ...draft, pan: "ABCDE1234F", fssaiExpiry: "2027-03-31", entityType: "llp" });
     expect(typed).toMatchObject({ shopName: "", ownerName: "Asha Kulkarni", pan: "ABCDE1234F", fssaiExpiry: "31/03/2027" });
-    expect(typed).toMatchObject({ entityType: "llp", serviceRadiusMetres: 2000 });
+    expect(typed).toMatchObject({ entityType: "llp", serviceRadiusMetres: 2000, location: null });
+  });
+
+  it("keeps the saved location", () => {
+    expect(typedFrom({ ...draft, location: { latitude: 18.5, longitude: 73.8 } }).location).toEqual({ latitude: 18.5, longitude: 73.8 });
   });
 });
 
@@ -65,13 +69,14 @@ describe("draftBody", () => {
         upiId: "asha@okhdfcbank",
         entityType: null,
         serviceRadiusMetres: 2000,
+        location: null,
       },
     });
   });
 
-  it("leaves the saved location alone", () => {
-    const answer = draftBody(typedFrom(draft));
-    expect(answer.ok && "location" in answer.body).toBe(false);
+  it("sends the location from the phone", () => {
+    const answer = draftBody({ ...typedFrom(draft), location: { latitude: 18.5, longitude: 73.8 } });
+    expect(answer.ok && answer.body.location).toEqual({ latitude: 18.5, longitude: 73.8 });
   });
 
   it("names each filled-in field that breaks its rule and saves nothing", () => {
@@ -80,9 +85,64 @@ describe("draftBody", () => {
   });
 });
 
+/** A form ready to send, with a licence valid until 2099. */
+const filled: Typed = {
+  ...typedFrom(draft),
+  shopName: "Asha Stores",
+  address: "12 MG Road, Pune",
+  pincode: "411045",
+  location: { latitude: 18.5, longitude: 73.8 },
+  entityType: "proprietorship",
+  pan: "ABCDE1234F",
+  fssaiNumber: "12345678901234",
+  fssaiExpiry: "31/12/2099",
+  upiId: "asha@okhdfcbank",
+};
+
+describe("sendBody", () => {
+  it("sends every field as the server's rules write it", () => {
+    expect(sendBody(filled)).toEqual({
+      ok: true,
+      body: {
+        shopName: "Asha Stores",
+        address: "12 MG Road, Pune",
+        pincode: "411045",
+        location: { latitude: 18.5, longitude: 73.8 },
+        ownerName: "Asha Kulkarni",
+        entityType: "proprietorship",
+        pan: "ABCDE1234F",
+        fssaiNumber: "12345678901234",
+        fssaiExpiry: "2099-12-31",
+        serviceRadiusMetres: 2000,
+        upiId: "asha@okhdfcbank",
+      },
+    });
+  });
+
+  it("names every empty field, the missing location among them", () => {
+    expect(sendBody(typedFrom(draft))).toEqual({
+      ok: false,
+      wrong: ["shopName", "address", "pincode", "location", "entityType", "pan", "fssaiNumber", "fssaiExpiry", "upiId"],
+    });
+  });
+
+  it("names a licence date that has passed", () => {
+    expect(sendBody({ ...filled, fssaiExpiry: "01/01/2020" })).toEqual({ ok: false, wrong: ["fssaiExpiry"] });
+  });
+});
+
+describe("expired", () => {
+  it("is true only for a real date that is not after today", () => {
+    expect(expired({ ...filled, fssaiExpiry: "01/01/2020" })).toBe(true);
+    expect(expired(filled)).toBe(false);
+    expect(expired({ ...filled, fssaiExpiry: "31/02/2020" })).toBe(false);
+    expect(expired({ ...filled, fssaiExpiry: "" })).toBe(false);
+  });
+});
+
 describe("shown", () => {
   it("keeps the server's named fields that the form shows", () => {
-    expect(shown(["pan", "location", "entityType"])).toEqual(["pan", "entityType"]);
+    expect(shown(["pan", "location", "areaName", "entityType"])).toEqual(["pan", "location", "entityType"]);
     expect(shown(undefined)).toEqual([]);
   });
 });
@@ -93,6 +153,7 @@ describe("changed", () => {
     expect(changed(saved, saved)).toBe(false);
     expect(changed({ ...saved, serviceRadiusMetres: 2500 }, saved)).toBe(true);
     expect(changed({ ...saved, shopName: "Asha Stores" }, saved)).toBe(true);
+    expect(changed({ ...saved, location: { latitude: 18.5, longitude: 73.8 } }, saved)).toBe(true);
   });
 });
 
