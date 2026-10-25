@@ -1,6 +1,7 @@
 export { AppShell } from "./app-shell";
 export { findPlace, type Found, type Locator } from "./find-place";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
+export { colourIcons } from "./icons";
 export { createSession, useSession, type AppSession, type SessionState } from "./session";
 export { SessionGate, type SessionGateWords } from "./session-gate";
 export { sessionStore } from "./session-store";
