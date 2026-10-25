@@ -36,6 +36,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createAccount: vi.fn().mockResolvedValue({ ok: true, data: created }),
     listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
     listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
+    previewCatalogImport: vi.fn(),
+    commitCatalogImport: vi.fn(),
     createMasterProduct: vi.fn(),
     editMasterProduct: vi.fn(),
     listPacks: vi.fn().mockResolvedValue({ ok: true, data: { packs: [] } }),

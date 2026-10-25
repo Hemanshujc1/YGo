@@ -1,5 +1,9 @@
 import {
   Account,
+  CATALOG_IMPORT_FILE_FIELDS,
+  CatalogImportPreviewResponse,
+  CatalogImportResponse,
+  type CatalogImportFileField,
   AdminAccountsResponse,
   Area,
   AreasResponse,
@@ -81,7 +85,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | SetThemeBody): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | SetThemeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -91,7 +95,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     }
     if (on !== current || on.ended || !on.access) return NO_SESSION;
     const token = on.access;
-    const answer = await send(method, path, json, { token });
+    const answer = await send(method, path, json, { token, timeoutMs: requestTimeoutMs });
     if (on !== current || on.ended) return NO_SESSION;
     if (answer.status === 403) {
       end(on);
@@ -105,13 +109,29 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     const refused = await renew(on, token);
     if (refused) return refused;
     if (on !== current || on.ended || !on.access) return NO_SESSION;
-    const retried = await send(method, path, json, { token: on.access });
+    const retried = await send(method, path, json, { token: on.access, timeoutMs: requestTimeoutMs });
     if (on !== current || on.ended) return NO_SESSION;
     if (retried.status === 401 || retried.status === 403) end(on);
     return retried;
   }
 
+  function importFiles(files: Record<CatalogImportFileField, File>): FormData {
+    const body = new FormData();
+    for (const field of CATALOG_IMPORT_FILE_FIELDS) body.append(field, files[field]);
+    return body;
+  }
+
   return {
+    /** Validate the CSV and companion ZIP; each upload request allows five minutes. */
+    async previewCatalogImport(files: Record<CatalogImportFileField, File>): Promise<ApiResult<CatalogImportPreviewResponse>> {
+      return result(await adminRequest("POST", "/v1/admin/catalog/import/preview", importFiles(files), 300_000), CatalogImportPreviewResponse);
+    },
+
+    /** Revalidate and atomically import the same files; row errors remain available on failure. */
+    async commitCatalogImport(files: Record<CatalogImportFileField, File>): Promise<ApiResult<CatalogImportResponse>> {
+      return result(await adminRequest("POST", "/v1/admin/catalog/import/commit", importFiles(files), 300_000), CatalogImportResponse);
+    },
+
     /** GET /v1/admin/waitlist: saved callback numbers for expansion planning. */
     async listWaitlist(): Promise<ApiResult<WaitlistResponse>> {
       return result(await adminRequest("GET", "/v1/admin/waitlist"), WaitlistResponse);
