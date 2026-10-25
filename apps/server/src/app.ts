@@ -23,6 +23,7 @@ import { registerMasterProductRoutes } from "./routes/master-products";
 import { registerCatalogImportRoutes } from "./routes/catalog-import";
 import { registerPackRoutes } from "./routes/packs";
 import { registerProfileRoutes } from "./routes/profile";
+import { registerShopRoutes } from "./routes/shops";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
@@ -103,6 +104,7 @@ export function buildApp({
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 
   app.get(

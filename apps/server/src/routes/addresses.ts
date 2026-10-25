@@ -9,14 +9,13 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
+import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
 /** At most 10 per account (owner decision on #217). */
 const LIMIT = 10;
 
-const addressSql = `SELECT id, label, flat, area_line AS "areaLine", pincode,
-  CASE WHEN point IS NULL THEN NULL
-    ELSE json_build_object('latitude', ST_Y(point::geometry), 'longitude', ST_X(point::geometry)) END AS point
+const addressSql = `SELECT id, label, flat, area_line AS "areaLine", pincode, ${pointJson("point")} AS point
   FROM saved_addresses`;
 
 export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
@@ -61,8 +60,7 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
         if ((count.rows[0]?.n ?? 0) >= LIMIT) return reply.code(409).send({ error: { code: "ADDRESS_LIMIT_REACHED" } });
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO saved_addresses (account_id, label, flat, area_line, pincode, point, saved_at)
-           VALUES ($1, $2, $3, $4, $5,
-             CASE WHEN $6::float8 IS NULL THEN NULL ELSE ST_SetSRID(ST_MakePoint($7::float8, $6::float8), 4326)::geography END, $8)
+           VALUES ($1, $2, $3, $4, $5, ${pointFrom("$6", "$7")}, $8)
            RETURNING id`,
           [who.accountId, label, flat, areaLine, pincode, point?.latitude ?? null, point?.longitude ?? null, clock.now()],
         );
