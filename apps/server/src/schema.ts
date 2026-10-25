@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   customType,
+  date,
   index,
   integer,
   numeric,
@@ -144,6 +145,49 @@ export const savedAddresses = pgTable("saved_addresses", {
   check("saved_addresses_label_valid", sql`${table.label} IN ('home', 'work', 'other')`),
   index("saved_addresses_account_id_saved_at_idx").on(table.accountId, table.savedAt.desc()),
   uniqueIndex("saved_addresses_home_work_idx").on(table.accountId, table.label).where(sql`${table.label} <> 'other'`),
+]);
+
+// A shop, from its Draft application on (#40). Fields stay empty while a
+// Draft; once sent, every ONB-3 field and the pincode's Area are set. Numbers
+// only: no identity document image and no bank detail (ONB-3).
+export const shops = pgTable("shops", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull().default("draft"),
+  shopName: text("shop_name"),
+  address: text("address"),
+  pincode: text("pincode"),
+  location: geographyPoint("location"),
+  ownerName: text("owner_name"),
+  entityType: text("entity_type"),
+  pan: text("pan"),
+  fssaiNumber: text("fssai_number"),
+  fssaiExpiry: date("fssai_expiry"),
+  serviceRadiusMetres: integer("service_radius_metres").notNull().default(2000),
+  upiId: text("upi_id"),
+  areaId: uuid("area_id").references(() => areas.id),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved')`),
+  check("shops_entity_type_valid", sql`${table.entityType} IN ('proprietorship', 'partnership_firm', 'llp', 'company')`),
+  check("shops_service_radius_valid", sql`${table.serviceRadiusMetres} BETWEEN 500 AND 5000 AND ${table.serviceRadiusMetres} % 500 = 0`),
+  check("shops_sent_complete", sql`${table.state} = 'draft' OR (${table.shopName} IS NOT NULL AND ${table.address} IS NOT NULL
+    AND ${table.pincode} IS NOT NULL AND ${table.location} IS NOT NULL AND ${table.ownerName} IS NOT NULL
+    AND ${table.entityType} IS NOT NULL AND ${table.pan} IS NOT NULL AND ${table.fssaiNumber} IS NOT NULL
+    AND ${table.fssaiExpiry} IS NOT NULL AND ${table.upiId} IS NOT NULL AND ${table.areaId} IS NOT NULL
+    AND ${table.submittedAt} IS NOT NULL)`),
+]);
+
+// An account's link to a shop, as Owner or Staff. The account is the key, so
+// an account holds one shop link at most (ACC-4), and an account with a shop
+// can't be deleted from under it.
+export const shopMembers = pgTable("shop_members", {
+  accountId: uuid("account_id").primaryKey().references(() => accounts.id),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  role: text("role").notNull(),
+}, (table) => [
+  check("shop_members_role_valid", sql`${table.role} IN ('owner', 'staff')`),
+  index("shop_members_shop_id_idx").on(table.shopId),
 ]);
 
 export const loginCodes = pgTable("login_codes", {

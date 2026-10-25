@@ -92,6 +92,13 @@
       "when": 1792851296714,
       "tag": "0012_account_theme",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792922939605,
+      "tag": "0013_shops",
+      "breakpoints": true
     }
   ]
 }
