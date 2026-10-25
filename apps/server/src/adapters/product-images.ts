@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { PRODUCT_IMAGE_MAX_BYTES } from "@ygo/contracts";
 import sharp from "sharp";
 
@@ -10,6 +10,7 @@ const MAX_SIDE = 8_000;
 const FORMATS = new Set(["jpeg", "png", "webp"]);
 
 export interface ProductImagePutClient {
+  deleteObject(input: { bucket: string; key: string }): Promise<void>;
   putObject(input: {
     bucket: string;
     key: string;
@@ -42,6 +43,9 @@ export interface PreparedProductImage {
 export function createS3ProductImageClient(options: { region: string; endpoint?: string }): ProductImagePutClient {
   const client = new S3Client(options);
   return {
+    async deleteObject(input) {
+      await client.send(new DeleteObjectCommand({ Bucket: input.bucket, Key: input.key }));
+    },
     async putObject(input) {
       await client.send(new PutObjectCommand({
         Bucket: input.bucket,
@@ -66,16 +70,19 @@ export function createProductImageStorage(options: {
     async store(productId: string, source: Buffer): Promise<{ keys: ProductImageVariants; urls: ProductImageVariants }> {
       return this.storePrepared(productId, await this.prepare(source));
     },
+    keys(productId: string, prepared: PreparedProductImage): ProductImageVariants {
+      const prefix = `products/${encodeURIComponent(productId)}/v1-${prepared.sourceHash}`;
+      return { 256: `${prefix}/256.webp`, 512: `${prefix}/512.webp`, 1024: `${prefix}/1024.webp` };
+    },
+    async remove(keys: ProductImageVariants): Promise<void> {
+      const results = await Promise.allSettled(PRODUCT_IMAGE_SIZES.map((size) => options.client.deleteObject({ bucket: options.bucket, key: keys[size] })));
+      const failures = results.filter((result) => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Product image cleanup failed");
+    },
     async storePrepared(productId: string, prepared: PreparedProductImage): Promise<{ keys: ProductImageVariants; urls: ProductImageVariants }> {
-      const version = `v1-${prepared.sourceHash}`;
-      const safeProductId = encodeURIComponent(productId);
-      const keys: ProductImageVariants = {
-        256: `products/${safeProductId}/${version}/256.webp`,
-        512: `products/${safeProductId}/${version}/512.webp`,
-        1024: `products/${safeProductId}/${version}/1024.webp`,
-      };
+      const keys = this.keys(productId, prepared);
 
-      await Promise.all(PRODUCT_IMAGE_SIZES.map((size) => options.client.putObject({
+      const results = await Promise.allSettled(PRODUCT_IMAGE_SIZES.map((size) => options.client.putObject({
         bucket: options.bucket,
         key: keys[size],
         body: prepared.variants[size],
@@ -83,6 +90,9 @@ export function createProductImageStorage(options: {
         cacheControl: PRODUCT_IMAGE_CACHE_CONTROL,
       })));
 
+      // Wait for every put before callers attempt cleanup, including after a partial failure.
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
       return { keys, urls: this.urls(keys) };
     },
     urls(keys: ProductImageVariants): ProductImageVariants {

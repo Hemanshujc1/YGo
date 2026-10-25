@@ -13,6 +13,7 @@ const productId = "123e4567-e89b-12d3-a456-426614174000";
 function storage() {
   const calls: Parameters<ProductImagePutClient["putObject"]>[0][] = [];
   const client: ProductImagePutClient = {
+    async deleteObject() {},
     async putObject(input) { calls.push(input); },
   };
   return {
@@ -143,10 +144,33 @@ describe("product image storage", () => {
     expect(calls.every((call) => Object.keys(call).sort().join(",") === "body,bucket,cacheControl,contentType,key")).toBe(true);
   });
 
+  it("waits for late successful uploads before cleanup after a partial failure", async () => {
+    const events: string[] = [];
+    let release!: () => void;
+    let late!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { late = resolve; });
+    const images = createProductImageStorage({
+      client: {
+        async putObject({ key }) {
+          if (key.endsWith("/256.webp")) throw new Error("failed put");
+          late(); await waiting; events.push("put");
+        },
+        async deleteObject() { events.push("delete"); },
+      }, bucket: "test", imageBaseUrl: "https://images.ygo.example",
+    });
+    const prepared = await images.prepare(await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } }).png().toBuffer());
+    const storing = images.storePrepared(productId, prepared).catch(async () => { await images.remove(images.keys(productId, prepared)); });
+    await started;
+    expect(events).toEqual([]);
+    release(); await storing;
+    expect(events).toEqual(["put", "put", "delete", "delete", "delete"]);
+  });
+
   it("builds local image URLs from a base that includes the bucket path", async () => {
     const calls: Parameters<ProductImagePutClient["putObject"]>[0][] = [];
     const images = createProductImageStorage({
-      client: { async putObject(input) { calls.push(input); } },
+      client: { async deleteObject() {}, async putObject(input) { calls.push(input); } },
       bucket: "ygo-product-images",
       imageBaseUrl: "http://127.0.0.1:8333/ygo-product-images/",
     });

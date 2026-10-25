@@ -25,6 +25,9 @@ let database: ReturnType<typeof connectDatabase>;
 let app: ReturnType<typeof buildApp>;
 let productImagePuts: Parameters<ProductImagePutClient["putObject"]>[0][];
 let failProductImagePuts: boolean;
+let productImageDeletes: string[];
+let failProductImageDeletes: boolean;
+let onProductImagePut: (() => Promise<void>) | undefined;
 
 beforeEach(async () => {
   name = `ygo_admin_routes_${randomUUID().replaceAll("-", "")}`;
@@ -46,10 +49,18 @@ beforeEach(async () => {
   mailer.sent.length = 0;
   productImagePuts = [];
   failProductImagePuts = false;
+  productImageDeletes = [];
+  failProductImageDeletes = false;
+  onProductImagePut = undefined;
   const productImages = createProductImageStorage({
     client: {
+      async deleteObject({ key }) {
+        productImageDeletes.push(key);
+        if (failProductImageDeletes) throw new Error("S3 delete unavailable");
+      },
       async putObject(input) {
         productImagePuts.push(input);
+        await onProductImagePut?.();
         if (failProductImagePuts) throw new Error("S3 unavailable");
       },
     },
@@ -873,13 +884,196 @@ describe("Catalog CSV import preview", () => {
   const csv = (rows: ReturnType<typeof row>[]) => [CATALOG_IMPORT_CSV_FIELDS.join(","), ...rows.map((r) => CATALOG_IMPORT_CSV_FIELDS.map((field) => `"${r[field].replaceAll('"', '""')}"`).join(","))].join("\r\n");
   async function token() { return { authorization: `Bearer ${(await signIn("/v1/admin/auth")).json().accessToken}` }; }
   async function image() { return sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } }).png().toBuffer(); }
-  function preview(headers: Record<string, string>, text: string, entries: Record<string, Uint8Array> = {}, options: { zip?: Buffer; omitZip?: boolean; extra?: boolean } = {}) {
+  function preview(headers: Record<string, string>, text: string, entries: Record<string, Uint8Array> = {}, options: { zip?: Buffer; omitZip?: boolean; extra?: boolean; commit?: boolean } = {}) {
     const part = (name: string, bytes: Uint8Array) => Buffer.concat([Buffer.from(`--ygo-import\r\nContent-Disposition: form-data; name="${name}"; filename="file"\r\nContent-Type: application/octet-stream\r\n\r\n`), bytes, Buffer.from("\r\n")]);
-    return app.inject({ method: "POST", url: "/v1/admin/catalog/import/preview", headers: { ...headers, "content-type": "multipart/form-data; boundary=ygo-import" }, payload: Buffer.concat([
+    return app.inject({ method: "POST", url: `/v1/admin/catalog/import/${options.commit ? "commit" : "preview"}`, headers: { ...headers, "content-type": "multipart/form-data; boundary=ygo-import" }, payload: Buffer.concat([
       part("catalogCsv", Buffer.from(text)), ...(options.omitZip ? [] : [part("imagesZip", options.zip ?? zipSync(entries))]),
       ...(options.extra ? [part("unknown", Buffer.from("x"))] : []), Buffer.from("--ygo-import--\r\n"),
     ]) });
   }
+
+  it("commits published products and packs once, adds packs on reimport, and keeps existing images", async () => {
+    const headers = await token();
+    const source = await image();
+    const rows = [row({ barcode: "12345678" }), row({ productCode: "second", quantity: "2" })];
+    const entries = { "Photos/apple.PNG": source, "Photos/second.png": await sharp({ create: { width: 2, height: 2, channels: 3, background: "blue" } }).png().toBuffer(), "__MACOSX/._apple.PNG": Buffer.from("metadata") };
+    const first = await preview(headers, csv(rows), entries, { commit: true });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ productsCreated: 1, productsSkipped: 0, packsCreated: 2, packsSkipped: 0 });
+    expect(productImagePuts).toHaveLength(3);
+    const product = (await database.pool.query("SELECT * FROM master_products")).rows[0];
+    expect(product).toMatchObject({ name: "Apples", active: true, published: true });
+    const originalKey = product.image_256_key;
+    const prepared = await createProductImageStorage({ client: { async putObject() {}, async deleteObject() {} }, bucket: "test", imageBaseUrl: "https://images.ygo.example" }).prepare(source);
+    expect(originalKey).toContain(prepared.sourceHash);
+    expect((await preview(headers, csv(rows), entries, { commit: true })).json()).toEqual({ productsCreated: 0, productsSkipped: 1, packsCreated: 0, packsSkipped: 2 });
+    const extra = row({ name: " APPLES ", quantity: "3", barcode: " 87654321 " });
+    expect((await preview(headers, csv([...rows, extra]), {}, { commit: true })).json()).toEqual({ productsCreated: 0, productsSkipped: 1, packsCreated: 1, packsSkipped: 2 });
+    expect(productImagePuts).toHaveLength(3);
+    expect(productImageDeletes).toEqual([]);
+    expect((await database.pool.query("SELECT image_256_key FROM master_products")).rows[0].image_256_key).toBe(originalKey);
+    expect((await database.pool.query("SELECT action FROM admin_actions WHERE target_type IN ('product', 'pack')")).rows.map((r) => r.action).sort()).toEqual(["pack.create", "pack.create", "pack.create", "product.create"]);
+  });
+
+  it("revalidates a successful preview and returns commit row errors without writes", async () => {
+    const headers = await token();
+    const entries = { "apple.png": await image() };
+    expect((await preview(headers, csv([row()]), entries)).json().errors).toEqual([]);
+    const category = (await database.pool.query("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0].id;
+    const product = (await database.pool.query("INSERT INTO master_products (name, category_id, base_unit, classification) VALUES ('Apples', $1, 'kg', 'measured') RETURNING id", [category])).rows[0].id;
+    await database.pool.query("INSERT INTO packs (product_id, quantity, barcode) VALUES ($1, 1, '12345678')", [product]);
+    const result = await preview(headers, csv([row()]), entries, { commit: true });
+    expect(result.statusCode).toBe(409);
+    expect(result.json()).toEqual({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: [
+      { rowNumber: 2, reason: "BARCODE_CONFLICT", field: "barcode" }, { rowNumber: 2, reason: "PRODUCT_DETAILS_MISMATCH" },
+    ] } });
+    const malformed = await preview(headers, csv([row({ quantity: "1.5" }), row({ name: "Pears" })]), entries, { commit: true });
+    expect(malformed.statusCode).toBe(409);
+    expect(malformed.json().error.rowErrors).toContainEqual({ rowNumber: 3, reason: "DUPLICATE_PRODUCT_CODE", field: "productCode" });
+    const invalidImage = await preview(headers, csv([row({ productCode: "pear", name: "Pears" })]), { "pear.png": Buffer.from("bad image") }, { commit: true });
+    expect(invalidImage.json().error.rowErrors).toContainEqual({ rowNumber: 2, reason: "INVALID_PRODUCT_IMAGE", field: "productCode" });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("rechecks database state after waiting for the catalog lock", async () => {
+    const headers = await token();
+    const source = await image();
+    const editor = await database.pool.connect();
+    let importing: ReturnType<typeof preview> | undefined;
+    try {
+      await editor.query("BEGIN");
+      await editor.query("UPDATE categories SET active = false WHERE name = 'Groceries'");
+      importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => r);
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0].n).toBe(1);
+      await editor.query("COMMIT");
+      const result = await importing;
+      expect(result.statusCode).toBe(409);
+      expect(result.json()).toEqual({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: [{ rowNumber: 2, reason: "CATEGORY_NOT_FOUND", field: "categoryName" }] } });
+      expect(productImagePuts).toEqual([]);
+    } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
+  });
+
+  it("bounds the overall catalog lock wait and rolls back before returning unavailable", async () => {
+    const headers = await token();
+    const source = await image();
+    const editor = await database.pool.connect();
+    let importing: ReturnType<typeof preview> | undefined;
+    let completed = false;
+    try {
+      await editor.query("BEGIN");
+      await editor.query("LOCK TABLE master_products IN ROW EXCLUSIVE MODE");
+      importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => { completed = true; return r; });
+      const waitForRetry = async (previous?: string) => {
+        let observed: { pid: number; started: string } | undefined;
+        await expect.poll(async () => {
+          observed = (await database.pool.query<{ pid: number; started: string }>(`SELECT pid, query_start::text AS started FROM pg_stat_activity
+            WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0];
+          return observed !== undefined && observed.started !== previous;
+        }).toBe(true);
+        if (!observed) throw new Error("Import retry was not observed");
+        return observed;
+      };
+      const first = await waitForRetry();
+      // Let retries run in between advances: the budget must not reset per attempt.
+      clock.advance(2_500);
+      const second = await waitForRetry(first.started);
+      clock.advance(2_499);
+      await waitForRetry(second.started);
+      clock.advance(1);
+      await expect.poll(() => completed).toBe(true);
+      const result = await importing;
+      expect(result.statusCode).toBe(503);
+      expect(result.json()).toEqual({ error: { code: "UNAVAILABLE" } });
+      expect((await editor.query("SELECT xact_start FROM pg_stat_activity WHERE pid = $1", [first.pid])).rows[0].xact_start).toBeNull();
+      expect((await editor.query("SELECT count(*)::int AS n FROM pg_locks WHERE pid = $1 AND relation IN ('categories'::regclass, 'master_products'::regclass, 'packs'::regclass, 'admin_memberships'::regclass)", [first.pid])).rows[0].n).toBe(0);
+      for (const table of ["master_products", "packs"]) expect((await database.pool.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n).toBe(0);
+      expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type IN ('product', 'pack')")).rows[0].n).toBe(0);
+      expect(productImagePuts).toEqual([]);
+      expect(productImageDeletes).toEqual([]);
+      await editor.query("ROLLBACK");
+      expect((await preview(headers, csv([row()]), { "apple.png": source }, { commit: true })).statusCode).toBe(200);
+    } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
+  });
+
+  it("lets an in-flight product edit finish when it needs a category lock next", async () => {
+    const headers = await token();
+    const source = await image();
+    const editor = await database.pool.connect();
+    let importing: ReturnType<typeof preview> | undefined;
+    try {
+      const category = (await editor.query("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0].id;
+      await editor.query("INSERT INTO master_products (name, category_id, base_unit, classification) VALUES ('Existing', $1, 'each', 'counted')", [category]);
+      await editor.query("BEGIN");
+      await editor.query("SELECT 1 FROM master_products WHERE name = 'Existing' FOR UPDATE");
+      importing = preview(headers, csv([row()]), { "apple.png": source }, { commit: true }).then((r) => r);
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND query = 'SELECT pg_sleep(0.05) /* catalog import lock retry */'`)).rows[0].n).toBe(1);
+      await editor.query("SET LOCAL lock_timeout = '1s'");
+      await editor.query("SELECT 1 FROM categories WHERE id = $1 FOR UPDATE", [category]);
+      await editor.query("UPDATE master_products SET name = 'Edited' WHERE name = 'Existing'");
+      await editor.query("COMMIT");
+      expect((await importing).statusCode).toBe(200);
+      expect((await database.pool.query("SELECT count(*)::int AS n FROM master_products WHERE name = 'Edited'")).rows[0].n).toBe(1);
+    } finally { await editor.query("ROLLBACK"); editor.release(); await importing; }
+  });
+
+  it.each([false, true])("rolls back later database failures and attempts every image delete (cleanup fails: %s)", async (failCleanup) => {
+    const headers = await token();
+    await database.pool.query(`CREATE FUNCTION fail_import_pack() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.quantity = 2 THEN RAISE EXCEPTION 'injected pack failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER fail_import_pack BEFORE INSERT ON packs FOR EACH ROW EXECUTE FUNCTION fail_import_pack()`);
+    failProductImageDeletes = failCleanup;
+    const result = await preview(headers, csv([row(), row({ productCode: "pear", name: "Pears", quantity: "2" })]), { "apple.png": await image(), "pear.png": await image() }, { commit: true });
+    expect(result.statusCode).toBe(500);
+    for (const table of ["master_products", "packs"]) expect((await database.pool.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n).toBe(0);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type IN ('product', 'pack')")).rows[0].n).toBe(0);
+    expect(productImagePuts).toHaveLength(6);
+    expect(productImageDeletes.sort()).toEqual(productImagePuts.map((put) => put.key).sort());
+  });
+
+  it("returns unavailable and cleans up partial image uploads without catalog writes", async () => {
+    failProductImagePuts = true;
+    const result = await preview(await token(), csv([row()]), { "apple.png": await image() }, { commit: true });
+    expect(result.statusCode).toBe(503);
+    expect(result.json()).toEqual({ error: { code: "UNAVAILABLE" } });
+    expect(productImageDeletes.sort()).toEqual(productImagePuts.map((put) => put.key).sort());
+    expect(productImageDeletes).toHaveLength(3);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM master_products")).rows[0].n).toBe(0);
+  });
+
+  it("keeps reads available and makes catalog edits wait during an import upload", async () => {
+    const headers = await token();
+    let started!: () => void;
+    let finish!: () => void;
+    const uploading = new Promise<void>((resolve) => { started = resolve; });
+    const release = new Promise<void>((resolve) => { finish = resolve; });
+    onProductImagePut = async () => { started(); await release; };
+    const importing = preview(headers, csv([row()]), { "apple.png": await image() }, { commit: true }).then((r) => r);
+    await uploading;
+    try {
+      expect((await database.pool.query("SELECT count(*)::int AS n FROM master_products")).rows[0].n).toBe(0);
+      for (const table of ["categories", "master_products", "packs"]) {
+        const client = await database.pool.connect();
+        try {
+          await client.query("BEGIN");
+          await expect(client.query(`LOCK TABLE ${table} IN ROW EXCLUSIVE MODE NOWAIT`)).rejects.toMatchObject({ code: "55P03" });
+        } finally { await client.query("ROLLBACK"); client.release(); }
+      }
+    } finally { finish(); }
+    expect((await importing).statusCode).toBe(200);
+  });
+
+  it("protects commit authorization and reports malformed multipart fields", async () => {
+    expect((await preview({}, csv([row()]), {}, { commit: true })).statusCode).toBe(401);
+    const mobile = (await signIn("/v1/auth")).json().accessToken;
+    expect((await preview({ authorization: `Bearer ${mobile}` }, csv([row()]), {}, { commit: true })).statusCode).toBe(403);
+    clock.advance(30_000);
+    const bad = await preview(await token(), csv([row()]), {}, { commit: true, omitZip: true });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect(productImagePuts).toEqual([]);
+  });
 
   it("requires an Admin web session before reading uploads", async () => {
     expect((await preview({}, csv([row()]))).statusCode).toBe(401);
