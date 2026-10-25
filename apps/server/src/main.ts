@@ -1,3 +1,4 @@
+import { createIdentityVerifier } from "./adapters/identity-verifier";
 import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
 import { createProductImageStorage, createS3ProductImageClient } from "./adapters/product-images";
@@ -23,6 +24,10 @@ const app = buildApp({
   checkDatabase: database.ping,
   database,
   mailer,
+  identityVerifier: createIdentityVerifier({
+    google: config.GOOGLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+    apple: config.APPLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+  }),
   clock: { now: () => new Date() },
   authTokenSecret: config.AUTH_TOKEN_SECRET,
   adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,

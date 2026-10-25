@@ -2,6 +2,11 @@ import {
   Account,
   ErrorEnvelope,
   HealthResponse,
+  IdentityChallenge,
+  IdentitySignInResponse,
+  type IdentityChallengeBody,
+  type IdentityEmailRequired,
+  type VerifyIdentityBody,
   MyShopApplicationResponse,
   SavedAddress,
   SavedAddressesResponse,
@@ -229,6 +234,30 @@ export function createApiClient({
     return renewed ? send(method, path, json, renewed) : NO_SESSION;
   }
 
+  async function signIn(path: string, body: VerifyCodeBody | VerifyIdentityBody) {
+    if (!session) throw new Error("createApiClient needs a session store to sign in");
+    const started = current;
+    const answered = result(await send("POST", path, body), IdentitySignInResponse);
+    if (!answered.ok) return answered;
+    if (current !== started) return { ok: false as const, status: 401, code: "UNAUTHENTICATED" as const };
+    if ("emailVerificationRequired" in answered.data) return { ok: true as const, data: answered.data };
+    const tokens = answered.data;
+    const next = life(tokens.accessToken, tokens.refreshToken);
+    started.over = true;
+    current = next;
+    try {
+      await inTurn(() => session.set(tokens.refreshToken));
+    } catch (err) {
+      // A refresh meanwhile has replaced the pair, and saves its own.
+      if (next.refresh === tokens.refreshToken) {
+        next.access = null;
+        next.refresh = null;
+      }
+      throw err;
+    }
+    return { ok: true as const, data: answered.data.account };
+  }
+
   return {
     /** `GET /v1/healthz`: whether the server and its database both answer. */
     async health(): Promise<ApiResult<HealthResponse>> {
@@ -256,25 +285,21 @@ export function createApiClient({
      * this rejects and keeps none, unless a call has refreshed it meanwhile.
      */
     async verifyCode(body: VerifyCodeBody): Promise<ApiResult<Account>> {
-      if (!session) throw new Error("createApiClient needs a session store to sign in");
-      const started = current;
-      const answered = result(await send("POST", "/v1/auth/verify", body), Session);
-      if (!answered.ok) return answered;
-      if (current !== started) return { ok: false, status: 401, code: "UNAUTHENTICATED" };
-      const next = life(answered.data.accessToken, answered.data.refreshToken);
-      started.over = true;
-      current = next;
-      try {
-        await inTurn(() => session.set(answered.data.refreshToken));
-      } catch (err) {
-        // A refresh meanwhile has replaced the pair, and saves its own.
-        if (next.refresh === answered.data.refreshToken) {
-          next.access = null;
-          next.refresh = null;
-        }
-        throw err;
-      }
-      return { ok: true, data: answered.data.account };
+      const answer = await signIn("/v1/auth/verify", body);
+      // The email-code endpoint always returns an account.
+      return answer.ok && "emailVerificationRequired" in answer.data
+        ? { ok: false, status: 500, code: "INTERNAL" }
+        : answer as ApiResult<Account>;
+    },
+
+    /** Starts a single provider attempt, before opening the native account picker. */
+    async identityChallenge(body: IdentityChallengeBody): Promise<ApiResult<typeof IdentityChallenge._output>> {
+      return result(await send("POST", "/v1/auth/identity/challenge", body), IdentityChallenge);
+    },
+
+    /** Verifies a signed provider token and saves the same session as email sign-in. */
+    async verifyIdentity(body: VerifyIdentityBody): Promise<ApiResult<Account | typeof IdentityEmailRequired._output>> {
+      return signIn("/v1/auth/identity", body);
     },
 
     /** `GET /v1/me`: the signed-in account. */

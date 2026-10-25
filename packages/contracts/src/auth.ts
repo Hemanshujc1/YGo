@@ -12,6 +12,20 @@ export type RequestCodeBody = z.infer<typeof RequestCodeBody>;
 export const VerifyCodeBody = z.strictObject({ email: Email, code: LoginOtp });
 export type VerifyCodeBody = z.infer<typeof VerifyCodeBody>;
 
+/** Provider sign-in (#36). A challenge is bound to one provider and used once. */
+export const IdentityProvider = z.enum(["google", "apple"]);
+export type IdentityProvider = z.infer<typeof IdentityProvider>;
+export const IdentityChallengeBody = z.strictObject({ provider: IdentityProvider });
+export type IdentityChallengeBody = z.infer<typeof IdentityChallengeBody>;
+export const IdentityChallenge = z.strictObject({ nonce: z.string().regex(/^[a-f0-9]{64}$/) });
+export const VerifyIdentityBody = IdentityChallengeBody.extend({
+  nonce: IdentityChallenge.shape.nonce,
+  identityToken: z.string().min(1).max(8192),
+});
+export type VerifyIdentityBody = z.infer<typeof VerifyIdentityBody>;
+/** A valid Google token for a mailbox Google does not host still needs an emailed code. */
+export const IdentityEmailRequired = z.strictObject({ emailVerificationRequired: Email });
+
 /** `POST /v1/auth/refresh`: trade the refresh token for a new pair. Answers a `Session`. */
 export const RefreshBody = z.strictObject({ refreshToken: Token });
 export type RefreshBody = z.infer<typeof RefreshBody>;
@@ -75,6 +89,9 @@ export const Session = z.object({
   account: Account,
 });
 export type Session = z.infer<typeof Session>;
+
+export const IdentitySignInResponse = z.union([Session, IdentityEmailRequired]);
+export type IdentitySignInResponse = z.infer<typeof IdentitySignInResponse>;
 
 /**
  * Admin web uses the same session but receives its rotating refresh token in

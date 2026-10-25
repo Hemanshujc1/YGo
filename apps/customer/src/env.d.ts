@@ -3,6 +3,8 @@ declare module "*.css";
 
 declare namespace NodeJS {
   interface ProcessEnv {
+    readonly EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?: string;
+    readonly EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?: string;
     /** The API's origin, such as `http://127.0.0.1:3000`. See README.md. */
     readonly EXPO_PUBLIC_API_BASE_URL?: string;
     /** The support address that Help and a phone already in use point to. See README.md. */

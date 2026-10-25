@@ -1,7 +1,9 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type Account, Email, type RequestCodeBody, type VerifyCodeBody } from "@ygo/contracts";
+import { type Account, Email, type RequestCodeBody, type VerifyCodeBody, type IdentityProvider } from "@ygo/contracts";
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, TextInput, View } from "react-native";
+import { IdentityButtons, type IdentityConfig } from "./identity-buttons";
+import { signInWithIdentity, type IdentityApi } from "./identity-flow";
 import { EnterCode } from "./enter-code";
 import {
   aboutField,
@@ -20,13 +22,14 @@ import { problemWords, type SignInWords } from "./sign-in-words";
 import { Text } from "./text";
 
 /** The calls sign-in makes: the app's own client. */
-interface SignInApi {
+interface SignInApi extends IdentityApi {
   requestCode(body: RequestCodeBody): Promise<ApiResult<undefined>>;
   verifyCode(body: VerifyCodeBody): Promise<ApiResult<Account>>;
 }
 
 export type SignInProps = {
   words: SignInWords;
+  identity: IdentityConfig;
   /** The address Help opens a new email to. */
   supportEmail: string;
   api: SignInApi;
@@ -48,7 +51,7 @@ let memory: Sends = new Map();
  * C01 Sign in, and C14 once a code is sent (#155, Q6–Q8). The root layout
  * shows it while signed out; there are no sign-in routes.
  */
-export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInProps) {
+export function SignIn({ words, supportEmail, api, onSignedIn, notice, identity }: SignInProps) {
   // The email as typed, kept when C14 goes back to C01.
   const [typed, setTyped] = useState("");
   // The notice goes at the first keystroke, so C14 going back to C01 never shows it again.
@@ -87,6 +90,12 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInP
     return outcome;
   }
 
+  async function sendForProvider(email: string) {
+    const problem = needsSend(email, memory, moment()) ? await send(email) : null;
+    if (!problem) setCodeFor(email);
+    return problem;
+  }
+
   return (
     // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard.
     <KeyboardAvoidingView behavior="padding" className="flex-1 bg-bg">
@@ -109,6 +118,13 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInP
         ) : (
           <EmailStep
             words={words}
+            identity={identity}
+            providerSignIn={async (provider, token) => {
+              const outcome = await signInWithIdentity(api, provider, token);
+              if ("signedIn" in outcome) { remember(new Map()); onSignedIn(outcome.signedIn); }
+              if ("email" in outcome) { setTyped(outcome.email); return sendForProvider(outcome.email); }
+              return "problem" in outcome ? outcome.problem : null;
+            }}
             supportEmail={supportEmail}
             typed={typed}
             setTyped={(text) => {
@@ -129,6 +145,8 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice }: SignInP
 }
 
 type EmailStepProps = {
+  identity: IdentityConfig;
+  providerSignIn: (provider: IdentityProvider, token: (nonce: string) => Promise<string | null>) => Promise<Problem | "provider" | null>;
   words: SignInWords;
   supportEmail: string;
   typed: string;
@@ -139,9 +157,9 @@ type EmailStepProps = {
 };
 
 /** C01: the email and "Email me a code". A send that fails stays here, with its message under the email (#155, Q7). */
-function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: EmailStepProps) {
+function EmailStep({ words, supportEmail, typed, setTyped, notice, send, identity, providerSignIn }: EmailStepProps) {
   const [focused, setFocused] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"email" | IdentityProvider | null>(null);
   // Set before React re-renders, so the return key and the button never send twice.
   const sending = useRef(false);
   const [problem, setProblem] = useState<{ text: string; onField: boolean } | null>(null);
@@ -155,11 +173,22 @@ function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: Email
     }
     setProblem(null);
     sending.current = true;
-    setBusy(true);
+    setBusy("email");
     const failed = await send(email.data);
     sending.current = false;
-    setBusy(false);
+    setBusy(null);
     if (failed) setProblem({ text: problemWords(words, failed, "send"), onField: aboutField(failed) });
+  }
+
+  async function provider(provider: IdentityProvider, token: (nonce: string) => Promise<string | null>) {
+    if (sending.current) return;
+    sending.current = true;
+    setBusy(provider);
+    setProblem(null);
+    try {
+      const failed = await providerSignIn(provider, token);
+      if (failed) setProblem({ text: failed === "provider" ? words.providerFailed : problemWords(words, failed, "check"), onField: false });
+    } finally { sending.current = false; setBusy(null); }
   }
 
   return (
@@ -170,8 +199,7 @@ function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: Email
       {words.heading && <Text className="mt-2 text-title font-semibold text-text">{words.heading}</Text>}
       <Text className="mt-2 text-body text-muted">{words.lead}</Text>
 
-      {/* Google and Apple go here (#36). */}
-      <View className="mt-8" />
+      <IdentityButtons config={identity} busy={busy} start={(kind, token) => void provider(kind, token)} />
 
       <Text className="text-label font-medium text-text">{words.emailLabel}</Text>
       <TextInput
@@ -204,7 +232,7 @@ function EmailStep({ words, supportEmail, typed, setTyped, notice, send }: Email
       )}
 
       <View className="mt-6">
-        <Button label={words.send} onPress={() => void submit()} busy={busy} />
+        <Button label={words.send} onPress={() => void submit()} busy={busy === "email"} disabled={busy !== null} />
       </View>
 
       <HelpLine help={words.help} supportEmail={supportEmail} />

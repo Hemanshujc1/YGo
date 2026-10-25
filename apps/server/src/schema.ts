@@ -17,6 +17,14 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
+export const identityChallenges = pgTable("identity_challenges", {
+  nonce: text("nonce").primaryKey(),
+  provider: text("provider").notNull(),
+  address: text("address").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  used: boolean("used").notNull().default(false),
+}, (table) => [index("identity_challenges_expiry_idx").on(table.expiresAt), index("identity_challenges_address_idx").on(table.address)]);
+
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
