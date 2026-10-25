@@ -1,14 +1,27 @@
-import { SaveShopApplicationBody, ServiceRadiusMetres, type ShopApplication, type ShopEntityType } from "@ygo/contracts";
+import {
+  type AddressPoint,
+  CalendarDate,
+  invalidFields,
+  SaveShopApplicationBody,
+  SendShopApplicationBody,
+  ServiceRadiusMetres,
+  type ShopApplication,
+  type ShopEntityType,
+} from "@ygo/contracts";
 
-/** The S17 fields typed as text. Business type and service radius are picked; location joins in #295. */
+/** The S17 fields typed as text. Business type and service radius are picked, and the location comes from the phone. */
 export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
 export type TextField = (typeof textFields)[number];
 
 /** A field that can show a message under it. */
-export type Field = TextField | "entityType";
+export type Field = TextField | "entityType" | "location";
 
 /** The form as on screen. */
-export type Typed = Record<TextField, string> & { entityType: ShopEntityType | null; serviceRadiusMetres: number };
+export type Typed = Record<TextField, string> & {
+  entityType: ShopEntityType | null;
+  serviceRadiusMetres: number;
+  location: AddressPoint | null;
+};
 
 /** The form for a saved application: an empty field shows blank, and the FSSAI expiry as DD/MM/YYYY (#276, Q3). */
 export function typedFrom(application: ShopApplication): Typed {
@@ -18,6 +31,7 @@ export function typedFrom(application: ShopApplication): Typed {
     fssaiExpiry: application.fssaiExpiry ? typedDate(application.fssaiExpiry) : "",
     entityType: application.entityType,
     serviceRadiusMetres: application.serviceRadiusMetres,
+    location: application.location,
   };
 }
 
@@ -35,12 +49,12 @@ export function isoDate(typed: string): string {
 }
 
 /**
- * Save draft's body (#276, Q5): every field, an empty one as null, checked
- * with the server's rules. A filled-in field that breaks its rule stops the
- * save and is named. Location is left out, so the saved one stays.
+ * Every field as the server takes it: trimmed, an empty one as null, and the
+ * expiry as YYYY-MM-DD. The location is left out until the phone gives one,
+ * so a save never erases one taken at the shop on another phone (#295 review, Q5).
  */
-export function draftBody(typed: Typed): { ok: true; body: SaveShopApplicationBody } | { ok: false; wrong: Field[] } {
-  const body = {
+function bodyFrom(typed: Typed) {
+  return {
     ...Object.fromEntries(
       textFields.map((field) => {
         const value = typed[field].trim();
@@ -49,15 +63,41 @@ export function draftBody(typed: Typed): { ok: true; body: SaveShopApplicationBo
     ),
     entityType: typed.entityType,
     serviceRadiusMetres: typed.serviceRadiusMetres,
+    ...(typed.location && { location: typed.location }),
   };
-  const checked = SaveShopApplicationBody.safeParse(body);
-  if (checked.success) return { ok: true, body: checked.data };
-  return { ok: false, wrong: shown(checked.error.issues.map((issue) => String(issue.path[0]))) };
 }
 
-/** The named fields this form shows, such as the `error.fields` of a refusal. */
+/**
+ * Save draft's body (#276, Q5): every field, an empty one as null, checked
+ * with the server's rules. A filled-in field that breaks its rule stops the
+ * save and is named.
+ */
+export function draftBody(typed: Typed): { ok: true; body: SaveShopApplicationBody } | { ok: false; wrong: Field[] } {
+  const checked = SaveShopApplicationBody.safeParse(bodyFrom(typed));
+  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: shown(invalidFields(checked.error)) };
+}
+
+/** Send's body (#295): every field must be filled in and keep its rule, and the FSSAI licence must be valid after today. */
+export function sendBody(typed: Typed): { ok: true; body: SendShopApplicationBody } | { ok: false; wrong: Field[] } {
+  const checked = SendShopApplicationBody.safeParse(bodyFrom(typed));
+  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: shown(invalidFields(checked.error)) };
+}
+
+/**
+ * True when the typed FSSAI expiry is a real date. A refused one then has
+ * passed, whichever clock refused it: the phone's or the server's (#295 review, Q2).
+ */
+export function realDate(typed: Typed): boolean {
+  return CalendarDate.safeParse(isoDate(typed.fssaiExpiry.trim())).success;
+}
+
+/**
+ * The named fields this form shows, such as the `error.fields` of a refusal.
+ * A part of a field, such as `location.latitude`, names the field.
+ */
 export function shown(fields: string[] | undefined): Field[] {
-  return (fields ?? []).filter((field): field is Field => field === "entityType" || textFields.includes(field as TextField));
+  const named = new Set((fields ?? []).map((field) => field.split(".")[0] ?? field));
+  return [...named].filter((field): field is Field => field === "entityType" || field === "location" || textFields.includes(field as TextField));
 }
 
 /** True when the form differs from what was last saved. */

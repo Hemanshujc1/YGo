@@ -69,7 +69,11 @@ export default function Home() {
   }
 
   const { application } = load;
-  if (application?.state === "draft") return <ApplicationForm application={application} onSent={() => void fetchApplication()} />;
+  if (application?.state === "draft") {
+    return (
+      <ApplicationForm application={application} onSent={(sent) => (sent ? setLoad({ kind: "loaded", application: sent }) : void fetchApplication())} />
+    );
+  }
 
   if (application) {
     return (

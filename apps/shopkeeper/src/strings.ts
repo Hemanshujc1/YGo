@@ -60,7 +60,7 @@ export const strings = {
     notCleared:
       "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
   },
-  // The shop application (#294): loading it, Start, S17, and a sent one until S18 (#292).
+  // The shop application (#294, #295): loading it, Start, S17, and a sent one until S18 (#292).
   application: {
     loadFailed: "Could not load your shop application. Check your connection, then try again.",
     retry: "Try again",
@@ -77,12 +77,34 @@ export const strings = {
       groups: { shop: "Shop", owner: "Owner", licences: "Licence numbers", payments: "Payments" },
       shopName: { label: "Shop name", invalid: "Enter your shop's name, up to 100 characters." },
       address: { label: "Shop address", invalid: "Enter your shop's address, up to 300 characters." },
-      pincode: { label: "Pincode", invalid: "Enter a 6-digit pincode, such as 411038." },
+      pincode: {
+        label: "Pincode",
+        invalid: "Enter a 6-digit pincode, such as 411038.",
+        notInArea: "YGo isn't in this pincode yet. Check it, or write to support.",
+      },
+      // Owner's answers on #276 (Q8, Q9) and #295 (Q3, Q4).
+      location: {
+        label: "Shop location",
+        use: "I'm at my shop: use this location",
+        found: (metres: string) => `Location found, accurate to about ${metres} m`,
+        foundNoAccuracy: "Location found",
+        saved: "Location saved",
+        rough: "Stand near your shop door, away from tall buildings, and try again.",
+        off: "Location is off for YGo. Turn it on in settings to save where your shop is.",
+        openSettings: "Open settings",
+        phoneOff: "Location is off on this phone. Turn it on and try again.",
+        notFound: "Couldn't find your location. Stand near your shop door and try again.",
+        invalid: "Use your location while at your shop.",
+      },
       ownerName: { label: "Owner's legal name", invalid: "Enter your name in letters, such as Asha Kulkarni." },
       entityType: { label: "Business type", invalid: "Choose your business type." },
       pan: { label: "PAN", invalid: "Enter a PAN such as ABCDE1234F: 5 letters, 4 digits, 1 letter." },
       fssaiNumber: { label: "FSSAI licence number", invalid: "Enter the 14-digit number on your FSSAI licence." },
-      fssaiExpiry: { label: "FSSAI licence valid until", invalid: "Enter the date as DD/MM/YYYY, such as 31/03/2027." },
+      fssaiExpiry: {
+        label: "FSSAI licence valid until",
+        invalid: "Enter the date as DD/MM/YYYY, such as 31/03/2027.",
+        expired: "This licence has expired. Enter a date after today.",
+      },
       upiId: { label: "UPI ID", invalid: "Enter a UPI ID such as asha@okhdfcbank." },
       datePlaceholder: "DD/MM/YYYY",
       entityTypes: { proprietorship: "Proprietorship", partnership_firm: "Partnership firm", llp: "LLP", company: "Company" },
@@ -96,11 +118,21 @@ export const strings = {
       phone: "Phone",
       email: "Email",
       fromAccount: "From your account.",
+      send: "Send application",
+      sending: "Sending…",
+      sendOffline: "Could not send. Check your connection, then try again.",
       save: "Save draft",
       saving: "Saving…",
       saved: "Draft saved.",
       wrong: "Check the fields marked above.",
       offline: "Could not save. Check your connection, then try again.",
+    },
+    // Owner's answer on #276 (Q6).
+    confirmSend: {
+      title: "Send your application?",
+      body: "You can't change it after this. To change it later, write to support.",
+      send: "Send",
+      cancel: "Cancel",
     },
     sent: {
       title: "Application sent",
