@@ -11,6 +11,16 @@ export function connectDatabase(url: string) {
     connectionTimeoutMillis: 5_000,
   });
   const db = drizzle({ client: pool });
+  // pool.end() resolves once each connection is asked to close, not once it
+  // has; a database dropped in that gap fails the connection (#287).
+  const closing = new Set<Promise<void>>();
+  pool.on("connect", (client) => {
+    const closed: Promise<void> = new Promise((resolve) => client.once("end", () => {
+      closing.delete(closed);
+      resolve();
+    }));
+    closing.add(closed);
+  });
 
   return {
     db,
@@ -18,7 +28,11 @@ export function connectDatabase(url: string) {
     async ping(): Promise<void> {
       await db.execute(sql`select 1`);
     },
-    close: () => pool.end(),
+    /** Resolves once every connection has closed. */
+    async close(): Promise<void> {
+      await pool.end();
+      await Promise.all(closing);
+    },
   };
 }
 

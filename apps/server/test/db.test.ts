@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { withTransaction } from "../src/db";
+import { connectDatabase, withTransaction } from "../src/db";
 
 // One connection, so the temporary table is visible to every step and a
 // connection that isn't handed back would hang the next query.
@@ -57,5 +57,19 @@ describe("withTransaction", () => {
     } finally {
       await lonePool.end();
     }
+  });
+});
+
+describe("connectDatabase", () => {
+  it("closes only once every connection has closed (#287)", async () => {
+    const database = connectDatabase(inject("databaseUrl"));
+    const closed: boolean[] = [];
+    database.pool.on("connect", (client) => {
+      const index = closed.push(false) - 1;
+      client.once("end", () => { closed[index] = true; });
+    });
+    await Promise.all(Array.from({ length: 5 }, () => database.pool.query("SELECT pg_sleep(0.05)")));
+    await database.close();
+    expect(closed).toEqual([true, true, true, true, true]);
   });
 });
