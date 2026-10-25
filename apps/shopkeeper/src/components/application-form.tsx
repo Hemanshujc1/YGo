@@ -161,7 +161,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     working.current = false;
     setSending(false);
     if (!answer) return setMessage(words.sendOffline);
-    // The answer is the sent application, so "Application sent" needs no second request (#295 review, Q4).
+    // The answer is the sent application, so S18 needs no second request (#295 review, Q4).
     if (answer.ok) return onSent(answer.data);
     if (answer.code === "SHOP_APPLICATION_SENT") return onSent();
     if (answer.code === "PINCODE_NOT_IN_AREA") {

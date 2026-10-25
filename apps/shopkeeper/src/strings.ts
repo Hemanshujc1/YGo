@@ -60,7 +60,7 @@ export const strings = {
     notCleared:
       "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
   },
-  // The shop application (#294, #295): loading it, Start, S17, and a sent one until S18 (#292).
+  // The shop application (#294, #295, #292): loading it, Start, S17 and S18.
   application: {
     loadFailed: "Could not load your shop application. Check your connection, then try again.",
     retry: "Try again",
@@ -134,9 +134,20 @@ export const strings = {
       send: "Send",
       cancel: "Cancel",
     },
-    sent: {
-      title: "Application sent",
-      body: "We're checking it and will be in touch. To change anything, write to support.",
+    // S18 (#292). Owner's answers on #40 (Q13) and #292 (Q1–Q5).
+    status: {
+      title: "Your shop application",
+      steps: {
+        draft: { name: "Draft", line: "You fill in your application." },
+        submitted: { name: "Submitted", line: "You send it.", next: "Next: Admin starts reviewing your application." },
+        under_review: { name: "Under review", line: "Admin checks your details.", next: "Next: Admin approves your shop." },
+        approved: { name: "Approved", line: "Admin approves your shop.", next: "Next: we visit your shop, then Admin makes it Live." },
+        live: { name: "Live", line: "Admin makes your shop Live, and customers nearby can order." },
+      },
+      marks: { done: "Done", current: "Now", later: "Not yet" },
+      sentOn: (date: string) => `Sent ${date}`,
+      support: "To change anything, write to support.",
+      refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },
     signOut: {
       title: "Sign out?",

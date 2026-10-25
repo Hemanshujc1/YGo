@@ -1,6 +1,6 @@
 # @ygo/shopkeeper
 
-The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it loads the account's shop application (#294): with none, a Start screen ("Start my shop application"); a Draft opens S17 Shop application, one form in four groups with Save draft; a sent one shows "Application sent" until S18 (#292). Each of these ends with the theme choice and Sign out. Joining a shop as staff comes with #58.
+The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it loads the account's shop application (#294): with none, a Start screen ("Start my shop application"); a Draft opens S17 Shop application, one form in four groups with Save draft; a sent one opens S18 Application status, the five steps from Draft to Live, refreshed by pulling down (#292). Each of these ends with the theme choice and Sign out. Joining a shop as staff comes with #58.
 
 ## Run it locally
 

@@ -1,10 +1,11 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, RefreshControl, type RefreshControlProps, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ApplicationForm } from "../components/application-form";
+import { ApplicationStatus } from "../components/application-status";
 import { SignOut } from "../components/sign-out";
 import { strings } from "../strings";
 
@@ -14,13 +15,15 @@ type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: 
 
 /**
  * The signed-in home until shops go Live (#46) and staff join shops (#58):
- * Start with no application, S17 for a Draft, and "Application sent" after
- * Send until S18 replaces it (#292). Owner's answers on #40 (Q12) and #276 (Q7).
+ * Start with no application, S17 for a Draft, and S18 once sent, refreshed by
+ * pulling down. Owner's answers on #40 (Q12, Q13), #276 (Q7) and #292 (Q5).
  */
 export default function Home() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [starting, setStarting] = useState(false);
   const [startFailed, setStartFailed] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState<string | null>(null);
   // Set before React re-renders, so a second tap never starts twice.
   const working = useRef(false);
 
@@ -34,6 +37,16 @@ export default function Home() {
   useEffect(() => {
     void fetchApplication();
   }, []);
+
+  // Keeps the steps on screen while it looks, and after a failed look.
+  async function refresh() {
+    setRefreshing(true);
+    setRefreshFailed(null);
+    const answer = await api.shopApplication().catch(() => null);
+    setRefreshing(false);
+    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data.application });
+    setRefreshFailed(answer ? strings.errors[answer.code] : words.status.refreshFailed);
+  }
 
   async function start() {
     if (working.current) return;
@@ -77,11 +90,8 @@ export default function Home() {
 
   if (application) {
     return (
-      <Plain>
-        <Text accessibilityRole="header" className="text-title-large font-semibold text-text">
-          {words.sent.title}
-        </Text>
-        <Text className="text-body text-muted">{words.sent.body}</Text>
+      <Plain refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}>
+        <ApplicationStatus application={application} refreshFailed={refreshFailed} />
       </Plain>
     );
   }
@@ -104,10 +114,11 @@ export default function Home() {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children }: { children: ReactNode }) {
+function Plain({ children, refreshControl }: { children: ReactNode; refreshControl?: ReactElement<RefreshControlProps> }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
+      refreshControl={refreshControl}
       className="flex-1 bg-bg"
       contentContainerClassName="grow justify-center gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
