@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { parse } from "csv-parse/sync";
 import { Unzip, UnzipInflate, unzipSync } from "fflate";
 import {
@@ -7,7 +7,7 @@ import {
   CatalogImportCsvField, CatalogImportCsvRow, type CatalogImportFileField,
   type CatalogImportPreviewResponse, type CatalogImportRowError,
 } from "@ygo/contracts";
-import { InvalidProductImageError, type ProductImageStorage } from "./adapters/product-images";
+import { InvalidProductImageError, type PreparedProductImage, type ProductImageStorage } from "./adapters/product-images";
 
 export class CatalogImportFileError extends Error {
   constructor(public fields: CatalogImportFileField[]) { super("Invalid catalog import file"); }
@@ -108,6 +108,13 @@ type ResolvedRow = ImportRow & {
 export async function previewCatalogImport(
   files: Record<CatalogImportFileField, Buffer>, db: Pool, images: Pick<ProductImageStorage, "prepare">,
 ): Promise<CatalogImportPreviewResponse> {
+  return (await validateCatalogImport(files, db, images)).preview;
+}
+
+export async function validateCatalogImport(
+  files: Record<CatalogImportFileField, Buffer>, db: Pool | PoolClient, images: Pick<ProductImageStorage, "prepare">,
+  prepared?: Map<string, PreparedProductImage>,
+) {
   let records: string[][];
   try { records = parse(new TextDecoder("utf-8", { fatal: true }).decode(files.catalogCsv), { bom: true, relax_column_count: true }); }
   catch { throw new CatalogImportFileError(["catalogCsv"]); }
@@ -177,7 +184,12 @@ export async function previewCatalogImport(
   const sources = imageFiles(files.imagesZip);
   const invalid = new Set<string>();
   for (const [code, source] of sources) {
-    try { await images.prepare(source); }
+    try {
+      if (!prepared?.has(code)) {
+        const image = await images.prepare(source);
+        prepared?.set(code, image);
+      }
+    }
     catch (error) { if (error instanceof InvalidProductImageError) invalid.add(code); else throw error; }
   }
   // A syntactically invalid row can still own an image; its row error already prevents commit.
@@ -188,5 +200,5 @@ export async function previewCatalogImport(
     else if (!row.productId && !sources.has(row.productCode)) errors.push({ rowNumber: row.rowNumber, reason: "MISSING_PRODUCT_IMAGE", field: "productCode" });
   }
   errors.sort((a, b) => a.rowNumber - b.rowNumber || a.reason.localeCompare(b.reason) || (a.field ?? "").localeCompare(b.field ?? ""));
-  return { rowCount: records.length, productCount: products.size, packCount: packs.size, errors };
+  return { preview: { rowCount: records.length, productCount: products.size, packCount: packs.size, errors }, rows: resolved.rows };
 }
