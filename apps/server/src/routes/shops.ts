@@ -49,8 +49,13 @@ async function application(client: Pool | PoolClient, column: "s.id" | "m.accoun
   return row.rows[0] ? fromRow(row.rows[0]) : null;
 }
 
-/** Whether an Area holds `pincode`. A paused Area still counts: it keeps its pincodes (#214). */
+/**
+ * Whether an Area holds `pincode`. A paused Area still counts: it keeps its pincodes (#214).
+ * Waits out an Admin Area save, so a pincode it removes can't be sent or
+ * corrected into; plain reads don't wait.
+ */
 async function inArea(client: PoolClient, pincode: string): Promise<boolean> {
+  await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
   return Boolean((await client.query("SELECT 1 FROM area_pincodes WHERE pincode = $1", [pincode])).rowCount);
 }
 

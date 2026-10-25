@@ -70,6 +70,25 @@ async function area(pincode: string, paused = false) {
   await database.pool.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ($1, $2)", [pincode, inserted.rows[0]?.id]);
 }
 
+/**
+ * Answers `request`, sent while an Admin Area save (routes/areas.ts) that
+ * removes `pincode` is open; the save commits once `request` waits for it.
+ */
+async function duringAreaSave<T>(pincode: string, request: () => Promise<T>): Promise<T> {
+  const admin = await database.pool.connect();
+  try {
+    await admin.query("BEGIN");
+    await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
+    await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
+    let settled = false;
+    const pending = request().finally(() => { settled = true; });
+    const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
+    while (!settled && !(await database.pool.query(waiting)).rowCount) await new Promise((resolve) => setTimeout(resolve, 10));
+    await admin.query("COMMIT");
+    return await pending;
+  } finally { admin.release(); }
+}
+
 // The FSSAI check reads the real clock (the contract's rule), not the test clock.
 const complete = {
   shopName: "Sai General Stores",
@@ -186,6 +205,15 @@ describe("shop application", () => {
     expect((await read(headers)).application.areaName).toBe("Baner");
     await database.pool.query("DELETE FROM area_pincodes");
     expect((await read(headers)).application.areaName).toBeNull();
+  });
+
+  it("waits out an Admin Area save that removes the pincode, then refuses it", async () => {
+    await area("411038");
+    const { headers } = await owner("asha@example.com");
+    const started = (await start(headers)).json();
+    const refused = await duringAreaSave("411038", () => send(headers, complete));
+    expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
+    expect(await read(headers)).toEqual({ application: started });
   });
 
   it("names each missing field and a past FSSAI expiry together", async () => {
@@ -352,5 +380,9 @@ describe("shop application, Admin", () => {
     expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
     expect((await app.inject({ method: "GET", url: `${url}/${id}`, headers })).json()).toEqual(moved.json());
     expect(await actions(id)).toEqual([{ action: "shop.correct.pincode", reason: "Shop is in Baner" }]);
+
+    const late = await duringAreaSave("411038", () => correct(headers, id, { pincode: "411038", reason: "Back to Kothrud" }));
+    expect(late.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
+    expect((await app.inject({ method: "GET", url: `${url}/${id}`, headers })).json()).toEqual(moved.json());
   });
 });
