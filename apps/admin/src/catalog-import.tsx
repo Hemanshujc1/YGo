@@ -104,8 +104,8 @@ export function CatalogImport({ api }: { api: AdminApi }) {
       {error && <p role="alert" className="text-danger">{error}</p>}
       {problems.length > 0 && <div>
         <h2 className="font-semibold text-danger">{copy.problems}</h2><p className="mt-2 text-muted">{copy.nothingImported}</p>
-        <div className="mt-4 max-h-96 overflow-auto"><table className="w-full text-left">
-          <thead><tr><th scope="col" className="p-2">{copy.row}</th><th scope="col" className="p-2">{copy.problem}</th></tr></thead>
+        <div className="mt-4 max-h-96 overflow-auto"><table className="w-full min-w-3xl text-left">
+          <thead className="bg-sunken"><tr><th scope="col" className="p-2">{copy.row}</th><th scope="col" className="p-2">{copy.problem}</th></tr></thead>
           <tbody>{problems.map((problem, index) => <tr key={index} className="border-t border-border">
             <td className="p-2 tabular-nums">{problem.rowNumber}</td><td className="p-2">{copy.reasons[problem.reason]}{problem.field && ` (${copy.columns[problem.field]})`}</td>
           </tr>)}</tbody>
