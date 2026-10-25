@@ -1,8 +1,9 @@
 import { type SendShopApplicationBody, type ShopApplication, ShopEntityType } from "@ygo/contracts";
 import { formatNumber, formatPhone } from "@ygo/format";
 import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, ThemePicker } from "@ygo/mobile";
+import { addressAt } from "@ygo/mobile/address-at";
 import * as Location from "expo-location";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Linking, Pressable, ScrollView, TextInput, type TextInputProps, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
@@ -10,6 +11,7 @@ import {
   changed,
   draftBody,
   type Field,
+  fillFromLocation,
   realDate,
   sendBody,
   shown,
@@ -74,9 +76,17 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
   // This visit's fix: a reopened Draft has only the saved location, with no accuracy (#295, Q3).
   const [fix, setFix] = useState<{ accuracy: number | null } | null>(null);
   const [problem, setProblem] = useState<keyof typeof problems | null>(null);
+  const [filledIn, setFilledIn] = useState(false);
   // Set before React re-renders, so a second tap never saves, sends or looks twice.
   const working = useRef(false);
   const looking = useRef(false);
+  // The latest look, so an older one's address never fills in after a new tap.
+  const looks = useRef(0);
+  // The form as last shown, so a fill sees what was typed while the address was looked up.
+  const shownTyped = useRef(typed);
+  useEffect(() => {
+    shownTyped.current = typed;
+  }, [typed]);
   const busy = saving || sending;
 
   function edit(field: Field | "serviceRadiusMetres", next: Partial<Typed>) {
@@ -101,12 +111,23 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     setLocating(true);
     setProblem(null);
     setFix(null);
+    setFilledIn(false);
+    const look = ++looks.current;
     const found = await findPlace(locator);
     looking.current = false;
     setLocating(false);
     if (found.kind !== "found") return setProblem(found.kind);
     setFix({ accuracy: found.accuracy });
     edit("location", { location: found.point });
+    // A rough fix could name the next pincode, so only a close one fills in (#303, Q5).
+    if (found.accuracy !== null && found.accuracy > roughMetres) return;
+    // Save draft and Send stay on while the address is looked up (#303, Q3); no answer leaves both boxes as they are.
+    const at = await addressAt(Location.reverseGeocodeAsync, found.point);
+    if (look !== looks.current) return;
+    const fill = fillFromLocation(shownTyped.current, at);
+    if (fill.pincode !== undefined) edit("pincode", { pincode: fill.pincode });
+    if (fill.address !== undefined) edit("address", { address: fill.address });
+    setFilledIn(fill.pincode !== undefined || fill.address !== undefined);
   }
 
   async function save() {
@@ -221,6 +242,11 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
               </Text>
             )}
             {fix !== null && fix.accuracy !== null && fix.accuracy > roughMetres && <Text className="text-secondary text-muted">{words.location.rough}</Text>}
+            {filledIn && (
+              <Text accessibilityLiveRegion="polite" className="text-secondary text-muted">
+                {words.location.filledIn}
+              </Text>
+            )}
             <View className="mt-1">
               <Button label={words.location.use} onPress={() => void locate()} busy={locating} disabled={busy} variant="secondary" icon={MapPin} alignStart />
             </View>
