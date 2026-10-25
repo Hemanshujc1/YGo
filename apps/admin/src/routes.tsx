@@ -16,6 +16,7 @@ import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
 import { Products } from "./products";
+import { ShopApplications, ShopApplicationReview } from "./shop-applications";
 import { adminTheme, ThemePicker } from "./theme";
 import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
@@ -63,6 +64,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
                 { path: "/categories", label: strings.categories },
                 { path: "/products", label: strings.products },
                 { path: "/areas", label: strings.areas },
+                { path: "/applications", label: strings.applications },
                 { path: "/waitlist", label: strings.waitlist },
               ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "page" : undefined}
                 className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
@@ -342,6 +344,27 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listAreas(), (data) => data.areas),
       element: <Page protectedArea api={api}><Areas api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/applications",
+      loader: listLoader(() => api.listShopApplications(), (data) => data.applications),
+      element: <Page protectedArea api={api}><ShopApplications /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    },
+    {
+      path: "/applications/:id",
+      loader: async ({ params }) => {
+        const id = params.id;
+        if (!id) throw new Error(strings.notFound);
+        const result = await api.getShopApplication(id);
+        if (result.ok) return result.data;
+        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+        throw new Error(result.code);
+      },
+      element: <Page protectedArea api={api}><ShopApplicationReview api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
