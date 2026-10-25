@@ -200,6 +200,77 @@ describe("each call", () => {
     ]);
   });
 
+  it("starts, saves and sends the shop application, signed in", async () => {
+    const draft = {
+  id: "00000000-0000-4000-8000-000000000401",
+  state: "draft",
+  shopName: "Sai General Stores",
+  address: null,
+  pincode: null,
+  location: null,
+  ownerName: "Asha Kulkarni",
+  entityType: null,
+  pan: null,
+  fssaiNumber: null,
+  fssaiExpiry: null,
+  serviceRadiusMetres: 2000,
+  upiId: null,
+  areaName: null,
+  ownerPhone: "+919876543210",
+  ownerEmail: "asha@example.com",
+  submittedAt: null,
+} as const;
+    const body = {
+      shopName: "Sai General Stores",
+      address: "Shop 3, Paud Road, Kothrud",
+      pincode: "411038",
+      location: { latitude: 18.5074, longitude: 73.8077 },
+      ownerName: "Asha Kulkarni",
+      entityType: "proprietorship",
+      pan: "ABCDE1234F",
+      fssaiNumber: "11223344556677",
+      fssaiExpiry: "2027-03-31",
+      serviceRadiusMetres: 2000,
+      upiId: "asha.k@okhdfcbank",
+    } as const;
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.method === "GET") return answer(200, { application: null });
+      return answer(call.method === "POST" && call.path.endsWith("/shop-application") ? 201 : 200, draft);
+    });
+    await client.verifyCode(signIn);
+    expect(await client.shopApplication()).toEqual({ ok: true, data: { application: null } });
+    expect(await client.startShopApplication()).toEqual({ ok: true, data: draft });
+    expect(await client.saveShopApplication({ shopName: "Sai General Stores", pan: null })).toEqual({ ok: true, data: draft });
+    expect(await client.sendShopApplication(body)).toEqual({ ok: true, data: draft });
+    expect(calls.slice(1)).toEqual([
+      { method: "GET", path: "/v1/me/shop-application", body: undefined, auth: "Bearer a1" },
+      { method: "POST", path: "/v1/me/shop-application", body: undefined, auth: "Bearer a1" },
+      { method: "PATCH", path: "/v1/me/shop-application", body: { shopName: "Sai General Stores", pan: null }, auth: "Bearer a1" },
+      { method: "POST", path: "/v1/me/shop-application/send", body, auth: "Bearer a1" },
+    ]);
+  });
+
+  it("reads a pincode in no Area as its code", async () => {
+    const { client } = setup((call) =>
+      call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "PINCODE_NOT_IN_AREA" } }),
+    );
+    await client.verifyCode(signIn);
+    expect(await client.sendShopApplication({
+      shopName: "Sai General Stores",
+      address: "Shop 3, Paud Road, Kothrud",
+      pincode: "411038",
+      location: { latitude: 18.5074, longitude: 73.8077 },
+      ownerName: "Asha Kulkarni",
+      entityType: "proprietorship",
+      pan: "ABCDE1234F",
+      fssaiNumber: "11223344556677",
+      fssaiExpiry: "2027-03-31",
+      serviceRadiusMetres: 2000,
+      upiId: "asha.k@okhdfcbank",
+    } as const)).toEqual({ ok: false, status: 409, code: "PINCODE_NOT_IN_AREA" });
+  });
+
   it("reads the saved address limit as its code", async () => {
     const { client } = setup((call) =>
       call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "ADDRESS_LIMIT_REACHED" } }),

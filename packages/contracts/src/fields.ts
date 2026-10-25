@@ -135,3 +135,22 @@ export const UpiId = z
   .toLowerCase()
   .max(255)
   .regex(/^[a-z0-9._-]+@[a-z][a-z0-9.-]*$/);
+
+/** A shop's name, trimmed, 1 to 100 characters (ONB-3; owner decision on #40). */
+export const ShopName = z.string().trim().min(1).max(100);
+
+/** A shop's address in one box, trimmed, 1 to 300 characters; the pincode is its own field (owner decision on #40, Q7). */
+export const ShopAddress = z.string().trim().min(1).max(300);
+
+/** The shop's legal form (CONTEXT.md, Shop onboarding; owner decision on #40, Q8). */
+export const ShopEntityType = z.enum(["proprietorship", "partnership_firm", "llp", "company"]);
+export type ShopEntityType = z.infer<typeof ShopEntityType>;
+
+/**
+ * A shop's own delivery distance in metres: 0.5 km steps from 0.5 km to the
+ * platform's 5 km maximum (CONTEXT.md, Service radius; owner decision on #40, Q9).
+ */
+export const ServiceRadiusMetres = z.number().int().min(500).max(5000).multipleOf(500);
+
+/** A calendar date such as an FSSAI expiry, written `YYYY-MM-DD` (ONB-3). */
+export const CalendarDate = z.iso.date();

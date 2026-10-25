@@ -2,14 +2,18 @@ import {
   Account,
   ErrorEnvelope,
   HealthResponse,
+  MyShopApplicationResponse,
   SavedAddress,
   SavedAddressesResponse,
   Serviceability,
   Session,
+  ShopApplication,
   type AppIdentity,
   type ChangeNameBody,
   type RequestCodeBody,
   type SaveAddressBody,
+  type SaveShopApplicationBody,
+  type SendShopApplicationBody,
   type SetProfileBody,
   type SetThemeBody,
   type VerifyCodeBody,
@@ -316,6 +320,26 @@ export function createApiClient({
     /** `DELETE /v1/me/addresses/:id` */
     async removeAddress(id: string): Promise<ApiResult<undefined>> {
       return empty(await signedIn("DELETE", `/v1/me/addresses/${encodeURIComponent(id)}`));
+    },
+
+    /** `GET /v1/me/shop-application`: the account's shop application, or null before Start (S18). */
+    async shopApplication(): Promise<ApiResult<MyShopApplicationResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-application"), MyShopApplicationResponse);
+    },
+
+    /** `POST /v1/me/shop-application`: starts a Draft and makes the account its Owner (ACC-5). */
+    async startShopApplication(): Promise<ApiResult<ShopApplication>> {
+      return result(await signedIn("POST", "/v1/me/shop-application"), ShopApplication);
+    },
+
+    /** `PATCH /v1/me/shop-application`: Save draft. */
+    async saveShopApplication(body: SaveShopApplicationBody): Promise<ApiResult<ShopApplication>> {
+      return result(await signedIn("PATCH", "/v1/me/shop-application", body), ShopApplication);
+    },
+
+    /** `POST /v1/me/shop-application/send`: saves every field and sends the Draft for review. */
+    async sendShopApplication(body: SendShopApplicationBody): Promise<ApiResult<ShopApplication>> {
+      return result(await signedIn("POST", "/v1/me/shop-application/send", body), ShopApplication);
     },
 
     /**

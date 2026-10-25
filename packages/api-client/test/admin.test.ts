@@ -293,6 +293,47 @@ describe("Admin browser API client", () => {
     expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
   });
 
+  it("lists, reads, corrects, starts review of and approves shop applications", async () => {
+    const application = { ...{
+  id: "00000000-0000-4000-8000-000000000401",
+  state: "draft",
+  shopName: "Sai General Stores",
+  address: null,
+  pincode: null,
+  location: null,
+  ownerName: "Asha Kulkarni",
+  entityType: null,
+  pan: null,
+  fssaiNumber: null,
+  fssaiExpiry: null,
+  serviceRadiusMetres: 2000,
+  upiId: null,
+  areaName: null,
+  ownerPhone: "+919876543210",
+  ownerEmail: "asha@example.com",
+  submittedAt: null,
+}, state: "submitted", areaName: "Kothrud", submittedAt: "2026-10-25T10:00:00.000Z" };
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET" && path.endsWith("/shop-applications")) return answer(200, { applications: [application] });
+      return answer(200, application);
+    });
+    const correction = { upiId: "asha@oksbi", reason: "Owner gave the right UPI id" };
+    const path = `/v1/admin/shop-applications/${application.id}`;
+    expect(await client.listShopApplications()).toEqual({ ok: true, data: { applications: [application] } });
+    expect(await client.getShopApplication(application.id)).toEqual({ ok: true, data: application });
+    expect(await client.correctShopApplication(application.id, correction)).toEqual({ ok: true, data: application });
+    expect(await client.startShopApplicationReview(application.id)).toEqual({ ok: true, data: application });
+    expect(await client.approveShopApplication(application.id)).toEqual({ ok: true, data: application });
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      ["/v1/admin/shop-applications", "GET", undefined],
+      [path, "GET", undefined],
+      [path, "PATCH", correction],
+      [`${path}/start-review`, "POST", undefined],
+      [`${path}/approve`, "POST", undefined],
+    ]);
+  });
+
   it("passes on each pincode another Area holds", async () => {
     const conflicts = [{ pincode: "411038", areaName: "Kothrud" }];
     const { client } = setup(({ path }) =>
