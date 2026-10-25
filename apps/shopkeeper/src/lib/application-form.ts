@@ -1,6 +1,7 @@
 import {
   type AddressPoint,
   CalendarDate,
+  invalidFields,
   SaveShopApplicationBody,
   SendShopApplicationBody,
   ServiceRadiusMetres,
@@ -47,7 +48,11 @@ export function isoDate(typed: string): string {
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
 
-/** Every field as the server takes it: trimmed, an empty one as null, and the expiry as YYYY-MM-DD. */
+/**
+ * Every field as the server takes it: trimmed, an empty one as null, and the
+ * expiry as YYYY-MM-DD. The location is left out until the phone gives one,
+ * so a save never erases one taken at the shop on another phone (#295 review, Q5).
+ */
 function bodyFrom(typed: Typed) {
   return {
     ...Object.fromEntries(
@@ -58,13 +63,8 @@ function bodyFrom(typed: Typed) {
     ),
     entityType: typed.entityType,
     serviceRadiusMetres: typed.serviceRadiusMetres,
-    location: typed.location,
+    ...(typed.location && { location: typed.location }),
   };
-}
-
-/** The fields named by a failed check. */
-function named(issues: { path: PropertyKey[] }[]): Field[] {
-  return shown(issues.map((issue) => String(issue.path[0])));
 }
 
 /**
@@ -74,24 +74,30 @@ function named(issues: { path: PropertyKey[] }[]): Field[] {
  */
 export function draftBody(typed: Typed): { ok: true; body: SaveShopApplicationBody } | { ok: false; wrong: Field[] } {
   const checked = SaveShopApplicationBody.safeParse(bodyFrom(typed));
-  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: named(checked.error.issues) };
+  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: shown(invalidFields(checked.error)) };
 }
 
 /** Send's body (#295): every field must be filled in and keep its rule, and the FSSAI licence must be valid after today. */
 export function sendBody(typed: Typed): { ok: true; body: SendShopApplicationBody } | { ok: false; wrong: Field[] } {
   const checked = SendShopApplicationBody.safeParse(bodyFrom(typed));
-  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: named(checked.error.issues) };
+  return checked.success ? { ok: true, body: checked.data } : { ok: false, wrong: shown(invalidFields(checked.error)) };
 }
 
-/** True when the typed FSSAI expiry is a real date that Send refuses: today or earlier in India. */
-export function expired(typed: Typed): boolean {
-  const date = isoDate(typed.fssaiExpiry.trim());
-  return CalendarDate.safeParse(date).success && !SendShopApplicationBody.shape.fssaiExpiry.safeParse(date).success;
+/**
+ * True when the typed FSSAI expiry is a real date. A refused one then has
+ * passed, whichever clock refused it: the phone's or the server's (#295 review, Q2).
+ */
+export function realDate(typed: Typed): boolean {
+  return CalendarDate.safeParse(isoDate(typed.fssaiExpiry.trim())).success;
 }
 
-/** The named fields this form shows, such as the `error.fields` of a refusal. */
+/**
+ * The named fields this form shows, such as the `error.fields` of a refusal.
+ * A part of a field, such as `location.latitude`, names the field.
+ */
 export function shown(fields: string[] | undefined): Field[] {
-  return (fields ?? []).filter((field): field is Field => field === "entityType" || field === "location" || textFields.includes(field as TextField));
+  const named = new Set((fields ?? []).map((field) => field.split(".")[0] ?? field));
+  return [...named].filter((field): field is Field => field === "entityType" || field === "location" || textFields.includes(field as TextField));
 }
 
 /** True when the form differs from what was last saved. */

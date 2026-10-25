@@ -1,4 +1,4 @@
-import { type ShopApplication, ShopEntityType } from "@ygo/contracts";
+import { type SendShopApplicationBody, type ShopApplication, ShopEntityType } from "@ygo/contracts";
 import { formatNumber, formatPhone } from "@ygo/format";
 import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, ThemePicker } from "@ygo/mobile";
 import * as Location from "expo-location";
@@ -9,8 +9,8 @@ import { api, session } from "../api";
 import {
   changed,
   draftBody,
-  expired,
   type Field,
+  realDate,
   sendBody,
   shown,
   stepRadius,
@@ -55,9 +55,10 @@ const inputs: Record<TextField, TextInputProps> = {
  * in four groups with Send and Save draft. Save draft checks each filled-in
  * field with the server's rule, and an empty one is fine (#276, Q5). Send
  * checks every field with the server's Send rule, then asks first (Q6).
- * `onSent` reloads once it is sent, from this phone or another.
+ * `onSent` gets the sent application from this phone, or nothing when it
+ * was sent from another phone and must be loaded.
  */
-export function ApplicationForm({ application, onSent }: { application: ShopApplication; onSent: () => void }) {
+export function ApplicationForm({ application, onSent }: { application: ShopApplication; onSent: (sent?: ShopApplication) => void }) {
   const insets = useSafeAreaInsets();
   const [saved, setSaved] = useState(() => typedFrom(application));
   const [typed, setTyped] = useState(saved);
@@ -66,14 +67,16 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
-  const [asking, setAsking] = useState(false);
+  // The checked body while Send asks first.
+  const [asking, setAsking] = useState<SendShopApplicationBody | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [locating, setLocating] = useState(false);
   // This visit's fix: a reopened Draft has only the saved location, with no accuracy (#295, Q3).
   const [fix, setFix] = useState<{ accuracy: number | null } | null>(null);
   const [problem, setProblem] = useState<keyof typeof problems | null>(null);
-  // Set before React re-renders, so a second tap never saves or sends twice.
+  // Set before React re-renders, so a second tap never saves, sends or looks twice.
   const working = useRef(false);
+  const looking = useRef(false);
   const busy = saving || sending;
 
   function edit(field: Field | "serviceRadiusMetres", next: Partial<Typed>) {
@@ -83,15 +86,23 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     setJustSaved(false);
   }
 
-  /** Marks each named field with its message; a licence date that has passed says so (#295, Q5). */
+  /**
+   * Marks each named field with its message, replacing an old location
+   * problem. A real licence date that is refused has passed (#295, Q5).
+   */
   function mark(fields: Field[]) {
-    setWrong(Object.fromEntries(fields.map((field) => [field, field === "fssaiExpiry" && expired(typed) ? words.fssaiExpiry.expired : words[field].invalid])));
+    setProblem(null);
+    setWrong(Object.fromEntries(fields.map((field) => [field, field === "fssaiExpiry" && realDate(typed) ? words.fssaiExpiry.expired : words[field].invalid])));
   }
 
   async function locate() {
+    if (looking.current) return;
+    looking.current = true;
     setLocating(true);
     setProblem(null);
+    setFix(null);
     const found = await findPlace(locator);
+    looking.current = false;
     setLocating(false);
     if (found.kind !== "found") return setProblem(found.kind);
     setFix({ accuracy: found.accuracy });
@@ -101,6 +112,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
   async function save() {
     if (working.current) return;
     setJustSaved(false);
+    setProblem(null);
     const draft = draftBody(typed);
     if (!draft.ok) {
       mark(draft.wrong);
@@ -136,20 +148,22 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
       return setMessage(words.wrong);
     }
     setMessage(null);
-    setAsking(true);
+    setProblem(null);
+    setAsking(checked.body);
   }
 
-  async function send() {
-    setAsking(false);
-    const checked = sendBody(typed);
-    if (working.current || !checked.ok) return;
+  async function send(body: SendShopApplicationBody) {
+    setAsking(null);
+    if (working.current) return;
     working.current = true;
     setSending(true);
-    const answer = await api.sendShopApplication(checked.body).catch(() => null);
+    const answer = await api.sendShopApplication(body).catch(() => null);
     working.current = false;
     setSending(false);
     if (!answer) return setMessage(words.sendOffline);
-    if (answer.ok || answer.code === "SHOP_APPLICATION_SENT") return onSent();
+    // The answer is the sent application, so "Application sent" needs no second request (#295 review, Q4).
+    if (answer.ok) return onSent(answer.data);
+    if (answer.code === "SHOP_APPLICATION_SENT") return onSent();
     if (answer.code === "PINCODE_NOT_IN_AREA") {
       setWrong({ pincode: words.pincode.notInArea });
       return setMessage(words.wrong);
@@ -287,13 +301,15 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
           <Button label={sending ? words.sending : words.send} onPress={ask} disabled={busy || locating} />
           <Button label={saving ? words.saving : words.save} onPress={() => void save()} disabled={busy || locating} variant="secondary" />
           <Confirm
-            visible={asking}
+            visible={asking !== null}
             title={strings.application.confirmSend.title}
             body={strings.application.confirmSend.body}
             confirm={strings.application.confirmSend.send}
             cancel={strings.application.confirmSend.cancel}
-            onConfirm={() => void send()}
-            onCancel={() => setAsking(false)}
+            onConfirm={() => {
+              if (asking) void send(asking);
+            }}
+            onCancel={() => setAsking(null)}
           />
         </View>
 

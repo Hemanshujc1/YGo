@@ -1,6 +1,6 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { changed, draftBody, expired, isoDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
+import { changed, draftBody, isoDate, realDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
 
 const draft: ShopApplication = {
   id: "8f6c1f0e-1d2b-4c3a-9e8f-7a6b5c4d3e2f",
@@ -69,9 +69,13 @@ describe("draftBody", () => {
         upiId: "asha@okhdfcbank",
         entityType: null,
         serviceRadiusMetres: 2000,
-        location: null,
       },
     });
+  });
+
+  it("leaves the location out until the phone gives one, so a saved one is never erased", () => {
+    const answer = draftBody(typedFrom(draft));
+    expect(answer.ok && "location" in answer.body).toBe(false);
   });
 
   it("sends the location from the phone", () => {
@@ -131,18 +135,22 @@ describe("sendBody", () => {
   });
 });
 
-describe("expired", () => {
-  it("is true only for a real date that is not after today", () => {
-    expect(expired({ ...filled, fssaiExpiry: "01/01/2020" })).toBe(true);
-    expect(expired(filled)).toBe(false);
-    expect(expired({ ...filled, fssaiExpiry: "31/02/2020" })).toBe(false);
-    expect(expired({ ...filled, fssaiExpiry: "" })).toBe(false);
+describe("realDate", () => {
+  it("is true for a real date, past or future, and false for anything else", () => {
+    expect(realDate({ ...filled, fssaiExpiry: "01/01/2020" })).toBe(true);
+    expect(realDate(filled)).toBe(true);
+    expect(realDate({ ...filled, fssaiExpiry: "31/02/2020" })).toBe(false);
+    expect(realDate({ ...filled, fssaiExpiry: "" })).toBe(false);
   });
 });
 
 describe("shown", () => {
   it("keeps the server's named fields that the form shows", () => {
     expect(shown(["pan", "location", "areaName", "entityType"])).toEqual(["pan", "location", "entityType"]);
+  });
+
+  it("names the field for a part of it, once", () => {
+    expect(shown(["location.latitude", "location.longitude", "pan"])).toEqual(["location", "pan"]);
     expect(shown(undefined)).toEqual([]);
   });
 });
