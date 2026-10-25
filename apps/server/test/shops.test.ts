@@ -169,6 +169,28 @@ describe("shop application", () => {
     expect(await read(headers)).toEqual({ application: sent.json() });
   });
 
+  it("waits out an Admin Area save that moves the pincode, and takes the new Area", async () => {
+    await area("411038");
+    const { headers } = await owner("asha@example.com");
+    await start(headers);
+    const baner = await database.pool.query<{ id: string }>("INSERT INTO areas (name, paused) VALUES ('Baner', false) RETURNING id");
+    const admin = await database.pool.connect();
+    try {
+      // The Area save in routes/areas.ts, left open.
+      await admin.query("BEGIN");
+      await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
+      await admin.query("DELETE FROM area_pincodes WHERE pincode = '411038'");
+      await admin.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411038', $1)", [baner.rows[0]?.id]);
+      const sending = send(headers, complete);
+      const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
+      for (let tries = 0; tries < 100 && !(await database.pool.query(waiting)).rowCount; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await admin.query("COMMIT");
+      expect((await sending).json().areaName).toBe("Baner");
+    } finally { admin.release(); }
+  });
+
   it("names each missing field and a past FSSAI expiry together", async () => {
     await area("411038");
     const { headers } = await owner("asha@example.com");

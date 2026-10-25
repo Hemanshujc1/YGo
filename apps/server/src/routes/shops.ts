@@ -11,13 +11,12 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
+import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
 /** Reads an application with its Area and the Owner's phone and email. */
 const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
-  CASE WHEN s.location IS NULL THEN NULL
-    ELSE json_build_object('latitude', ST_Y(s.location::geometry), 'longitude', ST_X(s.location::geometry)) END AS location,
-  s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
+  ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
   to_char(s.fssai_expiry, 'YYYY-MM-DD') AS "fssaiExpiry", s.service_radius_metres AS "serviceRadiusMetres",
   s.upi_id AS "upiId", ar.name AS "areaName", a.phone AS "ownerPhone", a.email AS "ownerEmail",
   s.submitted_at AS "submittedAt"
@@ -26,14 +25,14 @@ const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.addre
   JOIN accounts a ON a.id = m.account_id
   LEFT JOIN areas ar ON ar.id = s.area_id`;
 
-async function application(client: Pool | PoolClient, shopId: string): Promise<ShopApplication> {
+/** The application whose `column` (`s.id` or the Owner's `m.account_id`) is `value`, or null. */
+async function application(client: Pool | PoolClient, column: "s.id" | "m.account_id", value: string): Promise<ShopApplication | null> {
   const row = await client.query<Omit<ShopApplication, "submittedAt"> & { submittedAt: Date | null }>(
-    `${applicationSql} WHERE s.id = $1`,
-    [shopId],
+    `${applicationSql} WHERE ${column} = $1`,
+    [value],
   );
   const found = row.rows[0];
-  if (!found) throw new Error("Shop application missing");
-  return { ...found, submittedAt: found.submittedAt?.toISOString() ?? null };
+  return found ? { ...found, submittedAt: found.submittedAt?.toISOString() ?? null } : null;
 }
 
 const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
@@ -58,10 +57,7 @@ function assignments(body: SaveShopApplicationBody): { sets: string[]; values: u
     if (field === "location") {
       const point = value as AddressPoint | null;
       values.push(point?.latitude ?? null, point?.longitude ?? null);
-      const latitude = `$${values.length - 1}::float8`;
-      const longitude = `$${values.length}::float8`;
-      sets.push(`location = CASE WHEN ${latitude} IS NULL THEN NULL
-        ELSE ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography END`);
+      sets.push(`location = ${pointFrom(`$${values.length - 1}`, `$${values.length}`)}`);
     } else {
       values.push(value);
       sets.push(`${columns[field as keyof typeof columns]} = $${values.length}`);
@@ -87,12 +83,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
   app.get("/v1/me/shop-application", { schema: { response: { 200: MyShopApplicationResponse, ...response } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const row = await pool.query<{ shopId: string }>(
-      `SELECT shop_id AS "shopId" FROM shop_members WHERE account_id = $1 AND role = 'owner'`,
-      [who.accountId],
-    );
-    const shopId = row.rows[0]?.shopId;
-    return { application: shopId ? await application(pool, shopId) : null };
+    return { application: await application(pool, "m.account_id", who.accountId) };
   });
 
   // Start creates the Draft and makes the account its Owner, in one go (ACC-5).
@@ -116,7 +107,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       const shopId = inserted.rows[0]?.id;
       if (!shopId) throw new Error("Shop insert returned no ID");
       await client.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'owner')", [who.accountId, shopId]);
-      const saved = await application(client, shopId);
+      const saved = await application(client, "s.id", shopId);
       await client.query("COMMIT");
       return reply.code(201).send(saved);
     });
@@ -134,7 +125,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       if (sets.length) {
         await client.query(`UPDATE shops SET ${sets.join(", ")} WHERE id = $${values.length + 1}`, [...values, shop.id]);
       }
-      const saved = await application(client, shop.id);
+      const saved = await application(client, "s.id", shop.id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
     });
@@ -150,6 +141,9 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       const shop = await ownShop(client, who.accountId);
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "draft") return reply.code(409).send({ error: { code: "SHOP_APPLICATION_SENT" } });
+      // Waits out an Admin Area save, so the pincode can't move to another
+      // Area while this Send lands; Sends and serviceability reads don't wait.
+      await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
       // A paused Area still counts: it keeps its pincodes (#214).
       const area = await client.query<{ areaId: string }>(`SELECT area_id AS "areaId" FROM area_pincodes WHERE pincode = $1`, [body.pincode]);
       const areaId = area.rows[0]?.areaId;
@@ -160,7 +154,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
          WHERE id = $${next + 2}`,
         [...values, areaId, clock.now(), shop.id],
       );
-      const saved = await application(client, shop.id);
+      const saved = await application(client, "s.id", shop.id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
     });

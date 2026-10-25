@@ -1,5 +1,5 @@
 {
-  "id": "65a9be02-a0d6-44c0-818a-30aa2432084a",
+  "id": "67218d7f-ff2c-4d41-985c-1d437851974b",
   "prevId": "e0368153-3565-4d6d-aa44-66dfdb67f9b3",
   "version": "7",
   "dialect": "postgresql",
@@ -1400,7 +1400,23 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "shops_area_id_idx": {
+          "name": "shops_area_id_idx",
+          "columns": [
+            {
+              "expression": "area_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "shops_area_id_areas_id_fk": {
           "name": "shops_area_id_areas_id_fk",

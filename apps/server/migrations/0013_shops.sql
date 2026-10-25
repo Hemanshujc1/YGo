@@ -35,4 +35,5 @@ CREATE TABLE "shops" (
 ALTER TABLE "shop_members" ADD CONSTRAINT "shop_members_account_id_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."accounts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shop_members" ADD CONSTRAINT "shop_members_shop_id_shops_id_fk" FOREIGN KEY ("shop_id") REFERENCES "public"."shops"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shops" ADD CONSTRAINT "shops_area_id_areas_id_fk" FOREIGN KEY ("area_id") REFERENCES "public"."areas"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "shop_members_shop_id_idx" ON "shop_members" USING btree ("shop_id");
+CREATE INDEX "shop_members_shop_id_idx" ON "shop_members" USING btree ("shop_id");--> statement-breakpoint
+CREATE INDEX "shops_area_id_idx" ON "shops" USING btree ("area_id");

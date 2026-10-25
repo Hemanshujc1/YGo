@@ -176,6 +176,7 @@ export const shops = pgTable("shops", {
     AND ${table.entityType} IS NOT NULL AND ${table.pan} IS NOT NULL AND ${table.fssaiNumber} IS NOT NULL
     AND ${table.fssaiExpiry} IS NOT NULL AND ${table.upiId} IS NOT NULL AND ${table.areaId} IS NOT NULL
     AND ${table.submittedAt} IS NOT NULL)`),
+  index("shops_area_id_idx").on(table.areaId),
 ]);
 
 // An account's link to a shop, as Owner or Staff. The account is the key, so
