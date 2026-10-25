@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -27,6 +27,12 @@ const apple = {
 const applePack = { id: "00000000-0000-4000-8000-000000000401", productId: apple.id, quantity: "2", barcode: "12345678", active: true };
 const kothrud = { id: "00000000-0000-4000-8000-000000000201", name: "Kothrud", pincodes: ["411038"], paused: false };
 const aundh = { id: "00000000-0000-4000-8000-000000000202", name: "Aundh", pincodes: ["411007", "411027"], paused: true };
+const application = {
+  id: "00000000-0000-4000-8000-000000000501", state: "submitted" as const, shopName: "Fresh Mart", address: "Main Road",
+  pincode: "411038", location: { latitude: 18.5, longitude: 73.8 }, ownerName: "Owner Name", entityType: "proprietorship" as const,
+  pan: "ABCDE1234F", fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000, upiId: "owner@upi",
+  areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com", submittedAt: "2026-10-24T10:00:00.000Z",
+};
 
 function setup(path: string, overrides: Record<string, unknown> = {}) {
   const api = {
@@ -395,6 +401,105 @@ describe("Admin web", () => {
     expect(screen.getByText("Apples")).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: strings.searchProducts }), { target: { value: "pear" } });
     expect(screen.getByText(strings.noProductMatches)).toBeTruthy();
+  });
+
+  it("lists applications with their states and opens the review", async () => {
+    const { api } = setup("/applications", { listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [application] } }), getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }) });
+    await screen.findByRole("heading", { name: strings.applications });
+    expect(screen.getByText(application.shopName)).toBeTruthy();
+    expect(screen.getByText(strings.applicationState.submitted)).toBeTruthy();
+    expect(screen.getByText(application.areaName)).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: application.shopName }));
+    await screen.findByRole("heading", { name: application.shopName });
+    expect(screen.getByText(application.ownerEmail)).toBeTruthy();
+    expect(screen.getByText("98765 43210")).toBeTruthy();
+    expect(screen.getByRole("link", { name: strings.openGoogleMaps })).toBeTruthy();
+    expect(api.getShopApplication).toHaveBeenCalledWith(application.id);
+  });
+
+  it("corrects a field with a reason and validates against the contract", async () => {
+    const corrected = { ...application, shopName: "Fresh Foods" };
+    const api = { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication: vi.fn().mockResolvedValue({ ok: true, data: corrected }) };
+    setup(`/applications/${application.id}`, api);
+    await screen.findByRole("heading", { name: application.shopName });
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.shopName) }));
+    fireEvent.change(screen.getByLabelText(strings.shopName), { target: { value: "Fresh Foods" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
+    expect(await screen.findByText(strings.applicationInvalidFields.reason)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Owner updated the name" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.correctionSaved);
+    expect(api.correctShopApplication).toHaveBeenCalledWith(application.id, { shopName: "Fresh Foods", reason: "Owner updated the name" });
+  });
+
+  it("opens corrections in a focused dialog and keeps the value when cancelling the reason", async () => {
+    const correctShopApplication = vi.fn();
+    setup(`/applications/${application.id}`, { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication });
+    await screen.findByRole("heading", { name: application.shopName });
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.shopName) }));
+    const dialog = screen.getByRole("dialog", { name: strings.editField(strings.shopName) });
+    const input = within(dialog).getByLabelText(strings.shopName);
+    expect(input).toHaveProperty("value", application.shopName);
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "Fresh Foods" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.saveCorrection }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.cancel }));
+    expect(within(screen.getByRole("dialog")).getByLabelText(strings.shopName)).toHaveProperty("value", "Fresh Foods");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(correctShopApplication).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: application.shopName })).toBeTruthy();
+  });
+
+  it("requires both coordinates and saves the radius in metres", async () => {
+    const correctShopApplication = vi.fn().mockResolvedValue({ ok: true, data: { ...application, serviceRadiusMetres: 2500 } });
+    setup(`/applications/${application.id}`, { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication });
+    await screen.findByRole("heading", { name: application.shopName });
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.location) }));
+    fireEvent.change(screen.getByLabelText(strings.latitude), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+    expect(screen.getByText(strings.applicationInvalidFields.location)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: strings.editField(strings.location) })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.cancel }));
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.serviceRadius) }));
+    fireEvent.change(screen.getByLabelText(strings.serviceRadius), { target: { value: "2.5" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Owner confirmed coverage" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
+    await screen.findByText(strings.correctionSaved);
+    expect(correctShopApplication).toHaveBeenCalledWith(application.id, { serviceRadiusMetres: 2500, reason: "Owner confirmed coverage" });
+  });
+
+  it("starts review and approves only from the matching application states", async () => {
+    const underReview = { ...application, state: "under_review" as const };
+    const approved = { ...application, state: "approved" as const };
+    const api = { getShopApplication: vi.fn().mockResolvedValueOnce({ ok: true, data: application }).mockResolvedValueOnce({ ok: true, data: underReview }),
+      startShopApplicationReview: vi.fn().mockResolvedValue({ ok: true, data: underReview }), approveShopApplication: vi.fn().mockResolvedValue({ ok: true, data: approved }) };
+    setup(`/applications/${application.id}`, api);
+    await screen.findByRole("button", { name: strings.startReview });
+    fireEvent.click(screen.getByRole("button", { name: strings.startReview }));
+    expect(await screen.findByText(strings.reviewStarted)).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.approveApplication })).toBeTruthy();
+    expect(api.startShopApplicationReview).toHaveBeenCalledWith(application.id);
+    fireEvent.click(screen.getByRole("button", { name: strings.approveApplication }));
+    expect(await screen.findByText(strings.applicationApproved)).toBeTruthy();
+    expect(api.approveShopApplication).toHaveBeenCalledWith(application.id);
+  });
+
+  it("shows loading, empty and retryable error states for applications", async () => {
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise((answer) => { resolve = answer; });
+    const api = vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ ok: true, data: { applications: [] } });
+    setup("/applications", { listShopApplications: api });
+    expect(screen.getByText(strings.applicationsLoading)).toBeTruthy();
+    resolve({ ok: false, status: 503, code: "UNAVAILABLE" });
+    expect(await screen.findByText(strings.failed)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    expect(await screen.findByText(strings.noApplications)).toBeTruthy();
+    expect(api).toHaveBeenCalledTimes(2);
   });
 
   it("loads packs, creates a counted pack, edits it and deactivates with a reason", async () => {
