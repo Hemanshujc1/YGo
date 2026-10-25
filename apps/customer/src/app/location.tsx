@@ -1,4 +1,4 @@
-import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
+import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, useSession } from "@ygo/mobile";
 import type { AddressLabel, AddressPoint, SavedAddress } from "@ygo/contracts";
 import * as Location from "expo-location";
 import { router, useFocusEffect, useNavigation } from "expo-router";
@@ -19,7 +19,7 @@ import { api, session } from "../api";
 import { Briefcase, House, MapPin, Search } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { goHome } from "../lib/go-home";
-import { findPlace, type Locator, newestOnly, refusedSearch, stale } from "../lib/location-flow";
+import { newestOnly, refusedSearch, stale } from "../lib/location-flow";
 import { searchPlaces, type Spot } from "../lib/map-place";
 import { phoneGeocoder } from "../lib/phone-geocoder";
 import {

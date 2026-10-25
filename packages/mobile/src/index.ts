@@ -1,4 +1,5 @@
 export { AppShell } from "./app-shell";
+export { findPlace, type Found, type Locator } from "./find-place";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
 export { createSession, useSession, type AppSession, type SessionState } from "./session";
 export { SessionGate, type SessionGateWords } from "./session-gate";
