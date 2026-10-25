@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  test: { setupFiles: ["src/test-setup.ts"] },
+  test: { setupFiles: ["src/test-setup.ts"], testTimeout: 10_000 },
   // In development the page and the API share one origin: /v1 goes to the
   // local server (apps/server). See README.md.
   server: {
