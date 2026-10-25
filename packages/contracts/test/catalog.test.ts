@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreateMasterProductBody, EditMasterProductBody, ErrorEnvelope, invalidFields } from "../src/index";
+import { CreateCategoryBody, CreateMasterProductBody, EditCategoryBody, EditMasterProductBody, ErrorEnvelope, invalidFields } from "../src/index";
 
 const body = {
   name: "Apples",
@@ -23,6 +23,22 @@ describe("master product contracts", () => {
   it("allows image-free edits and requires a non-reason edit field", () => {
     expect(EditMasterProductBody.parse({ name: "Red apples" })).toEqual({ name: "Red apples" });
     expect(EditMasterProductBody.safeParse({ reason: "A reason alone is not an edit" }).success).toBe(false);
+  });
+
+  it.each(["name", "brand"])("rejects NUL in product %s on create and edit", (field) => {
+    for (const schema of [CreateMasterProductBody, EditMasterProductBody]) {
+      const result = schema.safeParse({ ...body, [field]: "Farm\0fresh" });
+      if (result.success) throw new Error("expected NUL to be rejected");
+      expect(invalidFields(result.error)).toEqual([field]);
+    }
+  });
+
+  it("rejects NUL in category names on create and edit", () => {
+    for (const schema of [CreateCategoryBody, EditCategoryBody]) {
+      const result = schema.safeParse({ name: "Fruit\0fresh" });
+      if (result.success) throw new Error("expected NUL to be rejected");
+      expect(invalidFields(result.error)).toEqual(["name"]);
+    }
   });
 
   it("carries a draft ID with an unavailable response for image retries", () => {
