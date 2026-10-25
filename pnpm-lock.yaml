@@ -684,6 +684,9 @@ importers:
       '@ygo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@ygo/tokens':
+        specifier: workspace:*
+        version: link:../tokens
     devDependencies:
       '@types/node':
         specifier: 26.6.4

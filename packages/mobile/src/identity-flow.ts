@@ -1,3 +1,4 @@
+import { rejected } from "./sign-in-flow";
 import type { ApiResult } from "@ygo/api-client";
 import type { Account, IdentityChallengeBody, VerifyIdentityBody, IdentityChallenge, IdentityEmailRequired, ErrorCode } from "@ygo/contracts";
 
@@ -30,6 +31,6 @@ export async function signInWithIdentity(
       ? { email: answer.data.emailVerificationRequired }
       : { signedIn: answer.data };
   } catch (error) {
-    return { problem: error instanceof TypeError || (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) ? "offline" as const : "not-saved" as const };
+    return { problem: rejected(error) };
   }
 }

@@ -1,3 +1,4 @@
+import type { Clock } from "./clock";
 import { randomUUID } from "node:crypto";
 import { Email, type IdentityProvider } from "@ygo/contracts";
 import { createRemoteJWKSet, errors, jwtVerify } from "jose";
@@ -12,7 +13,7 @@ export interface IdentityVerifier {
   verify(provider: IdentityProvider, token: string, nonce?: string): Promise<Identity | null>;
 }
 
-export function createIdentityVerifier(audiences: Record<IdentityProvider, string[]>): IdentityVerifier {
+export function createIdentityVerifier(audiences: Record<IdentityProvider, string[]>, clock: Clock): IdentityVerifier {
   const keys = {
     google: createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs")),
     apple: createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys")),
@@ -23,6 +24,7 @@ export function createIdentityVerifier(audiences: Record<IdentityProvider, strin
       try {
         const { payload } = await jwtVerify(token, keys[provider], {
           algorithms: ["RS256"],
+          currentDate: clock.now(),
           issuer: provider === "google" ? ["https://accounts.google.com", "accounts.google.com"] : "https://appleid.apple.com",
           audience: audiences[provider],
           requiredClaims: ["sub", "exp", "iat", "email", "email_verified", "nonce"],

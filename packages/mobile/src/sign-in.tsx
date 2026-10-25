@@ -90,7 +90,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice, identity 
     return outcome;
   }
 
-  async function sendForProvider(email: string) {
+  async function openCode(email: string) {
     const problem = needsSend(email, memory, moment()) ? await send(email) : null;
     if (!problem) setCodeFor(email);
     return problem;
@@ -122,7 +122,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice, identity 
             providerSignIn={async (provider, token) => {
               const outcome = await signInWithIdentity(api, provider, token);
               if ("signedIn" in outcome) { remember(new Map()); onSignedIn(outcome.signedIn); }
-              if ("email" in outcome) { setTyped(outcome.email); return sendForProvider(outcome.email); }
+              if ("email" in outcome) { setTyped(outcome.email); return openCode(outcome.email); }
               return "problem" in outcome ? outcome.problem : null;
             }}
             supportEmail={supportEmail}
@@ -132,11 +132,7 @@ export function SignIn({ words, supportEmail, api, onSignedIn, notice, identity 
               setNoticeGone(true);
             }}
             notice={noticeGone ? undefined : notice}
-            send={async (email) => {
-              const problem = needsSend(email, memory, moment()) ? await send(email) : null;
-              if (!problem) setCodeFor(email);
-              return problem;
-            }}
+            send={openCode}
           />
         )}
       </ScrollView>

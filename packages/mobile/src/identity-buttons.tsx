@@ -1,3 +1,4 @@
+import { radii } from "@ygo/tokens";
 import * as Apple from "expo-apple-authentication";
 import { cssInterop, useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
@@ -49,15 +50,17 @@ export function IdentityButtons({ config, busy, start }: {
 
   return (
     <View className="my-8 gap-3">
-      <View className="h-12">
-      {busy === "google" ? <ActivityIndicator className="h-12 text-primary" /> : <GoogleButton
-        colorScheme={colorScheme === "dark" ? "dark" : "light"}
-        size="wide"
-        className="h-12 w-full"
-        signInBehavior="none"
-        disabled={busy !== null}
-        onPress={() => start("google", google)}
-      />}
+      <View className="h-12" accessibilityState={{ disabled: busy !== null, busy: busy === "google" }}>
+        {busy === "google" ? <ActivityIndicator className="h-12 text-primary" /> : (
+          <GoogleButton
+            colorScheme={colorScheme === "dark" ? "dark" : "light"}
+            size="wide"
+            className="h-12 w-full"
+            signInBehavior="none"
+            disabled={busy !== null}
+            onPress={() => start("google", google)}
+          />
+        )}
       </View>
       {appleAvailable && (
         <View className="h-12" pointerEvents={busy ? "none" : "auto"} accessibilityState={{ disabled: busy !== null, busy: busy === "apple" }}>
@@ -65,7 +68,7 @@ export function IdentityButtons({ config, busy, start }: {
             <AppleButton
               buttonType={Apple.AppleAuthenticationButtonType.SIGN_IN}
               buttonStyle={colorScheme === "dark" ? Apple.AppleAuthenticationButtonStyle.WHITE : Apple.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={8}
+              cornerRadius={radii.button}
               className="h-12 w-full"
               onPress={() => start("apple", apple)}
             />

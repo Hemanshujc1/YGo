@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // A Google OAuth iOS client is needed before prebuilding Google support.
       ...(iosClientId ? [["react-native-nitro-google-signin", {
         iosUrlScheme: iosClientId.split(".").reverse().join("."),
-      }] as [string, Record<string, string>]] : []),
+      }] as [string, Record<string, string>], "@ygo/mobile/google-sign-in-plugin"] : []),
     ],
   };
 };

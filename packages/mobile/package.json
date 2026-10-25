@@ -3,7 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./google-sign-in-plugin": "./google-sign-in.config.js"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
@@ -12,9 +13,12 @@
   },
   "dependencies": {
     "@ygo/api-client": "workspace:*",
-    "@ygo/contracts": "workspace:*"
+    "@ygo/contracts": "workspace:*",
+    "@ygo/tokens": "workspace:*"
   },
   "peerDependencies": {
+    "expo": "57.0.27",
+    "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
     "expo-secure-store": "57.0.4",
     "nativewind": "4.2.7",
@@ -22,10 +26,9 @@
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
     "react-native-mmkv": "4.3.2",
-    "react-native-nitro-modules": "0.35.9",
-    "react-native-safe-area-context": "5.7.0",
     "react-native-nitro-google-signin": "2.0.0",
-    "expo-apple-authentication": "57.0.2"
+    "react-native-nitro-modules": "0.35.9",
+    "react-native-safe-area-context": "5.7.0"
   },
   "devDependencies": {
     "@types/node": "26.6.4",
@@ -34,6 +37,7 @@
     "@ygo/tsconfig": "workspace:*",
     "eslint": "10.11.0",
     "expo": "57.0.27",
+    "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
     "expo-secure-store": "57.0.4",
     "nativewind": "4.2.7",
@@ -41,13 +45,12 @@
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
     "react-native-mmkv": "4.3.2",
+    "react-native-nitro-google-signin": "2.0.0",
     "react-native-nitro-modules": "0.35.9",
     "react-native-safe-area-context": "5.7.0",
     "react-native-svg": "15.15.4",
     "tailwindcss": "3.4.19",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
-    "react-native-nitro-google-signin": "2.0.0",
-    "expo-apple-authentication": "57.0.2"
+    "vitest": "5.0.3"
   }
 }

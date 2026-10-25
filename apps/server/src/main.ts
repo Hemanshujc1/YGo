@@ -20,6 +20,7 @@ const productImages = config.PRODUCT_IMAGE_BUCKET && imageBaseUrl
     imageBaseUrl,
   })
   : undefined;
+const clock = { now: () => new Date() };
 const app = buildApp({
   checkDatabase: database.ping,
   database,
@@ -27,8 +28,8 @@ const app = buildApp({
   identityVerifier: createIdentityVerifier({
     google: config.GOOGLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
     apple: config.APPLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
-  }),
-  clock: { now: () => new Date() },
+  }, clock),
+  clock,
   authTokenSecret: config.AUTH_TOKEN_SECRET,
   adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,
   productImages,

@@ -1,3 +1,4 @@
+import { SessionNotSaved } from "../src/sign-in-flow";
 import { describe, expect, it, vi } from "vitest";
 import { signInWithIdentity, type IdentityApi } from "../src/identity-flow";
 const account = { id: "account", email: "asha@gmail.com", name: null, phone: null, theme: "system" as const };
@@ -28,7 +29,7 @@ describe("ACC-1 provider sign-in flow", () => {
     expect(await signInWithIdentity(calls, "google", async () => { throw new Error(); })).toEqual({ problem: "provider" });
     calls.verifyIdentity = async () => ({ ok: false, status: 401, code: "UNAUTHENTICATED" });
     expect(await signInWithIdentity(calls, "google", async () => "token")).toEqual({ problem: "UNAUTHENTICATED" });
-    calls.verifyIdentity = async () => { throw new Error("keychain"); };
+    calls.verifyIdentity = async () => { throw new SessionNotSaved(new Error("keychain")); };
     expect(await signInWithIdentity(calls, "google", async () => "token")).toEqual({ problem: "not-saved" });
     calls.identityChallenge = async () => { throw new TypeError("offline"); };
     expect(await signInWithIdentity(calls, "google", async () => "token")).toEqual({ problem: "offline" });
