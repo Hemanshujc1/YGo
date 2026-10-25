@@ -18,7 +18,11 @@ import { withTransaction } from "../db";
 import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
-/** Reads an application with its Area and the Owner's phone and email. */
+/**
+ * Reads an application with the Owner's phone and email, and once sent, the
+ * Area now holding its pincode: it follows an Admin Area edit (owner decision
+ * on #280). A pincode later dropped from every Area reads as no Area.
+ */
 const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
   ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
   to_char(s.fssai_expiry, 'YYYY-MM-DD') AS "fssaiExpiry", s.service_radius_metres AS "serviceRadiusMetres",
@@ -27,7 +31,8 @@ const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.addre
   FROM shops s
   JOIN shop_members m ON m.shop_id = s.id AND m.role = 'owner'
   JOIN accounts a ON a.id = m.account_id
-  LEFT JOIN areas ar ON ar.id = s.area_id`;
+  LEFT JOIN area_pincodes p ON p.pincode = s.pincode AND s.state <> 'draft'
+  LEFT JOIN areas ar ON ar.id = p.area_id`;
 
 type ApplicationRow = Omit<ShopApplication, "submittedAt"> & { submittedAt: Date | null };
 
@@ -44,16 +49,9 @@ async function application(client: Pool | PoolClient, column: "s.id" | "m.accoun
   return row.rows[0] ? fromRow(row.rows[0]) : null;
 }
 
-/**
- * The Area holding `pincode`, or undefined. It first waits out an Admin Area
- * save, so the pincode can't move to another Area while the caller saves
- * the shop; other callers and serviceability reads don't wait.
- * A paused Area still counts: it keeps its pincodes (#214).
- */
-async function areaOf(client: PoolClient, pincode: string): Promise<string | undefined> {
-  await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
-  const area = await client.query<{ areaId: string }>(`SELECT area_id AS "areaId" FROM area_pincodes WHERE pincode = $1`, [pincode]);
-  return area.rows[0]?.areaId;
+/** Whether an Area holds `pincode`. A paused Area still counts: it keeps its pincodes (#214). */
+async function inArea(client: PoolClient, pincode: string): Promise<boolean> {
+  return Boolean((await client.query("SELECT 1 FROM area_pincodes WHERE pincode = $1", [pincode])).rowCount);
 }
 
 const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
@@ -68,6 +66,14 @@ const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
   serviceRadiusMetres: "service_radius_metres",
   upiId: "upi_id",
 };
+
+/** Whether a corrected `value` equals the stored one; a location by its latitude and longitude. */
+function unchanged(field: string, value: unknown, stored: unknown): boolean {
+  if (field !== "location") return value === stored;
+  const point = value as AddressPoint;
+  const was = stored as AddressPoint | null;
+  return was !== null && point.latitude === was.latitude && point.longitude === was.longitude;
+}
 
 /** The `SET` list and values for each field given; `null` empties one. */
 function assignments(body: SaveShopApplicationBody): { sets: string[]; values: unknown[] } {
@@ -162,13 +168,11 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       const shop = await ownShop(client, who.accountId);
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "draft") return reply.code(409).send({ error: { code: "SHOP_APPLICATION_SENT" } });
-      const areaId = await areaOf(client, body.pincode);
-      if (!areaId) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
+      if (!await inArea(client, body.pincode)) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
       const next = values.length + 1;
       await client.query(
-        `UPDATE shops SET ${sets.join(", ")}, state = 'submitted', area_id = $${next}, submitted_at = $${next + 1}
-         WHERE id = $${next + 2}`,
-        [...values, areaId, clock.now(), shop.id],
+        `UPDATE shops SET ${sets.join(", ")}, state = 'submitted', submitted_at = $${next} WHERE id = $${next + 1}`,
+        [...values, clock.now(), shop.id],
       );
       const saved = await application(client, "s.id", shop.id);
       await client.query("COMMIT");
@@ -201,19 +205,14 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       if (!old || old.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       // Compared after the contract's clean-up, so "abcde1234f" for "ABCDE1234F" is no change.
       const changed = Object.fromEntries(Object.entries(fields).filter(
-        ([field, value]) => value !== undefined && JSON.stringify(value) !== JSON.stringify(old[field as ShopApplicationField]),
+        ([field, value]) => value !== undefined && !unchanged(field, value, old[field as ShopApplicationField]),
       )) as SaveShopApplicationBody;
       const names = Object.keys(changed).map((field) => field === "location" ? "location" : columns[field as keyof typeof columns]);
       // A correction that changes nothing writes no record (as on #213).
       if (!names.length) return reply.code(200).send(old);
+      // A corrected pincode must be in an Area; the shop then reads as in it (owner decision on #275).
+      if (changed.pincode && !await inArea(client, changed.pincode)) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
       const { sets, values } = assignments(changed);
-      if (changed.pincode) {
-        // A pincode in another Area moves the shop there (owner decision on #275).
-        const areaId = await areaOf(client, changed.pincode);
-        if (!areaId) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
-        values.push(areaId);
-        sets.push(`area_id = $${values.length}`);
-      }
       await client.query(`UPDATE shops SET ${sets.join(", ")} WHERE id = $${values.length + 1}`, [...values, id]);
       await client.query(
         `INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason)
@@ -244,9 +243,8 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
           "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, $2, $3, 'shop', $4)",
           [who.accountId, action, id, reason],
         );
-        const saved = await application(client, "s.id", id);
         await client.query("COMMIT");
-        return reply.code(200).send(saved);
+        return reply.code(200).send({ ...old, state: to });
       });
     });
   }

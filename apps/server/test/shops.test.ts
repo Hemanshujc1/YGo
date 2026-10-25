@@ -49,10 +49,15 @@ afterEach(async () => {
   } finally { await root.end(); }
 });
 
+/** The sign-in code last mailed to `email`. */
+function codeFor(email: string) {
+  return mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1] ?? "";
+}
+
 /** Signs someone in on the Shopkeeper app, with a name and phone unless `profile` is false. */
 async function owner(email: string, profile = true, phone = "+919876543210") {
   await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email } });
-  const code = mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1] ?? "";
+  const code = codeFor(email);
   const signed = (await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email, code } })).json();
   clock.advance(1_000);
   const headers = { authorization: `Bearer ${signed.accessToken as string}` };
@@ -171,26 +176,16 @@ describe("shop application", () => {
     expect(await read(headers)).toEqual({ application: sent.json() });
   });
 
-  it("waits out an Admin Area save that moves the pincode, and takes the new Area", async () => {
+  it("follows the pincode when an Admin moves it to another Area, or out of every Area", async () => {
     await area("411038");
     const { headers } = await owner("asha@example.com");
     await start(headers);
+    await send(headers, complete);
     const baner = await database.pool.query<{ id: string }>("INSERT INTO areas (name, paused) VALUES ('Baner', false) RETURNING id");
-    const admin = await database.pool.connect();
-    try {
-      // The Area save in routes/areas.ts, left open.
-      await admin.query("BEGIN");
-      await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
-      await admin.query("DELETE FROM area_pincodes WHERE pincode = '411038'");
-      await admin.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411038', $1)", [baner.rows[0]?.id]);
-      const sending = send(headers, complete);
-      const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
-      for (let tries = 0; tries < 100 && !(await database.pool.query(waiting)).rowCount; tries += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      await admin.query("COMMIT");
-      expect((await sending).json().areaName).toBe("Baner");
-    } finally { admin.release(); }
+    await database.pool.query("UPDATE area_pincodes SET area_id = $1 WHERE pincode = '411038'", [baner.rows[0]?.id]);
+    expect((await read(headers)).application.areaName).toBe("Baner");
+    await database.pool.query("DELETE FROM area_pincodes");
+    expect((await read(headers)).application.areaName).toBeNull();
   });
 
   it("names each missing field and a past FSSAI expiry together", async () => {
@@ -237,8 +232,7 @@ describe("shop application, Admin", () => {
   const url = "/v1/admin/shop-applications";
   async function adminHeaders() {
     await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "admin@example.com" } });
-    const code = mailer.sent.findLast((sent) => sent.to === "admin@example.com")?.text.match(/code is (\d{6})/)?.[1] ?? "";
-    const signed = (await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: "admin@example.com", code } })).json();
+    const signed = (await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: "admin@example.com", code: codeFor("admin@example.com") } })).json();
     return { authorization: `Bearer ${signed.accessToken as string}` };
   }
   /** An Owner's application, sent unless `sent` is false. */
@@ -313,7 +307,7 @@ describe("shop application, Admin", () => {
     ]);
   });
 
-  it("lets one of two Admins start the same review", async () => {
+  it("lets only one of two Start reviews at once through", async () => {
     await area("411038");
     const { id } = await application("asha@example.com");
     const headers = await adminHeaders();
