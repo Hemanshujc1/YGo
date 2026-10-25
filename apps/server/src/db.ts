@@ -11,6 +11,22 @@ export function connectDatabase(url: string) {
     connectionTimeoutMillis: 5_000,
   });
   const db = drizzle({ client: pool });
+  // pool.end() resolves once each connection is asked to close, not once it
+  // has; a database dropped in that gap fails the connection (#287).
+  const closing = new Set<Promise<void>>();
+  pool.on("connect", (client) => {
+    const closed: Promise<void> = new Promise((resolve) => client.once("end", () => {
+      closing.delete(closed);
+      resolve();
+    }));
+    closing.add(closed);
+  });
+  // A connection the database drops while idle fails on the pool, and an
+  // unheard failure crashes the process. The server logs its own (main.ts);
+  // jobs and scripts fall back to this one.
+  pool.on("error", (err) => {
+    if (pool.listenerCount("error") === 1) console.error(`idle database client failed: ${err.message}`);
+  });
 
   return {
     db,
@@ -18,7 +34,16 @@ export function connectDatabase(url: string) {
     async ping(): Promise<void> {
       await db.execute(sql`select 1`);
     },
-    close: () => pool.end(),
+    /** Resolves once every connection has closed, or after `waitMs` so one that never does can't hang shutdown. */
+    async close(waitMs = 5_000): Promise<void> {
+      await pool.end();
+      let giveUp: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.all(closing),
+        new Promise((resolve) => { giveUp = setTimeout(resolve, waitMs); }),
+      ]);
+      clearTimeout(giveUp);
+    },
   };
 }
 

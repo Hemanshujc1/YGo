@@ -1,6 +1,6 @@
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { withTransaction } from "../src/db";
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
+import { connectDatabase, withTransaction } from "../src/db";
 
 // One connection, so the temporary table is visible to every step and a
 // connection that isn't handed back would hang the next query.
@@ -56,6 +56,52 @@ describe("withTransaction", () => {
       expect(await withTransaction(lonePool, pid)).not.toBe(firstPid);
     } finally {
       await lonePool.end();
+    }
+  });
+});
+
+describe("connectDatabase", () => {
+  it("closes only once every connection and its socket have closed (#287)", async () => {
+    const database = connectDatabase(inject("databaseUrl"));
+    const clients: pg.PoolClient[] = [];
+    const ended: boolean[] = [];
+    database.pool.on("connect", (client) => {
+      const index = clients.push(client) - 1;
+      ended.push(false);
+      client.once("end", () => { ended[index] = true; });
+    });
+    try {
+      await Promise.all(Array.from({ length: 5 }, () => database.pool.query("SELECT pg_sleep(0.05)")));
+    } finally {
+      await database.close();
+    }
+    expect(ended).toEqual([true, true, true, true, true]);
+    expect(clients.map((client) => client.connection.stream.destroyed)).toEqual([true, true, true, true, true]);
+  });
+
+  it("stops waiting for a connection that never reports closing", async () => {
+    const database = connectDatabase(inject("databaseUrl"));
+    // Runs before connectDatabase's own listener, so its wait never ends.
+    database.pool.prependListener("connect", (client) => {
+      const once = client.once.bind(client);
+      client.once = ((event: string, listener: () => void) => event === "end" ? client : once(event, listener)) as typeof client.once;
+    });
+    await database.pool.query("SELECT 1");
+    const started = Date.now();
+    await database.close(50);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("logs an idle connection the database drops, instead of crashing", async () => {
+    const database = connectDatabase(inject("databaseUrl"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pid = (await database.pool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      await pool.query("SELECT pg_terminate_backend($1)", [pid]);
+      await vi.waitFor(() => expect(logged).toHaveBeenCalledWith(expect.stringMatching(/^idle database client failed: /)));
+    } finally {
+      logged.mockRestore();
+      await database.close();
     }
   });
 });
