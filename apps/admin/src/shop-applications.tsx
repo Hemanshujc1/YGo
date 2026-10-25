@@ -1,5 +1,5 @@
 import { CorrectShopApplicationBody, type ShopApplication } from "@ygo/contracts";
-import { formatDate, formatDateTime, formatPhone } from "@ygo/format";
+import { formatDate, formatDateTime, formatNumber, formatPhone } from "@ygo/format";
 import { useState, type FormEvent } from "react";
 import { Link, useLoaderData } from "react-router";
 import { createAdminApiClient } from "@ygo/api-client";
@@ -23,7 +23,7 @@ function applicationValue(application: ShopApplication, field: EditableField) {
     return point ? `${point.latitude}, ${point.longitude}` : "—";
   }
   if (field === "entityType") return application.entityType ? strings.entities[application.entityType] : "—";
-  if (field === "serviceRadiusMetres") return `${application.serviceRadiusMetres / 1000} km`;
+  if (field === "serviceRadiusMetres") return strings.radiusKilometres(formatNumber(application.serviceRadiusMetres / 1000));
   const value = application[field];
   return value ?? "—";
 }
