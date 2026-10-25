@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import {
   CalendarDate,
@@ -35,9 +35,6 @@ const complete = {
   serviceRadiusMetres: 2000,
   upiId: "asha.k@okhdfcbank",
 };
-
-// 00:30 on 26 Oct 2026 in India, while it is still the 25th in UTC.
-const justAfterMidnight = new Date("2026-10-25T19:00:00Z");
 
 describe("ShopName", () => {
   it("trims, and takes 1 to 100 characters", () => {
@@ -91,25 +88,46 @@ describe("SaveShopApplicationBody", () => {
     ]);
   });
 
+  it("can't empty the service radius", () => {
+    expect(fieldsRefused(SaveShopApplicationBody, { serviceRadiusMetres: null })).toEqual(["serviceRadiusMetres"]);
+  });
+
   it("takes no Owner phone or email, which come from the account", () => {
     expect(fieldsRefused(SaveShopApplicationBody, { ownerPhone: "+919876543210" })).toEqual(["ownerPhone"]);
   });
 });
 
 describe("SendShopApplicationBody", () => {
+  // 00:30 on 26 Oct 2026 in India, while it is still the 25th in UTC.
+  beforeEach(() => vi.useFakeTimers({ now: new Date("2026-10-25T19:00:00Z") }));
+  afterEach(() => vi.useRealTimers());
+
   it("takes every field filled in", () => {
-    expect(SendShopApplicationBody(justAfterMidnight).parse({ ...complete, pan: "abcde 1234 f" }).pan).toBe("ABCDE1234F");
+    expect(SendShopApplicationBody.parse({ ...complete, pan: "abcde 1234 f" }).pan).toBe("ABCDE1234F");
   });
 
   it("names each missing field", () => {
     const missing = { ...complete, pan: undefined, location: undefined };
-    expect(fieldsRefused(SendShopApplicationBody(justAfterMidnight), missing)).toEqual(["location", "pan"]);
+    expect(fieldsRefused(SendShopApplicationBody, missing)).toEqual(["location", "pan"]);
   });
 
   it("needs an FSSAI expiry after today in India", () => {
-    const send = SendShopApplicationBody(justAfterMidnight);
-    expect(send.safeParse({ ...complete, fssaiExpiry: "2026-10-27" }).success).toBe(true);
-    expect(fieldsRefused(send, { ...complete, fssaiExpiry: "2026-10-26" })).toEqual(["fssaiExpiry"]);
+    expect(SendShopApplicationBody.safeParse({ ...complete, fssaiExpiry: "2026-10-27" }).success).toBe(true);
+    expect(fieldsRefused(SendShopApplicationBody, { ...complete, fssaiExpiry: "2026-10-26" })).toEqual(["fssaiExpiry"]);
+  });
+
+  it("reads the clock on each check, not once", () => {
+    const tomorrow = { ...complete, fssaiExpiry: "2026-10-27" };
+    expect(SendShopApplicationBody.safeParse(tomorrow).success).toBe(true);
+    vi.setSystemTime(new Date("2026-10-26T19:00:00Z"));
+    expect(fieldsRefused(SendShopApplicationBody, tomorrow)).toEqual(["fssaiExpiry"]);
+  });
+
+  it("names a past expiry together with the other errors", () => {
+    expect(fieldsRefused(SendShopApplicationBody, { ...complete, pan: undefined, fssaiExpiry: "2026-01-31" })).toEqual([
+      "pan",
+      "fssaiExpiry",
+    ]);
   });
 });
 
@@ -123,9 +141,17 @@ describe("CorrectShopApplicationBody", () => {
     });
   });
 
-  it("refuses a reason alone, and a field without a reason", () => {
-    expect(CorrectShopApplicationBody.safeParse({ reason: "Nothing" }).success).toBe(false);
+  it("refuses a field without a reason", () => {
     expect(fieldsRefused(CorrectShopApplicationBody, { shopName: "Sai Stores" })).toEqual(["reason"]);
+  });
+
+  it("refuses a reason with no field, or only empty ones, naming fields", () => {
+    expect(fieldsRefused(CorrectShopApplicationBody, { reason: "Nothing" })).toEqual(["fields"]);
+    expect(fieldsRefused(CorrectShopApplicationBody, { shopName: undefined, reason: "Nothing" })).toEqual(["fields"]);
+  });
+
+  it("can't empty a field", () => {
+    expect(fieldsRefused(CorrectShopApplicationBody, { pan: null, reason: "Typo" })).toEqual(["pan"]);
   });
 });
 

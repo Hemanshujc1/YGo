@@ -294,25 +294,25 @@ describe("Admin browser API client", () => {
   });
 
   it("lists, reads, corrects, starts review of and approves shop applications", async () => {
-    const application = { ...{
-  id: "00000000-0000-4000-8000-000000000401",
-  state: "draft",
-  shopName: "Sai General Stores",
-  address: null,
-  pincode: null,
-  location: null,
-  ownerName: "Asha Kulkarni",
-  entityType: null,
-  pan: null,
-  fssaiNumber: null,
-  fssaiExpiry: null,
-  serviceRadiusMetres: 2000,
-  upiId: null,
-  areaName: null,
-  ownerPhone: "+919876543210",
-  ownerEmail: "asha@example.com",
-  submittedAt: null,
-}, state: "submitted", areaName: "Kothrud", submittedAt: "2026-10-25T10:00:00.000Z" };
+    const application = {
+      id: "00000000-0000-4000-8000-000000000401",
+      state: "submitted",
+      shopName: "Sai General Stores",
+      address: "Shop 3, Paud Road, Kothrud",
+      pincode: "411038",
+      location: null,
+      ownerName: "Asha Kulkarni",
+      entityType: null,
+      pan: null,
+      fssaiNumber: null,
+      fssaiExpiry: null,
+      serviceRadiusMetres: 2000,
+      upiId: null,
+      areaName: "Kothrud",
+      ownerPhone: "+919876543210",
+      ownerEmail: "asha@example.com",
+      submittedAt: "2026-10-25T10:00:00.000Z",
+    };
     const { client, calls } = setup(({ path, method }) => {
       if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
       if (method === "GET" && path.endsWith("/shop-applications")) return answer(200, { applications: [application] });

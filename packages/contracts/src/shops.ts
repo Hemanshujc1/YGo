@@ -30,7 +30,10 @@ const applicationFields = {
   shopName: ShopName,
   address: ShopAddress,
   pincode: Pincode,
-  /** Taken from the phone's GPS while standing in the shop (Q6). */
+  /**
+   * Taken from the phone's GPS while standing in the shop (Q6). AddressPoint
+   * is a rough box around India, not a border check.
+   */
   location: AddressPoint,
   /** The legal name for invoices, filled in from the account's name at the start (Q11). */
   ownerName: PersonName,
@@ -43,62 +46,56 @@ const applicationFields = {
 };
 export type ShopApplicationField = keyof typeof applicationFields;
 
+/** Each field rule, also taking `null`. */
+function emptiable<T extends Record<string, z.ZodType>>(fields: T) {
+  return Object.fromEntries(Object.entries(fields).map(([key, rule]) => [key, rule.nullable()])) as {
+    [K in keyof T]: z.ZodNullable<T[K]>;
+  };
+}
+
 /**
  * `PATCH /v1/me/shop-application`: Save draft. A missing field stays as it
- * was and `null` empties it; a value given must keep its rule.
+ * was and `null` empties it; a value given must keep its rule. The service
+ * radius can't be emptied: it starts at 2 km and always has a value (Q9).
  */
-export const SaveShopApplicationBody = z.strictObject({
-  shopName: ShopName.nullable().optional(),
-  address: ShopAddress.nullable().optional(),
-  pincode: Pincode.nullable().optional(),
-  location: AddressPoint.nullable().optional(),
-  ownerName: PersonName.nullable().optional(),
-  entityType: ShopEntityType.nullable().optional(),
-  pan: Pan.nullable().optional(),
-  fssaiNumber: FssaiNumber.nullable().optional(),
-  fssaiExpiry: CalendarDate.nullable().optional(),
-  serviceRadiusMetres: ServiceRadiusMetres.nullable().optional(),
-  upiId: UpiId.nullable().optional(),
-});
+export const SaveShopApplicationBody = z
+  .strictObject({ ...emptiable(applicationFields), serviceRadiusMetres: ServiceRadiusMetres })
+  .partial();
 export type SaveShopApplicationBody = z.infer<typeof SaveShopApplicationBody>;
 
-/** India's date at `now`, `YYYY-MM-DD`. India keeps UTC+5:30 all year. */
-function indiaDate(now: Date): string {
-  return new Date(now.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+/** India's date now, `YYYY-MM-DD`. India keeps UTC+5:30 all year. */
+function indiaToday(): string {
+  return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
 }
 
 /**
  * `POST /v1/me/shop-application/send`: every field, with an FSSAI expiry
- * after today in India (Q10). The server saves and sends in one step; the
- * form runs the same check first. A pincode in no Area is refused by the
- * server as PINCODE_NOT_IN_AREA.
+ * after today in India (Q10). The clock is read on each check, and the
+ * expiry is checked with the other fields so every error shows at once.
+ * The server saves the fields and sends in one transaction; the form runs
+ * the same check first. A pincode in no Area is refused by the server as
+ * PINCODE_NOT_IN_AREA.
  */
-export const SendShopApplicationBody = (now: Date) =>
-  z.strictObject(applicationFields).refine((body) => body.fssaiExpiry > indiaDate(now), { path: ["fssaiExpiry"] });
-export type SendShopApplicationBody = z.infer<ReturnType<typeof SendShopApplicationBody>>;
+export const SendShopApplicationBody = z.strictObject({
+  ...applicationFields,
+  fssaiExpiry: CalendarDate.refine((date) => date > indiaToday()),
+});
+export type SendShopApplicationBody = z.infer<typeof SendShopApplicationBody>;
 
 /**
  * `PATCH /v1/admin/shop-applications/:id`: Admin corrects one or more fields
  * with a reason, while Submitted, Under Review or Approved (Q5). Each field
  * goes on the admin action record by name, never its value. A past FSSAI
- * expiry is allowed here: Admin records what the licence says (D-17).
+ * expiry is allowed here: Admin records what the licence says (D-17). A body
+ * with a reason and no field is refused, naming `fields`.
  */
 export const CorrectShopApplicationBody = z
-  .strictObject({
-    shopName: ShopName.optional(),
-    address: ShopAddress.optional(),
-    pincode: Pincode.optional(),
-    location: AddressPoint.optional(),
-    ownerName: PersonName.optional(),
-    entityType: ShopEntityType.optional(),
-    pan: Pan.optional(),
-    fssaiNumber: FssaiNumber.optional(),
-    fssaiExpiry: CalendarDate.optional(),
-    serviceRadiusMetres: ServiceRadiusMetres.optional(),
-    upiId: UpiId.optional(),
-    reason: AdminActionReason,
-  })
-  .refine((body) => Object.keys(body).some((key) => key !== "reason"));
+  .strictObject({ ...applicationFields, reason: AdminActionReason })
+  .partial()
+  .required({ reason: true })
+  .refine((body) => Object.entries(body).some(([key, value]) => key !== "reason" && value !== undefined), {
+    path: ["fields"],
+  });
 export type CorrectShopApplicationBody = z.infer<typeof CorrectShopApplicationBody>;
 
 /**
