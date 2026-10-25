@@ -21,6 +21,12 @@ export function connectDatabase(url: string) {
     }));
     closing.add(closed);
   });
+  // A connection the database drops while idle fails on the pool, and an
+  // unheard failure crashes the process. The server logs its own (main.ts);
+  // jobs and scripts fall back to this one.
+  pool.on("error", (err) => {
+    if (pool.listenerCount("error") === 1) console.error(`idle database client failed: ${err.message}`);
+  });
 
   return {
     db,
@@ -28,10 +34,15 @@ export function connectDatabase(url: string) {
     async ping(): Promise<void> {
       await db.execute(sql`select 1`);
     },
-    /** Resolves once every connection has closed. */
-    async close(): Promise<void> {
+    /** Resolves once every connection has closed, or after `waitMs` so one that never does can't hang shutdown. */
+    async close(waitMs = 5_000): Promise<void> {
       await pool.end();
-      await Promise.all(closing);
+      let giveUp: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.all(closing),
+        new Promise((resolve) => { giveUp = setTimeout(resolve, waitMs); }),
+      ]);
+      clearTimeout(giveUp);
     },
   };
 }
