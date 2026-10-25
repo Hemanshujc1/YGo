@@ -434,6 +434,26 @@ describe("Admin web", () => {
     expect(api.correctShopApplication).toHaveBeenCalledWith(application.id, { shopName: "Fresh Foods", reason: "Owner updated the name" });
   });
 
+  it("opens corrections in a focused dialog and keeps the value when cancelling the reason", async () => {
+    const correctShopApplication = vi.fn();
+    setup(`/applications/${application.id}`, { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication });
+    await screen.findByRole("heading", { name: application.shopName });
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.shopName) }));
+    const dialog = screen.getByRole("dialog", { name: strings.editField(strings.shopName) });
+    const input = within(dialog).getByLabelText(strings.shopName);
+    expect(input).toHaveProperty("value", application.shopName);
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "Fresh Foods" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.saveCorrection }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.cancel }));
+    expect(within(screen.getByRole("dialog")).getByLabelText(strings.shopName)).toHaveProperty("value", "Fresh Foods");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(correctShopApplication).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: application.shopName })).toBeTruthy();
+  });
+
   it("requires both coordinates and saves the radius in metres", async () => {
     const correctShopApplication = vi.fn().mockResolvedValue({ ok: true, data: { ...application, serviceRadiusMetres: 2500 } });
     setup(`/applications/${application.id}`, { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication });
@@ -442,7 +462,7 @@ describe("Admin web", () => {
     fireEvent.change(screen.getByLabelText(strings.latitude), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
     expect(screen.getByText(strings.applicationInvalidFields.location)).toBeTruthy();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("dialog", { name: strings.editField(strings.location) })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.cancel }));
     fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.serviceRadius) }));
     fireEvent.change(screen.getByLabelText(strings.serviceRadius), { target: { value: "2.5" } });

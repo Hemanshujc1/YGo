@@ -138,18 +138,20 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.ownerEmail}</dt><dd className="mt-1">{application.ownerEmail}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.submittedAt}</dt><dd className="mt-1">{application.submittedAt ? formatDateTime(application.submittedAt) : "—"}</dd></div>
     </dl></section>
-    {editing && <section className="mt-6 max-w-xl rounded-xl border border-border bg-surface p-6">
-      <h2 className="text-body font-semibold">{strings.editField(fieldLabels[editing])}</h2>
+    {editing && !reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setEditing(null); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="application-edit-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-border bg-raised p-6 shadow-xl">
+      <h2 id="application-edit-title" className="text-body font-semibold">{strings.editField(fieldLabels[editing])}</h2>
       <form className="mt-4 space-y-3" noValidate onSubmit={openReason}>
         <label htmlFor="application-value" className="block font-medium">{fieldLabels[editing]}</label>
-        {editing === "entityType" ? <select id="application-value" value={value} onChange={(event) => setValue(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3">
+        {editing === "entityType" ? <select id="application-value" autoFocus value={value} onChange={(event) => setValue(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3">
           {Object.entries(strings.entities).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-        </select> : editing === "location" ? <div className="grid grid-cols-2 gap-3">{[strings.latitude, strings.longitude].map((label, index) => <label key={label} className="block text-muted">{label}<input aria-label={label} type="number" step="any" value={value.split(",")[index]?.trim() ?? ""} onChange={(event) => { const parts = value.split(","); parts[index] = event.target.value; setValue(parts.join(",")); }} className="mt-1 h-10 w-full rounded-lg border border-border-strong bg-surface px-3" /></label>)}</div>
-          : <input id="application-value" type={editing === "fssaiExpiry" ? "date" : editing === "serviceRadiusMetres" ? "number" : "text"} step={editing === "serviceRadiusMetres" ? "0.5" : undefined} value={editing === "serviceRadiusMetres" ? String(Number(value) / 1000) : value} onChange={(event) => setValue(editing === "serviceRadiusMetres" ? String(Number(event.target.value) * 1000) : event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />}
+        </select> : editing === "location" ? <div className="grid grid-cols-2 gap-3">{[strings.latitude, strings.longitude].map((label, index) => <label key={label} className="block text-muted">{label}<input aria-label={label} autoFocus={index === 0} type="number" step="any" value={value.split(",")[index]?.trim() ?? ""} onChange={(event) => { const parts = value.split(","); parts[index] = event.target.value; setValue(parts.join(",")); }} className="mt-1 h-10 w-full rounded-lg border border-border-strong bg-surface px-3" /></label>)}</div>
+          : <input id="application-value" autoFocus type={editing === "fssaiExpiry" ? "date" : editing === "serviceRadiusMetres" ? "number" : "text"} step={editing === "serviceRadiusMetres" ? "0.5" : undefined} value={editing === "serviceRadiusMetres" ? String(Number(value) / 1000) : value} onChange={(event) => setValue(editing === "serviceRadiusMetres" ? String(Number(event.target.value) * 1000) : event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />}
         {errors[editing] && <p role="alert" className="text-danger">{errors[editing]}</p>}
         <div className="flex gap-3"><button className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.saveCorrection}</button><button type="button" onClick={() => setEditing(null)} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
       </form>
-    </section>}
+      </section>
+    </div>}
     {editing && reasonOpen && <ReasonDialog title={strings.editField(fieldLabels[editing])} confirmLabel={strings.saveCorrection} busy={busy} reasonError={errors.reason} error={error} onConfirm={(reason) => void save(reason)} onCancel={() => { setReasonOpen(false); setErrors({}); setError(""); }} />}
   </>;
 }
