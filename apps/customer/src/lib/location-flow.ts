@@ -11,44 +11,6 @@ export type Place = { pincode: string; name?: string; areaLine?: string; point?:
 /** "Baner, 411045", or the pincode alone when it was typed. */
 export const placeLabel = (place: Place) => (place.name ? `${place.name}, ${place.pincode}` : place.pincode);
 
-/** The phone's location calls, given by C15 so the tests can stand in for them. */
-export interface Locator {
-  /** Asks for location while the app is in use (#216, Q4); true when allowed. */
-  askPermission(): Promise<boolean>;
-  /** False when location is switched off for the whole phone. */
-  servicesOn(): Promise<boolean>;
-  /** Where the phone is now. Rejects when no position comes. */
-  position(): Promise<{ latitude: number; longitude: number }>;
-}
-
-/**
- * What "Use my current location" found:
- * - `found`: where the phone is, where Confirm opens the pin (#242, Q7).
- * - `off`: location was refused, so C15 shows "Location is off for YGo".
- * - `phone-off`: location is switched off for the whole phone.
- * - `not-found`: no position in time, or one outside India: "Couldn't find your pincode".
- */
-export type Found = { kind: "found"; point: AddressPoint } | { kind: "off" | "phone-off" | "not-found" };
-
-/** How long C15 waits for a position before asking for a typed pincode. */
-const findTimeout = 15_000;
-
-export async function findPlace(locator: Locator, timeout = findTimeout): Promise<Found> {
-  let position;
-  try {
-    if (!(await locator.askPermission())) return { kind: "off" };
-    if (!(await locator.servicesOn())) return { kind: "phone-off" };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("timed out")), timeout)));
-    position = await Promise.race([locator.position(), late]).finally(() => clearTimeout(timer));
-  } catch {
-    return { kind: "not-found" };
-  }
-  // Latitude and longitude only: the phone's position also carries altitude and accuracy.
-  const point = AddressPoint.safeParse({ latitude: position.latitude, longitude: position.longitude });
-  return point.success ? { kind: "found", point: point.data } : { kind: "not-found" };
-}
-
 /** A typed pincode checked with the server's own rule (#216, Q5); null when it breaks it. */
 export function typedPlace(text: string): Place | null {
   const pincode = Pincode.safeParse(text);
