@@ -46,6 +46,7 @@ function createAdminTheme(api: ThemeApi) {
   // The account's theme when it answers during a save; a failed save shows it, not the older one.
   let heard: ThemeChoice | null = null;
   let loading: Promise<void> | null = null;
+  let savedThemeVersion = 0;
   const listeners = new Set<() => void>();
 
   function show(next: ThemeView) {
@@ -65,6 +66,7 @@ function createAdminTheme(api: ThemeApi) {
     }
     const ok = answer?.ok ?? false;
     const back = heard ?? before;
+    if (ok) savedThemeVersion += 1;
     saving = null;
     heard = null;
     show({ choice: answer?.ok ? answer.data.theme : back, saving: false, failed: !ok });
@@ -84,10 +86,13 @@ function createAdminTheme(api: ThemeApi) {
     },
     /** Once per page load, from the signed-in pages: the account's theme wins. A failure tries again on the next page. */
     load() {
+      const version = savedThemeVersion;
       loading ??= api.me().then(
         (answer) => {
-          if (answer.ok) theme.account(answer.data);
-          else loading = null;
+          // A successful save is newer than this account read, even if it answers later.
+          if (answer.ok) {
+            if (version === savedThemeVersion) theme.account(answer.data);
+          } else loading = null;
         },
         () => { loading = null; },
       );

@@ -733,6 +733,28 @@ describe("Admin theme (#263)", () => {
     expect(localStorage.getItem(themeKey)).toBe("system");
   });
 
+  it("keeps a saved choice when the older account read answers afterward", async () => {
+    localStorage.setItem(themeKey, "dark");
+    const me = deferred<unknown>();
+    const save = deferred<unknown>();
+    const { api } = setup("/accounts", {
+      me: vi.fn().mockReturnValue(me.promise),
+      setTheme: vi.fn().mockReturnValue(save.promise),
+    });
+    await picker();
+
+    fireEvent.click(option("system"));
+    expect(api.setTheme).toHaveBeenCalledWith({ theme: "system" });
+    save.resolve({ ok: true, data: founder });
+    await waitFor(() => expect(option("system").getAttribute("aria-pressed")).toBe("true"));
+
+    me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
+    await me.promise;
+    expect(option("system").getAttribute("aria-pressed")).toBe("true");
+    expect(shown()).toBeUndefined();
+    expect(localStorage.getItem(themeKey)).toBe("system");
+  });
+
   it.each([
     ["refused", () => Promise.resolve({ ok: false, status: 503, code: "UNAVAILABLE" })],
     ["unanswered", () => Promise.reject(new TypeError("Failed to fetch"))],
