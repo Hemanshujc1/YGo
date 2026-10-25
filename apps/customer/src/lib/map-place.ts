@@ -1,24 +1,15 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type AddressLabel, AddressPoint, type ErrorCode, Pincode, SaveAddressBody } from "@ygo/contracts";
+import { type AddressLabel, type AddressPoint, type ErrorCode, SaveAddressBody } from "@ygo/contracts";
+import type { AddressAt } from "@ygo/mobile";
 import { type AreaAnswer, type Place, sentOutcome } from "./location-flow";
 
 /** The phone's own map lookups, given by the screens so the tests can stand in for them (#242). */
 export interface Geocoder {
   /** The spots a typed name, street or pincode points to. */
   find(text: string): Promise<{ latitude: number; longitude: number }[]>;
-  /** The addresses at a spot. */
-  addresses(point: AddressPoint): Promise<GeoAddress[]>;
+  /** The address at a spot, through `@ygo/mobile`'s `addressAt`; null when none fits. */
+  addressAt(point: AddressPoint): Promise<AddressAt | null>;
 }
-
-export type GeoAddress = {
-  /** "IN" for India; null when the phone doesn't say. */
-  isoCountryCode: string | null;
-  postalCode: string | null;
-  street: string | null;
-  name: string | null;
-  district: string | null;
-  city: string | null;
-};
 
 /** A place on the map, with the two lines Confirm shows: "Prabhat Road, Shivaji Nagar" and "Pune 411005". */
 export type Spot = { place: Place; title: string; detail: string };
@@ -28,41 +19,20 @@ const searchLimit = 5;
 const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): part is string => !!part))];
 
 /**
- * The spot at a point, from the first address in India with a pincode; null
- * when there is none, or the point is outside India. The box `AddressPoint`
- * checks also holds parts of Nepal, China and other neighbours, whose postal
- * codes can look like a pincode, so an address the phone names as in another
- * country is skipped; one with no country is kept. Only latitude and
- * longitude are kept: the phone's results also carry altitude, accuracy or
- * zoom, which the server's strict `AddressPoint` refuses.
+ * Where the pin stands, or null when no pincode is found there: "Move the pin
+ * a little" (#242, Q6). The area line is the address's line, cut to 200.
  */
-async function spotAt(geocoder: Geocoder, { latitude, longitude }: AddressPoint): Promise<Spot | null> {
-  const point = AddressPoint.safeParse({ latitude, longitude });
-  if (!point.success) return null;
-  for (const address of await geocoder.addresses(point.data)) {
-    if (address.isoCountryCode && address.isoCountryCode.toUpperCase() !== "IN") continue;
-    const pincode = Pincode.safeParse(address.postalCode ?? "");
-    if (!pincode.success) continue;
-    const street = address.street || address.name;
-    const title = unique([street, address.district]).join(", ");
-    const areaLine = unique([street, address.district, address.city]).join(", ").slice(0, 200).trim();
-    const name = address.district || address.city;
-    return {
-      place: { pincode: pincode.data, point: point.data, ...(name && { name }), ...(areaLine && { areaLine }) },
-      title: title || address.city || pincode.data,
-      detail: unique([address.city, pincode.data]).join(" "),
-    };
-  }
-  return null;
-}
-
-/** Where the pin stands, or null when no pincode is found there: "Move the pin a little" (#242, Q6). */
 export async function readPin(geocoder: Geocoder, point: AddressPoint): Promise<Spot | null> {
-  try {
-    return await spotAt(geocoder, point);
-  } catch {
-    return null;
-  }
+  const at = await geocoder.addressAt(point);
+  if (!at) return null;
+  const title = unique([at.street, at.district]).join(", ");
+  const areaLine = at.line.slice(0, 200).trim();
+  const name = at.district || at.city;
+  return {
+    place: { pincode: at.pincode, point: at.point, ...(name && { name }), ...(areaLine && { areaLine }) },
+    title: title || at.city || at.pincode,
+    detail: unique([at.city, at.pincode]).join(" "),
+  };
 }
 
 /**
