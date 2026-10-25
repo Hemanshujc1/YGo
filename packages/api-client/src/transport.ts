@@ -16,6 +16,8 @@ interface ApiFailure {
   fields?: string[];
   /** With PINCODE_IN_OTHER_AREA: each pincode and the Area holding it. */
   conflicts?: ErrorEnvelope["error"]["conflicts"];
+  /** Commit-time catalog validation problems, using the same rows as preview. */
+  rowErrors?: ErrorEnvelope["error"]["rowErrors"];
 }
 
 export interface Answer {
@@ -44,24 +46,26 @@ interface SendOptions {
   token?: string | null;
   credentials?: RequestCredentials;
   adminRefresh?: boolean;
+  timeoutMs?: number;
 }
 
 export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, app, onUpdateRequired }: TransportOptions) {
   const origin = baseUrl.trim().replace(/\/+$/, "");
 
   async function send(method: string, path: string, json?: unknown, options: SendOptions = {}): Promise<Answer> {
+    const multipart = json instanceof FormData;
     const response = await (fetchFn ?? fetch)(`${origin}${path}`, {
       method,
       headers: {
         accept: "application/json",
-        ...(json !== undefined && { "content-type": "application/json" }),
+        ...(json !== undefined && !multipart && { "content-type": "application/json" }),
         ...(options.token && { authorization: `Bearer ${options.token}` }),
         ...(options.adminRefresh && { [ADMIN_REFRESH_HEADER]: "1" }),
         ...(app && { [APP_NAME_HEADER]: app.name, [APP_VERSION_HEADER]: app.version }),
       },
-      body: json === undefined ? undefined : JSON.stringify(json),
+      body: multipart ? json : json === undefined ? undefined : JSON.stringify(json),
       ...(options.credentials && { credentials: options.credentials }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(options.timeoutMs ?? timeoutMs),
     });
 
     // A body that is not JSON, breaks the contract, or carries a code this
@@ -84,8 +88,8 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
     if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
-    const { code, fields, conflicts } = envelope.data.error;
-    return { ok: false, status, code, fields, conflicts };
+    const { code, fields, conflicts, rowErrors } = envelope.data.error;
+    return { ok: false, status, code, fields, conflicts, rowErrors };
   }
 
   function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {
