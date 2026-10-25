@@ -711,6 +711,37 @@ describe("Master product routes", () => {
     expect(productImagePuts).toEqual([]);
   });
 
+  it("rejects NUL in product and category create/edit requests before writes", async () => {
+    const token = await headers();
+    const categoryId = await groceries();
+    const body = createBody(categoryId, await image());
+    const made = await create(token, body);
+    expect(made.statusCode).toBe(201);
+    const id = made.json().id as string;
+    productImagePuts = [];
+    for (const field of ["name", "brand"]) {
+      for (const response of [
+        await create(token, { ...body, [field]: "Fresh\0fruit" }),
+        await edit(token, id, { [field]: "Fresh\0fruit" }),
+      ]) {
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: [field] } });
+      }
+    }
+    for (const request of [
+      { method: "POST" as const, url: "/v1/admin/categories" },
+      { method: "PATCH" as const, url: `/v1/admin/categories/${categoryId}` },
+    ]) {
+      const response = await app.inject({ ...request, headers: token, payload: { name: "Fresh\0fruit" } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["name"] } });
+    }
+    expect((await database.pool.query("SELECT name, brand FROM master_products")).rows).toEqual([{ name: "Apples", brand: null }]);
+    expect((await database.pool.query("SELECT name FROM categories WHERE id = $1", [categoryId])).rows).toEqual([{ name: "Groceries" }]);
+    expect((await database.pool.query("SELECT action FROM admin_actions WHERE target_type IN ('product', 'category')")).rows).toEqual([{ action: "product.create" }]);
+    expect(productImagePuts).toEqual([]);
+  });
+
   it("creates, lists and edits a product with image keys, category state and one audit row per change", async () => {
     const token = await headers();
     const source = await image();
@@ -1216,6 +1247,25 @@ describe("Catalog CSV import preview", () => {
         { rowNumber: 2, reason: "INVALID_ROW", field: "quantity" },
       ]);
     }
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("returns row errors for NUL catalog text with valid quantities on preview and commit", async () => {
+    const headers = await token();
+    const entries = { "apple.png": await image() };
+    for (const field of ["name", "brand", "categoryName", "parentCategoryName"]) {
+      const text = csv([row({ [field]: "Fresh\0fruit" })]);
+      const errors = [{ rowNumber: 2, reason: "INVALID_ROW", field }];
+      const checked = await preview(headers, text, entries);
+      expect(checked.statusCode).toBe(200);
+      expect(checked.json()).toEqual({ rowCount: 1, productCount: 0, packCount: 0, errors });
+      const committed = await preview(headers, text, entries, { commit: true });
+      expect(committed.statusCode).toBe(409);
+      expect(committed.json()).toEqual({ error: { code: "CATALOG_IMPORT_ROWS_INVALID", rowErrors: errors } });
+    }
+    expect((await database.pool.query("SELECT * FROM master_products")).rows).toEqual([]);
+    expect((await database.pool.query("SELECT * FROM packs")).rows).toEqual([]);
+    expect((await database.pool.query("SELECT * FROM admin_actions WHERE target_type IN ('product', 'pack')")).rows).toEqual([]);
     expect(productImagePuts).toEqual([]);
   });
 
