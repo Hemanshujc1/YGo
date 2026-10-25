@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
+import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 
 const rootUrl = inject("databaseUrl");
@@ -32,6 +33,7 @@ beforeEach(async () => {
     });
   } finally { await migrationClient.end(); }
   database = connectDatabase(url.href);
+  await bootstrapAdmin(database.pool, { email: "admin@example.com", name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
   app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
@@ -47,20 +49,44 @@ afterEach(async () => {
   } finally { await root.end(); }
 });
 
+/** The sign-in code last mailed to `email`. */
+function codeFor(email: string) {
+  return mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1] ?? "";
+}
+
 /** Signs someone in on the Shopkeeper app, with a name and phone unless `profile` is false. */
-async function owner(email: string, profile = true) {
+async function owner(email: string, profile = true, phone = "+919876543210") {
   await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email } });
-  const code = mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1] ?? "";
+  const code = codeFor(email);
   const signed = (await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email, code } })).json();
   clock.advance(1_000);
   const headers = { authorization: `Bearer ${signed.accessToken as string}` };
-  if (profile) await app.inject({ method: "PUT", url: "/v1/me/profile", headers, payload: { name: "Asha Kulkarni", phone: "+919876543210" } });
+  if (profile) await app.inject({ method: "PUT", url: "/v1/me/profile", headers, payload: { name: "Asha Kulkarni", phone } });
   return { id: signed.account.id as string, headers };
 }
 
 async function area(pincode: string, paused = false) {
   const inserted = await database.pool.query<{ id: string }>("INSERT INTO areas (name, paused) VALUES ('Kothrud', $1) RETURNING id", [paused]);
   await database.pool.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ($1, $2)", [pincode, inserted.rows[0]?.id]);
+}
+
+/**
+ * Answers `request`, sent while an Admin Area save (routes/areas.ts) that
+ * removes `pincode` is open; the save commits once `request` waits for it.
+ */
+async function duringAreaSave<T>(pincode: string, request: () => Promise<T>): Promise<T> {
+  const admin = await database.pool.connect();
+  try {
+    await admin.query("BEGIN");
+    await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
+    await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
+    let settled = false;
+    const pending = request().finally(() => { settled = true; });
+    const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
+    while (!settled && !(await database.pool.query(waiting)).rowCount) await new Promise((resolve) => setTimeout(resolve, 10));
+    await admin.query("COMMIT");
+    return await pending;
+  } finally { admin.release(); }
 }
 
 // The FSSAI check reads the real clock (the contract's rule), not the test clock.
@@ -169,26 +195,25 @@ describe("shop application", () => {
     expect(await read(headers)).toEqual({ application: sent.json() });
   });
 
-  it("waits out an Admin Area save that moves the pincode, and takes the new Area", async () => {
+  it("follows the pincode when an Admin moves it to another Area, or out of every Area", async () => {
     await area("411038");
     const { headers } = await owner("asha@example.com");
     await start(headers);
+    await send(headers, complete);
     const baner = await database.pool.query<{ id: string }>("INSERT INTO areas (name, paused) VALUES ('Baner', false) RETURNING id");
-    const admin = await database.pool.connect();
-    try {
-      // The Area save in routes/areas.ts, left open.
-      await admin.query("BEGIN");
-      await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
-      await admin.query("DELETE FROM area_pincodes WHERE pincode = '411038'");
-      await admin.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411038', $1)", [baner.rows[0]?.id]);
-      const sending = send(headers, complete);
-      const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
-      for (let tries = 0; tries < 100 && !(await database.pool.query(waiting)).rowCount; tries += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      await admin.query("COMMIT");
-      expect((await sending).json().areaName).toBe("Baner");
-    } finally { admin.release(); }
+    await database.pool.query("UPDATE area_pincodes SET area_id = $1 WHERE pincode = '411038'", [baner.rows[0]?.id]);
+    expect((await read(headers)).application.areaName).toBe("Baner");
+    await database.pool.query("DELETE FROM area_pincodes");
+    expect((await read(headers)).application.areaName).toBeNull();
+  });
+
+  it("waits out an Admin Area save that removes the pincode, then refuses it", async () => {
+    await area("411038");
+    const { headers } = await owner("asha@example.com");
+    const started = (await start(headers)).json();
+    const refused = await duringAreaSave("411038", () => send(headers, complete));
+    expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
+    expect(await read(headers)).toEqual({ application: started });
   });
 
   it("names each missing field and a past FSSAI expiry together", async () => {
@@ -228,5 +253,136 @@ describe("shop application", () => {
     await expect(database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [id, other.rows[0]?.id]))
       .rejects.toMatchObject({ constraint: "shop_members_pkey" });
     await expect(database.pool.query("DELETE FROM accounts WHERE id = $1", [id])).rejects.toMatchObject({ constraint: "shop_members_account_id_accounts_id_fk" });
+  });
+});
+
+describe("shop application, Admin", () => {
+  const url = "/v1/admin/shop-applications";
+  async function adminHeaders() {
+    await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "admin@example.com" } });
+    const signed = (await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: "admin@example.com", code: codeFor("admin@example.com") } })).json();
+    return { authorization: `Bearer ${signed.accessToken as string}` };
+  }
+  /** An Owner's application, sent unless `sent` is false. */
+  async function application(email: string, sent = true, phone = "+919876543210") {
+    const { headers } = await owner(email, true, phone);
+    const started = (await app.inject({ method: "POST", url: "/v1/me/shop-application", headers })).json();
+    if (!sent) return started;
+    return (await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers, payload: complete })).json();
+  }
+  function actions(shopId: string) {
+    return database.pool.query<{ action: string; reason: string }>(
+      "SELECT action, reason FROM admin_actions WHERE target_type = 'shop' AND target_id = $1 ORDER BY created_at, action",
+      [shopId],
+    ).then((result) => result.rows);
+  }
+  const move = (headers: Record<string, string>, id: string, step: string) => app.inject({ method: "POST", url: `${url}/${id}/${step}`, headers });
+  const correct = (headers: Record<string, string>, id: string, payload: object) => app.inject({ method: "PATCH", url: `${url}/${id}`, headers, payload });
+
+  it("refuses signed-out callers and app accounts", async () => {
+    const { headers } = await owner("asha@example.com");
+    const id = randomUUID();
+    for (const request of [
+      { method: "GET" as const, url },
+      { method: "GET" as const, url: `${url}/${id}` },
+      { method: "PATCH" as const, url: `${url}/${id}`, payload: { shopName: "Sai Stores", reason: "Typo" } },
+      { method: "POST" as const, url: `${url}/${id}/start-review` },
+      { method: "POST" as const, url: `${url}/${id}/approve` },
+    ]) {
+      expect((await app.inject(request)).statusCode).toBe(401);
+      expect((await app.inject({ ...request, headers })).statusCode).toBe(403);
+    }
+  });
+
+  it("lists sent applications, the longest waiting first, and reads one; a Draft is not found", async () => {
+    await area("411038");
+    const later = await application("asha@example.com", false);
+    const first = await application("bina@example.com", true, "+919876543211");
+    clock.advance(60_000);
+    await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers: (await owner("asha@example.com")).headers, payload: complete });
+    const draft = await application("chitra@example.com", false, "+919876543212");
+    const headers = await adminHeaders();
+    const listed = (await app.inject({ method: "GET", url, headers })).json().applications;
+    expect(listed.map((one: { id: string }) => one.id)).toEqual([first.id, later.id]);
+    const read = await app.inject({ method: "GET", url: `${url}/${later.id}`, headers });
+    expect(read.json()).toEqual(listed[1]);
+    expect(read.json()).toMatchObject({ state: "submitted", ownerPhone: "+919876543210", ownerEmail: "asha@example.com", areaName: "Kothrud" });
+    for (const id of [draft.id, randomUUID()]) {
+      for (const refused of [
+        await app.inject({ method: "GET", url: `${url}/${id}`, headers }),
+        await correct(headers, id, { shopName: "Sai Stores", reason: "Typo" }),
+        await move(headers, id, "start-review"),
+        await move(headers, id, "approve"),
+      ]) expect(refused.json()).toEqual({ error: { code: "NOT_FOUND" } });
+    }
+  });
+
+  it("starts review then approves, each logged with its fixed reason; any other move is refused", async () => {
+    await area("411038");
+    const { id } = await application("asha@example.com");
+    const headers = await adminHeaders();
+    const refused = { error: { code: "SHOP_STATE_CHANGE_REFUSED" } };
+    expect((await move(headers, id, "approve")).json()).toEqual(refused);
+    const reviewing = await move(headers, id, "start-review");
+    expect(reviewing.statusCode).toBe(200);
+    expect(reviewing.json().state).toBe("under_review");
+    expect((await move(headers, id, "start-review")).json()).toEqual(refused);
+    expect((await move(headers, id, "approve")).json().state).toBe("approved");
+    for (const step of ["start-review", "approve"]) expect((await move(headers, id, step)).statusCode).toBe(409);
+    expect(await actions(id)).toEqual([
+      { action: "shop.start_review", reason: "Started review" },
+      { action: "shop.approve", reason: "Approved" },
+    ]);
+  });
+
+  it("lets only one of two Start reviews at once through", async () => {
+    await area("411038");
+    const { id } = await application("asha@example.com");
+    const headers = await adminHeaders();
+    const both = await Promise.all([move(headers, id, "start-review"), move(headers, id, "start-review")]);
+    expect(both.map((one) => one.statusCode).sort()).toEqual([200, 409]);
+    expect(await actions(id)).toHaveLength(1);
+  });
+
+  it("corrects an Approved shop, logging each changed field by name with the reason", async () => {
+    await area("411038");
+    const { id } = await application("asha@example.com");
+    const headers = await adminHeaders();
+    await move(headers, id, "start-review");
+    const approved = (await move(headers, id, "approve")).json();
+    const location = { latitude: 18.5081, longitude: 73.8102 };
+    const corrected = await correct(headers, id, {
+      shopName: "Sai Super Mart", pan: "abcde1234f", location, fssaiExpiry: "2020-01-31", serviceRadiusMetres: 2000, reason: "Owner called support",
+    });
+    expect(corrected.statusCode).toBe(200);
+    expect(corrected.json()).toEqual({ ...approved, shopName: "Sai Super Mart", location, fssaiExpiry: "2020-01-31" });
+    const logged = ["shop.correct.fssai_expiry", "shop.correct.location", "shop.correct.shop_name"]
+      .map((action) => ({ action, reason: "Owner called support" }));
+    expect((await actions(id)).slice(2)).toEqual(logged);
+
+    const same = await correct(headers, id, { shopName: "Sai Super Mart", location, reason: "Again" });
+    expect(same.statusCode).toBe(200);
+    expect(same.json()).toEqual(corrected.json());
+    expect((await actions(id)).slice(2)).toEqual(logged);
+    expect((await correct(headers, id, { reason: "Nothing" })).json().error.fields).toEqual(["fields"]);
+  });
+
+  it("moves the shop to a corrected pincode's Area, and refuses one in no Area", async () => {
+    await area("411038");
+    const baner = await database.pool.query<{ id: string }>("INSERT INTO areas (name, paused) VALUES ('Baner', true) RETURNING id");
+    await database.pool.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411045', $1)", [baner.rows[0]?.id]);
+    const { id } = await application("asha@example.com");
+    const headers = await adminHeaders();
+    const moved = await correct(headers, id, { pincode: "411045", reason: "Shop is in Baner" });
+    expect(moved.json()).toMatchObject({ pincode: "411045", areaName: "Baner" });
+    const refused = await correct(headers, id, { pincode: "411001", shopName: "Sai Stores", reason: "Wrong pincode" });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
+    expect((await app.inject({ method: "GET", url: `${url}/${id}`, headers })).json()).toEqual(moved.json());
+    expect(await actions(id)).toEqual([{ action: "shop.correct.pincode", reason: "Shop is in Baner" }]);
+
+    const late = await duringAreaSave("411038", () => correct(headers, id, { pincode: "411038", reason: "Back to Kothrud" }));
+    expect(late.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
+    expect((await app.inject({ method: "GET", url: `${url}/${id}`, headers })).json()).toEqual(moved.json());
   });
 });

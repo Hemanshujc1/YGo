@@ -1,20 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
+  CorrectShopApplicationBody,
   ErrorEnvelope,
   MyShopApplicationResponse,
   SaveShopApplicationBody,
   SendShopApplicationBody,
   ShopApplication,
+  ShopApplicationParams,
+  ShopApplicationsResponse,
   type AddressPoint,
   type ShopApplicationField,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
+import { adminSignedIn, withAdminTransaction } from "../admin";
 import { withTransaction } from "../db";
 import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
-/** Reads an application with its Area and the Owner's phone and email. */
+/**
+ * Reads an application with the Owner's phone and email, and once sent, the
+ * Area now holding its pincode: it follows an Admin Area edit (owner decision
+ * on #280). A pincode later dropped from every Area reads as no Area.
+ */
 const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
   ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
   to_char(s.fssai_expiry, 'YYYY-MM-DD') AS "fssaiExpiry", s.service_radius_metres AS "serviceRadiusMetres",
@@ -23,16 +31,32 @@ const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.addre
   FROM shops s
   JOIN shop_members m ON m.shop_id = s.id AND m.role = 'owner'
   JOIN accounts a ON a.id = m.account_id
-  LEFT JOIN areas ar ON ar.id = s.area_id`;
+  LEFT JOIN area_pincodes p ON p.pincode = s.pincode AND s.state <> 'draft'
+  LEFT JOIN areas ar ON ar.id = p.area_id`;
 
-/** The application whose `column` (`s.id` or the Owner's `m.account_id`) is `value`, or null. */
-async function application(client: Pool | PoolClient, column: "s.id" | "m.account_id", value: string): Promise<ShopApplication | null> {
-  const row = await client.query<Omit<ShopApplication, "submittedAt"> & { submittedAt: Date | null }>(
-    `${applicationSql} WHERE ${column} = $1`,
-    [value],
-  );
-  const found = row.rows[0];
-  return found ? { ...found, submittedAt: found.submittedAt?.toISOString() ?? null } : null;
+type ApplicationRow = Omit<ShopApplication, "submittedAt"> & { submittedAt: Date | null };
+
+function fromRow(row: ApplicationRow): ShopApplication {
+  return { ...row, submittedAt: row.submittedAt?.toISOString() ?? null };
+}
+
+/**
+ * The application whose `column` (`s.id` or the Owner's `m.account_id`) is
+ * `value`, or null; `lock` locks the shop's row for a change.
+ */
+async function application(client: Pool | PoolClient, column: "s.id" | "m.account_id", value: string, lock = false): Promise<ShopApplication | null> {
+  const row = await client.query<ApplicationRow>(`${applicationSql} WHERE ${column} = $1${lock ? " FOR UPDATE OF s" : ""}`, [value]);
+  return row.rows[0] ? fromRow(row.rows[0]) : null;
+}
+
+/**
+ * Whether an Area holds `pincode`. A paused Area still counts: it keeps its pincodes (#214).
+ * Waits out an Admin Area save, so a pincode it removes can't be sent or
+ * corrected into; plain reads don't wait.
+ */
+async function inArea(client: PoolClient, pincode: string): Promise<boolean> {
+  await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
+  return Boolean((await client.query("SELECT 1 FROM area_pincodes WHERE pincode = $1", [pincode])).rowCount);
 }
 
 const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
@@ -47,6 +71,14 @@ const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
   serviceRadiusMetres: "service_radius_metres",
   upiId: "upi_id",
 };
+
+/** Whether a corrected `value` equals the stored one; a location by its latitude and longitude. */
+function unchanged(field: string, value: unknown, stored: unknown): boolean {
+  if (field !== "location") return value === stored;
+  const point = value as AddressPoint;
+  const was = stored as AddressPoint | null;
+  return was !== null && point.latitude === was.latitude && point.longitude === was.longitude;
+}
 
 /** The `SET` list and values for each field given; `null` empties one. */
 function assignments(body: SaveShopApplicationBody): { sets: string[]; values: unknown[] } {
@@ -141,22 +173,84 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       const shop = await ownShop(client, who.accountId);
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "draft") return reply.code(409).send({ error: { code: "SHOP_APPLICATION_SENT" } });
-      // Waits out an Admin Area save, so the pincode can't move to another
-      // Area while this Send lands; Sends and serviceability reads don't wait.
-      await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
-      // A paused Area still counts: it keeps its pincodes (#214).
-      const area = await client.query<{ areaId: string }>(`SELECT area_id AS "areaId" FROM area_pincodes WHERE pincode = $1`, [body.pincode]);
-      const areaId = area.rows[0]?.areaId;
-      if (!areaId) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
+      if (!await inArea(client, body.pincode)) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
       const next = values.length + 1;
       await client.query(
-        `UPDATE shops SET ${sets.join(", ")}, state = 'submitted', area_id = $${next}, submitted_at = $${next + 1}
-         WHERE id = $${next + 2}`,
-        [...values, areaId, clock.now(), shop.id],
+        `UPDATE shops SET ${sets.join(", ")}, state = 'submitted', submitted_at = $${next} WHERE id = $${next + 1}`,
+        [...values, clock.now(), shop.id],
       );
       const saved = await application(client, "s.id", shop.id);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
     });
   });
+
+  // Admin sees only sent applications: a Draft answers NOT_FOUND (owner decision on #280).
+  app.get("/v1/admin/shop-applications", { schema: { response: { 200: ShopApplicationsResponse, ...response } } }, async (request, reply) => {
+    if (!await adminSignedIn(request, reply, auth)) return reply;
+    const rows = await pool.query<ApplicationRow>(`${applicationSql} WHERE s.state <> 'draft' ORDER BY s.submitted_at, s.id`);
+    return { applications: rows.rows.map(fromRow) };
+  });
+
+  app.get("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
+    if (!await adminSignedIn(request, reply, auth)) return reply;
+    const found = await application(pool, "s.id", (request.params as { id: string }).id);
+    if (!found || found.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    return found;
+  });
+
+  // Each changed field is logged by name with the reason, never its values (Q5 on #40).
+  app.patch("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, body: CorrectShopApplicationBody, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
+    const who = await adminSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as { id: string };
+    const { reason, ...fields } = request.body as CorrectShopApplicationBody;
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
+      const old = await application(client, "s.id", id, true);
+      if (!old || old.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      // Compared after the contract's clean-up, so "abcde1234f" for "ABCDE1234F" is no change.
+      const changed = Object.fromEntries(Object.entries(fields).filter(
+        ([field, value]) => value !== undefined && !unchanged(field, value, old[field as ShopApplicationField]),
+      )) as SaveShopApplicationBody;
+      const names = Object.keys(changed).map((field) => field === "location" ? "location" : columns[field as keyof typeof columns]);
+      // A correction that changes nothing writes no record (as on #213).
+      if (!names.length) return reply.code(200).send(old);
+      // A corrected pincode must be in an Area; the shop then reads as in it (owner decision on #275).
+      if (changed.pincode && !await inArea(client, changed.pincode)) return reply.code(409).send({ error: { code: "PINCODE_NOT_IN_AREA" } });
+      const { sets, values } = assignments(changed);
+      await client.query(`UPDATE shops SET ${sets.join(", ")} WHERE id = $${values.length + 1}`, [...values, id]);
+      await client.query(
+        `INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason)
+         SELECT $1, 'shop.correct.' || field, $2, 'shop', $3 FROM unnest($4::text[]) AS field`,
+        [who.accountId, id, reason, names],
+      );
+      const saved = await application(client, "s.id", id);
+      await client.query("COMMIT");
+      return reply.code(200).send(saved);
+    });
+  });
+
+  // Admin moves each step by a click, with a fixed reason; opening it moves nothing (Q3 on #40).
+  for (const [path, from, to, action, reason] of [
+    ["start-review", "submitted", "under_review", "shop.start_review", "Started review"],
+    ["approve", "under_review", "approved", "shop.approve", "Approved"],
+  ] as const) {
+    app.post(`/v1/admin/shop-applications/:id/${path}`, { schema: { params: ShopApplicationParams, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
+      const who = await adminSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const { id } = request.params as { id: string };
+      return withAdminTransaction(pool, who.accountId, reply, async (client) => {
+        const old = await application(client, "s.id", id, true);
+        if (!old || old.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        if (old.state !== from) return reply.code(409).send({ error: { code: "SHOP_STATE_CHANGE_REFUSED" } });
+        await client.query("UPDATE shops SET state = $1 WHERE id = $2", [to, id]);
+        await client.query(
+          "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, $2, $3, 'shop', $4)",
+          [who.accountId, action, id, reason],
+        );
+        await client.query("COMMIT");
+        return reply.code(200).send({ ...old, state: to });
+      });
+    });
+  }
 }

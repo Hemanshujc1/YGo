@@ -148,7 +148,8 @@ export const savedAddresses = pgTable("saved_addresses", {
 ]);
 
 // A shop, from its Draft application on (#40). Fields stay empty while a
-// Draft; once sent, every ONB-3 field and the pincode's Area are set. Numbers
+// Draft; once sent, every ONB-3 field is set. Its Area is read from the
+// pincode, so it follows an Admin Area edit (owner decision on #280). Numbers
 // only: no identity document image and no bank detail (ONB-3).
 export const shops = pgTable("shops", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -164,7 +165,6 @@ export const shops = pgTable("shops", {
   fssaiExpiry: date("fssai_expiry"),
   serviceRadiusMetres: integer("service_radius_metres").notNull().default(2000),
   upiId: text("upi_id"),
-  areaId: uuid("area_id").references(() => areas.id),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => [
@@ -174,9 +174,8 @@ export const shops = pgTable("shops", {
   check("shops_sent_complete", sql`${table.state} = 'draft' OR (${table.shopName} IS NOT NULL AND ${table.address} IS NOT NULL
     AND ${table.pincode} IS NOT NULL AND ${table.location} IS NOT NULL AND ${table.ownerName} IS NOT NULL
     AND ${table.entityType} IS NOT NULL AND ${table.pan} IS NOT NULL AND ${table.fssaiNumber} IS NOT NULL
-    AND ${table.fssaiExpiry} IS NOT NULL AND ${table.upiId} IS NOT NULL AND ${table.areaId} IS NOT NULL
+    AND ${table.fssaiExpiry} IS NOT NULL AND ${table.upiId} IS NOT NULL
     AND ${table.submittedAt} IS NOT NULL)`),
-  index("shops_area_id_idx").on(table.areaId),
 ]);
 
 // An account's link to a shop, as Owner or Staff. The account is the key, so

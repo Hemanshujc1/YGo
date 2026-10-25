@@ -99,6 +99,13 @@
       "when": 1792923653098,
       "tag": "0013_shops",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792925392634,
+      "tag": "0014_shop_area_from_pincode",
+      "breakpoints": true
     }
   ]
 }
