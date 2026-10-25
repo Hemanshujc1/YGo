@@ -15,7 +15,8 @@ export const CATALOG_IMPORT_FILE_LIMITS = {
 } as const;
 
 /** Admin-managed global categories (#200, CAT-5); two levels at most. */
-export const CategoryName = z.string().trim().min(1).max(100);
+/** Category text cannot contain PostgreSQL-unrepresentable NUL (#269). */
+export const CategoryName = z.string().trim().min(1).max(100).refine((value) => !value.includes("\0"));
 export const Category = z.strictObject({
   id: z.uuid(),
   parentId: z.uuid().nullable(),
@@ -65,7 +66,7 @@ export const CatalogImportCsvRow = z.strictObject({
     (value) => typeof value === "string" && value.trim() === "" ? null : value,
     ProductBrand,
   ).refine((value) => value !== undefined).transform((value) => value ?? null),
-  parentCategoryName: z.string().trim().max(100).transform((value) => value || null),
+  parentCategoryName: z.string().trim().max(100).refine((value) => !value.includes("\0")).transform((value) => value || null),
   categoryName: CategoryName,
   baseUnit: ProductBaseUnit,
   classification: ProductClassification,

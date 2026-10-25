@@ -1211,7 +1211,10 @@ describe("Catalog CSV import preview", () => {
     for (const malformedIdentity of [{ name: "Apples\0", brand: "" }, { name: "Apples", brand: "Farm\0" }]) {
       const unreadable = await preview(headers, csv([row({ ...malformedIdentity, quantity: "1.5" })]), entries);
       expect(unreadable.statusCode).toBe(200);
-      expect(unreadable.json().errors).toEqual([{ rowNumber: 2, reason: "INVALID_ROW", field: "quantity" }]);
+      expect(unreadable.json().errors).toEqual([
+        { rowNumber: 2, reason: "INVALID_ROW", field: malformedIdentity.name.includes("\0") ? "name" : "brand" },
+        { rowNumber: 2, reason: "INVALID_ROW", field: "quantity" },
+      ]);
     }
     expect(productImagePuts).toEqual([]);
   });

@@ -94,11 +94,11 @@ export const AddressFlat = z.string().trim().min(1).max(100);
 /** A saved address's area line, the street and locality the phone's map lookup names; trimmed, 1 to 200 characters (#217). */
 export const AddressAreaLine = z.string().trim().min(1).max(200);
 
-/** Master product name, trimmed, 1 to 200 characters (owner decision on #203). */
-export const ProductName = z.string().trim().min(1).max(200);
+/** Master product name, trimmed, 1 to 200 characters (#203); no PostgreSQL-unrepresentable NUL (#269). */
+export const ProductName = z.string().trim().min(1).max(200).refine((value) => !value.includes("\0"));
 
-/** Optional master product brand, trimmed, 1 to 100 characters when present (owner decision on #203). */
-export const ProductBrand = z.string().trim().min(1).max(100).nullable().optional();
+/** Optional master product brand, trimmed, 1 to 100 characters when present (#203); no NUL (#269). */
+export const ProductBrand = z.string().trim().min(1).max(100).refine((value) => !value.includes("\0")).nullable().optional();
 
 /** Source product image size cap (owner decision on #203). */
 export const PRODUCT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;

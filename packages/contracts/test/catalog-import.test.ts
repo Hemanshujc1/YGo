@@ -10,6 +10,7 @@ import {
   CatalogImportResponse,
   CatalogImportRowError,
   PRODUCT_IMAGE_MAX_BYTES,
+  invalidFields,
 } from "../src/index";
 
 const csvRow = {
@@ -67,6 +68,12 @@ describe("catalog import contracts (#41)", () => {
       expect(CatalogImportCsvRow.safeParse(row).success).toBe(false);
     }
     expect(CatalogImportCsvRow.parse({ ...csvRow, barcode: " 012345678901 " }).barcode).toBe("012345678901");
+  });
+
+  it.each(["name", "brand", "categoryName", "parentCategoryName"])("rejects NUL in CSV %s with a valid quantity", (field) => {
+    const result = CatalogImportCsvRow.safeParse({ ...csvRow, [field]: "Fresh\0fruit" });
+    if (result.success) throw new Error("expected NUL to be rejected");
+    expect(invalidFields(result.error)).toEqual([field]);
   });
 
   it("accepts preview row errors and nonnegative integer counts", () => {
