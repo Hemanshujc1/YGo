@@ -1,8 +1,8 @@
-import type { SaveAddressBody } from "@ygo/contracts";
+import { type ErrorCode, PlaceSession, type SaveAddressBody } from "@ygo/contracts";
 import type { GeoAddress } from "@ygo/mobile/address-at";
 import { describe, expect, it } from "vitest";
 import type { AreaAnswer, Place } from "../src/lib/location-flow";
-import { addressBody, confirmAddress, type Geocoder, readPin, searchPlaces } from "../src/lib/map-place";
+import { addressBody, confirmAddress, type Geocoder, newSession, pickPlace, placeSessions, readPin, searchPlaces } from "../src/lib/map-place";
 
 const prabhat: GeoAddress = {
   isoCountryCode: "IN",
@@ -13,15 +13,12 @@ const prabhat: GeoAddress = {
   city: "Pune",
 };
 const shivajiNagar = { latitude: 18.5196, longitude: 73.8399 };
-const geocoder = (find: Geocoder["find"], addresses: Geocoder["addresses"] = async () => [prabhat]): Geocoder => ({
-  find,
-  addresses,
-});
+const geocoder = (addresses: Geocoder["addresses"] = async () => [prabhat]): Geocoder => ({ addresses });
 
 describe("readPin", () => {
   it("names the spot from the first address with a pincode", async () => {
     const pin = await readPin(
-      geocoder(async () => [], async () => [{ ...prabhat, postalCode: null }, prabhat]),
+      geocoder(async () => [{ ...prabhat, postalCode: null }, prabhat]),
       shivajiNagar,
     );
     expect(pin).toEqual({
@@ -37,107 +34,133 @@ describe("readPin", () => {
   });
 
   it("falls back to the address's name, then the city, when a part is missing or empty", async () => {
-    const named = await readPin(geocoder(async () => [], async () => [{ ...prabhat, street: null }]), shivajiNagar);
+    const named = await readPin(geocoder(async () => [{ ...prabhat, street: null }]), shivajiNagar);
     expect(named?.title).toBe("12, Shivaji Nagar");
     const bare = { isoCountryCode: "IN", postalCode: "411005", street: null, name: null, district: null, city: "Pune" };
-    const cityOnly = await readPin(geocoder(async () => [], async () => [bare]), shivajiNagar);
+    const cityOnly = await readPin(geocoder(async () => [bare]), shivajiNagar);
     expect(cityOnly).toMatchObject({ place: { name: "Pune", areaLine: "Pune" }, title: "Pune", detail: "Pune 411005" });
-    const emptyDistrict = await readPin(geocoder(async () => [], async () => [{ ...prabhat, district: "" }]), shivajiNagar);
+    const emptyDistrict = await readPin(geocoder(async () => [{ ...prabhat, district: "" }]), shivajiNagar);
     expect(emptyDistrict?.place.name).toBe("Pune");
   });
 
   it("is null when no address there has a pincode, the lookup fails, or the pin is outside India", async () => {
-    expect(await readPin(geocoder(async () => [], async () => [{ ...prabhat, postalCode: "SW1A 1AA" }]), shivajiNagar)).toBeNull();
-    expect(await readPin(geocoder(async () => [], () => Promise.reject(new Error("rate limited"))), shivajiNagar)).toBeNull();
-    expect(await readPin(geocoder(async () => []), { latitude: 51.5, longitude: -0.12 })).toBeNull();
+    expect(await readPin(geocoder(async () => [{ ...prabhat, postalCode: "SW1A 1AA" }]), shivajiNagar)).toBeNull();
+    expect(await readPin(geocoder(() => Promise.reject(new Error("rate limited"))), shivajiNagar)).toBeNull();
+    expect(await readPin(geocoder(), { latitude: 51.5, longitude: -0.12 })).toBeNull();
   });
 
   it("is null for an address the phone names as outside India, even inside India's box with a pincode-like code", async () => {
     // Lhasa sits inside AddressPoint's box, and its postal code 850000 passes the pincode rule.
     const lhasa = { latitude: 29.65, longitude: 91.1 };
     const china: GeoAddress = { isoCountryCode: "CN", postalCode: "850000", street: "Beijing Middle Road", name: null, district: "Chengguan", city: "Lhasa" };
-    expect(await readPin(geocoder(async () => [], async () => [china]), lhasa)).toBeNull();
-    expect(await readPin(geocoder(async () => [], async () => [{ ...china, isoCountryCode: "cn" }]), lhasa)).toBeNull();
+    expect(await readPin(geocoder(async () => [china]), lhasa)).toBeNull();
+    expect(await readPin(geocoder(async () => [{ ...china, isoCountryCode: "cn" }]), lhasa)).toBeNull();
   });
 
   it("keeps an address with no country, and skips a foreign one for an Indian one at the same spot", async () => {
-    expect((await readPin(geocoder(async () => [], async () => [{ ...prabhat, isoCountryCode: null }]), shivajiNagar))?.place.pincode).toBe("411005");
+    expect((await readPin(geocoder(async () => [{ ...prabhat, isoCountryCode: null }]), shivajiNagar))?.place.pincode).toBe("411005");
     const nepal: GeoAddress = { ...prabhat, isoCountryCode: "NP", postalCode: "560001" };
-    expect((await readPin(geocoder(async () => [], async () => [nepal, { ...prabhat, isoCountryCode: "in" }]), shivajiNagar))?.place.pincode).toBe("411005");
+    expect((await readPin(geocoder(async () => [nepal, { ...prabhat, isoCountryCode: "in" }]), shivajiNagar))?.place.pincode).toBe("411005");
   });
 });
 
+const session = "00000000-0000-4000-8000-000000000401";
+const baner = { id: "ChIJ-baner_1", title: "Baner Road", detail: "Baner, Pune, Maharashtra" };
+const point = { latitude: 18.559, longitude: 73.7868 };
+const failed = (code: ErrorCode) => ({ ok: false as const, status: 400, code });
+
+/** Our server's place search, answering as given and recording each call. */
+function places(search: unknown, picked: unknown = { ok: true, data: { point } }) {
+  const calls: string[] = [];
+  const answer = (value: unknown) => (value instanceof Error ? Promise.reject(value) : Promise.resolve(value as never));
+  return {
+    calls,
+    searchPlaces: (text: string, given: string) => (calls.push(`search ${text} ${given}`), answer(search)),
+    placePoint: (id: string, given: string) => (calls.push(`point ${id} ${given}`), answer(picked)),
+  };
+}
+
 describe("searchPlaces", () => {
-  it("is empty when nothing is found, so C15 shows the no-results message", async () => {
-    expect(await searchPlaces(geocoder(async () => []), "Nowhere")).toEqual([]);
-    expect(await searchPlaces(geocoder(() => Promise.reject(new Error("no results"))), "Nowhere")).toEqual([]);
+  it("searches the trimmed text with the session, and answers Google's matches", async () => {
+    const server = places({ ok: true, data: { matches: [baner] } });
+    expect(await searchPlaces(server, "  Baner Road  ", session)).toEqual([baner]);
+    expect(server.calls).toEqual([`search Baner Road ${session}`]);
   });
 
-  it("lists a single match, so it is seen before the map", async () => {
-    const spots = await searchPlaces(geocoder(async () => [shivajiNagar]), "  Prabhat Road  ");
-    expect(spots).toHaveLength(1);
-    expect(spots[0]?.title).toBe("Prabhat Road, Shivaji Nagar");
+  it("is empty when nothing matches, and bad-text without asking when the text breaks the search rule", async () => {
+    expect(await searchPlaces(places({ ok: true, data: { matches: [] } }), "Nowhere", session)).toEqual([]);
+    const server = places({ ok: true, data: { matches: [baner] } });
+    expect(await searchPlaces(server, "Baner\u0000", session)).toBe("bad-text");
+    expect(await searchPlaces(server, "a".repeat(101), session)).toBe("bad-text");
+    expect(server.calls).toEqual([]);
   });
 
-  it("searches the trimmed text, takes at most 5 matches, and drops those without a pincode", async () => {
-    let searched = "";
-    const points = Array.from({ length: 7 }, (_, i) => ({ latitude: 18.5 + i / 100, longitude: 73.8 }));
-    const spots = await searchPlaces(
-      geocoder(
-        async (text) => {
-          searched = text;
-          return points;
-        },
-        async (point) => (point.latitude === 18.51 ? [] : [{ ...prabhat, street: `Road ${point.latitude}` }]),
-      ),
-      " 411005 ",
-    );
-    expect(searched).toBe("411005");
-    expect(spots.map((spot) => spot.place.point?.latitude)).toEqual([18.5, 18.52, 18.53, 18.54]);
+  it("searches a pasted multi-line address as one line", async () => {
+    const server = places({ ok: true, data: { matches: [baner] } });
+    expect(await searchPlaces(server, "Flat 4,\nBaner Road\t Pune\r\n", session)).toEqual([baner]);
+    expect(server.calls).toEqual([`search Flat 4, Baner Road Pune ${session}`]);
   });
 
-  it("lists matches that name the same place once, and keeps only the pin's latitude and longitude", async () => {
-    // The phone's geocoder adds altitude and accuracy, which the server's strict point refuses.
-    const found = { ...shivajiNagar, altitude: 560, accuracy: 100 };
-    const spots = await searchPlaces(geocoder(async () => [found, { ...found, latitude: 18.52 }]), "411005");
-    expect(spots).toHaveLength(1);
-    expect(spots[0]?.place.point).toEqual(shivajiNagar);
+  it("names why it found nothing: no answer, the hourly limit, or the search down", async () => {
+    expect(await searchPlaces(places(new Error("offline")), "Baner", session)).toBe("offline");
+    expect(await searchPlaces(places(failed("TOO_MANY_REQUESTS")), "Baner", session)).toBe("too-many");
+    expect(await searchPlaces(places(failed("UNAVAILABLE")), "Baner", session)).toBe("unavailable");
+  });
+});
+
+describe("pickPlace", () => {
+  it("answers the tapped match's point, asked with the search's session", async () => {
+    const server = places(null);
+    expect(await pickPlace(server, baner.id, session)).toEqual(point);
+    expect(server.calls).toEqual([`point ${baner.id} ${session}`]);
   });
 
-  it("drops a match the phone names as outside India, even with a six-digit postal code", async () => {
-    const lhasa = { latitude: 29.65, longitude: 91.1 };
-    const china: GeoAddress = { isoCountryCode: "CN", postalCode: "850000", street: "Beijing Middle Road", name: null, district: "Chengguan", city: "Lhasa" };
-    const spots = await searchPlaces(
-      geocoder(async () => [lhasa, shivajiNagar], async (point) => (point.latitude === lhasa.latitude ? [china] : [prabhat])),
-      "Chengguan",
-    );
-    expect(spots.map((spot) => spot.place.point)).toEqual([shivajiNagar]);
-    expect(await searchPlaces(geocoder(async () => [lhasa], async () => [china]), "Lhasa")).toEqual([]);
+  it("names why there is no point: gone, no answer, the hourly limit, or the search down", async () => {
+    expect(await pickPlace(places(null, failed("NOT_FOUND")), baner.id, session)).toBe("gone");
+    expect(await pickPlace(places(null, new Error("offline")), baner.id, session)).toBe("offline");
+    expect(await pickPlace(places(null, failed("TOO_MANY_REQUESTS")), baner.id, session)).toBe("too-many");
+    expect(await pickPlace(places(null, failed("UNAVAILABLE")), baner.id, session)).toBe("unavailable");
+  });
+});
+
+describe("newSession", () => {
+  it("makes a new version-4 UUID each time, as the server's session rule takes", () => {
+    const first = newSession();
+    expect(PlaceSession.safeParse(first).success).toBe(true);
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(newSession()).not.toBe(first);
+  });
+});
+
+describe("placeSessions", () => {
+  const counting = () => {
+    let made = 0;
+    return placeSessions(() => `s${++made}`);
+  };
+
+  it("gives each search a new session, and the pick the session its search used", () => {
+    const sessions = counting();
+    const first = sessions.search();
+    const second = sessions.search();
+    expect(second).not.toBe(first);
+    expect(sessions.pick()).toBe(second);
   });
 
-  it("keeps a later match when looking up an earlier one fails", async () => {
-    const later = { latitude: 18.53, longitude: 73.84 };
-    const spots = await searchPlaces(
-      geocoder(
-        async () => [shivajiNagar, later],
-        async (point) => (point.latitude === shivajiNagar.latitude ? Promise.reject(new Error("rate limited")) : [prabhat]),
-      ),
-      "Prabhat Road",
-    );
-    expect(spots.map((spot) => spot.place.point)).toEqual([later]);
+  it("never sends an ended session again: a retry after a failed pick, or a tap after Back, gets a new one", () => {
+    const sessions = counting();
+    const searched = sessions.search();
+    const picked = sessions.pick();
+    const retried = sessions.pick();
+    const afterBack = sessions.pick();
+    expect(picked).toBe(searched);
+    expect(new Set([picked, retried, afterBack]).size).toBe(3);
+    expect(sessions.search()).not.toBe(afterBack);
   });
 
-  it("looks the matches up one at a time", async () => {
-    let running = 0;
-    let most = 0;
-    const slow = async () => {
-      most = Math.max(most, ++running);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      running--;
-      return [prabhat];
-    };
-    await searchPlaces(geocoder(async () => [shivajiNagar, shivajiNagar, shivajiNagar], slow), "Pune");
-    expect(most).toBe(1);
+  it("makes real sessions by default", () => {
+    const sessions = placeSessions();
+    expect(PlaceSession.safeParse(sessions.search()).success).toBe(true);
+    expect(PlaceSession.safeParse(sessions.pick()).success).toBe(true);
   });
 });
 
