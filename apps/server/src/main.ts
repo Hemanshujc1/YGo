@@ -1,3 +1,4 @@
+import { createIdentityVerifier } from "./adapters/identity-verifier";
 import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
 import { createGooglePlaceFinder } from "./adapters/place-finder";
@@ -20,11 +21,16 @@ const productImages = config.PRODUCT_IMAGE_BUCKET && imageBaseUrl
     imageBaseUrl,
   })
   : undefined;
+const clock = { now: () => new Date() };
 const app = buildApp({
   checkDatabase: database.ping,
   database,
   mailer,
-  clock: { now: () => new Date() },
+  identityVerifier: createIdentityVerifier({
+    google: config.GOOGLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+    apple: config.APPLE_CLIENT_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+  }, clock),
+  clock,
   authTokenSecret: config.AUTH_TOKEN_SECRET,
   adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,
   productImages,

@@ -24,6 +24,7 @@ export default function Layout() {
     >
       <SessionGate
         session={session}
+        identity={{ googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID, googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
         api={api}
         supportEmail={supportEmail}
         words={{

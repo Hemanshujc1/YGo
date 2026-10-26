@@ -24,6 +24,7 @@ export const strings = {
   },
   // C01 and C14 (#155). The support email comes from EXPO_PUBLIC_SUPPORT_EMAIL, never from here.
   signIn: {
+    providerFailed: "Couldn’t sign in. Try again, or use an emailed code below.",
     title: "YGo",
     heading: "Order from shops near you",
     lead: "Shops within 2 to 3 km deliver with their own staff. You pay the shop at the door, in cash or UPI.",

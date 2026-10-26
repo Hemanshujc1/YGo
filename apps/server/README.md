@@ -76,6 +76,8 @@ In `apps/server/.env`, set `PRODUCT_IMAGE_BUCKET=ygo-product-images`, `S3_ENDPOI
 | --- | --- | --- |
 | `DATABASE_URL` | yes | none; a `postgres://` URL |
 | `AUTH_TOKEN_SECRET` | yes | none; at least 32 bytes, used to sign access tokens and hash codes/tokens |
+| `GOOGLE_CLIENT_IDS` | no | empty; comma-separated permitted Google Web OAuth client IDs |
+| `APPLE_CLIENT_IDS` | no | empty; comma-separated permitted native Apple bundle identifiers |
 | `ADMIN_COOKIE_DOMAIN` | no | host-only locally; set to the registrable domain for Admin web deployment |
 | `MAILER` | yes | `ses` or `mailpit`; no console sender |
 | `MAIL_FROM` | yes | sender email address for both providers |
@@ -132,3 +134,7 @@ Admin action records are append-only. PostgreSQL rejects update, delete and trun
 ## Errors
 
 Every non-2xx response is the `ErrorEnvelope` from `@ygo/contracts`: `{"error":{"code":"…"}}`, a machine code and no display text. Each client maps the code to its own words.
+
+## Google and Apple sign-in
+
+Follow the [step-by-step provider setup guide](../../docs/operations/social-sign-in.md), including local migration, app configuration and device checks.

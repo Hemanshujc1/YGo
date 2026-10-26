@@ -4,6 +4,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
   ADMIN_REFRESH_HEADER,
+  Email,
+  IdentityChallenge,
+  IdentityChallengeBody,
+  IdentitySignInResponse,
+  VerifyIdentityBody,
   ErrorEnvelope,
   BrowserSession,
   type ErrorCode,
@@ -13,6 +18,7 @@ import {
   VerifyCodeBody,
   type Account,
 } from "@ygo/contracts";
+import type { IdentityVerifier } from "../adapters/identity-verifier";
 import type { Clock } from "../adapters/clock";
 import type { Mailer } from "../adapters/mailer";
 import {
@@ -36,6 +42,7 @@ const ADMIN_COOKIE = "__Secure-ygo-admin-refresh";
 interface AuthOptions {
   pool: Pool;
   mailer: Mailer;
+  identityVerifier?: IdentityVerifier;
   clock: Clock;
   secret: string;
   adminCookieDomain?: string;
@@ -81,9 +88,88 @@ function rateLimitAddress(address: string): string {
   return `${expanded.slice(0, 4).map((group) => group.padStart(4, "0")).join(":")}/64`;
 }
 
-export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, adminCookieDomain }: AuthOptions): void {
+export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, adminCookieDomain, identityVerifier }: AuthOptions): void {
   const keys = deriveKeys(secret);
   const setAdminCookie = (reply: FastifyReply, token: string) => reply.header("set-cookie", adminCookie(token, adminCookieDomain));
+  async function issueSession(client: PoolClient, account: Account, now: Date, browser: boolean) {
+    const sessionId = randomUUID();
+    const refreshToken = randomBytes(32).toString("base64url");
+    await client.query(
+      "INSERT INTO sessions (id, account_id, expires_at, kind) VALUES ($1, $2, $3, $4)",
+      [sessionId, account.id, new Date(now.getTime() + (browser ? ADMIN_IDLE_MS : REFRESH_TTL_MS)), browser ? "admin_web" : "mobile"],
+    );
+    await client.query(
+      "INSERT INTO refresh_tokens (token_hash, session_id, generation) VALUES ($1, $2, 0)",
+      [digest(keys.refreshHash, refreshToken), sessionId],
+    );
+    return { accessToken: accessToken(keys, account.id, sessionId, now), refreshToken };
+  }
+
+  app.post("/v1/auth/identity/challenge", {
+    schema: { body: IdentityChallengeBody, response: { 200: IdentityChallenge, 429: ErrorEnvelope, 503: ErrorEnvelope } },
+  }, async (request, reply) => {
+    if (!identityVerifier) return sendError(reply, 503, "UNAVAILABLE");
+    const { provider } = request.body as typeof IdentityChallengeBody._output;
+    const now = clock.now();
+    const address = rateLimitAddress(request.ip);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await lockKey(client, address, 3);
+      await client.query("DELETE FROM identity_challenges WHERE expires_at <= $1", [now]);
+      const count = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM identity_challenges WHERE address = $1", [address]);
+      if ((count.rows[0]?.count ?? 0) >= 30) {
+        await client.query("ROLLBACK");
+        return sendError(reply, 429, "TOO_MANY_REQUESTS");
+      }
+      const nonce = randomBytes(32).toString("hex");
+      await client.query("INSERT INTO identity_challenges (nonce, provider, address, expires_at) VALUES ($1, $2, $3, $4)",
+        [nonce, provider, address, new Date(now.getTime() + CODE_TTL_MS)]);
+      await client.query("COMMIT");
+      return { nonce };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  });
+
+  app.post("/v1/auth/identity", {
+    schema: { body: VerifyIdentityBody, response: { 200: IdentitySignInResponse, 401: ErrorEnvelope, 503: ErrorEnvelope } },
+  }, async (request, reply) => {
+    if (!identityVerifier) return sendError(reply, 503, "UNAVAILABLE");
+    const { provider, identityToken, nonce } = request.body as VerifyIdentityBody;
+    // Consume before verification: failures cannot be retried to probe the verifier.
+    const challenge = await pool.query(
+      "UPDATE identity_challenges SET used = true WHERE nonce = $1 AND provider = $2 AND NOT used AND expires_at > $3 RETURNING nonce",
+      [nonce, provider, clock.now()],
+    );
+    if (!challenge.rowCount) return sendError(reply, 401, "UNAUTHENTICATED");
+    let identity;
+    try { identity = await identityVerifier.verify(provider, identityToken, nonce); }
+    catch { return sendError(reply, 503, "UNAVAILABLE"); }
+    const email = Email.safeParse(identity?.email);
+    if (!identity || !email.success) return sendError(reply, 401, "UNAUTHENTICATED");
+    if (identity.emailCodeRequired) return { emailVerificationRequired: email.data };
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await lockKey(client, email.data, 1);
+      const result = await client.query<Account>(
+        `INSERT INTO accounts (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+         RETURNING id, email, name, phone, theme`, [email.data],
+      );
+      const account = result.rows[0];
+      if (!account) throw new Error("Account insert returned no row");
+      const signed = await issueSession(client, account, clock.now(), false);
+      await client.query("COMMIT");
+      request.log.info({ provider, outcome: "signed_in" }, "Auth identity");
+      return { ...signed, account };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  });
+
   const requestCode = (browser: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
       request.log.info({ flow: browser ? "admin" : "mobile", stage: "code" }, "Auth attempt");
       const { email } = request.body as typeof RequestCodeBody._output;
@@ -284,24 +370,15 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
           return sendError(reply, 401, "UNAUTHENTICATED");
         }
         if (!account) throw new Error("Account insert returned no row");
-        const sessionId = randomUUID();
-        const refreshToken = randomBytes(32).toString("base64url");
-        await client.query(
-          "INSERT INTO sessions (id, account_id, expires_at, kind) VALUES ($1, $2, $3, $4)",
-          [sessionId, account.id, new Date(now.getTime() + (browser ? ADMIN_IDLE_MS : REFRESH_TTL_MS)), browser ? "admin_web" : "mobile"],
-        );
-        await client.query(
-          "INSERT INTO refresh_tokens (token_hash, session_id, generation) VALUES ($1, $2, 0)",
-          [digest(keys.refreshHash, refreshToken), sessionId],
-        );
+        const signed = await issueSession(client, account, now, browser);
         await client.query("DELETE FROM login_codes WHERE email = $1", [email]);
         await client.query("COMMIT");
         request.log.info({ flow: browser ? "admin" : "mobile", outcome: "signed_in" }, "Auth verify");
         if (browser) {
-          setAdminCookie(reply, refreshToken);
-          return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), account });
+          setAdminCookie(reply, signed.refreshToken);
+          return reply.code(200).send({ accessToken: signed.accessToken, account });
         }
-        return reply.code(200).send({ accessToken: accessToken(keys, account.id, sessionId, now), refreshToken, account });
+        return reply.code(200).send({ ...signed, account });
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;

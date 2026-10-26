@@ -19,6 +19,7 @@ export type SessionGateWords = {
 
 type SessionGateProps = {
   session: AppSession;
+  identity: SignInProps["identity"];
   /** The app's own client: the calls C01, C14 and C02 make. */
   api: SignInProps["api"] & ProfileProps["api"];
   /** The address Help and C02's phone-in-use card open a new email to. */
@@ -34,7 +35,7 @@ type SessionGateProps = {
  * waits, C01 and C14 while signed out, C02 until the name and phone are
  * saved, "Can't reach YGo" when no answer came, and the app once signed in.
  */
-export function SessionGate({ session, api, supportEmail, words, children }: SessionGateProps) {
+export function SessionGate({ session, api, supportEmail, words, children, identity }: SessionGateProps) {
   const state = useSession(session);
 
   // Once per launch: a remount (Fast Refresh) never sends the person back to the blank screen.
@@ -51,6 +52,7 @@ export function SessionGate({ session, api, supportEmail, words, children }: Ses
           words={words.signIn}
           supportEmail={supportEmail}
           api={api}
+          identity={identity}
           onSignedIn={session.signedIn}
           notice={state.notCleared ? words.notCleared : undefined}
         />

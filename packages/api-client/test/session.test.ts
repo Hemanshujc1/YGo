@@ -1001,3 +1001,34 @@ describe("a sign-in or sign-out during another change", () => {
     expect(onSignedOut).not.toHaveBeenCalled();
   });
 });
+
+
+describe("ACC-1 provider sessions", () => {
+  const identity = { provider: "google" as const, nonce: "a".repeat(64), identityToken: "signed-token" };
+  it("saves the provider session and uses its ordinary access token", async () => {
+    const h = setup((call) => call.path === "/v1/auth/identity" ? answer(200, pair(1)) : answer(200, account));
+    expect(await h.client.verifyIdentity(identity)).toEqual({ ok: true, data: account });
+    expect(h.sets).toEqual(["r1"]);
+    await h.client.me();
+    expect(h.calls.at(-1)?.auth).toBe("Bearer a1");
+  });
+  it("keeps tokens out of mailbox-challenge results and does not save a session", async () => {
+    const h = setup(() => answer(200, { emailVerificationRequired: "asha@example.com" }));
+    expect(await h.client.verifyIdentity(identity)).toEqual({ ok: true, data: { emailVerificationRequired: "asha@example.com" } });
+    expect(h.sets).toEqual([]);
+  });
+  it("discards a provider response arriving after sign-out", async () => {
+    let release!: (response: Response) => void;
+    const h = setup((call) => call.path === "/v1/auth/identity" ? new Promise((resolve) => { release = resolve; }) : answer(204));
+    const signing = h.client.verifyIdentity(identity);
+    await h.client.signOut();
+    release(answer(200, pair(1)));
+    expect(await signing).toMatchObject({ ok: false, code: "UNAUTHENTICATED" });
+    expect(h.sets).toEqual([]);
+  });
+  it("reports a secure-storage failure instead of announcing sign-in", async () => {
+    const h = setup(() => answer(200, pair(1)));
+    h.failNext("set");
+    await expect(h.client.verifyIdentity(identity)).rejects.toThrow("Keychain unavailable");
+  });
+});

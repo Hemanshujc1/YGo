@@ -8,6 +8,7 @@ export type SignInWords = {
   heading?: string;
   lead: string;
   emailLabel: string;
+  providerFailed: string;
   /** Under the email when `Email` refuses it. */
   emailInvalid: string;
   /** "Email me a code". */

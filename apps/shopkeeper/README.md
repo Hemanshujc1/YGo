@@ -48,3 +48,7 @@ The theme (System, Light or Dark) is chosen at the end of the shop application s
 ## Styling
 
 NativeWind classes over `@ygo/tokens` roles only, such as `bg-surface` and `text-muted`. `tailwind.config.js` loads the same `@ygo/tokens/tailwind` plugin as the web apps, which replaces Tailwind's palette and switches to the dark values with the theme in use. `metro.config.js` sets 1rem to 16, as on the web, so the spacing scale matches the design system. Inline `style` is only for values known at runtime, such as safe-area insets.
+
+## Google and Apple sign-in
+
+See [provider setup and device checks](../../docs/operations/social-sign-in.md). Both apps need a new native build after installing these sign-in modules.

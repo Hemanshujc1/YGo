@@ -106,6 +106,13 @@
       "when": 1792925392634,
       "tag": "0014_shop_area_from_pincode",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792938816226,
+      "tag": "0015_identity_challenges",
+      "breakpoints": true
     }
   ]
 }

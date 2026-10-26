@@ -11,6 +11,7 @@ import {
 import Fastify, { type FastifyError, type FastifyServerOptions } from "fastify";
 import { bodyFields, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "./zod";
 import type { Database } from "./db";
+import type { IdentityVerifier } from "./adapters/identity-verifier";
 import type { Mailer } from "./adapters/mailer";
 import type { PlaceFinder } from "./adapters/place-finder";
 import type { Clock } from "./adapters/clock";
@@ -32,6 +33,7 @@ export interface AppOptions {
   checkDatabase: () => Promise<void>;
   database?: Database;
   mailer?: Mailer;
+  identityVerifier?: IdentityVerifier;
   clock?: Clock;
   authTokenSecret?: string;
   adminCookieDomain?: string;
@@ -61,6 +63,7 @@ export function buildApp({
   checkDatabase,
   database,
   mailer,
+  identityVerifier,
   clock,
   authTokenSecret,
   adminCookieDomain,
@@ -100,7 +103,7 @@ export function buildApp({
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(envelope("NOT_FOUND")));
 
   if (database && mailer && clock && authTokenSecret) {
-    registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret, adminCookieDomain });
+    registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret, adminCookieDomain, identityVerifier });
     registerAdminRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCategoryRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerMasterProductRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });

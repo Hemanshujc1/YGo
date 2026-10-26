@@ -27,6 +27,6 @@ describe("app.config", () => {
   it("keeps app.json's name, slug and other plugins", () => {
     const config = appConfig({ config: app.expo } as Parameters<typeof appConfig>[0]);
     expect(config).toMatchObject({ name: "YGo", slug: "ygo-customer" });
-    expect(config.plugins?.slice(0, -1)).toEqual(app.expo.plugins);
+    expect(config.plugins?.slice(0, app.expo.plugins.length)).toEqual(app.expo.plugins);
   });
 });
