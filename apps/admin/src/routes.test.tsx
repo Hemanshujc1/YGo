@@ -827,11 +827,12 @@ describe("Admin theme (#263)", () => {
   it("goes back to the system theme without the attribute", async () => {
     localStorage.setItem(themeKey, "dark");
     document.documentElement.dataset.theme = "dark";
-    setup("/accounts", {
+    const { api } = setup("/accounts", {
       me: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
       setTheme: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     });
     await picker();
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
     fireEvent.click(option("system"));
     await waitFor(() => expect(option("system").getAttribute("aria-pressed")).toBe("true"));
     expect(shown()).toBeUndefined();
@@ -847,6 +848,7 @@ describe("Admin theme (#263)", () => {
       setTheme: vi.fn().mockReturnValue(save.promise),
     });
     await picker();
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
 
     fireEvent.click(option("system"));
     expect(api.setTheme).toHaveBeenCalledWith({ theme: "system" });
