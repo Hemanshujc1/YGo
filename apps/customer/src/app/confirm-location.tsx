@@ -1,10 +1,9 @@
 import { type AddressLabel, AddressPoint } from "@ygo/contracts";
 import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
+import { PinMap } from "@ygo/mobile/pin-map";
 import { useLocalSearchParams, useNavigation } from "expo-router";
-import { cssInterop } from "nativewind";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, TextInput, View } from "react-native";
-import MapView from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { MapPin } from "../components/icons";
@@ -16,12 +15,7 @@ import { phoneGeocoder } from "../lib/phone-geocoder";
 import { savePlace } from "../lib/saved-place";
 import { strings } from "../strings";
 
-cssInterop(MapView, { className: "style" });
-
 const words = strings.confirm;
-
-// Street level when the map opens (#242, Q6).
-const streetLevel = { latitudeDelta: 0.004, longitudeDelta: 0.004 };
 
 // The phone's geocoder limits how often an app may ask, so a read waits until the map has rested this long.
 const settle = 600;
@@ -56,8 +50,6 @@ export default function ConfirmLocation() {
   const [reads] = useState(newestOnly);
   const [saves] = useState(newestOnly);
   const wait = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // The spot last read: Android reports the opening region too, which needs no second read.
-  const last = useRef(start);
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(
@@ -80,9 +72,6 @@ export default function ConfirmLocation() {
 
   /** The map stopped at a new spot: read it once the map has rested, and drop an old save failure, which was for the last spot. */
   function moved(point: AddressPoint) {
-    const before = last.current;
-    if (before && Math.abs(before.latitude - point.latitude) < 1e-6 && Math.abs(before.longitude - point.longitude) < 1e-6) return;
-    last.current = point;
     clearTimeout(wait.current);
     reads.drop();
     setReading(true);
@@ -143,23 +132,8 @@ export default function ConfirmLocation() {
       <TopBar title={words.title} />
 
       {start && (
-        <View className="h-[45%]">
-          <MapView
-            className="flex-1"
-            initialRegion={{ ...start, ...streetLevel }}
-            onRegionChangeComplete={({ latitude, longitude }) => moved({ latitude, longitude })}
-            // Held still while saving, so the spot on screen is the one being saved.
-            scrollEnabled={!saving}
-            zoomEnabled={!saving}
-            rotateEnabled={!saving}
-            pitchEnabled={!saving}
-            toolbarEnabled={false}
-          />
-          {/* The pin stays in the middle and its point marks the spot (#242, Q6). */}
-          <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
-            <MapPin size={40} className="mb-10 text-primary" />
-          </View>
-        </View>
+        // Held still while saving, so the spot on screen is the one being saved.
+        <PinMap className="h-[45%]" start={start} onMoved={moved} locked={saving} pin={<MapPin size={40} className="mb-10 text-primary" />} />
       )}
 
       <ScrollView

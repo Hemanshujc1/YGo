@@ -1,7 +1,8 @@
-import { type SendShopApplicationBody, type ShopApplication, ShopEntityType } from "@ygo/contracts";
+import { type AddressPoint, type SendShopApplicationBody, type ShopApplication, ShopEntityType } from "@ygo/contracts";
 import { formatNumber, formatPhone } from "@ygo/format";
 import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, ThemePicker } from "@ygo/mobile";
 import { addressAt } from "@ygo/mobile/address-at";
+import { PinMap } from "@ygo/mobile/pin-map";
 import * as Location from "expo-location";
 import { type ReactNode, useRef, useState } from "react";
 import { KeyboardAvoidingView, Linking, Pressable, ScrollView, TextInput, type TextInputProps, View } from "react-native";
@@ -12,6 +13,7 @@ import {
   draftBody,
   type Field,
   fillFromLocation,
+  mapStart,
   realDate,
   sendBody,
   shown,
@@ -23,6 +25,7 @@ import {
 import { strings } from "../strings";
 import { Confirm } from "./confirm";
 import { MapPin, Minus, Plus } from "./icons";
+import { MapPicker } from "./map-picker";
 import { SignOut } from "./sign-out";
 
 const words = strings.application.form;
@@ -74,8 +77,12 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
   const [asking, setAsking] = useState<SendShopApplicationBody | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [locating, setLocating] = useState(false);
-  // This visit's fix: a reopened Draft has only the saved location, with no accuracy (#295, Q3).
-  const [fix, setFix] = useState<{ accuracy: number | null } | null>(null);
+  // This visit's fix, or "pinned" once set on the map: a reopened Draft has only the saved location, with no accuracy (#295, Q3).
+  const [fix, setFix] = useState<{ accuracy: number | null } | "pinned" | null>(null);
+  // Where the full-screen map opens while it is shown, and whether "Set on map" is still finding that spot or found none (#307, Q3).
+  const [picking, setPicking] = useState<AddressPoint | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [noStart, setNoStart] = useState(false);
   const [problem, setProblem] = useState<keyof typeof problems | null>(null);
   // What the address at the location filled in; the line under the location shows while a box still holds it.
   const [filled, setFilled] = useState<ReturnType<typeof fillFromLocation>>({});
@@ -108,6 +115,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     looking.current = true;
     setLocating(true);
     setProblem(null);
+    setNoStart(false);
     setFix(null);
     setFilled({});
     const look = ++looks.current;
@@ -119,8 +127,45 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     edit("location", { location: found.point });
     // A rough fix could name the next pincode, so only a close one fills in (#303, Q5).
     if (isRough(found.accuracy)) return;
+    await fill(found.point, look);
+  }
+
+  /** "Move the pin" opens the map on the location; "Set on map" first finds where to open it (#307, Q3). */
+  async function openMap() {
+    if (looking.current) return;
+    setProblem(null);
+    setNoStart(false);
+    if (typed.location) return setPicking(typed.location);
+    looking.current = true;
+    setStarting(true);
+    const start = await mapStart(
+      {
+        // Android's geocoder answers only once location is allowed.
+        geocode: async (query) => (await Location.requestForegroundPermissionsAsync(), Location.geocodeAsync(query)),
+        here: () => findPlace(locator),
+      },
+      typed,
+    );
+    looking.current = false;
+    setStarting(false);
+    if (start) setPicking(start);
+    else setNoStart(true);
+  }
+
+  /** "Use this spot": the pin is the location, saved with Save draft or Send (#307, Q2). */
+  async function pin(point: AddressPoint) {
+    setPicking(null);
+    setFix("pinned");
+    setFilled({});
+    const look = ++looks.current;
+    edit("location", { location: point });
+    await fill(point, look);
+  }
+
+  /** Fills an empty Pincode and Address from the address at the point (#303, #307 Q4), unless a newer look, save or send came first. */
+  async function fill(point: AddressPoint, look: number) {
     // Save draft and Send stay on while the address is looked up (#303, Q3); no answer leaves both boxes as they are.
-    const at = await addressAt(Location.reverseGeocodeAsync, found.point);
+    const at = await addressAt(Location.reverseGeocodeAsync, point);
     if (look !== looks.current) return;
     // `typed` is the form at the tap. A box typed in since then has already lost its mark,
     // and the fill checks the latest form again, so it never replaces what was typed.
@@ -239,24 +284,50 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
           <View className="gap-1.5">
             <Text className="text-label font-medium text-text">{words.location.label}</Text>
             {typed.location && (
-              <Text accessibilityLiveRegion="polite" className="text-body text-text">
-                {fix === null
-                  ? words.location.saved
-                  : fix.accuracy === null
-                    ? words.location.foundNoAccuracy
-                    : words.location.found(formatNumber(Math.round(fix.accuracy)))}
-              </Text>
+              <>
+                {/* Only shows the spot: the full-screen map moves it, as a map inside the form would fight the scrolling (#307, Q2). */}
+                <PinMap
+                  key={`${typed.location.latitude},${typed.location.longitude}`}
+                  className="h-[180px] overflow-hidden rounded-card"
+                  start={typed.location}
+                  locked
+                  pin={<MapPin size={32} className="mb-8 text-primary" />}
+                />
+                <Text accessibilityLiveRegion="polite" className="text-body text-text">
+                  {fix === null
+                    ? words.location.saved
+                    : fix === "pinned"
+                      ? words.location.pinned
+                      : fix.accuracy === null
+                        ? words.location.foundNoAccuracy
+                        : words.location.found(formatNumber(Math.round(fix.accuracy)))}
+                </Text>
+              </>
             )}
-            {fix !== null && isRough(fix.accuracy) && <Text className="text-secondary text-muted">{words.location.rough}</Text>}
+            {fix !== null && fix !== "pinned" && isRough(fix.accuracy) && <Text className="text-secondary text-muted">{words.location.rough}</Text>}
             {filledIn && (
               <Text accessibilityLiveRegion="polite" className="text-secondary text-muted">
                 {words.location.filledIn}
               </Text>
             )}
-            <View className="mt-1">
-              <Button label={words.location.use} onPress={() => void locate()} busy={locating} disabled={busy} variant="secondary" icon={MapPin} alignStart />
+            <View className="mt-1 gap-2.5">
+              <Button label={words.location.use} onPress={() => void locate()} busy={locating} disabled={busy || starting} variant="secondary" icon={MapPin} alignStart />
+              <Button
+                label={typed.location ? words.location.move : words.location.setOnMap}
+                onPress={() => void openMap()}
+                busy={starting}
+                disabled={busy || locating}
+                variant="secondary"
+                alignStart
+              />
             </View>
-            {problem ? <FieldMessage text={problems[problem]} /> : wrong.location !== undefined && <FieldMessage text={wrong.location} />}
+            {problem ? (
+              <FieldMessage text={problems[problem]} />
+            ) : noStart ? (
+              <FieldMessage text={words.location.noStart} />
+            ) : (
+              wrong.location !== undefined && <FieldMessage text={wrong.location} />
+            )}
             {problem === "off" && <Button label={words.location.openSettings} onPress={() => void Linking.openSettings()} variant="text" />}
           </View>
           <View className="gap-1.5">
@@ -332,6 +403,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
           {/* Off while finding the location too, so a save landing after the fix can't replace it. A save or send drops an address still being looked up. */}
           <Button label={sending ? words.sending : words.send} onPress={ask} disabled={busy || locating} />
           <Button label={saving ? words.saving : words.save} onPress={() => void save()} disabled={busy || locating} variant="secondary" />
+          {picking && <MapPicker start={picking} onUse={(point) => void pin(point)} onBack={() => setPicking(null)} />}
           <Confirm
             visible={asking !== null}
             title={strings.application.confirmSend.title}

@@ -97,7 +97,19 @@ export const strings = {
         openSettings: "Open settings",
         phoneOff: "Location is off on this phone. Turn it on and try again.",
         notFound: "Couldn't find your location. Stand near your shop door and try again.",
-        invalid: "Use your location while at your shop.",
+        invalid: "Use your location at your shop, or set it on the map.",
+        // #307, Q2 and Q3.
+        pinned: "Pin set on the map",
+        move: "Move the pin",
+        setOnMap: "Set on map",
+        noStart: "Couldn't find your area. Enter your shop's pincode, then try again.",
+      },
+      // The full-screen map behind "Move the pin" and "Set on map" (#307, Q2).
+      map: {
+        title: "Shop location",
+        back: "Back",
+        hint: "Move the map until the pin is on your shop's door.",
+        use: "Use this spot",
       },
       ownerName: { label: "Owner's legal name", invalid: "Enter your name in letters, such as Asha Kulkarni." },
       entityType: { label: "Business type", invalid: "Choose your business type." },

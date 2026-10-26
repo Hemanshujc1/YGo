@@ -1,6 +1,6 @@
 # @ygo/shopkeeper
 
-The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it loads the account's shop application (#294): with none, a Start screen ("Start my shop application"); a Draft opens S17 Shop application, one form in four groups with Save draft; a sent one opens S18 Application status, the five steps from Draft to Live, refreshed by pulling down (#292). Each of these ends with the theme choice and Sign out. Joining a shop as staff comes with #58.
+The Shopkeeper app (Owner and Staff; delivery is a tab inside it, CONTEXT.md): Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens` (ADR-0001). Signed out, it shows sign-in: C01 Sign in, C14 Enter email code, then C02 Your name and phone number once. After that it loads the account's shop application (#294): with none, a Start screen ("Start my shop application"); a Draft opens S17 Shop application, one form in four groups with Save draft, where the shop's location comes from the phone's GPS or from a pin moved on Google's map (#307); a sent one opens S18 Application status, the five steps from Draft to Live, refreshed by pulling down (#292). Each of these ends with the theme choice and Sign out. Joining a shop as staff comes with #58.
 
 ## Run it locally
 
@@ -16,7 +16,12 @@ Expo Go is not used (ADR-0001). `expo run` makes a local development build and s
    # Optional until the store listings exist; while unset, the update screen names the stores instead of showing a button. A store build needs both.
    EXPO_PUBLIC_ANDROID_STORE_URL=
    EXPO_PUBLIC_IOS_STORE_URL=
+   # The Google map keys for S17's map, the same two as the Customer app's.
+   GOOGLE_MAPS_ANDROID_API_KEY=
+   GOOGLE_MAPS_IOS_API_KEY=
    ```
+
+   Without the map keys the map on S17 is blank. Each key's restrictions in Google Cloud list this app too: its package name with the same debug SHA-1 on the Android key, and its bundle ID on the iOS key (see [the map keys](../customer/README.md#the-map-keys)).
 
    That works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`.
 3. Build and open it:
