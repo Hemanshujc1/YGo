@@ -28,13 +28,14 @@ describe("Google place finder", () => {
     placePrediction: { placeId, structuredFormat: { mainText: { text: main }, ...(secondary && { secondaryText: { text: secondary } }) } },
   });
 
-  it("searches India only with the session, and keeps 5 matches with a usable id and a name", async () => {
+  it("searches India only with the session, and keeps 5 matches with a usable, unrepeated id and a name", async () => {
     const { calls, fetcher } = fakeFetch(200, {
       suggestions: [
         prediction(baner.id, baner.title, baner.detail),
         prediction("bad/id", "Bad"),
         { placePrediction: { placeId: "ChIJ-noname" } },
         prediction("ChIJ-2", "Baner Gaon"),
+        prediction(baner.id, "Baner Road again"),
         ...["3", "4", "5", "6"].map((n) => prediction(`ChIJ-${n}`, `Place ${n}`, "Pune")),
       ],
     });
@@ -49,7 +50,7 @@ describe("Google place finder", () => {
     const [call] = calls;
     expect(call?.url).toBe("https://places.googleapis.com/v1/places:autocomplete");
     expect(call?.init.method).toBe("POST");
-    expect(call?.init.headers).toMatchObject({ "X-Goog-Api-Key": "key-1" });
+    expect(call?.init.headers).toMatchObject({ "Content-Type": "application/json", "X-Goog-Api-Key": "key-1" });
     expect(JSON.parse(String(call?.init.body))).toEqual({ input: "Baner", sessionToken: session, includedRegionCodes: ["in"], languageCode: "en" });
   });
 
@@ -62,12 +63,13 @@ describe("Google place finder", () => {
     expect(await createGooglePlaceFinder("key-1", fetcher).point(baner.id, session)).toEqual(point);
     expect(calls[0]?.url).toBe(`https://places.googleapis.com/v1/places/${baner.id}?sessionToken=${session}`);
     expect(calls[0]?.init.method).toBe("GET");
-    expect(calls[0]?.init.headers).toMatchObject({ "X-Goog-Api-Key": "key-1", "X-Goog-FieldMask": "location" });
+    expect(calls[0]?.init.headers).toEqual({ "X-Goog-Api-Key": "key-1", "X-Goog-FieldMask": "location" });
   });
 
-  it("answers null for a place Google no longer knows, and rejects when Google fails", async () => {
+  it("answers null for a place Google no longer knows, and rejects when Google fails or refuses the call", async () => {
     expect(await createGooglePlaceFinder("key-1", fakeFetch(404, {}).fetcher).point(baner.id, session)).toBeNull();
     expect(await createGooglePlaceFinder("key-1", fakeFetch(200, {}).fetcher).point(baner.id, session)).toBeNull();
+    await expect(createGooglePlaceFinder("key-1", fakeFetch(400, {}).fetcher).point(baner.id, session)).rejects.toThrow("400");
     await expect(createGooglePlaceFinder("key-1", fakeFetch(500, {}).fetcher).point(baner.id, session)).rejects.toThrow("500");
     await expect(createGooglePlaceFinder("key-1", fakeFetch(403, {}).fetcher).search("Baner", session)).rejects.toThrow("403");
   });

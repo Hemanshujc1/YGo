@@ -19,12 +19,17 @@ const WINDOW_MS = 60 * 60 * 1000;
 /**
  * Whether an account may make one more call in the last hour, counting it if
  * so. Kept in memory: a restart forgets the counts, which only lets a few
- * extra calls through.
+ * extra calls through. Once an hour it forgets accounts with no call that hour.
  */
 function hourlyLimit(clock: Clock): (accountId: string) => boolean {
   const calls = new Map<string, number[]>();
+  let swept = clock.now().getTime();
   return (accountId) => {
     const now = clock.now().getTime();
+    if (now - swept >= WINDOW_MS) {
+      for (const [id, times] of calls) if (now - (times.at(-1) ?? 0) >= WINDOW_MS) calls.delete(id);
+      swept = now;
+    }
     const recent = (calls.get(accountId) ?? []).filter((at) => now - at < WINDOW_MS);
     const allowed = recent.length < LIMIT;
     if (allowed) recent.push(now);
