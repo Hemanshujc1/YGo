@@ -35,7 +35,7 @@ import { CatalogImportRowErrors } from "./catalog";
  * Saved addresses (#217):
  * - ADDRESS_LIMIT_REACHED (409): the account already has 10 saved addresses.
  * Place search (#257):
- * - TOO_MANY_REQUESTS (429): the account searched, or picked a match, 30 times in the last hour.
+ * - TOO_MANY_REQUESTS (429): the account searched 30 times in the last hour, or picked a match 30 times; each is counted on its own.
  * - UNAVAILABLE (503): Google Places did not answer, or no key is set.
  * - NOT_FOUND (404): the picked place is gone, or has no point in India.
  * Shop application (#40):

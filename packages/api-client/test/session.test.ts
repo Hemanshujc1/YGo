@@ -187,7 +187,7 @@ describe("each call", () => {
     expect(await client.placePoint("ChIJ-baner_1", session)).toEqual({ ok: true, data: { point } });
     expect(calls.slice(1)).toEqual([
       { method: "GET", path: `/v1/places?text=Baner+Road+%26+Co&session=${session}`, body: undefined, auth: "Bearer a1" },
-      { method: "GET", path: `/v1/places/ChIJ-baner_1?session=${session}`, body: undefined, auth: "Bearer a1" },
+      { method: "GET", path: `/v1/places/point?id=ChIJ-baner_1&session=${session}`, body: undefined, auth: "Bearer a1" },
     ]);
   });
 

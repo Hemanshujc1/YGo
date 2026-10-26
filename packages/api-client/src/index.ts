@@ -330,9 +330,10 @@ export function createApiClient({
       return result(await signedIn("GET", `/v1/places?${query}`), PlaceSearchResponse);
     },
 
-    /** `GET /v1/places/:id?session=`: a picked match's point, ending the search's session. */
+    /** `GET /v1/places/point?id=&session=`: a picked match's point, ending the search's session. */
     async placePoint(id: string, session: string): Promise<ApiResult<PlacePointResponse>> {
-      return result(await signedIn("GET", `/v1/places/${encodeURIComponent(id)}?${new URLSearchParams({ session })}`), PlacePointResponse);
+      const query = new URLSearchParams({ id, session });
+      return result(await signedIn("GET", `/v1/places/point?${query}`), PlacePointResponse);
     },
 
     /** `GET /v1/me/shop-application`: the account's shop application, or null before Start (S18). */
