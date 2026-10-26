@@ -20,7 +20,7 @@ import { Briefcase, House, MapPin, Search } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { goHome } from "../lib/go-home";
 import { newestOnly, refusedSearch, stale } from "../lib/location-flow";
-import { newSession, pickPlace, type PlaceTrouble, searchPlaces } from "../lib/map-place";
+import { pickPlace, type PlaceTrouble, placeSessions, searchPlaces } from "../lib/map-place";
 import {
   addressLine,
   afterLoad,
@@ -76,8 +76,9 @@ export default function SetLocation() {
   const [searching, setSearching] = useState(false);
   // The match whose point is on its way; its row shows the wait.
   const [picking, setPicking] = useState<string | null>(null);
-  // The matches with the Google session that found them; a tapped match ends that session (#257, Q5).
-  const [results, setResults] = useState<{ session: string; matches: PlaceMatch[] }>({ session: "", matches: [] });
+  const [matches, setMatches] = useState<PlaceMatch[]>([]);
+  // A tapped match ends its search's Google session (#257, Q5).
+  const [sessions] = useState(placeSessions);
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set before React re-renders, so a second tap never asks twice.
   const working = useRef(false);
@@ -162,7 +163,7 @@ export default function SetLocation() {
     if (working.current || !text.trim()) return;
     working.current = true;
     setProblem(null);
-    setResults({ session: "", matches: [] });
+    setMatches([]);
     setSearching(true);
     const allowed = Platform.OS === "ios" || (!locationOff && (await asks.ask(locator.askPermission().catch(() => false))));
     if (allowed === stale) return;
@@ -174,11 +175,10 @@ export default function SetLocation() {
       if (refused.place) openConfirm({ pincode: refused.place.pincode });
       return;
     }
-    const session = newSession();
-    const found = await asks.ask(searchPlaces(api, text, session));
+    const found = await asks.ask(searchPlaces(api, text, sessions.search()));
     if (found === stale) return;
     if (typeof found === "string") return stop(found);
-    setResults({ session, matches: found });
+    setMatches(found);
     stop(found.length ? null : "no-results");
   }
 
@@ -188,10 +188,7 @@ export default function SetLocation() {
     working.current = true;
     setProblem(null);
     setPicking(match.id);
-    // The pick ends this Google session, so a later tap, after Back from Confirm or a failed pick, starts a new one (Q5).
-    const ended = results.session;
-    setResults((current) => ({ ...current, session: newSession() }));
-    const found = await asks.ask(pickPlace(api, match.id, ended));
+    const found = await asks.ask(pickPlace(api, match.id, sessions.pick()));
     if (found === stale) return;
     if (typeof found === "string") return stop(found);
     stop(null);
@@ -308,9 +305,9 @@ export default function SetLocation() {
             icon={Search}
           />
 
-          {results.matches.length > 0 && (
+          {matches.length > 0 && (
             <View className="overflow-hidden rounded-card border border-border bg-surface">
-              {results.matches.map((match, i) => (
+              {matches.map((match, i) => (
                 <Pressable
                   key={match.id}
                   accessibilityRole="button"

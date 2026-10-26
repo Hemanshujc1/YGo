@@ -2,7 +2,7 @@ import { type ErrorCode, PlaceSession, type SaveAddressBody } from "@ygo/contrac
 import type { GeoAddress } from "@ygo/mobile/address-at";
 import { describe, expect, it } from "vitest";
 import type { AreaAnswer, Place } from "../src/lib/location-flow";
-import { addressBody, confirmAddress, type Geocoder, newSession, pickPlace, readPin, searchPlaces } from "../src/lib/map-place";
+import { addressBody, confirmAddress, type Geocoder, newSession, pickPlace, placeSessions, readPin, searchPlaces } from "../src/lib/map-place";
 
 const prabhat: GeoAddress = {
   isoCountryCode: "IN",
@@ -129,6 +129,38 @@ describe("newSession", () => {
     expect(PlaceSession.safeParse(first).success).toBe(true);
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(newSession()).not.toBe(first);
+  });
+});
+
+describe("placeSessions", () => {
+  const counting = () => {
+    let made = 0;
+    return placeSessions(() => `s${++made}`);
+  };
+
+  it("gives each search a new session, and the pick the session its search used", () => {
+    const sessions = counting();
+    const first = sessions.search();
+    const second = sessions.search();
+    expect(second).not.toBe(first);
+    expect(sessions.pick()).toBe(second);
+  });
+
+  it("never sends an ended session again: a retry after a failed pick, or a tap after Back, gets a new one", () => {
+    const sessions = counting();
+    const searched = sessions.search();
+    const picked = sessions.pick();
+    const retried = sessions.pick();
+    const afterBack = sessions.pick();
+    expect(picked).toBe(searched);
+    expect(new Set([picked, retried, afterBack]).size).toBe(3);
+    expect(sessions.search()).not.toBe(afterBack);
+  });
+
+  it("makes real sessions by default", () => {
+    const sessions = placeSessions();
+    expect(PlaceSession.safeParse(sessions.search()).success).toBe(true);
+    expect(PlaceSession.safeParse(sessions.pick()).success).toBe(true);
   });
 });
 

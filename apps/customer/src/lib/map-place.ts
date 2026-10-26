@@ -62,6 +62,26 @@ export function newSession(): string {
 }
 
 /**
+ * The Google session for C15's searches and the pick that ends one (#257, Q5).
+ * Each search starts a new session. A pick sends the session its search used
+ * and moves on to a new one, so a later tap, after Back from Confirm or a
+ * failed pick, never sends a session Google has already ended.
+ */
+export function placeSessions(make: () => string = newSession) {
+  let current = make();
+  return {
+    /** A new session for a search. */
+    search: () => (current = make()),
+    /** The session to send with a pick, which ends it. */
+    pick() {
+      const ended = current;
+      current = make();
+      return ended;
+    },
+  };
+}
+
+/**
  * Up to 5 of Google's matches for the search field, each with Google's two
  * lines and no pincode (#257, Q6); empty when nothing is found. Line breaks
  * and tabs, as a pasted address brings, become spaces; text that still breaks
