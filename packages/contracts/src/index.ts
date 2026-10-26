@@ -27,6 +27,7 @@ export {
   PersonName,
   Phone,
   Pincode,
+  PlaceSearchText,
   PackBarcode,
   PackQuantity,
   CountedPackQuantity,
@@ -91,6 +92,15 @@ export {
   SavedAddressParams,
   SavedAddressesResponse,
 } from "./addresses";
+export {
+  PlaceId,
+  PlaceMatch,
+  PlacePointQuery,
+  PlacePointResponse,
+  PlaceSearchQuery,
+  PlaceSearchResponse,
+  PlaceSession,
+} from "./places";
 export {
   CorrectShopApplicationBody,
   MyShopApplicationResponse,
