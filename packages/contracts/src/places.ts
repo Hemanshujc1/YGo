@@ -12,14 +12,21 @@ import { PlaceSearchText } from "./fields";
 export const PlaceSession = z.uuid();
 
 /**
- * Google's place id. Google gives no character set, but every id it shows is
- * web-safe base64: letters, digits, `_` and `-`, which also keeps the id safe in
- * the path of Google's URL. Google sets no maximum length, and an address in an
- * Indian script runs long (its own example for one in Hyderabad is 679
- * characters), so the cap is only a guard, far past that. It travels in the
- * query, not our path.
+ * Google's place id, an opaque "textual identifier". Google documents no
+ * character set, so none is assumed: an id it hands out is never refused for
+ * its characters. Google sets no maximum length, and an address in an Indian
+ * script runs long (its own example for one in Hyderabad is 679 characters),
+ * so the cap is only a guard, far past that. It travels in our query, and the
+ * server percent-encodes it into one segment of Google's path; `.` and `..` are
+ * refused because a URL resolves them as "this" and "up" segments even then.
+ * Control characters such as NUL are refused, as in #269.
  */
-export const PlaceId = z.string().regex(/^[\w-]{1,4096}$/);
+export const PlaceId = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => !/\p{Cc}/u.test(value))
+  .refine((value) => value !== "." && value !== "..");
 
 /** `GET /v1/places?text=&session=`: up to 5 places in India for the typed text (Q6). */
 export const PlaceSearchQuery = z.strictObject({
