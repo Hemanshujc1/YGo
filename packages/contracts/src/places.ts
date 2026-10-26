@@ -11,8 +11,15 @@ import { PlaceSearchText } from "./fields";
 /** Made by the phone for each search; Google's session token. */
 export const PlaceSession = z.uuid();
 
-/** Google's place id: letters, digits, `_` and `-`. Some run past 100 characters, so it travels in the query, not the path. */
-export const PlaceId = z.string().regex(/^[\w-]{1,1000}$/);
+/**
+ * Google's place id. Google gives no character set, but every id it shows is
+ * web-safe base64: letters, digits, `_` and `-`, which also keeps the id safe in
+ * the path of Google's URL. Google sets no maximum length, and an address in an
+ * Indian script runs long (its own example for one in Hyderabad is 679
+ * characters), so the cap is only a guard, far past that. It travels in the
+ * query, not our path.
+ */
+export const PlaceId = z.string().regex(/^[\w-]{1,4096}$/);
 
 /** `GET /v1/places?text=&session=`: up to 5 places in India for the typed text (Q6). */
 export const PlaceSearchQuery = z.strictObject({

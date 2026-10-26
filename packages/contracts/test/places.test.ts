@@ -33,16 +33,30 @@ describe("PlaceSearchResponse", () => {
 });
 
 describe("PlaceId", () => {
-  it("takes Google's letters, digits, _ and -, past 100 characters, in a match and a pick alike", () => {
-    const long = `Ei${"x".repeat(150)}`;
-    expect(PlaceId.safeParse(match.id).success).toBe(true);
-    expect(PlaceId.safeParse(long).success).toBe(true);
+  // Google's own examples (developers.google.com/maps/documentation/places/web-service/place-id): a place, an
+  // address, an intersection, and an address in Hyderabad written in Telugu, 679 characters long.
+  const googles = [
+    "ChIJgUbEo8cfqokR5lP9_Wh_DaM",
+    "EicxMyBNYXJrZXQgU3QsIFdpbG1pbmd0b24sIE5DIDI4NDAxLCBVU0EiGhIYChQKEgnRTo6ixx-qiRHo_bbmkCm7ZRAN",
+    "GhIJQWDl0CIeQUARxks3icF8U8A",
+    "IhoSGAoUChIJ0U6OoscfqokR6P225pApu2UQDQ",
+    "EpID4LC14LC_4LCo4LCv4LGN4LCo4LCX4LCw4LGNIC0g4LC44LGI4LCm4LGN4LCs4LC-4LCm4LGNIOCwsOCxi-CwoeCxjeCwoeCxgSAmIOCwteCwv-CwqOCwr-CxjSDgsKjgsJfgsLDgsY0g4LCu4LGG4LCv4LC_4LCo4LGNIOCwsOCxi-CwoeCxjeCwoeCxgSwg4LC14LC_4LCo4LCv4LGNIOCwqOCwl-CwsOCxjSDgsJXgsL7gsLLgsKjgsYAsIOCwsuCwleCxjeCwt-CxjeCwruCwv-CwqOCwl-CwsOCxjSDgsJXgsL7gsLLgsKjgsYAsIOCwuOCwsOCxguCwsOCxjSDgsKjgsJfgsLDgsY0g4LC14LGG4LC44LGN4LCf4LGNLCDgsLjgsK_gsYDgsKbgsL7gsKzgsL7gsKbgsY0sIOCwueCxiOCwpuCwsOCwvuCwrOCwvuCwpuCxjSwg4LCk4LGG4LCy4LCC4LCX4LC-4LCjIDUwMDA1OSwg4LCt4LC-4LCw4LCk4LCm4LGH4LC24LCCImYiZAoUChIJ31l5uGWYyzsR9zY2qk9lDiASFAoSCd9ZebhlmMs7Efc2NqpPZQ4gGhQKEglDz61OZpjLOxHgDJCFY-o1qBoUChIJi37TW2-YyzsRr_uv50r7tdEiCg1MwFcKFS_dyy4",
+  ];
+
+  it("takes every id Google shows, long ones too, in a match and a pick alike", () => {
+    for (const id of googles) {
+      expect(PlaceId.safeParse(id).success).toBe(true);
+      expect(PlaceMatch.safeParse({ ...match, id }).success).toBe(true);
+      expect(PlacePointQuery.safeParse({ id, session }).success).toBe(true);
+    }
+    expect(PlaceId.safeParse("a".repeat(4096)).success).toBe(true);
+  });
+
+  it("refuses an empty id, one past 4096 characters, and anything that could reach another of Google's paths", () => {
     expect(PlaceId.safeParse("").success).toBe(false);
-    expect(PlaceId.safeParse("a/../b").success).toBe(false);
-    expect(PlaceId.safeParse("a".repeat(1001)).success).toBe(false);
-    expect(PlaceMatch.safeParse({ ...match, id: long }).success).toBe(true);
+    expect(PlaceId.safeParse("a".repeat(4097)).success).toBe(false);
+    for (const id of ["a/../b", "..", "a?b", "a#b", "a%2Fb", "a b", "a.b"]) expect(PlaceId.safeParse(id).success).toBe(false);
     expect(PlaceMatch.safeParse({ ...match, id: "a/b" }).success).toBe(false);
-    expect(PlacePointQuery.safeParse({ id: long, session }).success).toBe(true);
   });
 });
 

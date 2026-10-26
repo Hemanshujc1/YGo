@@ -8,6 +8,7 @@ import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { createGooglePlaceFinder, type PlaceFinder } from "../src/adapters/place-finder";
 import { buildApp } from "../src/app";
+import { hourlyLimit } from "../src/routes/places";
 import { connectDatabase } from "../src/db";
 
 const session = "00000000-0000-4000-8000-000000000401";
@@ -72,6 +73,60 @@ describe("Google place finder", () => {
     await expect(createGooglePlaceFinder("key-1", fakeFetch(400, {}).fetcher).point(baner.id, session)).rejects.toThrow("400");
     await expect(createGooglePlaceFinder("key-1", fakeFetch(500, {}).fetcher).point(baner.id, session)).rejects.toThrow("500");
     await expect(createGooglePlaceFinder("key-1", fakeFetch(403, {}).fetcher).search("Baner", session)).rejects.toThrow("403");
+  });
+
+  it("gives Google a time limit, and rejects when Google can't be reached, times out, or answers what isn't JSON", async () => {
+    const { calls, fetcher } = fakeFetch(200, {});
+    await createGooglePlaceFinder("key-1", fetcher).search("Baner", session);
+    await createGooglePlaceFinder("key-1", fetcher).point(baner.id, session);
+    for (const call of calls) expect(call.init.signal).toBeInstanceOf(AbortSignal);
+
+    const throwing = (error: Error) => (async () => Promise.reject(error)) as typeof fetch;
+    const unreachable = createGooglePlaceFinder("key-1", throwing(new TypeError("fetch failed")));
+    await expect(unreachable.search("Baner", session)).rejects.toThrow("fetch failed");
+    await expect(unreachable.point(baner.id, session)).rejects.toThrow("fetch failed");
+    const slow = createGooglePlaceFinder("key-1", throwing(new DOMException("The operation was aborted due to timeout", "TimeoutError")));
+    await expect(slow.search("Baner", session)).rejects.toThrow("timeout");
+    await expect(slow.point(baner.id, session)).rejects.toThrow("timeout");
+
+    const garbled = (async () => new Response("<html>Error</html>", { status: 200 })) as typeof fetch;
+    await expect(createGooglePlaceFinder("key-1", garbled).search("Baner", session)).rejects.toThrow();
+    await expect(createGooglePlaceFinder("key-1", garbled).point(baner.id, session)).rejects.toThrow();
+  });
+});
+
+describe("hourly limit", () => {
+  const minute = 60 * 1000;
+
+  it("allows 30 calls in any hour per account, one more as each call turns an hour old", () => {
+    const at = createLocalClock(new Date("2030-01-01T00:00:00.000Z"));
+    const allow = hourlyLimit(at);
+    expect(allow("asha")).toBe(true);
+    at.advance(30 * minute);
+    for (let n = 1; n < 30; n++) expect(allow("asha")).toBe(true);
+    expect(allow("asha")).toBe(false);
+    expect(allow("ravi")).toBe(true);
+    // A refused call is not counted, so it never pushes the next free call later.
+    at.advance(30 * minute - 1);
+    expect(allow("asha")).toBe(false);
+    at.advance(1);
+    expect(allow("asha")).toBe(true);
+    expect(allow("asha")).toBe(false);
+  });
+
+  it("forgets an account in its hourly sweep only once its last call is an hour old", () => {
+    const at = createLocalClock(new Date("2030-01-01T00:00:00.000Z"));
+    const allow = hourlyLimit(at);
+    expect(allow("asha")).toBe(true);
+    at.advance(50 * minute);
+    for (let n = 1; n < 30; n++) expect(allow("asha")).toBe(true);
+    // An hour after the start the sweep runs. Asha's first call is past the hour, but her last is not, so her 29 still count.
+    at.advance(11 * minute);
+    expect(allow("asha")).toBe(true);
+    expect(allow("asha")).toBe(false);
+    // An hour after her last call she starts afresh.
+    at.advance(60 * minute);
+    for (let n = 0; n < 30; n++) expect(allow("asha")).toBe(true);
   });
 });
 
