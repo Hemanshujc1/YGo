@@ -92,8 +92,8 @@ Google needs each Android **package name + signing certificate SHA-1**. Google a
 4. Generate the Android projects if they are missing:
 
    ```sh
-   pnpm --filter @ygo/customer exec expo prebuild --platform android --no-install
-   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform android --no-install
+   pnpm --filter @ygo/customer exec expo prebuild --platform android --no-install --no-clean
+   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform android --no-install --no-clean
    ```
 
 5. Read **each app's own debug keystore** fingerprint:
@@ -153,7 +153,7 @@ test -f apps/shopkeeper/.env || cp apps/shopkeeper/.env.example apps/shopkeeper/
 test -f apps/server/.env || cp apps/server/.env.example apps/server/.env
 ```
 
-Edit the files in your editor. Values below are placeholders.
+Edit the files in your editor. Values below are placeholders. Paste each complete real client ID after `=`, replacing the **whole** example value, including its example suffix.
 
 **`apps/customer/.env`:**
 
@@ -238,12 +238,14 @@ Local emailed codes appear in [Mailpit](http://localhost:8025); they are not del
    adb devices
    ```
 
-2. Apply the provider config to both existing native projects. A rebuild alone does not regenerate an existing native folder:
+2. Apply the provider config to both existing native projects. A rebuild alone does not apply the config plugins. `--no-clean` keeps the native folders rather than recreating them:
 
    ```sh
-   pnpm --filter @ygo/customer exec expo prebuild --platform android --no-install
-   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform android --no-install
+   pnpm --filter @ygo/customer exec expo prebuild --platform android --no-install --no-clean
+   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform android --no-install --no-clean
    ```
+
+   Rerun the two fingerprint commands from stage 2 afterward. If a fingerprint changed, update its Google Android client registration before testing.
 
 3. Build and run **Customer**:
 
@@ -284,11 +286,11 @@ Use an Apple developer team that can enable **Sign in with Apple**. If enrollmen
 ## 8. Rebuild and check iOS
 
 1. Verify the local `ios.bundleIdentifier` in each `app.json` still matches stage 2, and each app's `.env` contains its Google iOS client ID.
-2. Apply native config and install iOS dependencies:
+2. Apply native config and install iOS dependencies. Use `--no-clean` to preserve the existing native project:
 
    ```sh
-   pnpm --filter @ygo/customer exec expo prebuild --platform ios
-   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform ios
+   pnpm --filter @ygo/customer exec expo prebuild --platform ios --no-clean
+   pnpm --filter @ygo/shopkeeper exec expo prebuild --platform ios --no-clean
    ```
 
    YGo adds the Google return scheme/URL handler and Apple entitlement automatically. Keep signing changes in Xcode, not manual edits to generated AppDelegate code.
