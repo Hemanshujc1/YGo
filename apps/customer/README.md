@@ -7,7 +7,7 @@ The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens
 Expo Go is not used (ADR-0001). `expo run` makes a local development build and starts Metro.
 
 1. Start the server: see `apps/server/README.md`. It listens on `127.0.0.1:3000`.
-2. Copy `apps/customer/.env.example` to `apps/customer/.env` (git-ignored), and set the support email. It points at the server on `127.0.0.1:3000`, which works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`.
+2. Copy `apps/customer/.env.example` to `apps/customer/.env` (git-ignored), and set the support email. It points at the server on `127.0.0.1:3000`, which works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`. For the Android map, also set `GOOGLE_MAPS_ANDROID_API_KEY` (a Maps SDK for Android key restricted to your package and debug SHA-1); without it the map on Confirm location is blank.
 3. Build and open it:
 
    ```sh
