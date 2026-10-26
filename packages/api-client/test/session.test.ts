@@ -173,6 +173,24 @@ describe("each call", () => {
     ]);
   });
 
+  it("searches places and gets a picked one's point, signed in (#257)", async () => {
+    const session = "00000000-0000-4000-8000-000000000401";
+    const matches = [{ id: "ChIJ-baner_1", title: "Baner Road", detail: "Baner, Pune, Maharashtra" }];
+    const point = { latitude: 18.559, longitude: 73.7868 };
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path.startsWith("/v1/places?")) return answer(200, { matches });
+      return answer(200, { point });
+    });
+    await client.verifyCode(signIn);
+    expect(await client.searchPlaces("Baner Road & Co", session)).toEqual({ ok: true, data: { matches } });
+    expect(await client.placePoint("ChIJ-baner_1", session)).toEqual({ ok: true, data: { point } });
+    expect(calls.slice(1)).toEqual([
+      { method: "GET", path: `/v1/places?text=Baner+Road+%26+Co&session=${session}`, body: undefined, auth: "Bearer a1" },
+      { method: "GET", path: `/v1/places/point?id=ChIJ-baner_1&session=${session}`, body: undefined, auth: "Bearer a1" },
+    ]);
+  });
+
   it("lists, saves and removes saved addresses, signed in", async () => {
     const saved = {
       id: "00000000-0000-4000-8000-000000000301",
