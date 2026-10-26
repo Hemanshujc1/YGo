@@ -38,6 +38,12 @@ export {
   PackQuantity,
   CountedPackQuantity,
   PRODUCT_IMAGE_MAX_BYTES,
+  VISIT_PHOTO_MAX_BYTES,
+  ShopVisitDate,
+  ShopVisitNotes,
+  OnboardingFeeAmount,
+  OnboardingPaymentDate,
+  OnboardingPaymentReference,
   ServiceRadiusMetres,
   ShopAddress,
   ShopEntityType,
@@ -118,3 +124,17 @@ export {
   ShopState,
   type ShopApplicationField,
 } from "./shops";
+
+export {
+  PhoneConfirmationState,
+  CreateVisitPhotoUploadBody,
+  VisitPhotoUpload,
+  ShopVisitChecks,
+  RecordShopVisitBody,
+  ShopVisit,
+  ShopVisitParams,
+  VisitPhotoAccess,
+  RecordOnboardingFeeBody,
+  OnboardingFee,
+  ShopOnboarding,
+} from "./shop-visits";
