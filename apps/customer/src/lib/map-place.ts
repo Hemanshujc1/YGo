@@ -1,12 +1,19 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type AddressLabel, type AddressPoint, type ErrorCode, SaveAddressBody } from "@ygo/contracts";
+import {
+  type AddressLabel,
+  type AddressPoint,
+  type ErrorCode,
+  type PlaceMatch,
+  type PlacePointResponse,
+  type PlaceSearchResponse,
+  PlaceSearchText,
+  SaveAddressBody,
+} from "@ygo/contracts";
 import { addressAt, type GeoAddress } from "@ygo/mobile/address-at";
 import { type AreaAnswer, type Place, sentOutcome } from "./location-flow";
 
-/** The phone's own map lookups, given by the screens so the tests can stand in for them (#242). */
+/** The phone's own map lookup, given by the screens so the tests can stand in for it (#242). */
 export interface Geocoder {
-  /** The spots a typed name, street or pincode points to. */
-  find(text: string): Promise<{ latitude: number; longitude: number }[]>;
   /** The addresses at a spot. */
   addresses(point: AddressPoint): Promise<GeoAddress[]>;
 }
@@ -14,8 +21,6 @@ export interface Geocoder {
 /** A place on the map, with the two lines Confirm shows: "Prabhat Road, Shivaji Nagar" and "Pune 411005". */
 export type Spot = { place: Place; title: string; detail: string };
 
-/** Search shows at most this many matches (#217, answer 5). */
-const searchLimit = 5;
 const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): part is string => !!part))];
 
 /**
@@ -36,26 +41,45 @@ export async function readPin(geocoder: Geocoder, point: AddressPoint): Promise<
   };
 }
 
+/** Our server's place search, which asks Google Places (#257, Q4). */
+type Places = {
+  searchPlaces(text: string, session: string): Promise<ApiResult<PlaceSearchResponse>>;
+  placePoint(id: string, session: string): Promise<ApiResult<PlacePointResponse>>;
+};
+
+/** Why a search or a pick has nothing to show: no answer, past the hourly limit (Q8), or the search is down. */
+export type PlaceTrouble = "offline" | "too-many" | "unavailable";
+
+const trouble = (code: ErrorCode): PlaceTrouble => (code === "TOO_MANY_REQUESTS" ? "too-many" : "unavailable");
+
 /**
- * Up to 5 matches for the search field, each with a pincode and named once
- * (#242, Q4); empty when nothing is found. The matches are looked up one at a
- * time, since the phone's geocoder handles one request at a time and limits
- * how many an app sends.
+ * A new Google session for one search and the pick that ends it (#257, Q5).
+ * A version-4 UUID; it only groups billing, so `Math.random` is enough.
  */
-export async function searchPlaces(geocoder: Geocoder, text: string): Promise<Spot[]> {
-  let points;
-  try {
-    points = (await geocoder.find(text.trim())).slice(0, searchLimit);
-  } catch {
-    return [];
-  }
-  const spots = new Map<string, Spot>();
-  for (const point of points) {
-    const spot = await readPin(geocoder, point);
-    const named = spot && `${spot.title}\n${spot.detail}`;
-    if (named && !spots.has(named)) spots.set(named, spot);
-  }
-  return [...spots.values()];
+export function newSession(): string {
+  const hex = (length: number) => Array.from({ length }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${"89ab"[Math.floor(Math.random() * 4)]}${hex(3)}-${hex(12)}`;
+}
+
+/**
+ * Up to 5 of Google's matches for the search field, each with Google's two
+ * lines and no pincode (#257, Q6); empty when nothing is found or the text
+ * breaks the search rule.
+ */
+export async function searchPlaces(places: Places, text: string, session: string): Promise<PlaceMatch[] | PlaceTrouble> {
+  const checked = PlaceSearchText.safeParse(text);
+  if (!checked.success) return [];
+  const answer = await places.searchPlaces(checked.data, session).catch(() => null);
+  if (!answer) return "offline";
+  return answer.ok ? answer.data.matches : trouble(answer.code);
+}
+
+/** A tapped match's point, for Confirm to open at; "gone" when Google no longer knows the place. */
+export async function pickPlace(places: Places, id: string, session: string): Promise<AddressPoint | PlaceTrouble | "gone"> {
+  const answer = await places.placePoint(id, session).catch(() => null);
+  if (!answer) return "offline";
+  if (answer.ok) return answer.data.point;
+  return answer.code === "NOT_FOUND" ? "gone" : trouble(answer.code);
 }
 
 /** Confirm's body for the server, or null when "Flat, house or floor" breaks the server's rule (#217, answer 7). */
