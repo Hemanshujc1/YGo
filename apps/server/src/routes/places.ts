@@ -21,7 +21,7 @@ const WINDOW_MS = 60 * 60 * 1000;
  * so. Kept in memory: a restart forgets the counts, which only lets a few
  * extra calls through. Once an hour it forgets accounts with no call that hour.
  */
-function hourlyLimit(clock: Clock): (accountId: string) => boolean {
+export function hourlyLimit(clock: Clock): (accountId: string) => boolean {
   const calls = new Map<string, number[]>();
   let swept = clock.now().getTime();
   return (accountId) => {
