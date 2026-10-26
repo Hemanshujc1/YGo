@@ -1,6 +1,7 @@
 import { createIdentityVerifier } from "./adapters/identity-verifier";
 import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
+import { createGooglePlaceFinder } from "./adapters/place-finder";
 import { createProductImageStorage, createS3ProductImageClient } from "./adapters/product-images";
 import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
@@ -33,6 +34,7 @@ const app = buildApp({
   authTokenSecret: config.AUTH_TOKEN_SECRET,
   adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,
   productImages,
+  places: config.GOOGLE_PLACES_API_KEY ? createGooglePlaceFinder(config.GOOGLE_PLACES_API_KEY) : undefined,
   minAppVersions: { customer: config.MIN_CUSTOMER_VERSION, shopkeeper: config.MIN_SHOPKEEPER_VERSION },
   logger: { level: config.LOG_LEVEL },
 });

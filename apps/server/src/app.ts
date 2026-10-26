@@ -13,6 +13,7 @@ import { bodyFields, serializerCompiler, validatorCompiler, type ZodTypeProvider
 import type { Database } from "./db";
 import type { IdentityVerifier } from "./adapters/identity-verifier";
 import type { Mailer } from "./adapters/mailer";
+import type { PlaceFinder } from "./adapters/place-finder";
 import type { Clock } from "./adapters/clock";
 import type { ProductImageStorage } from "./adapters/product-images";
 import { registerAddressRoutes } from "./routes/addresses";
@@ -23,6 +24,7 @@ import { registerCategoryRoutes } from "./routes/categories";
 import { registerMasterProductRoutes } from "./routes/master-products";
 import { registerCatalogImportRoutes } from "./routes/catalog-import";
 import { registerPackRoutes } from "./routes/packs";
+import { registerPlaceRoutes } from "./routes/places";
 import { registerProfileRoutes } from "./routes/profile";
 import { registerShopRoutes } from "./routes/shops";
 
@@ -36,6 +38,8 @@ export interface AppOptions {
   authTokenSecret?: string;
   adminCookieDomain?: string;
   productImages?: ProductImageStorage;
+  /** C15's place search (#257); without it the search answers UNAVAILABLE. */
+  places?: PlaceFinder;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
   minAppVersions?: Record<AppName, AppVersion>;
   logger?: FastifyServerOptions["logger"];
@@ -64,6 +68,7 @@ export function buildApp({
   authTokenSecret,
   adminCookieDomain,
   productImages,
+  places,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   logger = false,
 }: AppOptions) {
@@ -107,6 +112,7 @@ export function buildApp({
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }
 
