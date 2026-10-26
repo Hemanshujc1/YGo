@@ -85,13 +85,16 @@ GitHub is where every agent, Codex included, reads progress.
 
 An agent with its own memory, such as Claude Code, also updates its handoff note.
 
-Done when the parent's comment is posted, or the closed issue has no parent.
+4. When the PR body has a "Screen check" line, add it to the open `Screen check: batch <N>` issue, and mark the batch ready when it is full, as `docs/agents/workflow.md` section 7 says.
+
+Done when the parent's comment is posted (or the closed issue has no parent), and any screen line sits in a batch.
 
 ## 8. Report
 
 Tell the owner in a few lines:
 
 - What merged, with its commit SHA.
+- "Batch ready" with the batch link, when this merge filled one.
 - Each worktree kept, and why.
 - Still open: `gh pr list` and `git worktree list`.
 - The next issue: the next open child of the parent, else the oldest `ready-for-agent` issue nobody has claimed (`git ls-remote --heads origin '<n>-*'` is empty).
