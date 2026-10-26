@@ -65,3 +65,19 @@ describe("product image configuration", () => {
     })).toThrow();
   });
 });
+
+describe("place search configuration", () => {
+  const base = {
+    DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo",
+    AUTH_TOKEN_SECRET: "a-secret-that-is-long-enough-for-tests",
+    MAILER: "mailpit",
+    MAIL_FROM: "hello@example.com",
+    MAILPIT_URL: "http://localhost:8025",
+  };
+
+  it("treats an empty Places key as no key", () => {
+    expect(loadConfig({ ...base, GOOGLE_PLACES_API_KEY: "" }).GOOGLE_PLACES_API_KEY).toBeUndefined();
+    expect(loadConfig(base).GOOGLE_PLACES_API_KEY).toBeUndefined();
+    expect(loadConfig({ ...base, GOOGLE_PLACES_API_KEY: "key-1" }).GOOGLE_PLACES_API_KEY).toBe("key-1");
+  });
+});
