@@ -39,7 +39,7 @@ AGENTS.md says code two apps need moves into a package, and a new package needs 
 
 **What it forbids.** No import of `@ygo/mobile` from `apps/admin`, `apps/web` or `apps/server`. No text inside the package. No code in it that only one app uses.
 
-**What it costs.** One more package and its Tailwind path in two configs. Moving a component in is a change to `packages/*`, so it ships in its own PR and gets the owner's line-by-line read (workflow.md). A change to a shared part affects both apps at once, so it is checked in both. An Expo upgrade, after the pilot's SDK pin is lifted, updates the package's pins in the same commit as the apps.
+**What it costs.** One more package and its Tailwind path in two configs. Moving a component in is a change to `packages/*`, so it gets the owner's line-by-line read (workflow.md). A change to a shared part affects both apps at once, so it is checked in both. An Expo upgrade, after the pilot's SDK pin is lifted, updates the package's pins in the same commit as the apps.
 
 **What it buys.** One fix for both apps, and one Customer and Shopkeeper look that cannot drift apart.
 

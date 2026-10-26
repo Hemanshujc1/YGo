@@ -21,16 +21,16 @@ Several coding agents and developers work on YGo at once. These rules keep their
 
 A ticket delivers one working feature end to end: its contract, its server route and its screen. One owner for the whole slice means no hand-off and no half-built interface waiting on another branch.
 
-## 3. Shared packages change one at a time
+## 3. Shared packages
 
 Each package in `packages/*` is shared by several apps, so two branches editing it at once will conflict or disagree.
 
-- A change to a package, above all `@ygo/contracts` or `@ygo/tokens`, ships in its own small PR, merged before the feature PRs that use it.
-- When two open tickets both need the same package changed, link them with a GitHub "blocked by" dependency so they run one after the other.
+- A change to a package ships inside the feature PR that needs it.
+- When another open branch edits the same package file (`scripts/overlap.sh` shows it), link the two tickets with a GitHub "blocked by" dependency so they run one after the other.
 
 ## 4. Size
 
-A PR is small enough to review in one sitting: about 400 changed lines, not counting lockfiles and generated files. A ticket that will exceed that is split into child issues before work starts.
+A PR stays at about 1,000 changed lines or fewer, not counting lockfiles and generated files. A ticket that will exceed that is split into child issues before work starts.
 
 ## 5. Done
 

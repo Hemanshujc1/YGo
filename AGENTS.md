@@ -18,7 +18,8 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
   - Done check: a test for each new behaviour, `pnpm check` before pushing, and a green gate in CI; a screen adds the owner's check in a browser or on a phone. Name it before writing code and finish when it passes.
   - One PR per ticket, split only past the size limit in `docs/agents/workflow.md`.
   - Follow the pattern of the nearest existing screen, route or test.
-  - A problem outside the ticket becomes a follow-up issue named in the PR.
+  - A small fix in code the ticket already edits goes in the same PR and is named in it. A bigger or unrelated problem becomes a follow-up issue named in the PR.
+  - A flaky test gets one rerun, and an issue only when it fails again.
 
 ## Where code lives
 

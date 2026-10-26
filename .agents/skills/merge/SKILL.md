@@ -33,7 +33,7 @@ Done when the PR reports `MERGEABLE`.
 
 `gh pr checks <n> --watch --fail-fast`.
 
-A red check: read it with `gh run view <run-id> --log-failed`, stop, and tell the owner which test failed and why. A check that fails on code the PR never touched is a flaky test: say so, and rerun only that job once with `gh run rerun <run-id> --failed`.
+A red check: read it with `gh run view <run-id> --log-failed`, stop, and tell the owner which test failed and why. A check that fails on code the PR never touched is a flaky test: say so, and rerun only that job once with `gh run rerun <run-id> --failed`. If it fails again, open one issue for that test.
 
 Done when every check is green.
 
