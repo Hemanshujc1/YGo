@@ -28,10 +28,16 @@ export function createGooglePlaceFinder(key: string, fetcher: typeof fetch = fet
   async function ask(path: string, fieldMask: string, body?: object): Promise<Response> {
     return fetcher(`${PLACES_URL}${path}`, {
       method: body ? "POST" : "GET",
-      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fieldMask },
+      headers: { ...(body && { "Content-Type": "application/json" }), "X-Goog-Api-Key": key, "X-Goog-FieldMask": fieldMask },
       ...(body && { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+  }
+
+  /** Lets go of an unread error answer, then rejects. */
+  async function failed(answer: Response, call: string): Promise<never> {
+    await answer.body?.cancel();
+    throw new Error(`Places ${call} answered ${answer.status}`);
   }
 
   return {
@@ -41,23 +47,28 @@ export function createGooglePlaceFinder(key: string, fetcher: typeof fetch = fet
         "suggestions.placePrediction.placeId,suggestions.placePrediction.structuredFormat",
         { input: text, sessionToken: session, includedRegionCodes: ["in"], languageCode: "en" },
       );
-      if (!answer.ok) throw new Error(`Places search answered ${answer.status}`);
+      if (!answer.ok) return failed(answer, "search");
       const { suggestions = [] } = (await answer.json()) as Autocomplete;
+      const seen = new Set<string>();
       return suggestions
         .flatMap(({ placePrediction: place }) => {
+          const id = place?.placeId;
           const title = place?.structuredFormat?.mainText?.text;
-          return place && PlaceId.safeParse(place.placeId).success && title
-            ? [{ id: place.placeId as string, title, detail: place.structuredFormat?.secondaryText?.text ?? "" }]
-            : [];
+          if (!id || !PlaceId.safeParse(id).success || !title || seen.has(id)) return [];
+          seen.add(id);
+          return [{ id, title, detail: place.structuredFormat?.secondaryText?.text ?? "" }];
         })
         .slice(0, 5);
     },
 
     async point(id, session) {
       const answer = await ask(`/places/${encodeURIComponent(id)}?${new URLSearchParams({ sessionToken: session })}`, "location");
-      // Google answers an unknown or retired place id with 404, or 400 for one it can't read.
-      if (answer.status === 404 || answer.status === 400) return null;
-      if (!answer.ok) throw new Error(`Places point answered ${answer.status}`);
+      // Google answers an unknown or retired place id with 404.
+      if (answer.status === 404) {
+        await answer.body?.cancel();
+        return null;
+      }
+      if (!answer.ok) return failed(answer, "point");
       const { location } = (await answer.json()) as { location?: { latitude?: number; longitude?: number } };
       return typeof location?.latitude === "number" && typeof location.longitude === "number"
         ? { latitude: location.latitude, longitude: location.longitude }

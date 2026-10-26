@@ -21,8 +21,8 @@ const BaseEnv = z.object({
   PRODUCT_IMAGE_LOCAL_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
   S3_REGION: z.string().min(1).default("ap-south-1"),
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
-  // C15's place search (#257); without it the search answers UNAVAILABLE.
-  GOOGLE_PLACES_API_KEY: z.string().min(1).optional(),
+  // C15's place search (#257); without it, or left empty, the search answers UNAVAILABLE.
+  GOOGLE_PLACES_API_KEY: z.string().optional().transform((key) => key || undefined),
 });
 
 const Env = z.discriminatedUnion("MAILER", [
