@@ -131,6 +131,21 @@ describe("onboarding history", () => {
     expect(PhoneConfirmationState.safeParse(true).success).toBe(false);
   });
 
+  it("requires a real calendar date in visit history without a clock-dependent cutoff", () => {
+    const entry = {
+      id, actorId: id, recordedAt: "2026-10-26T12:00:00Z",
+      checks, notes: null, photo: null,
+    };
+    for (const visitDate of ["2020-02-29", "2026-10-25", "2027-01-01"]) {
+      expect(ShopVisit.parse({ ...entry, visitDate }).visitDate).toBe(visitDate);
+    }
+    for (const visitDate of ["not-a-date", "2026-02-30", "2026-1-1", "2026-10-25T12:00:00Z"]) {
+      const result = ShopVisit.safeParse({ ...entry, visitDate });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(invalidFields(result.error)).toEqual(["visitDate"]);
+    }
+  });
+
   it("reads repeat visits, purged photos and fee history without revalidating historical input", () => {
     const entry = {
       id, actorId: id, visitDate: "2026-10-25", recordedAt: "2026-10-26T12:00:00Z",

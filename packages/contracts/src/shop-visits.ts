@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  AdminActionReason, OnboardingFeeAmount, OnboardingPaymentDate, OnboardingPaymentReference,
+  AdminActionReason, CalendarDate, OnboardingFeeAmount, OnboardingPaymentDate, OnboardingPaymentReference,
   ShopVisitDate, ShopVisitNotes, VISIT_PHOTO_MAX_BYTES,
 } from "./fields";
 
@@ -14,6 +14,11 @@ export const CreateVisitPhotoUploadBody = z.strictObject({
   byteLength: z.number().int().min(1).max(VISIT_PHOTO_MAX_BYTES),
 });
 export type CreateVisitPhotoUploadBody = z.infer<typeof CreateVisitPhotoUploadBody>;
+/**
+ * URL syntax only, not proof of a trusted destination or private storage.
+ * The server signs its own object key at the configured storage endpoint
+ * (#320); consumers use the authenticated API response, never an input URL.
+ */
 export const VisitPhotoUpload = z.strictObject({ id: z.uuid(), uploadUrl: z.url() });
 export type VisitPhotoUpload = z.infer<typeof VisitPhotoUpload>;
 
@@ -44,7 +49,7 @@ export type RecordShopVisitBody = z.infer<typeof RecordShopVisitBody>;
  */
 export const ShopVisit = z.strictObject({
   id: z.uuid(),
-  visitDate: z.string(),
+  visitDate: CalendarDate,
   recordedAt: z.iso.datetime(),
   actorId: z.uuid(),
   checks: ShopVisitChecks,
@@ -60,6 +65,10 @@ export type ShopVisit = z.infer<typeof ShopVisit>;
 
 /** Private GET access is issued afresh to an authorized Admin, never stored in history. */
 export const ShopVisitParams = z.strictObject({ id: z.uuid(), visitId: z.uuid() });
+/**
+ * URL syntax only. The server authorizes access to this visit before signing
+ * a GET for its private object (#322); parsing this response grants no access.
+ */
 export const VisitPhotoAccess = z.strictObject({ downloadUrl: z.url() });
 export type VisitPhotoAccess = z.infer<typeof VisitPhotoAccess>;
 
