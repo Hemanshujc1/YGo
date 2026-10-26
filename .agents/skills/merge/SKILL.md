@@ -15,18 +15,19 @@ The owner saying "merge" is their approval for that PR. Work through the steps i
 
 Done when you hold one PR number.
 
-## 2. Bring it up to date with main
+## 2. Rebase only on a conflict
 
-Find the worktree holding the PR's branch with `git worktree list`, and work there.
+`gh pr view <n> --json mergeable --jq .mergeable`:
 
-1. `git fetch origin`.
-2. `git merge-base --is-ancestor origin/main origin/<branch>` succeeds: already up to date, go to step 3.
-3. Otherwise rebase: `git rebase origin/main`. A conflicting `pnpm-lock.yaml` is rebuilt with `pnpm install`. A conflict in code you cannot settle with certainty: `git rebase --abort`, stop, and name the files to the owner.
-4. `git push --force-with-lease`.
+- `MERGEABLE`: go to step 3. A branch behind main merges as it is; the run on main checks the combination.
+- `UNKNOWN`: GitHub is still working it out; ask again after a few seconds.
+- `CONFLICTING`: rebase in the worktree holding the PR's branch (`git worktree list`):
+  1. `git fetch origin && git rebase origin/main`. A conflicting `pnpm-lock.yaml` is rebuilt with `pnpm install`. A conflict in code you cannot settle with certainty: `git rebase --abort`, stop, and name the files to the owner.
+  2. `git push --force-with-lease`.
 
-A PR from the second developer, or one with no worktree on this machine: ask its author to rebase rather than rewriting their branch.
+A conflicting PR from the second developer, or one with no worktree on this machine: ask its author to rebase rather than rewriting their branch.
 
-Done when the PR branch contains `origin/main`.
+Done when the PR reports `MERGEABLE`.
 
 ## 3. Wait for green checks
 
