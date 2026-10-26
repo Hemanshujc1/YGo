@@ -41,4 +41,4 @@ A PR is small enough to review in one sitting: about 400 changed lines, not coun
 ## 6. Review
 
 - Every PR gets a `/code-review` pass, and the author fixes or answers each finding.
-- The owner approves every merge. PRs that touch `packages/*` or money code (`@ygo/pricing`, server billing and settlement) get a line-by-line human read.
+- The owner approves every merge by saying "merge"; the agent then follows `.agents/skills/merge/SKILL.md`. PRs that touch `packages/*` or money code (`@ygo/pricing`, server billing and settlement) get a line-by-line human read.
