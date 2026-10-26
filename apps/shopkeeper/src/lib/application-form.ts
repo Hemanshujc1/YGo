@@ -40,11 +40,11 @@ export function typedFrom(application: ShopApplication): Typed {
 /**
  * The empty Pincode and Address that the address at the shop's location fills
  * in; a box with text is never changed (#303). The Address is the address's
- * line, cut to the Address rule's 300 characters (#303, Q2).
+ * line, cut to the Address rule's length (#303, Q2).
  */
 export function fillFromLocation(typed: Typed, at: AddressAt | null): Partial<Pick<Typed, "pincode" | "address">> {
   if (!at) return {};
-  const address = ShopAddress.safeParse(at.line.slice(0, 300));
+  const address = ShopAddress.safeParse(at.line.slice(0, ShopAddress.maxLength ?? undefined));
   return {
     ...(typed.pincode.trim() === "" && { pincode: at.pincode }),
     ...(typed.address.trim() === "" && address.success && { address: address.data }),

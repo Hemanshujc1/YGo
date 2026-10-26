@@ -3,7 +3,7 @@ import { formatNumber, formatPhone } from "@ygo/format";
 import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, ThemePicker } from "@ygo/mobile";
 import { addressAt } from "@ygo/mobile/address-at";
 import * as Location from "expo-location";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { KeyboardAvoidingView, Linking, Pressable, ScrollView, TextInput, type TextInputProps, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
@@ -36,6 +36,7 @@ const locator: Locator = {
 
 /** A fix less accurate than this keeps the location and shows a hint to try again (#276, Q9). */
 const roughMetres = 100;
+const isRough = (accuracy: number | null) => accuracy !== null && accuracy > roughMetres;
 
 /** Why "use this location" found nothing. */
 const problems = { off: words.location.off, "phone-off": words.location.phoneOff, "not-found": words.location.notFound };
@@ -76,17 +77,14 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
   // This visit's fix: a reopened Draft has only the saved location, with no accuracy (#295, Q3).
   const [fix, setFix] = useState<{ accuracy: number | null } | null>(null);
   const [problem, setProblem] = useState<keyof typeof problems | null>(null);
-  const [filledIn, setFilledIn] = useState(false);
+  // What the address at the location filled in; the line under the location shows while a box still holds it.
+  const [filled, setFilled] = useState<ReturnType<typeof fillFromLocation>>({});
+  const filledIn = (filled.pincode !== undefined && typed.pincode === filled.pincode) || (filled.address !== undefined && typed.address === filled.address);
   // Set before React re-renders, so a second tap never saves, sends or looks twice.
   const working = useRef(false);
   const looking = useRef(false);
-  // The latest look, so an older one's address never fills in after a new tap.
+  // The latest look, so an older one's address never fills in after a new tap, a save or a send.
   const looks = useRef(0);
-  // The form as last shown, so a fill sees what was typed while the address was looked up.
-  const shownTyped = useRef(typed);
-  useEffect(() => {
-    shownTyped.current = typed;
-  }, [typed]);
   const busy = saving || sending;
 
   function edit(field: Field | "serviceRadiusMetres", next: Partial<Typed>) {
@@ -111,7 +109,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     setLocating(true);
     setProblem(null);
     setFix(null);
-    setFilledIn(false);
+    setFilled({});
     const look = ++looks.current;
     const found = await findPlace(locator);
     looking.current = false;
@@ -120,14 +118,19 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     setFix({ accuracy: found.accuracy });
     edit("location", { location: found.point });
     // A rough fix could name the next pincode, so only a close one fills in (#303, Q5).
-    if (found.accuracy !== null && found.accuracy > roughMetres) return;
+    if (isRough(found.accuracy)) return;
     // Save draft and Send stay on while the address is looked up (#303, Q3); no answer leaves both boxes as they are.
     const at = await addressAt(Location.reverseGeocodeAsync, found.point);
     if (look !== looks.current) return;
-    const fill = fillFromLocation(shownTyped.current, at);
-    if (fill.pincode !== undefined) edit("pincode", { pincode: fill.pincode });
-    if (fill.address !== undefined) edit("address", { address: fill.address });
-    setFilledIn(fill.pincode !== undefined || fill.address !== undefined);
+    // `typed` is the form at the tap. A box typed in since then has already lost its mark,
+    // and the fill checks the latest form again, so it never replaces what was typed.
+    const fill = fillFromLocation(typed, at);
+    if (fill.pincode === undefined && fill.address === undefined) return;
+    setTyped((now) => ({ ...now, ...fillFromLocation(now, at) }));
+    setWrong((now) => Object.fromEntries(Object.entries(now).filter(([named]) => !(named in fill))));
+    setMessage(null);
+    setJustSaved(false);
+    setFilled(fill);
   }
 
   async function save() {
@@ -140,6 +143,8 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
       return setMessage(words.wrong);
     }
     working.current = true;
+    // Drops an address still being looked up, so it can't land on top of this save or send.
+    looks.current++;
     setSaving(true);
     setMessage(null);
     const answer = await api.saveShopApplication(draft.body).catch(() => null);
@@ -177,6 +182,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
     setAsking(null);
     if (working.current) return;
     working.current = true;
+    looks.current++;
     setSending(true);
     const answer = await api.sendShopApplication(body).catch(() => null);
     working.current = false;
@@ -241,7 +247,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
                     : words.location.found(formatNumber(Math.round(fix.accuracy)))}
               </Text>
             )}
-            {fix !== null && fix.accuracy !== null && fix.accuracy > roughMetres && <Text className="text-secondary text-muted">{words.location.rough}</Text>}
+            {fix !== null && isRough(fix.accuracy) && <Text className="text-secondary text-muted">{words.location.rough}</Text>}
             {filledIn && (
               <Text accessibilityLiveRegion="polite" className="text-secondary text-muted">
                 {words.location.filledIn}
@@ -323,7 +329,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
               {words.saved}
             </Text>
           )}
-          {/* Off while finding the location too, so a save landing after the fix can't replace it. */}
+          {/* Off while finding the location too, so a save landing after the fix can't replace it. A save or send drops an address still being looked up. */}
           <Button label={sending ? words.sending : words.send} onPress={ask} disabled={busy || locating} />
           <Button label={saving ? words.saving : words.save} onPress={() => void save()} disabled={busy || locating} variant="secondary" />
           <Confirm
