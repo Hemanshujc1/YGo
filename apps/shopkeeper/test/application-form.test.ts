@@ -1,6 +1,7 @@
 import type { ShopApplication } from "@ygo/contracts";
+import { type AddressAt, addressAt } from "@ygo/mobile/address-at";
 import { describe, expect, it } from "vitest";
-import { changed, draftBody, isoDate, realDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
+import { changed, draftBody, fillFromLocation, isoDate, realDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
 
 const draft: ShopApplication = {
   id: "8f6c1f0e-1d2b-4c3a-9e8f-7a6b5c4d3e2f",
@@ -171,5 +172,33 @@ describe("stepRadius", () => {
     expect(stepRadius(2000, -1)).toBe(1500);
     expect(stepRadius(500, -1)).toBeNull();
     expect(stepRadius(5000, 1)).toBeNull();
+  });
+});
+
+// What the phone's lookup names at Shivaji Nagar, read by @ygo/mobile's addressAt as on S17.
+const prabhat = { isoCountryCode: "IN", postalCode: "411005", street: "Prabhat Road", name: "12", district: "Shivaji Nagar", city: "Pune" };
+const at = (await addressAt(async () => [prabhat], { latitude: 18.5196, longitude: 73.8399 })) as AddressAt;
+
+describe("fillFromLocation", () => {
+  const empty = typedFrom(draft);
+
+  it("fills an empty Pincode and Address from the address at the location", () => {
+    expect(fillFromLocation(empty, at)).toEqual({ pincode: "411005", address: "Prabhat Road, Shivaji Nagar, Pune" });
+    expect(fillFromLocation({ ...empty, pincode: "  " }, at)).toMatchObject({ pincode: "411005" });
+  });
+
+  it("never changes a box that has text", () => {
+    expect(fillFromLocation({ ...empty, pincode: "411038" }, at)).toEqual({ address: "Prabhat Road, Shivaji Nagar, Pune" });
+    expect(fillFromLocation({ ...empty, address: "Shop 4, Lane 2" }, at)).toEqual({ pincode: "411005" });
+    expect(fillFromLocation({ ...empty, pincode: "411038", address: "Shop 4" }, at)).toEqual({});
+  });
+
+  it("fills nothing when no address was found", () => {
+    expect(fillFromLocation(empty, null)).toEqual({});
+  });
+
+  it("cuts the Address to its 300 characters, and leaves it empty when the line is", () => {
+    expect(fillFromLocation(empty, { ...at, line: "x".repeat(320) }).address).toHaveLength(300);
+    expect(fillFromLocation(empty, { ...at, line: "" })).toEqual({ pincode: "411005" });
   });
 });
