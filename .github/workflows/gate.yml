@@ -64,14 +64,88 @@ jobs:
           python3 ops/test-off-aws-check.py
           python3 scripts/test-gate-lock.py
 
-      # The restore and deployment tests below take over a minute. A pull
-      # request runs them only when it changes what they exercise: the ops
-      # scripts, the workflows, or the server build (turbo traces its sources,
-      # workspace packages and lockfile entries). If turbo cannot answer, they
-      # run. Pushes to main always run them.
-      - name: Find what the pull request changes
+      - name: Check deployment workflow and promotion
+        run: |
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+          python3 ops/test-dispatch.py
+
+      # Every run restores turbo's cache from the latest push to main, so only
+      # the tasks whose inputs changed run again. Turbo's hash covers each
+      # task's files, dependencies and lockfile entries; the key adds this
+      # workflow, which turbo cannot see (the Postgres image, the steps). Only
+      # main saves, and only the results this run used, so the cache holds one
+      # run and never grows.
+      - name: Restore turbo cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-
+
+      - run: pnpm gate --summarize
+
+      - name: Keep only this run's results in the turbo cache
+        if: github.event_name == 'push'
+        run: |
+          jq -r '.tasks[].hash' .turbo/runs/*.json > "$RUNNER_TEMP/hashes"
+          find .turbo/cache -type f | while read -r file; do
+            name=$(basename "$file")
+            grep -qxF "${name%%[-.]*}" "$RUNNER_TEMP/hashes" || rm "$file"
+          done
+
+      - name: Save turbo cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
+
+  # The restore and deployment tests take about two minutes, so they run in
+  # their own job beside the gate, and only when a change reaches what they
+  # exercise: the ops scripts, the workflows, or the server build (turbo traces
+  # its sources, workspace packages and lockfile entries). If turbo cannot
+  # answer, they run. HEAD^1 is main before the change, both for a pull
+  # request's merge commit and for a squash merge pushed to main.
+  ops:
+    name: ops
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
+        env:
+          POSTGRES_USER: ygo
+          POSTGRES_PASSWORD: ygo
+          POSTGRES_DB: ygo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h localhost -U ygo -d ygo"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://ygo:ygo@localhost:5432/ygo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Find what the change touches
         id: changes
-        if: github.event_name == 'pull_request'
         run: |
           set -o pipefail
           if ! server=$(pnpm exec turbo query affected --tasks build --packages @ygo/server --base HEAD^1 --head HEAD | jq '.data.affectedTasks.length'); then
@@ -82,39 +156,12 @@ jobs:
             echo "ops=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check deployment workflow and promotion
-        run: |
-          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --strict
-          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint"
-          python3 ops/test-dispatch.py
-
-      # A pull request reuses turbo's cache from the latest push to main, so
-      # only the tasks whose inputs changed run again. Turbo's hash covers each
-      # task's files, dependencies and lockfile entries; the key adds this
-      # workflow, which turbo cannot see (the Postgres image, the steps). main
-      # restores nothing, so every push to main runs every task, then saves
-      # the results. Only main saves, so the cache never grows past one run.
-      - name: Restore turbo cache
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-
-
-      - run: pnpm gate
-
-      - name: Save turbo cache
-        if: github.event_name == 'push'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ hashFiles('.github/workflows/gate.yml') }}-${{ github.sha }}
+      - name: Build the server
+        if: steps.changes.outputs.ops == 'true'
+        run: pnpm --filter @ygo/server build
 
       - name: Exercise exact production restore script
-        if: github.event_name == 'push' || steps.changes.outputs.ops == 'true'
+        if: steps.changes.outputs.ops == 'true'
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSLo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -128,7 +175,7 @@ jobs:
             bash -lc 'dnf -qy install systemd >/dev/null && python3 /ops/test-systemd-compat.py /systemd-args.jsonl'
 
       - name: Exercise exact host deployment script
-        if: github.event_name == 'push' || steps.changes.outputs.ops == 'true'
+        if: steps.changes.outputs.ops == 'true'
         run: sudo --preserve-env=PATH,TEST_DATABASE_URL,GITHUB_ACTIONS python3 ops/test-deploy.py
 
   # PRD Q-9: no secret is ever committed. Scans the full history, so a secret

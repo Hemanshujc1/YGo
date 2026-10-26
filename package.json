@@ -9,6 +9,7 @@
   },
   "scripts": {
     "gate": "python3 scripts/gate-lock.py turbo run lint typecheck test build",
+    "check": "TURBO_SCM_BASE=origin/main python3 scripts/gate-lock.py turbo run lint typecheck test build --affected",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
