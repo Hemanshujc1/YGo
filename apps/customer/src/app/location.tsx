@@ -1,5 +1,5 @@
 import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, useSession } from "@ygo/mobile";
-import type { AddressLabel, AddressPoint, SavedAddress } from "@ygo/contracts";
+import type { AddressLabel, AddressPoint, PlaceMatch, SavedAddress } from "@ygo/contracts";
 import * as Location from "expo-location";
 import { router, useFocusEffect, useNavigation } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,8 +20,7 @@ import { Briefcase, House, MapPin, Search } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { goHome } from "../lib/go-home";
 import { newestOnly, refusedSearch, stale } from "../lib/location-flow";
-import { searchPlaces, type Spot } from "../lib/map-place";
-import { phoneGeocoder } from "../lib/phone-geocoder";
+import { pickPlace, type PlaceTrouble, placeSessions, searchPlaces } from "../lib/map-place";
 import {
   addressLine,
   afterLoad,
@@ -46,8 +45,20 @@ const locator: Locator = {
 // A saved row's icon; its title is Confirm's word for the label (#243, Q2).
 const labelIcon = { home: House, work: Briefcase, other: MapPin } satisfies Record<AddressLabel, unknown>;
 
-/** What C15 shows under the field: a lookup found nothing, or a typed pincode broke the rule. */
-type Problem = "invalid" | "not-found" | "phone-off" | "no-results";
+/** What C15 shows under the field: a lookup found nothing, typed text broke the rule, or the place search failed (#257). */
+type Problem = "invalid" | "bad-text" | "not-found" | "phone-off" | "no-results" | PlaceTrouble | "gone";
+
+const messages = {
+  invalid: words.pincodeInvalid,
+  "bad-text": words.searchBadText,
+  "not-found": words.notFound,
+  "phone-off": words.phoneOff,
+  "no-results": words.noResults,
+  offline: words.searchOffline,
+  "too-many": words.tooManySearches,
+  unavailable: words.searchDown,
+  gone: words.placeGone,
+} satisfies Record<Problem, string>;
 
 /**
  * C15 Set location (#216, #242, #243): the phone's current location or a
@@ -63,7 +74,11 @@ export default function SetLocation() {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<Spot[]>([]);
+  // The match whose point is on its way; its row shows the wait.
+  const [picking, setPicking] = useState<string | null>(null);
+  const [matches, setMatches] = useState<PlaceMatch[]>([]);
+  // A tapped match ends its search's Google session (#257, Q5).
+  const [sessions] = useState(placeSessions);
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set before React re-renders, so a second tap never asks twice.
   const working = useRef(false);
@@ -111,7 +126,7 @@ export default function SetLocation() {
     return () => listener.remove();
   }, [locationOff]);
 
-  // Android looks places up only with location allowed, so with it refused the field takes a pincode (#217, answer 6).
+  // Android reads the address under Confirm's pin only with location allowed, so with it refused the field takes a pincode (#217, answer 6).
   const pincodeOnly = Platform.OS === "android" && locationOff;
 
   /** Opens Confirm location over C15, so Back returns to the results (#242, Q5). */
@@ -128,6 +143,7 @@ export default function SetLocation() {
     working.current = false;
     setFinding(false);
     setSearching(false);
+    setPicking(null);
     setProblem(next);
   }
 
@@ -147,7 +163,7 @@ export default function SetLocation() {
     if (working.current || !text.trim()) return;
     working.current = true;
     setProblem(null);
-    setResults([]);
+    setMatches([]);
     setSearching(true);
     const allowed = Platform.OS === "ios" || (!locationOff && (await asks.ask(locator.askPermission().catch(() => false))));
     if (allowed === stale) return;
@@ -159,10 +175,24 @@ export default function SetLocation() {
       if (refused.place) openConfirm({ pincode: refused.place.pincode });
       return;
     }
-    const found = await asks.ask(searchPlaces(phoneGeocoder, text));
+    const found = await asks.ask(searchPlaces(api, text, sessions.search()));
     if (found === stale) return;
-    setResults(found);
+    if (typeof found === "string") return stop(found);
+    setMatches(found);
     stop(found.length ? null : "no-results");
+  }
+
+  /** A tapped match: its point from Google, then Confirm opens there and reads the pincode (#257, Q6). */
+  async function pick(match: PlaceMatch) {
+    if (working.current || leaving.current) return;
+    working.current = true;
+    setProblem(null);
+    setPicking(match.id);
+    const found = await asks.ask(pickPlace(api, match.id, sessions.pick()));
+    if (found === stale) return;
+    if (typeof found === "string") return stop(found);
+    stop(null);
+    confirmAt(found);
   }
 
   /** A saved row becomes the chosen place and Home checks it, with no Confirm (#243, Q3). */
@@ -197,16 +227,8 @@ export default function SetLocation() {
     setSaved((current) => withoutAddress(current, id));
   }
 
-  const message =
-    problem === "invalid"
-      ? words.pincodeInvalid
-      : problem === "not-found"
-        ? words.notFound
-        : problem === "phone-off"
-          ? words.phoneOff
-          : problem === "no-results"
-            ? words.noResults
-            : null;
+  const message = problem && messages[problem];
+  const busy = searching || picking !== null;
   const label = pincodeOnly ? words.pincodeLabel : words.searchLabel;
 
   return (
@@ -246,7 +268,7 @@ export default function SetLocation() {
             <Button
               label={words.useCurrent}
               onPress={() => void useCurrent()}
-              disabled={searching}
+              disabled={busy}
               variant="secondary"
               icon={MapPin}
               alignStart
@@ -264,14 +286,14 @@ export default function SetLocation() {
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               onSubmitEditing={() => void search()}
-              editable={!searching}
+              editable={!busy}
               keyboardType={pincodeOnly ? "number-pad" : "default"}
               textContentType={pincodeOnly ? "postalCode" : "fullStreetAddress"}
               autoComplete={pincodeOnly ? "postal-code" : "street-address"}
               maxLength={pincodeOnly ? 7 : 100}
               returnKeyType="search"
               accessibilityLabel={label}
-              className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem === "invalid", focused)}`}
+              className={`mt-2 h-[52px] rounded-input bg-surface px-4 font-sans text-body text-text ${edgeClass(problem === "invalid" || problem === "bad-text", focused)}`}
             />
             {message && <FieldMessage text={message} />}
           </View>
@@ -279,23 +301,25 @@ export default function SetLocation() {
           <Button
             label={searching ? words.searching : words.search}
             onPress={() => void search()}
-            disabled={searching}
+            disabled={busy}
             icon={Search}
           />
 
-          {results.length > 0 && (
+          {matches.length > 0 && (
             <View className="overflow-hidden rounded-card border border-border bg-surface">
-              {results.map((spot, i) => (
+              {matches.map((match, i) => (
                 <Pressable
-                  key={`${spot.title}\n${spot.detail}`}
+                  key={match.id}
                   accessibilityRole="button"
-                  onPress={() => spot.place.point && confirmAt(spot.place.point)}
+                  accessibilityState={{ disabled: busy, busy: picking === match.id }}
+                  disabled={busy}
+                  onPress={() => void pick(match)}
                   className={`min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-primary-subtle ${i > 0 ? "border-t border-border" : ""}`}
                 >
-                  <MapPin size={20} className="text-muted" />
+                  {picking === match.id ? <ActivityIndicator className="text-primary" /> : <MapPin size={20} className="text-muted" />}
                   <View className="flex-1">
-                    <Text className="text-body font-medium text-text">{spot.title}</Text>
-                    <Text className="text-secondary text-muted">{spot.detail}</Text>
+                    <Text className="text-body font-medium text-text">{match.title}</Text>
+                    {match.detail !== "" && <Text className="text-secondary text-muted">{match.detail}</Text>}
                   </View>
                 </Pressable>
               ))}

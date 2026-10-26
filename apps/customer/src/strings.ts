@@ -103,6 +103,12 @@ export const strings = {
     search: "Search",
     searching: "Searching…",
     noResults: "Couldn't find that place. Try another name or the pincode.",
+    // Place search through our server (#257).
+    searchBadText: "Couldn't search that. Remove any special characters and try again.",
+    searchOffline: "Couldn't search. Check your connection, then try again.",
+    tooManySearches: "Too many searches. Wait a little and try again.",
+    searchDown: "Search isn't working right now. Use your current location, or try again later.",
+    placeGone: "Couldn't open that place. Try another match.",
     // C15's saved addresses (#243). The labels are Confirm's own words.
     savedTitle: "Saved addresses",
     savedLoading: "Loading saved addresses…",
