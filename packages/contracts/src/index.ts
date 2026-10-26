@@ -92,6 +92,15 @@ export {
   SavedAddressesResponse,
 } from "./addresses";
 export {
+  PlaceMatch,
+  PlaceParams,
+  PlacePointQuery,
+  PlacePointResponse,
+  PlaceSearchQuery,
+  PlaceSearchResponse,
+  PlaceSession,
+} from "./places";
+export {
   CorrectShopApplicationBody,
   MyShopApplicationResponse,
   SaveShopApplicationBody,

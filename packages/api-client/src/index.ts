@@ -3,6 +3,8 @@ import {
   ErrorEnvelope,
   HealthResponse,
   MyShopApplicationResponse,
+  PlacePointResponse,
+  PlaceSearchResponse,
   SavedAddress,
   SavedAddressesResponse,
   Serviceability,
@@ -320,6 +322,17 @@ export function createApiClient({
     /** `DELETE /v1/me/addresses/:id` */
     async removeAddress(id: string): Promise<ApiResult<undefined>> {
       return empty(await signedIn("DELETE", `/v1/me/addresses/${encodeURIComponent(id)}`));
+    },
+
+    /** `GET /v1/places?text=&session=`: up to 5 places in India for C15's search (#257). */
+    async searchPlaces(text: string, session: string): Promise<ApiResult<PlaceSearchResponse>> {
+      const query = new URLSearchParams({ text, session });
+      return result(await signedIn("GET", `/v1/places?${query}`), PlaceSearchResponse);
+    },
+
+    /** `GET /v1/places/:id?session=`: a picked match's point, ending the search's session. */
+    async placePoint(id: string, session: string): Promise<ApiResult<PlacePointResponse>> {
+      return result(await signedIn("GET", `/v1/places/${encodeURIComponent(id)}?${new URLSearchParams({ session })}`), PlacePointResponse);
     },
 
     /** `GET /v1/me/shop-application`: the account's shop application, or null before Start (S18). */
