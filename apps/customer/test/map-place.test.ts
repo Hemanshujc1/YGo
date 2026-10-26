@@ -87,12 +87,18 @@ describe("searchPlaces", () => {
     expect(server.calls).toEqual([`search Baner Road ${session}`]);
   });
 
-  it("is empty when nothing matches, or when the text breaks the search rule, without asking", async () => {
+  it("is empty when nothing matches, and bad-text without asking when the text breaks the search rule", async () => {
     expect(await searchPlaces(places({ ok: true, data: { matches: [] } }), "Nowhere", session)).toEqual([]);
     const server = places({ ok: true, data: { matches: [baner] } });
-    expect(await searchPlaces(server, "Baner\u0000", session)).toEqual([]);
-    expect(await searchPlaces(server, "a".repeat(101), session)).toEqual([]);
+    expect(await searchPlaces(server, "Baner\u0000", session)).toBe("bad-text");
+    expect(await searchPlaces(server, "a".repeat(101), session)).toBe("bad-text");
     expect(server.calls).toEqual([]);
+  });
+
+  it("searches a pasted multi-line address as one line", async () => {
+    const server = places({ ok: true, data: { matches: [baner] } });
+    expect(await searchPlaces(server, "Flat 4,\nBaner Road\t Pune\r\n", session)).toEqual([baner]);
+    expect(server.calls).toEqual([`search Flat 4, Baner Road Pune ${session}`]);
   });
 
   it("names why it found nothing: no answer, the hourly limit, or the search down", async () => {

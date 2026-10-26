@@ -63,12 +63,13 @@ export function newSession(): string {
 
 /**
  * Up to 5 of Google's matches for the search field, each with Google's two
- * lines and no pincode (#257, Q6); empty when nothing is found or the text
- * breaks the search rule.
+ * lines and no pincode (#257, Q6); empty when nothing is found. Line breaks
+ * and tabs, as a pasted address brings, become spaces; text that still breaks
+ * the search rule is "bad-text", without asking.
  */
-export async function searchPlaces(places: Places, text: string, session: string): Promise<PlaceMatch[] | PlaceTrouble> {
-  const checked = PlaceSearchText.safeParse(text);
-  if (!checked.success) return [];
+export async function searchPlaces(places: Places, text: string, session: string): Promise<PlaceMatch[] | PlaceTrouble | "bad-text"> {
+  const checked = PlaceSearchText.safeParse(text.replace(/\s+/g, " "));
+  if (!checked.success) return "bad-text";
   const answer = await places.searchPlaces(checked.data, session).catch(() => null);
   if (!answer) return "offline";
   return answer.ok ? answer.data.matches : trouble(answer.code);
