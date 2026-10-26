@@ -37,7 +37,7 @@ const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): pa
  * phone names as in another country is skipped; one with no country is kept.
  * Only latitude and longitude are kept: the phone's results also carry
  * altitude, accuracy or zoom, which the server's strict `AddressPoint` refuses.
- * Used by C15 (#242) and S17 (#303).
+ * Used by C15 (#242).
  */
 export async function addressAt(
   lookup: (point: AddressPoint) => Promise<GeoAddress[]>,

@@ -1,4 +1,3 @@
-import { addressAt } from "@ygo/mobile";
 import * as Location from "expo-location";
 import type { Geocoder } from "./map-place";
 
@@ -8,5 +7,5 @@ import type { Geocoder } from "./map-place";
  */
 export const phoneGeocoder: Geocoder = {
   find: (text) => Location.geocodeAsync(text),
-  addressAt: (point) => addressAt(Location.reverseGeocodeAsync, point),
+  addresses: (point) => Location.reverseGeocodeAsync(point),
 };

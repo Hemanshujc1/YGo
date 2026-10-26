@@ -1,14 +1,14 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type AddressLabel, type AddressPoint, type ErrorCode, SaveAddressBody } from "@ygo/contracts";
-import type { AddressAt } from "@ygo/mobile";
+import { addressAt, type GeoAddress } from "@ygo/mobile/address-at";
 import { type AreaAnswer, type Place, sentOutcome } from "./location-flow";
 
 /** The phone's own map lookups, given by the screens so the tests can stand in for them (#242). */
 export interface Geocoder {
   /** The spots a typed name, street or pincode points to. */
   find(text: string): Promise<{ latitude: number; longitude: number }[]>;
-  /** The address at a spot, through `@ygo/mobile`'s `addressAt`; null when none fits. */
-  addressAt(point: AddressPoint): Promise<AddressAt | null>;
+  /** The addresses at a spot. */
+  addresses(point: AddressPoint): Promise<GeoAddress[]>;
 }
 
 /** A place on the map, with the two lines Confirm shows: "Prabhat Road, Shivaji Nagar" and "Pune 411005". */
@@ -20,10 +20,11 @@ const unique = (parts: (string | null)[]) => [...new Set(parts.filter((part): pa
 
 /**
  * Where the pin stands, or null when no pincode is found there: "Move the pin
- * a little" (#242, Q6). The area line is the address's line, cut to 200.
+ * a little" (#242, Q6). The address is `@ygo/mobile`'s `addressAt`, which
+ * never rejects; the area line is its line, cut to 200.
  */
 export async function readPin(geocoder: Geocoder, point: AddressPoint): Promise<Spot | null> {
-  const at = await geocoder.addressAt(point);
+  const at = await addressAt((where) => geocoder.addresses(where), point);
   if (!at) return null;
   const title = unique([at.street, at.district]).join(", ");
   const areaLine = at.line.slice(0, 200).trim();

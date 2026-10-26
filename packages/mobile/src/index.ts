@@ -1,4 +1,3 @@
-export { addressAt, type AddressAt, type GeoAddress } from "./address-at";
 export { AppShell } from "./app-shell";
 export { findPlace, type Found, type Locator } from "./find-place";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
