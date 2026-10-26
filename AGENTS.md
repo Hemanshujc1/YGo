@@ -79,4 +79,4 @@ Single-context: one root `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.
 
 ### Skills outside the repo
 
-The repo installs only the skills in `.agents/skills/`, pinned by `skills-lock.json`. Others named in these docs, such as `/code-review`, are installed per user in Claude Code; an agent without them follows the written step by hand.
+The repo installs only the skills in `.agents/skills/`: the ones pinned by `skills-lock.json`, plus YGo's own `merge`, which every agent follows when the owner says "merge". Others named in these docs, such as `/code-review`, are installed per user in Claude Code; an agent without them follows the written step by hand.
