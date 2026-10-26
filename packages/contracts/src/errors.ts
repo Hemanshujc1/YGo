@@ -34,6 +34,10 @@ import { CatalogImportRowErrors } from "./catalog";
  * - File-level import failures use VALIDATION_FAILED (400). Missing CSV/ZIP parts name the missing part; missing or unknown CSV columns name `catalogCsv`; unreadable ZIPs name `imagesZip`; an oversized file names the part that exceeded its limit.
  * Saved addresses (#217):
  * - ADDRESS_LIMIT_REACHED (409): the account already has 10 saved addresses.
+ * Place search (#257):
+ * - TOO_MANY_REQUESTS (429): the account searched 30 times in the last hour, or picked a match 30 times; each is counted on its own.
+ * - UNAVAILABLE (503): Google Places did not answer, or no key is set.
+ * - NOT_FOUND (404): the picked place is gone, or has no point in India.
  * Shop application (#40):
  * - SHOP_APPLICATION_EXISTS (409): the account already has a shop application or shop link (ACC-4).
  * - SHOP_APPLICATION_SENT (409): the Owner saved or sent an application that is no longer a Draft.

@@ -94,6 +94,9 @@ export const AddressFlat = z.string().trim().min(1).max(100);
 /** A saved address's area line, the street and locality the phone's map lookup names; trimmed, 1 to 200 characters (#217). */
 export const AddressAreaLine = z.string().trim().min(1).max(200);
 
+/** C15's place search text, trimmed, 1 to 100 characters, with no control characters such as NUL (#257, as #269). */
+export const PlaceSearchText = z.string().trim().min(1).max(100).refine((value) => !/\p{Cc}/u.test(value));
+
 /** Master product name, trimmed, 1 to 200 characters (#203); no PostgreSQL-unrepresentable NUL (#269). */
 export const ProductName = z.string().trim().min(1).max(200).refine((value) => !value.includes("\0"));
 
