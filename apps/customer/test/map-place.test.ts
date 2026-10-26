@@ -1,7 +1,8 @@
 import type { SaveAddressBody } from "@ygo/contracts";
+import type { GeoAddress } from "@ygo/mobile/address-at";
 import { describe, expect, it } from "vitest";
 import type { AreaAnswer, Place } from "../src/lib/location-flow";
-import { addressBody, confirmAddress, type GeoAddress, type Geocoder, readPin, searchPlaces } from "../src/lib/map-place";
+import { addressBody, confirmAddress, type Geocoder, readPin, searchPlaces } from "../src/lib/map-place";
 
 const prabhat: GeoAddress = {
   isoCountryCode: "IN",

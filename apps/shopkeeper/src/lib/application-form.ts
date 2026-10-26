@@ -5,9 +5,11 @@ import {
   SaveShopApplicationBody,
   SendShopApplicationBody,
   ServiceRadiusMetres,
+  ShopAddress,
   type ShopApplication,
   type ShopEntityType,
 } from "@ygo/contracts";
+import type { AddressAt } from "@ygo/mobile/address-at";
 
 /** The S17 fields typed as text. Business type and service radius are picked, and the location comes from the phone. */
 export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
@@ -32,6 +34,20 @@ export function typedFrom(application: ShopApplication): Typed {
     entityType: application.entityType,
     serviceRadiusMetres: application.serviceRadiusMetres,
     location: application.location,
+  };
+}
+
+/**
+ * The empty Pincode and Address that the address at the shop's location fills
+ * in; a box with text is never changed (#303). The Address is the address's
+ * line, cut to the Address rule's length (#303, Q2).
+ */
+export function fillFromLocation(typed: Typed, at: AddressAt | null): Partial<Pick<Typed, "pincode" | "address">> {
+  if (!at) return {};
+  const address = ShopAddress.safeParse(at.line.slice(0, ShopAddress.maxLength ?? undefined));
+  return {
+    ...(typed.pincode.trim() === "" && { pincode: at.pincode }),
+    ...(typed.address.trim() === "" && address.success && { address: address.data }),
   };
 }
 

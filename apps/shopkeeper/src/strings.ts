@@ -91,6 +91,8 @@ export const strings = {
         foundNoAccuracy: "Location found",
         saved: "Location saved",
         rough: "Stand near your shop door, away from tall buildings, and try again.",
+        // #303, Q4.
+        filledIn: "Filled in from your location. Check the pincode and address.",
         off: "Location is off for YGo. Turn it on in settings to save where your shop is.",
         openSettings: "Open settings",
         phoneOff: "Location is off on this phone. Turn it on and try again.",

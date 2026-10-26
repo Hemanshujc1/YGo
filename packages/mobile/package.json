@@ -4,7 +4,8 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
-    "./google-sign-in-plugin": "./google-sign-in.config.js"
+    "./google-sign-in-plugin": "./google-sign-in.config.js",
+    "./address-at": "./src/address-at.ts"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
