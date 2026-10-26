@@ -30,12 +30,13 @@ describe("Google place finder", () => {
   });
 
   it("searches India only with the session, and keeps 5 matches with a usable, unrepeated id and a name", async () => {
+    const odd = "ChIJ.2/x~y+z=";
     const { calls, fetcher } = fakeFetch(200, {
       suggestions: [
         prediction(baner.id, baner.title, baner.detail),
-        prediction("bad/id", "Bad"),
+        prediction("..", "Bad"),
         { placePrediction: { placeId: "ChIJ-noname" } },
-        prediction("ChIJ-2", "Baner Gaon"),
+        prediction(odd, "Baner Gaon"),
         prediction(baner.id, "Baner Road again"),
         ...["3", "4", "5", "6"].map((n) => prediction(`ChIJ-${n}`, `Place ${n}`, "Pune")),
       ],
@@ -43,7 +44,7 @@ describe("Google place finder", () => {
     const matches = await createGooglePlaceFinder("key-1", fetcher).search("Baner", session);
     expect(matches).toEqual([
       baner,
-      { id: "ChIJ-2", title: "Baner Gaon", detail: "" },
+      { id: odd, title: "Baner Gaon", detail: "" },
       { id: "ChIJ-3", title: "Place 3", detail: "Pune" },
       { id: "ChIJ-4", title: "Place 4", detail: "Pune" },
       { id: "ChIJ-5", title: "Place 5", detail: "Pune" },
@@ -65,6 +66,20 @@ describe("Google place finder", () => {
     expect(calls[0]?.url).toBe(`https://places.googleapis.com/v1/places/${baner.id}?sessionToken=${session}`);
     expect(calls[0]?.init.method).toBe("GET");
     expect(calls[0]?.init.headers).toEqual({ "X-Goog-Api-Key": "key-1", "X-Goog-FieldMask": "location" });
+  });
+
+  it("keeps any place id to one segment of Google's place path", async () => {
+    const { calls, fetcher } = fakeFetch(200, { location: point });
+    const finder = createGooglePlaceFinder("key-1", fetcher);
+    const ids = ["a/../b", "../places:autocomplete", "a?key=x#y", "%2e%2e", "...", "a\\b"];
+    for (const id of ids) await finder.point(id, session);
+    calls.forEach(({ url }, i) => {
+      const asked = new URL(url);
+      expect(asked.origin).toBe("https://places.googleapis.com");
+      expect(asked.pathname).toMatch(/^\/v1\/places\/[^/]+$/);
+      expect(decodeURIComponent(asked.pathname.slice("/v1/places/".length))).toBe(ids[i]);
+      expect([...asked.searchParams]).toEqual([["sessionToken", session]]);
+    });
   });
 
   it("answers null for a place Google no longer knows, and rejects when Google fails or refuses the call", async () => {
@@ -222,7 +237,8 @@ describe("place search", () => {
     const headers = await customer("asha@example.com");
     expect((await search(headers, "Baner\u0000")).statusCode).toBe(400);
     expect((await app.inject({ method: "GET", url: "/v1/places?text=Baner&session=s1", headers })).statusCode).toBe(400);
-    expect((await pick(headers, "a/b")).statusCode).toBe(400);
+    expect((await pick(headers, "..")).statusCode).toBe(400);
+    expect((await pick(headers, "a\u0000b")).statusCode).toBe(400);
     expect(asked).toEqual([]);
   });
 

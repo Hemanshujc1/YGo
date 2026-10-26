@@ -52,11 +52,28 @@ describe("PlaceId", () => {
     expect(PlaceId.safeParse("a".repeat(4096)).success).toBe(true);
   });
 
-  it("refuses an empty id, one past 4096 characters, and anything that could reach another of Google's paths", () => {
+  it("assumes no character set Google doesn't document", () => {
+    for (const id of ["a.b", "a~b", "a+b=", "a/b", "a?b", "a#b", "a%2Fb", "a b", "...", "बाणेर"]) {
+      expect(PlaceId.safeParse(id).success).toBe(true);
+      expect(PlaceMatch.safeParse({ ...match, id }).success).toBe(true);
+    }
+  });
+
+  it("refuses an empty id, one past 4096 characters, control characters, and the dot segments", () => {
     expect(PlaceId.safeParse("").success).toBe(false);
     expect(PlaceId.safeParse("a".repeat(4097)).success).toBe(false);
-    for (const id of ["a/../b", "..", "a?b", "a#b", "a%2Fb", "a b", "a.b"]) expect(PlaceId.safeParse(id).success).toBe(false);
-    expect(PlaceMatch.safeParse({ ...match, id: "a/b" }).success).toBe(false);
+    for (const id of ["a\0b", "a\nb", "a\u007fb", ".", ".."]) expect(PlaceId.safeParse(id).success).toBe(false);
+    expect(PlacePointQuery.safeParse({ id: "..", session }).success).toBe(false);
+  });
+
+  it("stays one segment of Google's path once the server encodes it", () => {
+    for (const id of ["a/../b", "../places:autocomplete", "a?key=x#y", "%2e%2e", "...", "a\\b", ...googles]) {
+      expect(PlaceId.safeParse(id).success).toBe(true);
+      const segment = encodeURIComponent(id);
+      expect(segment).toMatch(/^[^/?#\\]+$/);
+      expect(segment).not.toMatch(/^(?:\.|%2e){1,2}$/i);
+      expect(decodeURIComponent(segment)).toBe(id);
+    }
   });
 });
 
