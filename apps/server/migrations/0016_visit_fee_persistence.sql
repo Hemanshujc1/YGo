@@ -129,3 +129,7 @@ FOR EACH ROW EXECUTE FUNCTION reject_visit_fee_change();
 --> statement-breakpoint
 CREATE TRIGGER onboarding_fees_no_truncate BEFORE TRUNCATE ON onboarding_fees
 FOR EACH STATEMENT EXECUTE FUNCTION reject_visit_fee_change();
+--> statement-breakpoint
+-- Evidence is immutable while retained, but DELETE remains available for DEL-10.
+CREATE TRIGGER visit_photos_no_update BEFORE UPDATE ON visit_photos
+FOR EACH ROW EXECUTE FUNCTION reject_visit_fee_change();

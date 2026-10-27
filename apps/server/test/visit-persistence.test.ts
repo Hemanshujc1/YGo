@@ -93,6 +93,7 @@ it("purges photo metadata independently and retains history after actor deletion
   await client.query(photoSql, [randomUUID(), saved.id, "visit-photos/test/hash.jpg", -90, 180, null]);
   expect((await client.query("SELECT captured_at FROM visit_photos WHERE visit_id = $1", [saved.id])).rows).toEqual([{ captured_at: null }]);
   await refused(photoSql, [randomUUID(), saved.id, "visit-photos/other/hash.jpg", 0, 0, null], "23505");
+  await refused("UPDATE visit_photos SET longitude = 0, object_key = 'replacement.jpg' WHERE visit_id = $1", [saved.id], "P0001");
   await client.query("DELETE FROM visit_photos WHERE visit_id = $1", [saved.id]);
   await client.query(photoSql, [randomUUID(), saved.id, "visit-photos/test/hash.jpg", 0, 0, "2020:01:01 12:30:00"]);
   await client.query("DELETE FROM accounts WHERE id = $1", [actorId]);
