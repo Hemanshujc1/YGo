@@ -157,3 +157,28 @@ export const ServiceRadiusMetres = z.number().int().min(500).max(5000).multipleO
 
 /** A calendar date such as an FSSAI expiry, written `YYYY-MM-DD` (ONB-3). */
 export const CalendarDate = z.iso.date();
+
+/** Private shop-front JPEG limit: 10 MB (owner decision on #42). */
+export const VISIT_PHOTO_MAX_BYTES = 10_000_000;
+
+/** India's calendar date; shared by date rules, not a display formatter. */
+export function indiaToday(): string {
+  return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+}
+
+/** Editable visit date, no later than today in India (owner decision on #42). */
+export const ShopVisitDate = CalendarDate.refine((date) => date <= indiaToday());
+
+/** Payment date, no later than today in India (owner decision on #42). */
+export const OnboardingPaymentDate = CalendarDate.refine((date) => date <= indiaToday());
+
+/** Optional visit notes, with the Admin record's 500-character limit (#42). */
+export const ShopVisitNotes = z.string().trim().max(500);
+
+/** Positive rupee decimal, at most NUMERIC(12,2), never a JS float (ADR-0002, #42). */
+export const OnboardingFeeAmount = z.string().trim()
+  .regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/)
+  .refine((value) => /[1-9]/.test(value));
+
+/** Receipt or payment reference; the same limit as an Admin reason (#42). */
+export const OnboardingPaymentReference = z.string().trim().min(1).max(500);

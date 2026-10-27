@@ -207,5 +207,6 @@ export const strings = {
     SHOP_APPLICATION_SENT: "Your application has been sent, so it can't be changed here. Write to support to change it.",
     PINCODE_NOT_IN_AREA: "YGo isn't in your area yet.",
     SHOP_STATE_CHANGE_REFUSED: "This application has moved on. Refresh to see where it is.",
+    VISIT_PHOTO_LOCATION_MISSING: "This photo has no location. Choose a shop-front photo with location enabled.",
   } satisfies Record<ErrorCode, string>,
 };

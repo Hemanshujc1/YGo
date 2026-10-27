@@ -43,6 +43,9 @@ import { CatalogImportRowErrors } from "./catalog";
  * - SHOP_APPLICATION_SENT (409): the Owner saved or sent an application that is no longer a Draft.
  * - PINCODE_NOT_IN_AREA (409): the shop's pincode is in no Area, at Send or in an Admin correction.
  * - SHOP_STATE_CHANGE_REFUSED (409): Start review on anything but Submitted, or Approve on anything but Under Review.
+ * Visit evidence (#42):
+ * - VISIT_PHOTO_LOCATION_MISSING (400): the uploaded JPEG has no valid GPS metadata.
+ * - Invalid, oversized or unreadable evidence uses VALIDATION_FAILED, naming photo.
  * - A Draft is the Owner's own: Admin calls on one answer NOT_FOUND.
  */
 export const ErrorCode = z.enum([
@@ -72,6 +75,7 @@ export const ErrorCode = z.enum([
   "SHOP_APPLICATION_SENT",
   "PINCODE_NOT_IN_AREA",
   "SHOP_STATE_CHANGE_REFUSED",
+  "VISIT_PHOTO_LOCATION_MISSING",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
