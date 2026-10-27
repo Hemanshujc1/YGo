@@ -93,10 +93,15 @@ export function pinSpot(geocoder: Geocoder, show: (view: PinView) => void) {
       tell();
     },
     place: (): Place | null => (ready() ? (read?.spot?.place ?? null) : null),
-    /** Leaving drops any answer still on its way (#216, Q3). */
+    /**
+     * Leaving drops any answer still on its way (#216, Q3), and forgets that the
+     * map was moving, so a screen that starts again never waits on a stop that
+     * may have gone with the map that left.
+     */
     leave() {
       clearTimeout(wait);
       reads.drop();
+      moving = false;
     },
   };
 }

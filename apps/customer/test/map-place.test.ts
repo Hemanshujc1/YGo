@@ -390,6 +390,21 @@ describe("pinSpot", () => {
     expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
   });
 
+  it("turns Confirm on after starting again when the screen left while the map was moving", async () => {
+    // The map that was moving may be gone with its stop, so the screen that starts again must not wait for it.
+    const { lookup, land } = held();
+    const pin = pinSpot(lookup, () => {});
+    pin.open(before);
+    land(0);
+    await vi.advanceTimersByTimeAsync(0);
+    pin.moving(true);
+    pin.leave();
+    pin.open(before);
+    land(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toMatchObject({ point: before });
+  });
+
   it("keeps Confirm off through repeated moves while a read is on its way, and saves only the last stop", async () => {
     const { lookup, asked, land } = held();
     const pin = pinSpot(lookup, () => {});
