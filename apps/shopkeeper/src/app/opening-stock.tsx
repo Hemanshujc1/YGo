@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
-import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
+import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
 
 const words = strings.shopSetup;
@@ -25,6 +25,8 @@ export default function OpeningStockScreen() {
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<Record<string, string>>({});
   const [editableQueued, setEditableQueued] = useState<Record<string, boolean>>({});
+  const [stockRefreshFailed, setStockRefreshFailed] = useState<Record<string, boolean>>({});
+  const [refreshingStock, setRefreshingStock] = useState<string | null>(null);
 
   async function refresh() {
     setLoad({ kind: "loading" });
@@ -73,6 +75,25 @@ export default function OpeningStockScreen() {
 
   useEffect(() => { void refresh(); }, []);
 
+  async function retryStockRefresh(item: ShopListingCatalogItem, shopId: string) {
+    if (refreshingStock) return;
+    setRefreshingStock(item.packId);
+    const result = await refreshListingsAfterConflict(
+      load.kind === "loaded" ? load.items : [],
+      async () => {
+        const answer = await api.shopListings().catch(() => null);
+        return answer?.ok ? answer.data.items.filter((row) => row.listing !== null) : null;
+      },
+    );
+    setRefreshingStock(null);
+    if (result.kind === "failed") return;
+    setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
+    setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + (pendingOpeningStock(shopId, item.packId)?.quantity ?? "") + " " + item.baseUnit + "." }));
+    setLoad((current) => current.kind === "loaded" && current.shopId === shopId
+      ? { ...current, items: result.items }
+      : current);
+  }
+
   async function save(item: ShopListingCatalogItem) {
     if (load.kind !== "loaded" || saving) return;
     const shopId = load.shopId;
@@ -109,6 +130,10 @@ export default function OpeningStockScreen() {
         setLoad((current) => current.kind === "loaded" && current.shopId === shopId
           ? { ...current, items: replaceListingsFromRefresh(current.items, refreshedItems) }
           : current);
+        setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
+      } else {
+        setStockRefreshFailed((current) => ({ ...current, [item.packId]: true }));
+        setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + entry.data.quantity + " " + item.baseUnit + ". " + words.stockStatusUnavailable }));
       }
       return;
     }
@@ -141,6 +166,7 @@ export default function OpeningStockScreen() {
             <Button label={words.saveStock} onPress={() => void save(item)} busy={saving === item.packId} />
           </>}
           {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-pending" : message[item.packId] === words.stockRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
+          {stockRefreshFailed[item.packId] && <Button label={words.retry} onPress={() => void retryStockRefresh(item, load.shopId)} busy={refreshingStock === item.packId} variant="secondary" />}
         </View>;
       })}
     </ScrollView>

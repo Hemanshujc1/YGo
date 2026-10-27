@@ -204,6 +204,7 @@ export const strings = {
     stockRecorded: "Opening stock recorded.",
     stockQueued: "Opening stock is waiting to sync.",
     stockConflict: "This shop already has opening stock recorded. The queued amount was not recorded:",
+    stockStatusUnavailable: "The recorded stock status could not be refreshed. Try again to check it.",
     errors: { onlinePrice: "Enter a valid price.", counterPrice: "Enter a valid price.", mrp: "Enter a valid price.", lowStockLevel: "Enter a valid quantity.", minimumOrderQuantity: "Enter a valid quantity.", quantityStep: "Enter a valid quantity.", quantity: "Enter a valid quantity.", quantityOptions: "Check the quantity-price options." },
   },
   // On the Start screen and at the end of S17 until S36 More is built (#193, #294).

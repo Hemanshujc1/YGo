@@ -36,6 +36,20 @@ export function replaceListingsFromRefresh<T extends { packId: string }>(current
   return current.map((item) => refreshedByPack.get(item.packId) ?? item);
 }
 
+export async function refreshListingsAfterConflict<T extends { packId: string }>(
+  current: T[],
+  refresh: () => Promise<T[] | null>,
+): Promise<{ kind: "refreshed"; items: T[] } | { kind: "failed" }> {
+  try {
+    const refreshed = await refresh();
+    return refreshed === null
+      ? { kind: "failed" }
+      : { kind: "refreshed", items: replaceListingsFromRefresh(current, refreshed) };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
 export type OpeningStockSyncResult =
   | { kind: "empty" }
   | { kind: "synced" }
