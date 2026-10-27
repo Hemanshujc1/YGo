@@ -1,9 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, AdminAccount, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody } from "@ygo/contracts";
+import { Account, AdminAccount, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody, type AdminRole } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn } from "../admin";
 import { deriveKeys } from "../tokens";
+
+// Where each role's membership lives and the action that records its creation (#343).
+const created: Record<AdminRole, { table: string; action: string }> = {
+  admin: { table: "admin_memberships", action: "admin.create" },
+  area_manager: { table: "area_manager_memberships", action: "area_manager.create" },
+};
 
 export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
@@ -77,8 +83,8 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
         );
         const account = inserted.rows[0];
         if (!account) throw new Error("Admin insert returned no account");
-        const action = role === "admin" ? "admin.create" : "area_manager.create";
-        await client.query(`INSERT INTO ${role === "admin" ? "admin_memberships" : "area_manager_memberships"} (account_id) VALUES ($1)`, [account.id]);
+        const { table, action } = created[role];
+        await client.query(`INSERT INTO ${table} (account_id) VALUES ($1)`, [account.id]);
         await client.query(
           "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, $2, $3, $4)",
           [who.accountId, action, account.id, reason],

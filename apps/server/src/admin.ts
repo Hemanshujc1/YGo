@@ -5,9 +5,10 @@ import type { Clock } from "./adapters/clock";
 import { withTransaction } from "./db";
 import { signedIn, type AuthKeys, type SignedIn } from "./tokens";
 
-/** Everyone who may sign in to the Admin web, with their role (#343). An account holds at most one. */
+/** Everyone who may sign in to the Admin web, with their role (#343). Accounts are created with one; Admin wins if both. */
 export const ADMIN_WEB_MEMBERS = `(SELECT account_id, 'admin' AS role FROM admin_memberships
-  UNION ALL SELECT account_id, 'area_manager' AS role FROM area_manager_memberships)`;
+  UNION ALL SELECT account_id, 'area_manager' AS role FROM area_manager_memberships
+  WHERE account_id NOT IN (SELECT account_id FROM admin_memberships))`;
 
 /** Check current Admin or Area Manager membership after validating the session. */
 export async function adminWebSignedIn(

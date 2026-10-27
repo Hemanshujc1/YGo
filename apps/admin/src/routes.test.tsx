@@ -786,6 +786,17 @@ describe("Area Manager shell (#343)", () => {
     expect(api.listShopApplications).not.toHaveBeenCalled();
   });
 
+  it("asks the server again after sign-out, so a signed-out Area Manager page goes to sign-in", async () => {
+    const me = vi.fn().mockResolvedValueOnce({ ok: true, data: manager }).mockResolvedValue({ ok: false, status: 401, code: "UNAUTHENTICATED" });
+    const { router } = setup("/applications", { me });
+    await screen.findByText(strings.noAssignedShops);
+    fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
+    await screen.findByRole("heading", { name: strings.signIn });
+    await router.navigate("/applications");
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
   it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", `/applications/${application.id}`])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
@@ -828,10 +839,11 @@ describe("Admin theme (#263)", () => {
   };
 
   it("shows no picker before sign-in, then takes the account's theme on sign-in", async () => {
-    // The account load never answers here, so only the sign-in answer can set the theme.
+    // The role reads on "/" and "/accounts" answer; the theme's account load never does, so only the sign-in answer can set the theme.
     setup("/sign-in", {
       verifyCode: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
-      me: signedInThen(new Promise(() => undefined)),
+      me: vi.fn().mockResolvedValueOnce({ ok: true, data: founder }).mockResolvedValueOnce({ ok: true, data: founder })
+        .mockReturnValue(new Promise(() => undefined)),
     });
     expect(screen.queryByRole("group", { name: strings.theme })).toBeNull();
     fireEvent.change(screen.getByLabelText(strings.email), { target: { value: founder.email } });
@@ -965,7 +977,7 @@ describe("Admin theme (#263)", () => {
     expect(shown()).toBeUndefined();
     await router.navigate("/waitlist");
     await waitFor(() => expect(shown()).toBe("dark"));
-    expect(me).toHaveBeenCalledTimes(3);
+    expect(me).toHaveBeenCalledTimes(4);
   });
 
   it("keeps the save message after moving to another page", async () => {

@@ -27,28 +27,21 @@ type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
 type FieldErrors = Partial<Record<Field, string>>;
 
-// The signed-in account's role, read once per sign-in (#343). Loaders wait for it, so the shell can read it as it draws.
-const signedInAs = new WeakMap<AdminApi, { answer: Promise<ApiResult<AdminAccount>>; role?: AdminRole }>();
+// The role the last page's loader read (#343), so the shell can draw it. Kept after a failed read, for the error page.
+const lastRole = new WeakMap<AdminApi, AdminRole>();
 
-function signedInRole(api: AdminApi) {
-  let known = signedInAs.get(api);
-  if (!known) {
-    const entry: { answer: Promise<ApiResult<AdminAccount>>; role?: AdminRole } = { answer: api.me() };
-    signedInAs.set(api, entry);
-    entry.answer.then(
-      (result) => { if (result.ok) entry.role = result.data.role; else signedInAs.delete(api); },
-      () => { signedInAs.delete(api); },
-    );
-    known = entry;
-  }
-  return known.answer;
-}
-
-/** Runs the Admin's loader; an Area Manager gets theirs, by default Applications (#343). */
+/**
+ * Reads the role on every page, then runs the Admin's loader; an Area Manager
+ * gets theirs, by default Applications (#343). Checked first because a 403
+ * from an Admin-only route would sign them out.
+ */
 function byRole(api: AdminApi, admin: LoaderFunction, areaManager: LoaderFunction = () => redirect("/applications")): LoaderFunction {
   return async (args) => {
-    const me = await signedInRole(api);
-    if (me.ok) return me.data.role === "admin" ? admin(args) : areaManager(args);
+    const me = await api.me();
+    if (me.ok) {
+      lastRole.set(api, me.data.role);
+      return me.data.role === "admin" ? admin(args) : areaManager(args);
+    }
     if (me.code === "UNAUTHENTICATED" || me.code === "FORBIDDEN") return redirect("/sign-in");
     throw new Error(me.code);
   };
@@ -58,7 +51,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
   const location = useLocation();
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
-  const role = api && signedInAs.get(api)?.role;
+  const role = api && lastRole.get(api);
   const nav = role === "admin" ? [
     { path: "/accounts", label: strings.accounts },
     { path: "/categories", label: strings.categories },
@@ -153,7 +146,6 @@ function SignIn({ api }: { api: AdminApi }) {
       const result = await api.verifyCode(parsed.data);
       if (result.ok) {
         adminTheme(api).account(result.data);
-        signedInAs.delete(api);
         void navigate("/");
       } else setError(strings.errors[result.code]);
     } catch {
