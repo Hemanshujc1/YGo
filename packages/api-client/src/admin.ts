@@ -17,6 +17,14 @@ import {
   PacksResponse,
   ShopApplication,
   ShopApplicationsResponse,
+  ShopVisit,
+  ShopOnboarding,
+  OnboardingFee,
+  VisitPhotoUpload,
+  VisitPhotoAccess,
+  type CreateVisitPhotoUploadBody,
+  type RecordShopVisitBody,
+  type RecordOnboardingFeeBody,
   type CorrectShopApplicationBody,
   type CreateAdminBody,
   type CreateAreaBody,
@@ -88,7 +96,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | SetThemeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | SetThemeBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -255,6 +263,31 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/shop-applications/:id/approve`: Under Review to Approved. */
     async approveShopApplication(id: string): Promise<ApiResult<ShopApplication>> {
       return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/approve`), ShopApplication);
+    },
+
+    /** Issue a private PUT URL from the authenticated API; never substitute an input URL. */
+    async createVisitPhotoUpload(id: string, body: CreateVisitPhotoUploadBody): Promise<ApiResult<VisitPhotoUpload>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/visit-photo-upload`, body), VisitPhotoUpload);
+    },
+
+    /** Record a visit using the server-issued upload id; the server reads GPS from the photo. */
+    async recordShopVisit(id: string, body: RecordShopVisitBody): Promise<ApiResult<ShopVisit>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/visits`, body), ShopVisit);
+    },
+
+    /** Issue fresh private GET access from the authenticated API; URL syntax alone establishes no trust. */
+    async getVisitPhotoAccess(id: string, visitId: string): Promise<ApiResult<VisitPhotoAccess>> {
+      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}/visits/${encodeURIComponent(visitId)}/photo`), VisitPhotoAccess);
+    },
+
+    /** Append a paid fee or reasoned waiver, preserving earlier entries. */
+    async recordOnboardingFee(id: string, body: RecordOnboardingFeeBody): Promise<ApiResult<OnboardingFee>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/onboarding-fees`, body), OnboardingFee);
+    },
+
+    /** Read visit and fee histories, newest first, with the owner's contact confirmation state. */
+    async getShopOnboarding(id: string): Promise<ApiResult<ShopOnboarding>> {
+      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}/onboarding`), ShopOnboarding);
     },
 
     /** Clear local access immediately and ask the server to end the cookie session. */
