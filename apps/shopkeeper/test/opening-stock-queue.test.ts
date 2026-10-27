@@ -9,7 +9,7 @@ vi.mock("react-native-mmkv", () => ({
   }),
 }));
 
-import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../src/lib/opening-stock-queue";
+import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../src/lib/opening-stock-queue";
 
 const shopId = "00000000-0000-4000-8000-000000000001";
 const packId = "00000000-0000-4000-8000-000000000002";
@@ -73,6 +73,21 @@ describe("offline opening stock", () => {
       kind: "refreshed",
       items: serverListings,
     });
+    expect(pendingOpeningStock(shopId, packId)).toEqual(entry);
+  });
+
+  it("refreshes listings after a startup conflict and reports failed refresh for retry", async () => {
+    queueOpeningStock(shopId, packId, entry);
+    const sync = await syncQueuedOpeningStock(shopId, packId, async () => ({ ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" }));
+    const current = [{ packId, stock: "0", openingStockRecorded: false }];
+    const refresh = vi.fn().mockRejectedValue(new Error("offline"));
+
+    expect(sync).toEqual({ kind: "pending", code: "OPENING_STOCK_ALREADY_RECORDED" });
+    expect(await refreshListingsForQueuedConflicts(current, [{ packId }], refresh)).toEqual({
+      kind: "failed",
+      packIds: [packId],
+    });
+    expect(refresh).toHaveBeenCalledOnce();
     expect(pendingOpeningStock(shopId, packId)).toEqual(entry);
   });
 });

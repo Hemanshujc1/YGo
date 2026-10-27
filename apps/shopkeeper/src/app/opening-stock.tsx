@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
-import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
+import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
 
 const words = strings.shopSetup;
@@ -67,6 +67,38 @@ export default function OpeningStockScreen() {
           : result.code ? strings.errors[result.code] : words.saveOffline,
       ])),
     }));
+    const conflictItems = syncResults
+      .filter(({ result }) => result.kind === "pending" && result.code === "OPENING_STOCK_ALREADY_RECORDED")
+      .map(({ item }) => item);
+    const conflictRefresh = await refreshListingsForQueuedConflicts(
+      items,
+      conflictItems,
+      async () => {
+        const updated = await api.shopListings().catch(() => null);
+        return updated?.ok ? updated.data.items.filter((row) => row.listing !== null) : null;
+      },
+    );
+    if (conflictRefresh.kind === "failed") {
+      setStockRefreshFailed((current) => ({
+        ...current,
+        ...Object.fromEntries(conflictRefresh.packIds.map((packId) => [packId, true])),
+      }));
+      setMessage((current) => ({
+        ...current,
+        ...Object.fromEntries(conflictItems.map((item) => [
+          item.packId,
+          `${words.stockConflict} ${pendingOpeningStock(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}. ${words.stockStatusUnavailable}`,
+        ])),
+      }));
+    } else if (conflictRefresh.kind === "refreshed") {
+      setLoad((current) => current.kind === "loaded" && current.shopId === shopId
+        ? { ...current, items: conflictRefresh.items }
+        : current);
+      setStockRefreshFailed((current) => ({
+        ...current,
+        ...Object.fromEntries(conflictRefresh.packIds.map((packId) => [packId, false])),
+      }));
+    }
     if (syncResults.some(({ result }) => result.kind === "synced")) {
       const updated = await api.shopListings().catch(() => null);
       if (updated?.ok) setLoad({ kind: "loaded", shopId, items: updated.data.items.filter((item) => item.listing !== null) });

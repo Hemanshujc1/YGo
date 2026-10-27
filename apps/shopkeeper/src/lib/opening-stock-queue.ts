@@ -50,6 +50,24 @@ export async function refreshListingsAfterConflict<T extends { packId: string }>
   }
 }
 
+export async function refreshListingsForQueuedConflicts<T extends { packId: string }>(
+  current: T[],
+  conflicts: Array<{ packId: string }>,
+  refresh: () => Promise<T[] | null>,
+): Promise<
+  | { kind: "none" }
+  | { kind: "refreshed"; items: T[]; packIds: string[] }
+  | { kind: "failed"; packIds: string[] }
+> {
+  const packIds = conflicts.map(({ packId }) => packId);
+  if (packIds.length === 0) return { kind: "none" };
+
+  const result = await refreshListingsAfterConflict(current, refresh);
+  return result.kind === "failed"
+    ? { kind: "failed", packIds }
+    : { kind: "refreshed", items: result.items, packIds };
+}
+
 export type OpeningStockSyncResult =
   | { kind: "empty" }
   | { kind: "synced" }
