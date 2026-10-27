@@ -10,7 +10,7 @@ import {
   SaveAddressBody,
 } from "@ygo/contracts";
 import { addressAt, type GeoAddress } from "@ygo/mobile/address-at";
-import { type AreaAnswer, type Place, sentOutcome } from "./location-flow";
+import { type AreaAnswer, newestOnly, type Place, sentOutcome, stale } from "./location-flow";
 
 /** The phone's own map lookup, given by the screens so the tests can stand in for it (#242). */
 export interface Geocoder {
@@ -38,6 +38,71 @@ export async function readPin(geocoder: Geocoder, point: AddressPoint): Promise<
     place: { pincode: at.pincode, point: at.point, ...(name && { name }), ...(areaLine && { areaLine }) },
     title: title || at.city || at.pincode,
     detail: unique([at.city, at.pincode]).join(" "),
+  };
+}
+
+/** What C15 shows under the map: whether it is still finding the spot, and the spot found last. */
+export type PinView = { reading: boolean; spot: Spot | null };
+
+// The phone's geocoder limits how often an app may ask, so a read waits until the map has rested this long.
+const settle = 600;
+
+/**
+ * The spot under C15's pin as the map moves (#242). `place` is what Confirm
+ * may save at the moment of a tap: null from the moment the map starts moving
+ * until the spot where it stopped is read (#339), as the map reports a spot
+ * only once it stops. A read counts only for the newest spot the map stopped
+ * at, whatever order answers land in. The map may report several starts
+ * before one stop, so the newest report says whether it moves.
+ */
+export function pinSpot(geocoder: Geocoder, show: (view: PinView) => void) {
+  const reads = newestOnly();
+  let moving = false;
+  // The newest spot the map stopped at (or opened on), and the newest read that landed with the spot it was for.
+  let want: AddressPoint | null = null;
+  let read: { at: AddressPoint; spot: Spot | null } | null = null;
+  let wait: ReturnType<typeof setTimeout> | undefined;
+  const ready = () => !moving && want !== null && read?.at === want;
+  const tell = () => show({ reading: !ready(), spot: read?.spot ?? null });
+
+  async function ask(point: AddressPoint) {
+    const found = await reads.ask(readPin(geocoder, point));
+    if (found === stale || point !== want) return;
+    read = { at: point, spot: found };
+    tell();
+  }
+
+  return {
+    /** The screen opens: read the first spot, or, when it starts again after leaving, the spot the map is at now. */
+    open(start: AddressPoint) {
+      want ??= start;
+      tell();
+      void ask(want);
+    },
+    /** The map stopped at a new spot: read it once the map has rested. */
+    moved(point: AddressPoint) {
+      clearTimeout(wait);
+      reads.drop();
+      want = point;
+      tell();
+      wait = setTimeout(() => void ask(point), settle);
+    },
+    /** The map started or stopped moving; it stops even where it began, so Confirm never stays off. */
+    moving(on: boolean) {
+      moving = on;
+      tell();
+    },
+    place: (): Place | null => (ready() ? (read?.spot?.place ?? null) : null),
+    /**
+     * Leaving drops any answer still on its way (#216, Q3), and forgets that the
+     * map was moving, so a screen that starts again never waits on a stop that
+     * may have gone with the map that left.
+     */
+    leave() {
+      clearTimeout(wait);
+      reads.drop();
+      moving = false;
+    },
   };
 }
 

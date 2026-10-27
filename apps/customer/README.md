@@ -7,7 +7,7 @@ The Customer app: Expo SDK 57, `expo-router` and NativeWind v4 over `@ygo/tokens
 Expo Go is not used (ADR-0001). `expo run` makes a local development build and starts Metro.
 
 1. Start the server: see `apps/server/README.md`. It listens on `127.0.0.1:3000`.
-2. Copy `apps/customer/.env.example` to `apps/customer/.env` (git-ignored), and set the support email. It points at the server on `127.0.0.1:3000`, which works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`. For the Android map, also set `GOOGLE_MAPS_ANDROID_API_KEY` (see [The Android map key](#the-android-map-key)); without it the map on Confirm location is blank.
+2. Copy `apps/customer/.env.example` to `apps/customer/.env` (git-ignored), and set the support email. It points at the server on `127.0.0.1:3000`, which works from the iOS simulator. The Android emulator reaches the Mac at `http://10.0.2.2:3000`. A real phone needs the Mac's LAN address, with the server started with `HOST=0.0.0.0`. For the map, also set `GOOGLE_MAPS_ANDROID_API_KEY` and `GOOGLE_MAPS_IOS_API_KEY` (see [The map keys](#the-map-keys)); without them the map on Confirm location is blank.
 3. Build and open it:
 
    ```sh
@@ -26,9 +26,14 @@ The theme choice is saved on the phone with MMKV and applied before the first sc
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
-## The Android map key
+## The map keys
 
-Confirm location draws Google's map on Android, with a Maps SDK for Android key from `GOOGLE_MAPS_ANDROID_API_KEY` (#255); iOS draws Apple Maps, which needs no key. `app.config.ts` reads the variable from `apps/customer/.env` or the build's environment, so the key is never in the repo. The build writes it into the Android app, where anyone can read it, so restrict it in Google Cloud: API restrictions to Maps SDK for Android only, and application restrictions to Android apps, each entry a package name with a SHA-1 fingerprint.
+Confirm location draws Google's map on both phones (#255, #307), through `PinMap` from `@ygo/mobile`. Each phone has its own key: a Maps SDK for Android key from `GOOGLE_MAPS_ANDROID_API_KEY` and a Maps SDK for iOS key from `GOOGLE_MAPS_IOS_API_KEY`. The Shopkeeper app uses the same two keys for S17's map. `app.config.ts` reads the variables from `apps/customer/.env` or the build's environment, so the keys are never in the repo. The build writes each into the app, where anyone can read it, so restrict both in Google Cloud:
+
+- **Android key**: API restrictions to Maps SDK for Android only, and application restrictions to Android apps, each entry a package name with a SHA-1 fingerprint: one per app.
+- **iOS key**: API restrictions to Maps SDK for iOS only, and application restrictions to iOS apps, each entry a bundle ID (`PRODUCT_BUNDLE_IDENTIFIER` in the app's `ios/` Xcode project): one per app.
+
+For the Android entries:
 
 - **Package name**: `applicationId` in `apps/customer/android/app/build.gradle`, the throwaway one chosen on the first run.
 - **Debug SHA-1**: a local build is signed with `apps/customer/android/app/debug.keystore`, which `expo run:android` writes from React Native's template, not with `~/.android/debug.keystore`. Read its fingerprint with:
@@ -40,6 +45,8 @@ Confirm location draws Google's map on Android, with a Maps SDK for Android key 
 - **Store builds**: Google Play signs them with its own key, so add a second entry with the SHA-1 of Play's app signing key (Play Console, the app's App integrity page). Add the upload key's SHA-1 too if testers install builds you signed yourself.
 
 A wrong package or SHA-1 shows a blank map with no error in the app. `adb logcat | grep -i "authorization failure"` shows Google's refusal; the lines after it name the package and SHA-1 the app sent, and the key, so do not paste them anywhere public.
+
+On iOS a wrong bundle ID also shows a blank map; the Xcode console names Google's refusal. A changed key reaches the app only with a new native build (`expo run:android` or `expo run:ios`).
 
 ## Build
 

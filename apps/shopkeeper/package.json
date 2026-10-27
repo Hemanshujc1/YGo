@@ -34,6 +34,7 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
+    "react-native-maps": "1.27.2",
     "react-native-mmkv": "4.3.2",
     "react-native-nitro-google-signin": "2.0.0",
     "react-native-nitro-modules": "0.35.9",
