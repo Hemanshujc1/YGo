@@ -51,6 +51,7 @@ async function jpeg(gps = true, capture = true, latitude = "12/1 30/1 0/1", ref 
 
 describe("private visit photos", () => {
   const objects = new Map<string, Buffer>();
+  const chunked = new Set<string>();
   let endpoint: string;
   let storage: ReturnType<typeof createVisitPhotoStorage>;
   const server = createServer(async (request, response) => {
@@ -63,13 +64,16 @@ describe("private visit photos", () => {
       response.writeHead(200).end();
     } else if (request.method === "GET" && objects.has(url.pathname)) {
       const body = objects.get(url.pathname) ?? Buffer.alloc(0);
-      response.writeHead(200, { "content-length": body.length, "content-type": "image/jpeg" }).end(body);
+      response.writeHead(200, { ...(chunked.has(url.pathname) ? {} : { "content-length": body.length }), "content-type": "image/jpeg" });
+      response.write(body);
+      response.end();
     } else response.writeHead(404).end();
   });
   beforeEach(async () => {
     vi.stubEnv("AWS_ACCESS_KEY_ID", "test-access");
     vi.stubEnv("AWS_SECRET_ACCESS_KEY", secret);
     objects.clear();
+    chunked.clear();
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
@@ -123,6 +127,48 @@ describe("private visit photos", () => {
     expect(Buffer.from(await (await fetch(downloadUrl)).arrayBuffer())).toEqual(source);
   });
 
+  it.each([1, 5])("ignores non-text capture time encoded as TIFF type %s", async (type) => {
+    const source = await jpeg();
+    const entry = source.indexOf(Buffer.from([3, 144, 2, 0, 20, 0, 0, 0]));
+    expect(entry).toBeGreaterThan(0);
+    source.writeUInt16LE(type, entry + 2);
+    if (type === 1) {
+      source.writeUInt32LE(2, entry + 4);
+      source.writeUInt32LE(7, entry + 8);
+    } else {
+      // Reuse the existing 20-byte ASCII payload as one TIFF rational.
+      source.writeUInt32LE(1, entry + 4);
+    }
+    const result = await upload(source);
+    expect(await storage.validate(result.id, result.byteLength)).toMatchObject({ latitude: -12.5, capturedAt: null });
+  });
+
+  it("bounds an S3 response without Content-Length before writing evidence", async () => {
+    const result = await upload(await jpeg());
+    const key = new URL(result.uploadUrl).pathname;
+    chunked.add(key);
+    objects.set(key, Buffer.alloc(VISIT_PHOTO_MAX_BYTES + 1));
+    await expect(storage.validate(result.id, result.byteLength)).rejects.toThrow("exceeds 10 MB");
+    expect([...objects.keys()].some((key) => key.includes("/visit-photos/"))).toBe(false);
+  });
+
+  it("refuses anonymous writes and signed URL changes to evidence paths or cache policy", async () => {
+    const source = await jpeg();
+    const result = await upload(source);
+    const photo = await storage.validate(result.id, result.byteLength);
+    const url = new URL(result.uploadUrl);
+    const anonymous = new URL(url.pathname, url.origin);
+    expect((await fetch(anonymous, { method: "PUT", body: new Uint8Array(source) })).status).toBe(403);
+    url.pathname = new URL(await storage.downloadUrl(photo.key)).pathname;
+    expect((await fetch(url, { method: "PUT", body: new Uint8Array(source), headers: { "content-type": "image/jpeg" } })).status).toBe(403);
+    url.pathname = "/private-visits/visit-uploads/../visit-photos/forged.jpg";
+    expect((await fetch(url, { method: "PUT", body: new Uint8Array(source), headers: { "content-type": "image/jpeg" } })).status).toBe(403);
+    const download = new URL(await storage.downloadUrl(photo.key));
+    expect(download.searchParams.get("response-cache-control")).toBe("private, no-store");
+    download.searchParams.set("response-cache-control", "public");
+    expect((await fetch(download)).status).toBe(403);
+  });
+
   it("permits missing capture time and zero coordinates", async () => {
     const result = await upload(await jpeg(true, false, "0/1 0/1 0/1", "N"));
     expect(await storage.validate(result.id, result.byteLength)).toMatchObject({ latitude: 0, capturedAt: null });
@@ -162,16 +208,20 @@ describe("private visit photos", () => {
     [[-12, 1], [0, 1], [0, 1]],
     [[Infinity, 1], [0, 1], [0, 1]],
     [[12, NaN], [0, 1], [0, 1]],
+    [[12, 1], [60, 1], [0, 1]],
+    [[12, 1], [0, 1], [60, 1]],
+    [[181, 1], [0, 1], [0, 1]],
     [["12", 1], [0, 1], [0, 1]],
     [[12, 1], null, [0, 1]],
     [[12, 1], [0, 1]],
     [[12, 1, 2], [0, 1], [0, 1]],
     "malformed",
-  ].map((value) => [value]))("rejects malformed EXIF rational values %# without saving evidence", async (value) => {
+  ].flatMap((value) => ["GPSLatitude", "GPSLongitude"].map((axis) => [axis, value] as const)))("rejects malformed %s rational values %# without saving evidence", async (axis, value) => {
     const result = await upload(await jpeg());
     const load = vi.spyOn(ExifReader, "load").mockReturnValue({ exif: {
-      GPSLatitude: { value }, GPSLatitudeRef: { value: ["N"] },
+      GPSLatitude: { value: [[12, 1], [30, 1], [0, 1]] }, GPSLatitudeRef: { value: ["N"] },
       GPSLongitude: { value: [[77, 1], [15, 1], [0, 1]] }, GPSLongitudeRef: { value: ["W"] },
+      [axis]: { value },
     } } as unknown as ReturnType<typeof ExifReader.load>);
     try {
       await expect(storage.validate(result.id, result.byteLength)).rejects.toBeInstanceOf(VisitPhotoLocationMissingError);

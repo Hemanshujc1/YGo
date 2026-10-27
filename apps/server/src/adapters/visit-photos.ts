@@ -74,7 +74,8 @@ async function inspect(source: Buffer) {
   const longitude = coordinate(tags?.GPSLongitude?.value, tags?.GPSLongitudeRef?.value?.[0], "E", "W", 180);
   if (latitude === null || longitude === null) throw new VisitPhotoLocationMissingError();
   // Preserve the original camera value; it may have no timezone.
-  return { latitude, longitude, capturedAt: tags?.DateTimeOriginal?.value[0] ?? null };
+  const capturedAt = tags?.DateTimeOriginal?.value?.[0];
+  return { latitude, longitude, capturedAt: typeof capturedAt === "string" ? capturedAt : null };
 }
 
 function coordinate(value: unknown, ref: unknown, positive: string, negative: string, max: number) {
