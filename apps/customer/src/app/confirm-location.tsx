@@ -10,15 +10,12 @@ import { MapPin } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { askArea, newestOnly, stale, typedPlace } from "../lib/location-flow";
 import { goHome } from "../lib/go-home";
-import { addressBody, type Confirmed, confirmAddress, readPin, type Spot } from "../lib/map-place";
+import { addressBody, type Confirmed, confirmAddress, type PinView, pinSpot } from "../lib/map-place";
 import { phoneGeocoder } from "../lib/phone-geocoder";
 import { savePlace } from "../lib/saved-place";
 import { strings } from "../strings";
 
 const words = strings.confirm;
-
-// The phone's geocoder limits how often an app may ask, so a read waits until the map has rested this long.
-const settle = 600;
 
 /** "Flat, house or floor" broke the rule, or Confirm failed and stays open (#242, review of #249). */
 type Problem = "flat" | Exclude<Confirmed, { kind: "done" }>;
@@ -38,8 +35,8 @@ export default function ConfirmLocation() {
     return point.success ? point.data : null;
   });
   const [typed] = useState(() => typedPlace(params.pincode ?? ""));
-  const [spot, setSpot] = useState<Spot | null>(null);
-  const [reading, setReading] = useState(start !== null);
+  const [view, setView] = useState<PinView>({ reading: start !== null, spot: null });
+  const [pin] = useState(() => pinSpot(phoneGeocoder, setView));
   const [flat, setFlat] = useState("");
   const [focused, setFocused] = useState(false);
   const [label, setLabel] = useState<AddressLabel>("home");
@@ -47,51 +44,37 @@ export default function ConfirmLocation() {
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set before React re-renders, so a second tap never saves twice.
   const working = useRef(false);
-  const [reads] = useState(newestOnly);
   const [saves] = useState(newestOnly);
-  const wait = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Leaving drops any answer still on its way (#216, Q3).
   useEffect(
     () => () => {
-      clearTimeout(wait.current);
-      reads.drop();
+      pin.leave();
       saves.drop();
     },
-    [reads, saves],
+    [pin, saves],
   );
 
-  /** Reads the spot under the pin; only the newest read counts, as the map may stop again before one lands. */
-  async function read(point: AddressPoint) {
-    setReading(true);
-    const found = await reads.ask(readPin(phoneGeocoder, point));
-    if (found === stale) return;
-    setSpot(found);
-    setReading(false);
-  }
-
-  /** The map stopped at a new spot: read it once the map has rested, and drop an old save failure, which was for the last spot. */
+  /** The map stopped at a new spot: read it, and drop an old save failure, which was for the last spot. */
   function moved(point: AddressPoint) {
-    clearTimeout(wait.current);
-    reads.drop();
-    setReading(true);
+    pin.moved(point);
     setProblem((now) => (now === "flat" ? now : null));
-    wait.current = setTimeout(() => void read(point), settle);
   }
 
-  // The first spot, read once when the screen opens, before the map reports where it stopped.
   useEffect(() => {
-    if (start) void read(start);
+    if (start) pin.open(start);
   }, []);
 
   // The gate shows the app only when signed in; this tells TypeScript.
   if (state.status !== "signed-in") return null;
   const accountId = state.account.id;
-  const place = start ? (reading ? null : spot?.place ?? null) : typed;
+  const place = start ? (view.reading ? null : view.spot?.place ?? null) : typed;
 
   async function confirm() {
-    if (working.current || !place) return;
-    const body = addressBody(place, label, flat);
+    // Asked at the tap, not taken from the last render, so a tap as the map starts moving saves nothing (#339).
+    const now = start ? pin.place() : typed;
+    if (working.current || !now) return;
+    const body = addressBody(now, label, flat);
     if (!body) return setProblem("flat");
     working.current = true;
     setProblem(null);
@@ -103,7 +86,7 @@ export default function ConfirmLocation() {
           saveAddress: (address) => api.saveAddress(address),
           keep: (kept) => savePlace(accountId, kept),
         },
-        place,
+        now,
         body,
       ),
     );
@@ -133,7 +116,7 @@ export default function ConfirmLocation() {
 
       {start && (
         // Held still while saving, so the spot on screen is the one being saved.
-        <PinMap className="h-[45%]" start={start} onMoved={moved} locked={saving} pin={<MapPin size={40} className="mb-10 text-primary" />} />
+        <PinMap className="h-[45%]" start={start} onMoved={moved} onMoving={pin.moving} locked={saving} pin={<MapPin size={40} className="mb-10 text-primary" />} />
       )}
 
       <ScrollView
@@ -142,15 +125,15 @@ export default function ConfirmLocation() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
       >
         <View className="min-h-12 justify-center">
-          {start && reading ? (
+          {start && view.reading ? (
             <View className="flex-row items-center gap-2">
               <ActivityIndicator className="text-primary" />
               <Text className="text-body text-muted">{words.reading}</Text>
             </View>
           ) : place ? (
             <>
-              <Text className="text-body font-semibold text-text">{spot?.title ?? place.pincode}</Text>
-              {spot && <Text className="text-secondary text-muted">{spot.detail}</Text>}
+              <Text className="text-body font-semibold text-text">{view.spot?.title ?? place.pincode}</Text>
+              {view.spot && <Text className="text-secondary text-muted">{view.spot.detail}</Text>}
             </>
           ) : (
             <FieldMessage text={words.noPincode} />
