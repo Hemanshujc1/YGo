@@ -38,7 +38,9 @@ export async function spotNow(map: { getCamera: () => Promise<{ center: AddressP
  * `onMoved` gets each new spot once the map stops; Android also reports the
  * opening spot, which is skipped. `onMoving` hears when the map starts moving
  * and when it stops, even where it began, so a screen can tell while the spot
- * under the pin is not known yet (#339). `locked` holds the map still and lets
+ * under the pin is not known yet (#339). Both phones may report several starts
+ * (a drag, then a fling) before one stop, always in order, so the newest
+ * report says whether the map moves. `locked` holds the map still and lets
  * touches pass through, for a preview or while a spot is being saved.
  * Each app passes its own Lucide `pin`, its bottom tip at the middle.
  * `ref` reads the spot under the pin at the moment of a tap.

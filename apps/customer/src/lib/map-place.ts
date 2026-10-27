@@ -51,44 +51,48 @@ const settle = 600;
  * The spot under C15's pin as the map moves (#242). `place` is what Confirm
  * may save at the moment of a tap: null from the moment the map starts moving
  * until the spot where it stopped is read (#339), as the map reports a spot
- * only once it stops. Only the newest read counts, as the map may stop again
- * before one lands.
+ * only once it stops. A read counts only for the newest spot the map stopped
+ * at, whatever order answers land in. The map may report several starts
+ * before one stop, so the newest report says whether it moves.
  */
 export function pinSpot(geocoder: Geocoder, show: (view: PinView) => void) {
   const reads = newestOnly();
   let moving = false;
-  let reading = false;
-  let spot: Spot | null = null;
+  // The newest spot the map stopped at (or opened on), and the newest read that landed with the spot it was for.
+  let want: AddressPoint | null = null;
+  let read: { at: AddressPoint; spot: Spot | null } | null = null;
   let wait: ReturnType<typeof setTimeout> | undefined;
-  const tell = () => show({ reading: moving || reading, spot });
+  const ready = () => !moving && want !== null && read?.at === want;
+  const tell = () => show({ reading: !ready(), spot: read?.spot ?? null });
 
-  async function read(point: AddressPoint) {
-    reading = true;
-    tell();
+  async function ask(point: AddressPoint) {
     const found = await reads.ask(readPin(geocoder, point));
-    if (found === stale) return;
-    spot = found;
-    reading = false;
+    if (found === stale || point !== want) return;
+    read = { at: point, spot: found };
     tell();
   }
 
   return {
-    /** The first spot, read once when the screen opens, before the map reports where it stopped. */
-    open: (point: AddressPoint) => void read(point),
+    /** The screen opens: read the first spot, or, when it starts again after leaving, the spot the map is at now. */
+    open(start: AddressPoint) {
+      want ??= start;
+      tell();
+      void ask(want);
+    },
     /** The map stopped at a new spot: read it once the map has rested. */
     moved(point: AddressPoint) {
       clearTimeout(wait);
       reads.drop();
-      reading = true;
+      want = point;
       tell();
-      wait = setTimeout(() => void read(point), settle);
+      wait = setTimeout(() => void ask(point), settle);
     },
     /** The map started or stopped moving; it stops even where it began, so Confirm never stays off. */
     moving(on: boolean) {
       moving = on;
       tell();
     },
-    place: (): Place | null => (moving || reading ? null : (spot?.place ?? null)),
+    place: (): Place | null => (ready() ? (read?.spot?.place ?? null) : null),
     /** Leaving drops any answer still on its way (#216, Q3). */
     leave() {
       clearTimeout(wait);
