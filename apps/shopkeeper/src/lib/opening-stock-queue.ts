@@ -31,6 +31,11 @@ export function clearOpeningStock(shopId: string, packId: string): void {
   storage.remove(key(shopId, packId));
 }
 
+export function replaceListingsFromRefresh<T extends { packId: string }>(current: T[], refreshed: T[]): T[] {
+  const refreshedByPack = new Map(refreshed.map((item) => [item.packId, item]));
+  return current.map((item) => refreshedByPack.get(item.packId) ?? item);
+}
+
 export type OpeningStockSyncResult =
   | { kind: "empty" }
   | { kind: "synced" }

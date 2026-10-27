@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
-import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
+import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
 
 const words = strings.shopSetup;
@@ -101,12 +101,21 @@ export default function OpeningStockScreen() {
       setMessage((current) => ({ ...current, [item.packId]: words.stockRecorded }));
       return;
     }
+    if (answer?.code === "OPENING_STOCK_ALREADY_RECORDED") {
+      setMessage((current) => ({ ...current, [item.packId]: `${words.stockConflict} ${entry.data.quantity} ${item.baseUnit}.` }));
+      const updated = await api.shopListings().catch(() => null);
+      if (updated?.ok) {
+        const refreshedItems = updated.data.items.filter((row) => row.listing !== null);
+        setLoad((current) => current.kind === "loaded" && current.shopId === shopId
+          ? { ...current, items: replaceListingsFromRefresh(current.items, refreshedItems) }
+          : current);
+      }
+      return;
+    }
     if (answer?.code === "VALIDATION_FAILED") setEditableQueued((current) => ({ ...current, [item.packId]: true }));
     setMessage((current) => ({
       ...current,
-      [item.packId]: answer?.code === "OPENING_STOCK_ALREADY_RECORDED"
-        ? `${words.stockConflict} ${entry.data.quantity} ${item.baseUnit}.`
-        : answer ? strings.errors[answer.code] : words.saveOffline,
+      [item.packId]: answer ? strings.errors[answer.code] : words.saveOffline,
     }));
   }
 
