@@ -400,9 +400,9 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
               {words.saved}
             </Text>
           )}
-          {/* Off while finding the location too, so a save landing after the fix can't replace it. A save or send drops an address still being looked up. */}
-          <Button label={sending ? words.sending : words.send} onPress={ask} disabled={busy || locating} />
-          <Button label={saving ? words.saving : words.save} onPress={() => void save()} disabled={busy || locating} variant="secondary" />
+          {/* Off while finding the location or where the map opens too, so a save landing after the fix or the pin can't replace it. A save or send drops an address still being looked up. */}
+          <Button label={sending ? words.sending : words.send} onPress={ask} disabled={busy || locating || starting} />
+          <Button label={saving ? words.saving : words.save} onPress={() => void save()} disabled={busy || locating || starting} variant="secondary" />
           {picking && <MapPicker start={picking} onUse={(point) => void pin(point)} onBack={() => setPicking(null)} />}
           <Confirm
             visible={asking !== null}
