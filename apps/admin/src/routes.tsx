@@ -1,10 +1,11 @@
 import { createAdminApiClient, type ApiResult } from "@ygo/api-client";
-import { CreateAdminBody, RequestCodeBody, VerifyCodeBody, type Account } from "@ygo/contracts";
+import { CreateAdminBody, RequestCodeBody, VerifyCodeBody, type AdminAccount, type AdminRole } from "@ygo/contracts";
 import { useState, type FormEvent, type ReactNode } from "react";
 import {
   Link,
   isRouteErrorResponse,
   redirect,
+  type LoaderFunction,
   useLoaderData,
   useLocation,
   useNavigate,
@@ -26,10 +27,46 @@ type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
 type FieldErrors = Partial<Record<Field, string>>;
 
+// The signed-in account's role, read once per sign-in (#343). Loaders wait for it, so the shell can read it as it draws.
+const signedInAs = new WeakMap<AdminApi, { answer: Promise<ApiResult<AdminAccount>>; role?: AdminRole }>();
+
+function signedInRole(api: AdminApi) {
+  let known = signedInAs.get(api);
+  if (!known) {
+    const entry: { answer: Promise<ApiResult<AdminAccount>>; role?: AdminRole } = { answer: api.me() };
+    signedInAs.set(api, entry);
+    entry.answer.then(
+      (result) => { if (result.ok) entry.role = result.data.role; else signedInAs.delete(api); },
+      () => { signedInAs.delete(api); },
+    );
+    known = entry;
+  }
+  return known.answer;
+}
+
+/** Runs the Admin's loader; an Area Manager gets theirs, by default Applications (#343). */
+function byRole(api: AdminApi, admin: LoaderFunction, areaManager: LoaderFunction = () => redirect("/applications")): LoaderFunction {
+  return async (args) => {
+    const me = await signedInRole(api);
+    if (me.ok) return me.data.role === "admin" ? admin(args) : areaManager(args);
+    if (me.code === "UNAUTHENTICATED" || me.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(me.code);
+  };
+}
+
 function Page({ children, protectedArea = false, api }: { children: ReactNode; protectedArea?: boolean; api?: AdminApi }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
+  const role = api && signedInAs.get(api)?.role;
+  const nav = role === "admin" ? [
+    { path: "/accounts", label: strings.accounts },
+    { path: "/categories", label: strings.categories },
+    { path: "/products", label: strings.products },
+    { path: "/areas", label: strings.areas },
+    { path: "/applications", label: strings.applications },
+    { path: "/waitlist", label: strings.waitlist },
+  ] : role === "area_manager" ? [{ path: "/applications", label: strings.applications }] : [];
 
   async function signOut() {
     if (!api) return;
@@ -46,7 +83,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     <div className="min-h-screen bg-bg font-sans text-secondary text-text">
       <header className="border-b border-border bg-surface px-8 py-5">
         <div className="flex items-center justify-between gap-4">
-          <Link to="/accounts" className="text-title font-semibold text-brand">{strings.title}</Link>
+          <Link to="/" className="text-title font-semibold text-brand">{role === "area_manager" ? strings.areaManagerTitle : strings.title}</Link>
           {protectedArea && api && <div className="flex items-center gap-4">
             <ThemePicker api={api} />
             <button disabled={signingOut} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
@@ -59,21 +96,17 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
         {protectedArea && (
           <aside className="w-56 shrink-0 border-r border-border bg-surface px-4 py-8">
             <nav aria-label={strings.navigation}>
-              {[
-                { path: "/accounts", label: strings.accounts },
-                { path: "/categories", label: strings.categories },
-                { path: "/products", label: strings.products },
-                { path: "/areas", label: strings.areas },
-                { path: "/applications", label: strings.applications },
-                { path: "/waitlist", label: strings.waitlist },
-              ].map(({ path, label }, index) => <Link key={path} to={path} aria-current={(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "page" : undefined}
+              {nav.map(({ path, label }, index) => <Link key={path} to={path} aria-current={(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "page" : undefined}
                 className={`${index ? "mt-2 " : ""}block rounded-lg p-3 font-medium ${(location.pathname === path || location.pathname.startsWith(`${path}/`)) ? "bg-primary-subtle text-on-primary-subtle" : "text-muted"}`}>
                 {label}
               </Link>)}
             </nav>
           </aside>
         )}
-        <main className="mx-auto min-w-0 max-w-5xl flex-1 px-8 py-10">{children}</main>
+        <main className="mx-auto min-w-0 max-w-5xl flex-1 px-8 py-10">
+          {protectedArea && role === "area_manager" && <p className="mb-8 rounded-lg bg-info-subtle p-3 text-on-info-subtle">{strings.areaManagerScope}</p>}
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -120,7 +153,8 @@ function SignIn({ api }: { api: AdminApi }) {
       const result = await api.verifyCode(parsed.data);
       if (result.ok) {
         adminTheme(api).account(result.data);
-        void navigate("/accounts");
+        signedInAs.delete(api);
+        void navigate("/");
       } else setError(strings.errors[result.code]);
     } catch {
       setError(strings.failed);
@@ -169,14 +203,15 @@ function SignIn({ api }: { api: AdminApi }) {
 }
 
 function Accounts({ api }: { api: AdminApi }) {
-  const loaded = useLoaderData() as Account[];
+  const loaded = useLoaderData() as AdminAccount[];
   const [accounts, setAccounts] = useState(loaded);
   const [screen, setScreen] = useState<"list" | "new" | "created">("list");
-  const [fields, setFields] = useState<CreateAdminBody>({ email: "", name: "", phone: "", reason: "" });
+  const blank = { email: "", name: "", phone: "", role: undefined, reason: "" };
+  const [fields, setFields] = useState<Omit<CreateAdminBody, "role"> & { role: AdminRole | undefined }>(blank);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [created, setCreated] = useState<Account | null>(null);
+  const [created, setCreated] = useState<AdminAccount | null>(null);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -227,11 +262,12 @@ function Accounts({ api }: { api: AdminApi }) {
               <table className="w-full min-w-xl text-left">
                 <thead className="bg-sunken"><tr>
                   <th className="p-3 font-medium">{strings.name}</th><th className="p-3 font-medium">{strings.email}</th>
-                  <th className="p-3 font-medium">{strings.phone}</th>
+                  <th className="p-3 font-medium">{strings.phone}</th><th className="p-3 font-medium">{strings.role}</th>
                 </tr></thead>
                 <tbody>{accounts.map((account) => <tr key={account.id} className="border-t border-border">
                   <td className="p-3">{account.name}</td><td className="p-3">{account.email}</td>
                   <td className="p-3 tabular-nums">{account.phone ? `${account.phone.slice(-10, -5)} ${account.phone.slice(-5)}` : strings.noPhone}</td>
+                  <td className="p-3">{strings.roles[account.role]}</td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -256,6 +292,16 @@ function Accounts({ api }: { api: AdminApi }) {
                 )}
                 {field === "reason" && <p className="mt-1 text-secondary text-muted">{strings.reasonHint}</p>}
                 {errors[field] && <p role="alert" className="mt-1 text-secondary text-danger">{errors[field]}</p>}
+                {field === "phone" && <fieldset className="mt-4">
+                  <legend className="mb-2 font-medium">{strings.role}</legend>
+                  <div className="flex gap-6">
+                    {(["admin", "area_manager"] as const).map((role) => <label key={role} className="flex items-center gap-2">
+                      <input type="radio" name="role" checked={fields.role === role} onChange={() => setFields({ ...fields, role })} />
+                      {strings.roles[role]}
+                    </label>)}
+                  </div>
+                  {errors.role && <p role="alert" className="mt-1 text-secondary text-danger">{errors.role}</p>}
+                </fieldset>}
               </div>
             ))}
             {error && <Message>{error}</Message>}
@@ -273,12 +319,16 @@ function Accounts({ api }: { api: AdminApi }) {
         <section className="max-w-xl rounded-xl border border-border bg-surface p-6">
           <h2 className="text-body font-semibold text-success">{strings.created}</h2>
           <p className="mt-3">{created.name} · {created.email}</p>
-          <button onClick={() => { setScreen("list"); setFields({ email: "", name: "", phone: "", reason: "" }); }}
+          <button onClick={() => { setScreen("list"); setFields(blank); }}
             className="mt-6 h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.backToAccounts}</button>
         </section>
       )}
     </Page>
   );
+}
+
+function Applications() {
+  return useLoaderData() === null ? <p className="text-muted">{strings.noAssignedShops}</p> : <ShopApplications />;
 }
 
 function RouteError({ api }: { api?: AdminApi }) {
@@ -301,32 +351,32 @@ function listLoader<T, List>(load: () => Promise<ApiResult<T>>, select: (data: T
 
 export function adminRoutes(api: AdminApi): RouteObject[] {
   return [
-    { path: "/", loader: () => redirect("/accounts") },
+    { path: "/", loader: byRole(api, () => redirect("/accounts")) },
     { path: "/sign-in", element: <SignIn api={api} /> },
     {
       path: "/accounts",
-      loader: listLoader(() => api.listAccounts(), (data) => data.accounts),
+      loader: byRole(api, listLoader(() => api.listAccounts(), (data) => data.accounts)),
       element: <Accounts api={api} />,
       hydrateFallbackElement: <Page>{strings.loading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/categories",
-      loader: listLoader(() => api.listCategories(), (data) => data.categories),
+      loader: byRole(api, listLoader(() => api.listCategories(), (data) => data.categories)),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/products/import",
-      loader: listLoader(() => api.me(), (data) => data),
+      loader: byRole(api, () => null),
       element: <Page protectedArea api={api}><CatalogImport api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.checking}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/products",
-      loader: async () => {
+      loader: byRole(api, async () => {
         const [products, categories] = await Promise.all([api.listMasterProducts(), api.listCategories()]);
         if (!products.ok || !categories.ok) {
           if ((!products.ok && (products.code === "UNAUTHENTICATED" || products.code === "FORBIDDEN")) ||
@@ -334,42 +384,43 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
           throw new Error(strings.failed);
         }
         return { products: products.data.products, categories: categories.data.categories };
-      },
+      }),
       element: <Page protectedArea api={api}><Products api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.productsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/areas",
-      loader: listLoader(() => api.listAreas(), (data) => data.areas),
+      loader: byRole(api, listLoader(() => api.listAreas(), (data) => data.areas)),
       element: <Page protectedArea api={api}><Areas api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/applications",
-      loader: listLoader(() => api.listShopApplications(), (data) => data.applications),
-      element: <Page protectedArea api={api}><ShopApplications /></Page>,
+      // Assigning shops to an Area Manager comes in #299; until then they have none.
+      loader: byRole(api, listLoader(() => api.listShopApplications(), (data) => data.applications), () => null),
+      element: <Page protectedArea api={api}><Applications /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/applications/:id",
-      loader: async ({ params }) => {
+      loader: byRole(api, async ({ params }) => {
         const id = params.id;
         if (!id) throw new Error(strings.notFound);
         const result = await api.getShopApplication(id);
         if (result.ok) return result.data;
         if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
         throw new Error(result.code);
-      },
+      }),
       element: <Page protectedArea api={api}><ShopApplicationReview api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     },
     {
       path: "/waitlist",
-      loader: listLoader(() => api.listWaitlist(), (data) => data.entries),
+      loader: byRole(api, listLoader(() => api.listWaitlist(), (data) => data.entries)),
       element: <Page protectedArea api={api}><Waitlist /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.waitlistLoading}</Page>,
       errorElement: <RouteError api={api} />,

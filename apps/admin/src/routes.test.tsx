@@ -13,8 +13,8 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
 });
 
-const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system" };
-const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211", theme: "system" };
+const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system", role: "admin" };
+const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Manager", phone: "+919876543211", theme: "system", role: "area_manager" };
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
 const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
 const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };
@@ -133,13 +133,17 @@ describe("Admin web", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.newAccount }));
     fireEvent.click(screen.getByRole("button", { name: strings.create }));
     expect(await screen.findByText(strings.invalidFields.email)).toBeTruthy();
+    expect(screen.getByText(strings.invalidFields.role)).toBeTruthy();
     expect(api.createAccount).not.toHaveBeenCalled();
     fillCreate();
     fireEvent.click(screen.getByRole("button", { name: strings.create }));
     expect(await screen.findByText(strings.created)).toBeTruthy();
-    expect(api.createAccount).toHaveBeenCalledWith({ email: created.email, name: created.name, phone: created.phone, reason: "Coverage" });
+    expect(api.createAccount).toHaveBeenCalledWith({ email: created.email, name: created.name, phone: created.phone, role: "area_manager", reason: "Coverage" });
     fireEvent.click(screen.getByRole("button", { name: strings.backToAccounts }));
-    expect(await screen.findByText(created.email)).toBeTruthy();
+    const row = (await screen.findByText(created.email)).closest("tr");
+    expect(screen.getByRole("columnheader", { name: strings.role })).toBeTruthy();
+    expect(row?.textContent).toContain(strings.roles.area_manager);
+    expect(screen.getByText(founder.email).closest("tr")?.textContent).toContain(strings.roles.admin);
   });
 
   it.each(["EMAIL_IN_USE", "PHONE_IN_USE"] as const)("shows %s at its field", async (code) => {
@@ -761,10 +765,53 @@ describe("Admin web", () => {
   });
 });
 
+describe("Area Manager shell (#343)", () => {
+  const manager = { ...created, role: "area_manager" };
+
+  it("signs an Area Manager in to Applications, with their own nav and scope banner", async () => {
+    const { api, router } = setup("/sign-in", { verifyCode: vi.fn().mockResolvedValue({ ok: true, data: manager }), me: vi.fn().mockResolvedValue({ ok: true, data: manager }) });
+    fireEvent.change(screen.getByLabelText(strings.email), { target: { value: manager.email } });
+    fireEvent.click(screen.getByRole("button", { name: strings.sendCode }));
+    fireEvent.change(await screen.findByLabelText(strings.code), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.verify }));
+    expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/applications");
+    expect(screen.getByRole("link", { name: strings.areaManagerTitle })).toBeTruthy();
+    expect(screen.queryByText(strings.title)).toBeNull();
+    expect(screen.getByText(strings.areaManagerScope)).toBeTruthy();
+    const links = within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([strings.applications]);
+    expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
+    expect(api.listShopApplications).not.toHaveBeenCalled();
+  });
+
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", `/applications/${application.id}`])(
+    "sends an Area Manager from %s to Applications without asking the server",
+    async (path) => {
+      const { api, router } = setup(path, { me: vi.fn().mockResolvedValue({ ok: true, data: manager }) });
+      expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
+      expect(router.state.location.pathname).toBe("/applications");
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.getShopApplication]) {
+        expect(call).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("shows Admin the full nav and no scope banner", async () => {
+    setup("/accounts");
+    await screen.findByText(founder.email);
+    expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(6);
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+  });
+});
+
 function fillCreate() {
   fireEvent.change(screen.getByLabelText(strings.email), { target: { value: created.email } });
   fireEvent.change(screen.getByLabelText(strings.name), { target: { value: created.name } });
   fireEvent.change(screen.getByLabelText(strings.phone), { target: { value: created.phone } });
+  fireEvent.click(screen.getByLabelText(strings.roles.area_manager));
   fireEvent.change(screen.getByLabelText(strings.reason), { target: { value: "Coverage" } });
 }
 
@@ -772,6 +819,8 @@ describe("Admin theme (#263)", () => {
   const picker = () => screen.findByRole("group", { name: strings.theme });
   const option = (choice: "system" | "light" | "dark") => screen.getByRole("button", { name: strings.themes[choice] });
   const shown = () => document.documentElement.dataset.theme;
+  // The routes read the role first (#343); the theme's own account read comes next.
+  const signedInThen = (theme: Promise<unknown>) => vi.fn().mockResolvedValueOnce({ ok: true, data: founder }).mockReturnValue(theme);
   const deferred = <T,>() => {
     let resolve!: (value: T) => void;
     const promise = new Promise<T>((done) => { resolve = done; });
@@ -782,7 +831,7 @@ describe("Admin theme (#263)", () => {
     // The account load never answers here, so only the sign-in answer can set the theme.
     setup("/sign-in", {
       verifyCode: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
-      me: vi.fn().mockReturnValue(new Promise(() => undefined)),
+      me: signedInThen(new Promise(() => undefined)),
     });
     expect(screen.queryByRole("group", { name: strings.theme })).toBeNull();
     fireEvent.change(screen.getByLabelText(strings.email), { target: { value: founder.email } });
@@ -797,13 +846,13 @@ describe("Admin theme (#263)", () => {
   it("starts from this browser's copy, then the account's theme wins on load", async () => {
     localStorage.setItem(themeKey, "light");
     const me = deferred<unknown>();
-    const { api } = setup("/accounts", { me: vi.fn().mockReturnValue(me.promise) });
+    const { api } = setup("/accounts", { me: signedInThen(me.promise) });
     await picker();
     expect(option("light").getAttribute("aria-pressed")).toBe("true");
     me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
     await waitFor(() => expect(option("dark").getAttribute("aria-pressed")).toBe("true"));
     expect(shown()).toBe("dark");
-    expect(api.me).toHaveBeenCalledOnce();
+    expect(api.me).toHaveBeenCalledTimes(2);
   });
 
   it("applies a choice at once, saves it, and allows one save at a time", async () => {
@@ -844,7 +893,7 @@ describe("Admin theme (#263)", () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
     const { api } = setup("/accounts", {
-      me: vi.fn().mockReturnValue(me.promise),
+      me: signedInThen(me.promise),
       setTheme: vi.fn().mockReturnValue(save.promise),
     });
     await picker();
@@ -881,7 +930,7 @@ describe("Admin theme (#263)", () => {
   it("keeps a choice under way when the account answers during the save", async () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
-    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    setup("/accounts", { me: signedInThen(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
     await picker();
     fireEvent.click(option("dark"));
     me.resolve({ ok: true, data: { ...founder, theme: "light" } });
@@ -895,7 +944,7 @@ describe("Admin theme (#263)", () => {
   it("goes back to the account's theme, not the older one, when a save fails after the account answered", async () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
-    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    setup("/accounts", { me: signedInThen(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
     await picker();
     fireEvent.click(option("light"));
     me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
@@ -907,15 +956,16 @@ describe("Admin theme (#263)", () => {
 
   it("loads the account's theme again on the next page when the first load fails", async () => {
     const me = vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: founder })
       .mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" })
       .mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } });
     const { router } = setup("/accounts", { me });
     await picker();
-    await waitFor(() => expect(me).toHaveBeenCalledOnce());
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
     expect(shown()).toBeUndefined();
     await router.navigate("/waitlist");
     await waitFor(() => expect(shown()).toBe("dark"));
-    expect(me).toHaveBeenCalledTimes(2);
+    expect(me).toHaveBeenCalledTimes(3);
   });
 
   it("keeps the save message after moving to another page", async () => {

@@ -8,10 +8,12 @@ const account = {
   phone: "+919876543210",
   theme: "system",
 };
+const areaManager = { ...account, role: "area_manager" };
 const createBody = {
   email: account.email,
   name: account.name,
   phone: account.phone,
+  role: "area_manager" as const,
   reason: "Add a second platform administrator",
 };
 const code = { email: account.email, code: "123456" };
@@ -130,11 +132,11 @@ describe("Admin browser API client", () => {
       const { client, calls, refreshes } = setup(({ path }) =>
         path.endsWith("/refresh")
           ? answer(200, { accessToken: "access-1", account })
-          : answer(200, { accounts: [account] }),
+          : answer(200, { accounts: [areaManager] }),
       );
       await vi.advanceTimersByTimeAsync(31 * 60_000);
       expect(calls).toEqual([]);
-      expect(await client.listAccounts()).toEqual({ ok: true, data: { accounts: [account] } });
+      expect(await client.listAccounts()).toEqual({ ok: true, data: { accounts: [areaManager] } });
       expect(refreshes()).toHaveLength(1);
       expect(calls[0]?.headers.get("x-ygo-admin-refresh")).toBe("1");
       expect(calls[0]?.credentials).toBe("include");
@@ -151,11 +153,11 @@ describe("Admin browser API client", () => {
   it.each(["EMAIL_IN_USE", "PHONE_IN_USE"])("lists accounts and preserves %s on create", async (conflictCode) => {
     const { client, calls } = setup(({ path, method }) => {
       if (path.endsWith("/verify")) return answer(200, { accessToken: "access-1", account });
-      if (method === "GET") return answer(200, { accounts: [account] });
+      if (method === "GET") return answer(200, { accounts: [areaManager] });
       return answer(409, { error: { code: conflictCode } });
     });
     await client.verifyCode(code);
-    expect(await client.listAccounts()).toEqual({ ok: true, data: { accounts: [account] } });
+    expect(await client.listAccounts()).toEqual({ ok: true, data: { accounts: [areaManager] } });
     expect(await client.createAccount(createBody)).toEqual({ ok: false, status: 409, code: conflictCode, fields: undefined });
     expect(calls.slice(1).map((call) => [call.path, call.method, call.body])).toEqual([
       ["/v1/admin/accounts", "GET", undefined],
@@ -166,13 +168,13 @@ describe("Admin browser API client", () => {
     ]);
   });
 
-  it("reads the Admin's own account and saves its theme (#263)", async () => {
+  it("reads the signed-in account with its role and saves its theme (#263, #343)", async () => {
     const dark = { ...account, theme: "dark" };
     const { client, calls } = setup(({ path, method }) => {
       if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
-      return answer(200, method === "GET" ? account : dark);
+      return answer(200, method === "GET" ? areaManager : dark);
     });
-    expect(await client.me()).toEqual({ ok: true, data: account });
+    expect(await client.me()).toEqual({ ok: true, data: areaManager });
     expect(await client.setTheme({ theme: "dark" })).toEqual({ ok: true, data: dark });
     expect(calls.slice(1).map(({ path, method, body, headers }) => [path, method, body, headers.get("authorization")])).toEqual([
       ["/v1/admin/me", "GET", undefined, "Bearer access-1"],
@@ -184,14 +186,14 @@ describe("Admin browser API client", () => {
     expect(await malformed.client.setTheme({ theme: "dark" })).toEqual({ ok: false, status: 200, code: "INTERNAL" });
   });
 
-  it("parses a created Admin account", async () => {
+  it("parses a created account and its role", async () => {
     const { client } = setup(({ path }) =>
       path.endsWith("/verify")
         ? answer(200, { accessToken: "access-1", account })
-        : answer(201, account),
+        : answer(201, areaManager),
     );
     await client.verifyCode(code);
-    expect(await client.createAccount(createBody)).toEqual({ ok: true, data: account });
+    expect(await client.createAccount(createBody)).toEqual({ ok: true, data: areaManager });
   });
 
   it("lists, creates and edits categories with the Admin session", async () => {
@@ -395,15 +397,15 @@ describe("Admin browser API client", () => {
         await waiting;
         return answer(200, { accessToken: "access-1", account });
       }
-      return answer(200, { accounts: [account] });
+      return answer(200, { accounts: [areaManager] });
     });
     const first = client.listAccounts();
     const second = client.listAccounts();
     await vi.waitFor(() => expect(refreshes()).toHaveLength(1));
     release();
     expect(await Promise.all([first, second])).toEqual([
-      { ok: true, data: { accounts: [account] } },
-      { ok: true, data: { accounts: [account] } },
+      { ok: true, data: { accounts: [areaManager] } },
+      { ok: true, data: { accounts: [areaManager] } },
     ]);
     expect(calls.filter((call) => call.path.endsWith("/accounts"))).toHaveLength(2);
   });
@@ -419,7 +421,7 @@ describe("Admin browser API client", () => {
       }
       return headers.get("authorization") === "Bearer access-1"
         ? answer(401, denied)
-        : answer(200, { accounts: [account] });
+        : answer(200, { accounts: [areaManager] });
     });
     await client.verifyCode(code);
     const first = client.listAccounts();
@@ -427,8 +429,8 @@ describe("Admin browser API client", () => {
     await vi.waitFor(() => expect(refreshes()).toHaveLength(1));
     release();
     expect(await Promise.all([first, second])).toEqual([
-      { ok: true, data: { accounts: [account] } },
-      { ok: true, data: { accounts: [account] } },
+      { ok: true, data: { accounts: [areaManager] } },
+      { ok: true, data: { accounts: [areaManager] } },
     ]);
     expect(refreshes()).toHaveLength(1);
     expect(calls.filter((call) => call.path.endsWith("/accounts")).map((call) => call.headers.get("authorization"))).toEqual([
@@ -453,7 +455,7 @@ describe("Admin browser API client", () => {
 
   it("reports an unexpected sign-out answer, without restoring local access", async () => {
     const { client, calls, onSignedOut } = setup(({ path }) =>
-      path.endsWith("/sign-out") ? answer(503, { error: { code: "UNAVAILABLE" } }) : answer(200, { accounts: [account] }),
+      path.endsWith("/sign-out") ? answer(503, { error: { code: "UNAVAILABLE" } }) : answer(200, { accounts: [areaManager] }),
     );
     expect(await client.signOut()).toEqual({ ok: false, status: 503, code: "UNAVAILABLE", fields: undefined });
     expect(await client.listAccounts()).toMatchObject({ ok: false, status: 401 });

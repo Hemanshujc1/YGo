@@ -120,6 +120,13 @@
       "when": 1793090073166,
       "tag": "0016_visit_fee_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793093743138,
+      "tag": "0017_area_manager_memberships",
+      "breakpoints": true
     }
   ]
 }

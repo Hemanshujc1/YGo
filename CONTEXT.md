@@ -14,7 +14,7 @@ This document carries the domain: what the product does and what the words mean.
 **`can deliver`**: A per-staff flag, not a role. It reveals the delivery screens in the Shopkeeper app and puts the person in the delivery-assignment list. The Owner needs no flag: an Owner can always be assigned the shop's own orders and deliver them, with no Staff account.
 **Customer**: A person ordering from shops. Never "user".
 **Admin**: The platform operator.
-**Area Manager**: The operator of exactly one Area. Onboards and supports the shops in it, and is paid a share of the platform commission earned there. The mockups use a retired term for this role; use Area Manager everywhere in current requirements and implementation.
+**Area Manager**: Onboards and supports the shops Admin assigns to them, and is paid a share of the platform commission collected from those shops. An Area Manager has no Area: several may work in one Area, and a shop has at most one Area Manager. The mockups use a retired term for this role; use Area Manager everywhere in current requirements and implementation.
 **Area**: An admin-named container of one or more pincodes, used for administration. Never "zone".
 **Service radius**: A shop's own delivery distance. A shop is shown to a customer who is inside it, and the customer's Area does not have to be the shop's Area. It is the second of two tests: the customer's location must first be in an active Area (see Service area).
 **Area pause**: An admin switch that stops new orders in an Area while live orders finish. Separate from a shop's open/closed toggle.
@@ -81,7 +81,7 @@ One staff account belongs to exactly one shop. The Owner invites staff by phone 
 
 **The staff-to-shop link is its own record carrying its own active flag, never a column on the account.** That single choice settles re-invitation. Re-inviting a deactivated phone number reactivates the existing link, so the person's past status transitions and counter bills keep pointing at the same actor — which is the whole reason deactivation exists instead of deletion. Only the Owner can do it; a deactivated person cannot re-enrol themselves. And a person deactivated at one shop may be invited by another: the first shop's history keeps its deactivated link while the second gets a fresh active one, which is only possible because the link is a record. Were it a column, that move would either corrupt the first shop's history or need a second account on the same phone, which the identity rule forbids. The one case nothing can undo is **staff deletion**, which removes the person's identity: a later invitation is a genuinely new account with no history, and the app says so rather than appearing to restore someone.
 
-Admin web has a separate **Area Manager** role scoped to one Area. Inside that Area an Area Manager may see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting; only Admin moves a shop to Live.
+Admin web has a separate **Area Manager** role scoped to the shops Admin assigns to them; any other shop is "not found" to them. On those shops an Area Manager may see the shop and its application, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting; only Admin starts a review, approves, moves a shop to Live or assigns an Area Manager.
 
 ## Fulfilment modes
 
@@ -294,7 +294,7 @@ Settlement runs weekly on Monday for the preceding Monday-to-Sunday period, aggr
 
 Because nothing is prepaid and UPI is collected at handover, **there is no refund flow**. Cancellation is free before acceptance and allowed until the shop marks the order ready. A refusal at the door marks the order undelivered and charges no commission. Anything owed after delivery is an admin adjustment on the next statement, with the shop returning cash directly. **The adjustment moves money between the shop and the platform only; it never pays the customer.** The platform holds no customer money and has no means of paying one, so a customer is made whole only by the shop. **When a complaint is upheld and money is owed, Admin records the amount and the shop pays the customer directly within seven calendar days.** Both see the amount, the due date and the status: owed, marked paid by the shop, confirmed by the customer, or disputed. A dispute or a missed date goes to an Admin queue. **Nothing happens to the shop automatically.** A repayment left unpaid past its date is a ground on which Admin may suspend the shop, and that suspension is the platform's one lever.
 
-Area Managers are paid a configurable share of the commission **actually collected** in their Area, in the weekly run but as a separate platform expense, never netted into a shop's statement.
+Area Managers are paid a configurable share of the commission **actually collected** from the shops assigned to them, counted for whoever is assigned when it is collected, in the weekly run but as a separate platform expense, never netted into a shop's statement.
 
 ## Pricing engine
 

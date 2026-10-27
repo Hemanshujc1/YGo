@@ -11,7 +11,7 @@ Phase 1 has one authenticated web surface and, as this decision discovered, one 
 Constraints fixed before this decision:
 
 - **The Phase 1 surfaces are Customer Mobile, Shopkeeper Mobile and Admin Web** ([#2](https://github.com/Hemanshujc1/YGo/issues/2)). There is no Shopkeeper web and no customer web storefront.
-- **Admin web is desktop-first with no phone layout** ([#12](https://github.com/Hemanshujc1/YGo/issues/12)), and its screen list is the [#7](https://github.com/Hemanshujc1/YGo/issues/7) cut, including Settlements, Complaints, Area Managers with payouts and search synonyms. Area Managers log in to it with an Area-scoped role.
+- **Admin web is desktop-first with no phone layout** ([#12](https://github.com/Hemanshujc1/YGo/issues/12)), and its screen list is the [#7](https://github.com/Hemanshujc1/YGo/issues/7) cut, including Settlements, Complaints, Area Managers with payouts and search synonyms. Area Managers log in to it with a role scoped to the shops assigned to them (amended 27 Oct 2026, [#343](https://github.com/Hemanshujc1/YGo/issues/343): an Area Manager has no Area).
 - **Styling tokens are shared with the mobile apps**, which use NativeWind v4 over semantic tokens — a deliberate soft constraint toward Tailwind on the web ([ADR-0001](0001-mobile-app-framework.md)).
 - **The whole platform runs on one `t4g.small` with 2 GiB**, already hosting Fastify, Nginx and a nightly `pg_dump` ([ADR-0005](0005-hosting-and-operations.md)).
 - **The API is REST `/v1` with shared Zod contracts** ([ADR-0004](0004-backend-shape-and-api-contract.md)), and sessions are an access token plus a server-side rotating refresh token.

@@ -1,5 +1,6 @@
 import {
   Account,
+  AdminAccount,
   CATALOG_IMPORT_FILE_FIELDS,
   CatalogImportPreviewResponse,
   CatalogImportResponse,
@@ -155,9 +156,9 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       return { ok: true, data: answered.data.account };
     },
 
-    /** `GET /v1/admin/me`: the signed-in Admin's own account, theme included. */
-    async me(): Promise<ApiResult<Account>> {
-      return result(await adminRequest("GET", "/v1/admin/me"), Account);
+    /** `GET /v1/admin/me`: the signed-in Admin's or Area Manager's own account, with theme and role (#343). */
+    async me(): Promise<ApiResult<AdminAccount>> {
+      return result(await adminRequest("GET", "/v1/admin/me"), AdminAccount);
     },
 
     /** `PUT /v1/admin/me/theme`: save the theme on the account, shared with the mobile apps (#263). */
@@ -165,14 +166,14 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       return result(await adminRequest("PUT", "/v1/admin/me/theme", body), Account);
     },
 
-    /** `GET /v1/admin/accounts`: Admin memberships and their accounts. */
+    /** `GET /v1/admin/accounts`: Admin and Area Manager accounts, each with its role. */
     async listAccounts(): Promise<ApiResult<AdminAccountsResponse>> {
       return result(await adminRequest("GET", "/v1/admin/accounts"), AdminAccountsResponse);
     },
 
-    /** `POST /v1/admin/accounts`: create an Admin with a recorded reason. */
-    async createAccount(body: CreateAdminBody): Promise<ApiResult<Account>> {
-      return result(await adminRequest("POST", "/v1/admin/accounts", body), Account);
+    /** `POST /v1/admin/accounts`: create an Admin or Area Manager with a recorded reason. */
+    async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
+      return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
     },
 
     /** `GET /v1/admin/categories`: list the global category tree. */
