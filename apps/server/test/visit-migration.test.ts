@@ -23,7 +23,8 @@ it("upgrades existing accounts without promoting visit confirmation or changing 
     await cp(migrations, previous, { recursive: true });
     const journalPath = join(previous, "meta/_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as { entries: { tag: string }[] };
-    journal.entries = journal.entries.filter((entry) => entry.tag !== "0016_visit_fee_persistence");
+    // Before 0016, so later migrations are left out too: drizzle skips any older than the last one applied.
+    journal.entries = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === "0016_visit_fee_persistence"));
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle({ client }), { migrationsFolder: previous });
     await client.query(`INSERT INTO accounts (email, phone_verified) VALUES
