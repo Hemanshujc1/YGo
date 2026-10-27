@@ -5,6 +5,7 @@ import { Link, useLoaderData } from "react-router";
 import { createAdminApiClient } from "@ygo/api-client";
 import { ReasonDialog } from "./components/reason-dialog";
 import { fieldMessages } from "./lib/field-messages";
+import { ShopVisitAndFeePanel } from "./shop-visits";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
@@ -138,6 +139,7 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.ownerEmail}</dt><dd className="mt-1">{application.ownerEmail}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.submittedAt}</dt><dd className="mt-1">{application.submittedAt ? formatDateTime(application.submittedAt) : "—"}</dd></div>
     </dl></section>
+    {application.state !== "draft" && <ShopVisitAndFeePanel api={api} application={application} />}
     {editing && !reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setEditing(null); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="application-edit-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-border bg-raised p-6 shadow-xl">
       <h2 id="application-edit-title" className="text-body font-semibold">{strings.editField(fieldLabels[editing])}</h2>
