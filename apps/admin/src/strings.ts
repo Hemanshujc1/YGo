@@ -264,5 +264,6 @@ export const strings = {
     SHOP_APPLICATION_SENT: "This application has been sent, so its Owner can't change it.",
     PINCODE_NOT_IN_AREA: "This pincode isn't in any Area.",
     SHOP_STATE_CHANGE_REFUSED: "This application has moved on. Reload to see its state.",
+    VISIT_PHOTO_LOCATION_MISSING: "This photo has no location. Choose a shop-front photo with location enabled.",
   } satisfies Record<ErrorCode, string>,
 };

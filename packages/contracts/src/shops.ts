@@ -4,6 +4,7 @@ import {
   AdminActionReason,
   CalendarDate,
   FssaiNumber,
+  indiaToday,
   Pan,
   PersonName,
   Pincode,
@@ -62,11 +63,6 @@ export const SaveShopApplicationBody = z
   .strictObject({ ...emptiable(applicationFields), serviceRadiusMetres: ServiceRadiusMetres })
   .partial();
 export type SaveShopApplicationBody = z.infer<typeof SaveShopApplicationBody>;
-
-/** India's date now, `YYYY-MM-DD`. India keeps UTC+5:30 all year. */
-function indiaToday(): string {
-  return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
-}
 
 /**
  * `POST /v1/me/shop-application/send`: every field, with an FSSAI expiry
