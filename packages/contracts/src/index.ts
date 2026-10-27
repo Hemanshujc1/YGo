@@ -28,6 +28,7 @@ export {
   Email,
   FssaiNumber,
   HandoverOtp,
+  indiaToday,
   LoginOtp,
   Pan,
   PersonName,

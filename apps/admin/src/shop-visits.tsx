@@ -1,6 +1,7 @@
 import {
   CreateVisitPhotoUploadBody, RecordOnboardingFeeBody, RecordShopVisitBody, ShopVisitChecks,
-  ShopVisitDate, ShopVisitNotes, type ShopApplication, type ShopOnboarding,
+  ShopVisitDate, ShopVisitNotes, indiaToday, type ShopApplication, type ShopOnboarding,
+  type ShopVisitChecks as ShopVisitChecksContract,
 } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatMoney } from "@ygo/format";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -10,10 +11,8 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type VisitField = "photo" | "visitDate" | "checks" | "notes";
 type FeeField = "status" | "amount" | "paymentDate" | "reference" | "reason";
-type VisitChecks = { pan: boolean; fssai: boolean; ownerPhone: boolean; ownerEmail: boolean; alarmPermission: boolean; testerOptIn: boolean };
+type VisitChecks = Record<keyof ShopVisitChecksContract, boolean>;
 
-const emptyOnboarding = (): ShopOnboarding => ({ visits: [], fees: [], ownerPhoneState: "unverified", ownerEmailConfirmedAt: null });
-const indiaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const emptyChecks = (): VisitChecks => ({ pan: false, fssai: false, ownerPhone: false, ownerEmail: false, alarmPermission: false, testerOptIn: false });
 
 export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; application: ShopApplication }) {
@@ -46,9 +45,8 @@ export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; appl
     setLoading(true); setOnboarding(null); setLoadError("");
     void Promise.resolve().then(() => api.getShopOnboarding(application.id)).then((result) => {
       if (!active) return;
-      if (result?.ok) setOnboarding(result.data);
-      else if (result) setLoadError(strings.errors[result.code]);
-      else setOnboarding(emptyOnboarding());
+      if (result.ok) setOnboarding(result.data);
+      else setLoadError(strings.errors[result.code]);
     }).catch(() => {
       if (active) setLoadError(strings.failed);
     }).finally(() => { if (active) setLoading(false); });
@@ -199,8 +197,8 @@ export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; appl
         <form className="mt-4 space-y-4" onSubmit={(event) => void recordFee(event)} noValidate>
           <div><label htmlFor="fee-status" className="mb-2 block font-medium">{strings.feeStatus}</label>
             <select id="fee-status" value={feeStatus} onChange={(event) => setFeeStatus(event.target.value as "waived" | "paid")} className="h-10 rounded-lg border border-border-strong bg-surface px-3">
-              <option value="waived">{strings.feeWaived}</option><option value="paid">{strings.feePaid}</option>
-            </select>{feeErrors.status && <p role="alert" className="mt-1 text-danger">{feeErrors.status}</p>}</div>
+              <option value="waived">{strings.feeWaived}</option><option value="paid" disabled={onboarding.fees.length === 0}>{strings.feePaid}</option>
+            </select>{onboarding.fees.length === 0 && <p className="mt-1 text-muted">{strings.feePilotWaiverHint}</p>}{feeErrors.status && <p role="alert" className="mt-1 text-danger">{feeErrors.status}</p>}</div>
           {feeStatus === "paid" && <>
             <div><label htmlFor="fee-amount" className="mb-2 block font-medium">{strings.feeAmount}</label><input id="fee-amount" inputMode="decimal" value={feeAmount} onChange={(event) => setFeeAmount(event.target.value)} className="h-10 rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.amount && <p role="alert" className="mt-1 text-danger">{feeErrors.amount}</p>}</div>
             <div><label htmlFor="fee-date" className="mb-2 block font-medium">{strings.paymentDate}</label><input id="fee-date" type="date" max={indiaToday()} value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="h-10 rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.paymentDate && <p role="alert" className="mt-1 text-danger">{feeErrors.paymentDate}</p>}</div>

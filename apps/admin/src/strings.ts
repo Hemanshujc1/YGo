@@ -162,6 +162,7 @@ export const strings = {
   feeWaived: "Waived",
   feePaid: "Paid",
   feeStatus: "Fee status",
+  feePilotWaiverHint: "Pilot shops start with a waiver. Later fee changes need a reason.",
   feeAmount: "Amount (₹)",
   paymentDate: "Payment date",
   paymentReference: "Receipt or payment reference",

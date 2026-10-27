@@ -122,6 +122,13 @@ describe("Admin visit and onboarding fee screen", () => {
     expect(screen.getByText(strings.feeWaiverReason("Pilot cohort"))).toBeTruthy();
   });
 
+  it("requires the pilot waiver before paid fee changes are available", async () => {
+    setup();
+    await screen.findByLabelText(strings.feeStatus);
+    expect(screen.getByRole("option", { name: strings.feePaid }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(strings.feePilotWaiverHint)).toBeTruthy();
+  });
+
   it("requires a reason for later paid changes and records paid amount, date and reference", async () => {
     const previousWaiver: OnboardingFee = { id: "00000000-0000-4000-8000-000000000702", actorId, recordedAt: "2026-10-24T10:00:00.000Z", status: "waived", reason: "Pilot cohort" };
     const api = setup({ recordOnboardingFee: vi.fn().mockResolvedValue({ ok: true, data: paidFee }) }, { ...empty, fees: [previousWaiver] });
