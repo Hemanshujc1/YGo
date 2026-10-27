@@ -1,5 +1,5 @@
 import {
-  type AddressPoint,
+  AddressPoint,
   CalendarDate,
   invalidFields,
   SaveShopApplicationBody,
@@ -9,9 +9,10 @@ import {
   type ShopApplication,
   type ShopEntityType,
 } from "@ygo/contracts";
+import type { Found } from "@ygo/mobile";
 import type { AddressAt } from "@ygo/mobile/address-at";
 
-/** The S17 fields typed as text. Business type and service radius are picked, and the location comes from the phone. */
+/** The S17 fields typed as text. Business type and service radius are picked, and the location comes from the phone or the map. */
 export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
 export type TextField = (typeof textFields)[number];
 
@@ -49,6 +50,29 @@ export function fillFromLocation(typed: Typed, at: AddressAt | null): Partial<Pi
     ...(typed.pincode.trim() === "" && { pincode: at.pincode }),
     ...(typed.address.trim() === "" && address.success && { address: address.data }),
   };
+}
+
+/**
+ * Where "Set on map" opens with no location yet (#307, Q3): the typed
+ * Address and Pincode, looked up by the phone's geocoder, else where the
+ * phone is now. Null when neither gives a spot in India, and the form asks
+ * for the pincode first.
+ */
+export async function mapStart(
+  find: { geocode: (query: string) => Promise<{ latitude: number; longitude: number }[]>; here: () => Promise<Found> },
+  typed: Typed,
+): Promise<AddressPoint | null> {
+  const typedIn = [typed.address, typed.pincode].map((part) => part.trim()).filter((part) => part !== "");
+  if (typedIn.length > 0) {
+    // "India" keeps a pincode from matching another country's postal code.
+    const spots = await find.geocode([...typedIn, "India"].join(", ")).catch(() => []);
+    for (const { latitude, longitude } of spots) {
+      const point = AddressPoint.safeParse({ latitude, longitude });
+      if (point.success) return point.data;
+    }
+  }
+  const found = await find.here();
+  return found.kind === "found" ? found.point : null;
 }
 
 /** A saved YYYY-MM-DD date as DD/MM/YYYY, rearranged rather than formatted, so isoDate always reads it back. */

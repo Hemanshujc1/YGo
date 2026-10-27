@@ -1,7 +1,7 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { type AddressAt, addressAt } from "@ygo/mobile/address-at";
 import { describe, expect, it } from "vitest";
-import { changed, draftBody, fillFromLocation, isoDate, realDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
+import { changed, draftBody, fillFromLocation, isoDate, mapStart, realDate, sendBody, shown, stepRadius, type Typed, typedDate, typedFrom } from "../src/lib/application-form";
 
 const draft: ShopApplication = {
   id: "8f6c1f0e-1d2b-4c3a-9e8f-7a6b5c4d3e2f",
@@ -200,5 +200,45 @@ describe("fillFromLocation", () => {
   it("cuts the Address to its 300 characters, and leaves it empty when the line is", () => {
     expect(fillFromLocation(empty, { ...at, line: "x".repeat(320) }).address).toHaveLength(300);
     expect(fillFromLocation(empty, { ...at, line: "" })).toEqual({ pincode: "411005" });
+  });
+});
+
+describe("mapStart", () => {
+  const typed = typedFrom(draft);
+  const shop = { latitude: 18.5204, longitude: 73.8567 };
+  const here = { latitude: 18.53, longitude: 73.85 };
+  const found = async () => ({ kind: "found" as const, point: here, accuracy: 12 });
+  const lost = async () => ({ kind: "off" as const });
+
+  it("opens at the typed address and pincode, looked up by the phone, before asking where the phone is (#307, Q3)", async () => {
+    const asked: string[] = [];
+    const geocode = async (query: string) => (asked.push(query), [{ ...shop, altitude: 560, accuracy: 40 }]);
+    expect(await mapStart({ geocode, here: found }, { ...typed, address: " 12 FC Road ", pincode: "411004" })).toEqual(shop);
+    expect(asked).toEqual(["12 FC Road, 411004, India"]);
+  });
+
+  it("looks up the pincode alone when the address is empty", async () => {
+    const asked: string[] = [];
+    const geocode = async (query: string) => (asked.push(query), [shop]);
+    await mapStart({ geocode, here: found }, { ...typed, pincode: "411004" });
+    expect(asked).toEqual(["411004, India"]);
+  });
+
+  it("skips a spot outside India, as a pincode can look like another country's postal code", async () => {
+    const geocode = async () => [{ latitude: 40.7128, longitude: -74.006 }, shop];
+    expect(await mapStart({ geocode, here: found }, { ...typed, pincode: "411004" })).toEqual(shop);
+  });
+
+  it("falls back to where the phone is when nothing is typed, the lookup finds nothing, or it fails", async () => {
+    const never = async () => {
+      throw new Error("no lookup with nothing typed");
+    };
+    expect(await mapStart({ geocode: never, here: found }, typed)).toEqual(here);
+    expect(await mapStart({ geocode: async () => [], here: found }, { ...typed, pincode: "411004" })).toEqual(here);
+    expect(await mapStart({ geocode: never, here: found }, { ...typed, pincode: "411004" })).toEqual(here);
+  });
+
+  it("finds no start when the phone can't say where it is either", async () => {
+    expect(await mapStart({ geocode: async () => [], here: lost }, { ...typed, pincode: "411004" })).toBeNull();
   });
 });

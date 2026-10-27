@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./google-sign-in-plugin": "./google-sign-in.config.js",
-    "./address-at": "./src/address-at.ts"
+    "./address-at": "./src/address-at.ts",
+    "./pin-map": "./src/pin-map.tsx"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
@@ -26,6 +27,7 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
+    "react-native-maps": "1.27.2",
     "react-native-mmkv": "4.3.2",
     "react-native-nitro-google-signin": "2.0.0",
     "react-native-nitro-modules": "0.35.9",
@@ -45,6 +47,7 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-css-interop": "0.2.7",
+    "react-native-maps": "1.27.2",
     "react-native-mmkv": "4.3.2",
     "react-native-nitro-google-signin": "2.0.0",
     "react-native-nitro-modules": "0.35.9",
