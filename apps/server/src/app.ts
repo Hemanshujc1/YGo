@@ -15,6 +15,8 @@ import type { IdentityVerifier } from "./adapters/identity-verifier";
 import type { Mailer } from "./adapters/mailer";
 import type { PlaceFinder } from "./adapters/place-finder";
 import type { Clock } from "./adapters/clock";
+import type { VisitPhotoStorage } from "./adapters/visit-photos";
+import { registerShopVisitRoutes } from "./routes/shop-visits";
 import type { ProductImageStorage } from "./adapters/product-images";
 import { registerAddressRoutes } from "./routes/addresses";
 import { registerAuthRoutes } from "./routes/auth";
@@ -38,6 +40,7 @@ export interface AppOptions {
   authTokenSecret?: string;
   adminCookieDomain?: string;
   productImages?: ProductImageStorage;
+  visitPhotos?: VisitPhotoStorage;
   /** C15's place search (#257); without it the search answers UNAVAILABLE. */
   places?: PlaceFinder;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
@@ -68,6 +71,7 @@ export function buildApp({
   authTokenSecret,
   adminCookieDomain,
   productImages,
+  visitPhotos,
   places,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   logger = false,
@@ -114,6 +118,7 @@ export function buildApp({
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
   }
 
   app.get(

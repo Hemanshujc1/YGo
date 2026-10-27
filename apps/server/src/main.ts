@@ -1,4 +1,6 @@
 import { createIdentityVerifier } from "./adapters/identity-verifier";
+import { createS3FileStorage } from "./adapters/file-storage";
+import { createVisitPhotoStorage } from "./adapters/visit-photos";
 import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
 import { createGooglePlaceFinder } from "./adapters/place-finder";
@@ -34,6 +36,9 @@ const app = buildApp({
   authTokenSecret: config.AUTH_TOKEN_SECRET,
   adminCookieDomain: config.ADMIN_COOKIE_DOMAIN,
   productImages,
+  visitPhotos: config.VISIT_PHOTO_BUCKET ? createVisitPhotoStorage(createS3FileStorage({
+    bucket: config.VISIT_PHOTO_BUCKET, region: config.S3_REGION, endpoint: config.S3_ENDPOINT,
+  })) : undefined,
   places: config.GOOGLE_PLACES_API_KEY ? createGooglePlaceFinder(config.GOOGLE_PLACES_API_KEY) : undefined,
   minAppVersions: { customer: config.MIN_CUSTOMER_VERSION, shopkeeper: config.MIN_SHOPKEEPER_VERSION },
   logger: { level: config.LOG_LEVEL },
