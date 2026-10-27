@@ -47,6 +47,9 @@ import { CatalogImportRowErrors } from "./catalog";
  * - VISIT_PHOTO_LOCATION_MISSING (400): the uploaded JPEG has no valid GPS metadata.
  * - Invalid, oversized or unreadable evidence uses VALIDATION_FAILED, naming photo.
  * - A Draft is the Owner's own: Admin calls on one answer NOT_FOUND.
+ * Shop setup (#43):
+ * - SHOP_LISTING_NOT_READY (409): the shop has not been Approved yet.
+ * - OPENING_STOCK_ALREADY_RECORDED (409): an opening movement already exists for this listing.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -76,6 +79,8 @@ export const ErrorCode = z.enum([
   "PINCODE_NOT_IN_AREA",
   "SHOP_STATE_CHANGE_REFUSED",
   "VISIT_PHOTO_LOCATION_MISSING",
+  "SHOP_LISTING_NOT_READY",
+  "OPENING_STOCK_ALREADY_RECORDED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

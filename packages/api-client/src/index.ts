@@ -15,6 +15,11 @@ import {
   Serviceability,
   Session,
   ShopApplication,
+  ShopListingsResponse,
+  OpeningStockResponse,
+  type ShopListingCatalogItem,
+  type SaveShopListingBody as SaveShopListingInput,
+  type OpeningStockBody as OpeningStockInput,
   type AppIdentity,
   type ChangeNameBody,
   type RequestCodeBody,
@@ -379,6 +384,21 @@ export function createApiClient({
     /** `POST /v1/me/shop-application/send`: saves every field and sends the Draft for review. */
     async sendShopApplication(body: SendShopApplicationBody): Promise<ApiResult<ShopApplication>> {
       return result(await signedIn("POST", "/v1/me/shop-application/send", body), ShopApplication);
+    },
+
+    /** `GET /v1/me/shop-listings`: catalog packs available to this Owner and their shop settings. */
+    async shopListings(): Promise<ApiResult<ShopListingsResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-listings"), ShopListingsResponse);
+    },
+
+    /** `PUT /v1/me/shop-listings/:packId`: save this shop's settings for a catalog pack. */
+    async saveShopListing(packId: string, body: SaveShopListingInput): Promise<ApiResult<ShopListingCatalogItem>> {
+      return result(await signedIn("PUT", `/v1/me/shop-listings/${encodeURIComponent(packId)}`, body), ShopListingsResponse.shape.items.element);
+    },
+
+    /** `POST /v1/me/shop-listings/:packId/opening-stock`: append the first stock movement; clientId makes offline retries safe. */
+    async openingStock(packId: string, body: OpeningStockInput): Promise<ApiResult<OpeningStockResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-listings/${encodeURIComponent(packId)}/opening-stock`, body), OpeningStockResponse);
     },
 
     /**

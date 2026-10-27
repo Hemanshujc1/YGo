@@ -221,5 +221,7 @@ export const strings = {
     PINCODE_NOT_IN_AREA: "YGo isn't in your area yet.",
     SHOP_STATE_CHANGE_REFUSED: "This application has moved on. Refresh to see where it is.",
     VISIT_PHOTO_LOCATION_MISSING: "This photo has no location. Choose a shop-front photo with location enabled.",
+    SHOP_LISTING_NOT_READY: "Shop setup opens after Admin approves the application.",
+    OPENING_STOCK_ALREADY_RECORDED: "Opening stock was already recorded for this product.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -205,6 +205,52 @@ export const shopMembers = pgTable("shop_members", {
   index("shop_members_shop_id_idx").on(table.shopId),
 ]);
 
+// Shop-owned pack settings and base-unit inventory (#43, CAT-1, CAT-2, CAT-4).
+export const shopListings = pgTable("shop_listings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  packId: uuid("pack_id").notNull().references(() => packs.id),
+  onlinePrice: numeric("online_price", { precision: 12, scale: 2 }).notNull(),
+  counterPrice: numeric("counter_price", { precision: 12, scale: 2 }).notNull(),
+  mrp: numeric("mrp", { precision: 12, scale: 2 }).notNull(),
+  lowStockLevel: numeric("low_stock_level", { precision: 12, scale: 3 }).notNull().default("0"),
+  available: boolean("available").notNull().default(true),
+  minimumOrderQuantity: numeric("minimum_order_quantity", { precision: 12, scale: 3 }),
+  quantityStep: numeric("quantity_step", { precision: 12, scale: 3 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("shop_listings_shop_pack_idx").on(table.shopId, table.packId),
+  check("shop_listings_prices_valid", sql`${table.onlinePrice} >= 0 AND ${table.onlinePrice} <> 'NaN'::numeric AND ${table.counterPrice} >= 0 AND ${table.counterPrice} <> 'NaN'::numeric AND ${table.mrp} >= 0 AND ${table.mrp} <> 'NaN'::numeric AND ${table.lowStockLevel} >= 0 AND ${table.lowStockLevel} <> 'NaN'::numeric`),
+  check("shop_listings_measured_rules_pair", sql`((${table.minimumOrderQuantity} IS NULL) AND (${table.quantityStep} IS NULL)) OR (${table.minimumOrderQuantity} > 0 AND ${table.minimumOrderQuantity} <> 'NaN'::numeric AND ${table.quantityStep} > 0 AND ${table.quantityStep} <> 'NaN'::numeric)`),
+]);
+
+export const shopQuantityPriceOptions = pgTable("shop_quantity_price_options", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+}, (table) => [
+  uniqueIndex("shop_quantity_price_options_quantity_idx").on(table.listingId, table.quantity),
+  check("shop_quantity_price_options_valid", sql`${table.quantity} > 0 AND ${table.quantity} <> 'NaN'::numeric AND ${table.price} >= 0 AND ${table.price} <> 'NaN'::numeric`),
+]);
+
+// Inventory is the append-only source of on-hand stock; the opening row is idempotent for offline sync.
+export const stockMovements = pgTable("stock_movements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  actorId: uuid("actor_id").notNull(),
+  clientId: uuid("client_id").notNull(),
+  kind: text("kind").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening')`),
+  check("stock_movements_quantity_valid", sql`${table.quantity} >= 0 AND ${table.quantity} <> 'NaN'::numeric`),
+  uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
+  uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
+]);
+
 // Pending uploads bind the server-declared size to a shop and actor. They are
 // disposable; durable visits never depend on their lifecycle (#321, DEL-10).
 export const visitPhotoUploads = pgTable("visit_photo_uploads", {

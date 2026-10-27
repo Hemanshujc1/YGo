@@ -289,6 +289,38 @@ describe("each call", () => {
     } as const)).toEqual({ ok: false, status: 409, code: "PINCODE_NOT_IN_AREA" });
   });
 
+  it("reads catalog listings and sends price and opening-stock writes", async () => {
+    const id = "00000000-0000-4000-8000-000000000201";
+    const item = {
+      packId: id, productId: id, name: "Rice", brand: null, baseUnit: "kg", classification: "measured",
+      packQuantity: "1", barcode: null, listing: null, stock: "0", openingStockRecorded: false,
+    };
+    const listing = { ...item, listing: {
+      id, onlinePrice: "20.50", counterPrice: "21", mrp: "25", lowStockLevel: "0", available: true,
+      minimumOrderQuantity: "0.25", quantityStep: "0.05", quantityOptions: [],
+    } };
+    const opening = { listingId: id, quantity: "2.5", recordedAt: "2030-01-01T00:00:00.000Z" };
+    const body = {
+      onlinePrice: "20.50", counterPrice: "21", mrp: "25", lowStockLevel: "0", available: true,
+      minimumOrderQuantity: "0.25", quantityStep: "0.05", quantityOptions: [],
+    };
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.method === "GET") return answer(200, { items: [item] });
+      if (call.method === "PUT") return answer(200, listing);
+      return answer(201, opening);
+    });
+    await client.verifyCode(signIn);
+    expect(await client.shopListings()).toEqual({ ok: true, data: { items: [item] } });
+    expect(await client.saveShopListing(id, body)).toEqual({ ok: true, data: listing });
+    expect(await client.openingStock(id, { quantity: "2.5", clientId: "00000000-0000-4000-8000-000000000202" })).toEqual({ ok: true, data: opening });
+    expect(calls.slice(1).map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: "GET", path: "/v1/me/shop-listings" },
+      { method: "PUT", path: `/v1/me/shop-listings/${id}` },
+      { method: "POST", path: `/v1/me/shop-listings/${id}/opening-stock` },
+    ]);
+  });
+
   it("reads the saved address limit as its code", async () => {
     const { client } = setup((call) =>
       call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "ADDRESS_LIMIT_REACHED" } }),

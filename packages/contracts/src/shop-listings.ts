@@ -1,0 +1,74 @@
+import { z } from "zod";
+import { PackQuantity, ShopPrice } from "./fields";
+
+export const BaseUnitQuantity = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
+export const SignedBaseUnitQuantity = z.string().regex(/^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
+
+export const ShopListingParams = z.strictObject({ packId: z.uuid() });
+
+export const ShopQuantityPriceOption = z.strictObject({
+  id: z.uuid(),
+  quantity: PackQuantity,
+  price: ShopPrice,
+});
+
+export const ShopListingSettings = z.strictObject({
+  id: z.uuid(),
+  onlinePrice: ShopPrice,
+  counterPrice: ShopPrice,
+  mrp: ShopPrice,
+  lowStockLevel: BaseUnitQuantity,
+  available: z.boolean(),
+  minimumOrderQuantity: PackQuantity.nullable(),
+  quantityStep: PackQuantity.nullable(),
+  quantityOptions: z.array(ShopQuantityPriceOption),
+});
+
+export const ShopListingCatalogItem = z.strictObject({
+  packId: z.uuid(),
+  productId: z.uuid(),
+  name: z.string(),
+  brand: z.string().nullable(),
+  baseUnit: z.enum(["each", "kg", "l"]),
+  classification: z.enum(["counted", "measured"]),
+  packQuantity: PackQuantity,
+  barcode: z.string().nullable(),
+  listing: ShopListingSettings.nullable(),
+  stock: SignedBaseUnitQuantity,
+  openingStockRecorded: z.boolean(),
+});
+
+export const ShopListingsResponse = z.strictObject({ items: z.array(ShopListingCatalogItem) });
+
+export const ShopQuantityPriceOptionInput = z.strictObject({
+  quantity: PackQuantity,
+  price: ShopPrice,
+});
+
+export const SaveShopListingBody = z.strictObject({
+  onlinePrice: ShopPrice,
+  counterPrice: ShopPrice,
+  mrp: ShopPrice,
+  lowStockLevel: BaseUnitQuantity,
+  available: z.boolean().default(true),
+  minimumOrderQuantity: PackQuantity.nullable().default(null),
+  quantityStep: PackQuantity.nullable().default(null),
+  quantityOptions: z.array(ShopQuantityPriceOptionInput).max(20).default([]),
+}).refine((body) => (body.minimumOrderQuantity === null) === (body.quantityStep === null), { path: ["quantityStep"] });
+
+export const OpeningStockBody = z.strictObject({
+  quantity: BaseUnitQuantity,
+  clientId: z.uuid(),
+});
+
+export const OpeningStockResponse = z.strictObject({
+  listingId: z.uuid(),
+  quantity: BaseUnitQuantity,
+  recordedAt: z.iso.datetime(),
+});
+
+export type ShopListingCatalogItem = z.infer<typeof ShopListingCatalogItem>;
+export type ShopListingsResponse = z.infer<typeof ShopListingsResponse>;
+export type SaveShopListingBody = z.infer<typeof SaveShopListingBody>;
+export type OpeningStockBody = z.infer<typeof OpeningStockBody>;
+export type OpeningStockResponse = z.infer<typeof OpeningStockResponse>;

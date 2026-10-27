@@ -118,6 +118,9 @@ export const CountedPackQuantity = PackQuantity.refine((value) => !/\.\d*[1-9]/.
 /** Optional EAN/UPC digits, compared exactly with leading zeros preserved; no checksum conversion (#205). */
 export const PackBarcode = z.string().regex(/^(?:\d{8}|\d{12}|\d{13})$/);
 
+/** A non-negative rupee price with at most two decimals (CAT-1, ADR-0002). */
+export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
+
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
 export const Pan = z
   .string()
