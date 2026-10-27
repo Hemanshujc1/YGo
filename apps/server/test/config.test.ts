@@ -81,3 +81,14 @@ describe("place search configuration", () => {
     expect(loadConfig({ ...base, GOOGLE_PLACES_API_KEY: "key-1" }).GOOGLE_PLACES_API_KEY).toBe("key-1");
   });
 });
+
+
+describe("visit photo configuration", () => {
+  const base = { ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
+  it("allows a private bucket without any public URL base", () => {
+    expect(loadConfig({ ...base, VISIT_PHOTO_BUCKET: "private-visits" }).VISIT_PHOTO_BUCKET).toBe("private-visits");
+  });
+  it("rejects sharing the public product image bucket", () => {
+    expect(() => loadConfig({ ...base, VISIT_PHOTO_BUCKET: "images", PRODUCT_IMAGE_BUCKET: "images", PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com" })).toThrow("must be separate");
+  });
+});

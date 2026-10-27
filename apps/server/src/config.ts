@@ -18,6 +18,7 @@ const BaseEnv = z.object({
   // The oldest app versions still served (Q-7); 0.0.0 refuses none.
   MIN_CUSTOMER_VERSION: AppVersion.default("0.0.0"),
   MIN_SHOPKEEPER_VERSION: AppVersion.default("0.0.0"),
+  VISIT_PHOTO_BUCKET: z.string().min(3).optional(),
   PRODUCT_IMAGE_BUCKET: z.string().min(3).optional(),
   PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/i).optional(),
   PRODUCT_IMAGE_LOCAL_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
@@ -39,6 +40,9 @@ const Env = z.discriminatedUnion("MAILER", [
     MAILPIT_URL: z.url({ protocol: /^https?$/ }),
   }),
 ]).superRefine((env, context) => {
+  if (env.VISIT_PHOTO_BUCKET && env.VISIT_PHOTO_BUCKET === env.PRODUCT_IMAGE_BUCKET) {
+    context.addIssue({ code: "custom", message: "VISIT_PHOTO_BUCKET must be separate from public product images" });
+  }
   const hasCloudFront = Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN);
   const hasLocalBase = Boolean(env.PRODUCT_IMAGE_LOCAL_BASE_URL);
   if (Boolean(env.PRODUCT_IMAGE_BUCKET) !== (hasCloudFront || hasLocalBase)) {
