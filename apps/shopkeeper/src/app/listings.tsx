@@ -12,7 +12,7 @@ type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: 
 type Form = {
   onlinePrice: string; counterPrice: string; mrp: string; lowStockLevel: string;
   available: boolean; minimumOrderQuantity: string; quantityStep: string;
-  quantityOptions: { quantity: string; price: string }[];
+  quantityOptions: { name: string; quantity: string; price: string }[];
 };
 
 const emptyForm: Form = { onlinePrice: "", counterPrice: "", mrp: "", lowStockLevel: "0", available: true, minimumOrderQuantity: "", quantityStep: "", quantityOptions: [] };
@@ -23,7 +23,7 @@ function formFor(item: ShopListingCatalogItem): Form {
     onlinePrice: listing.onlinePrice, counterPrice: listing.counterPrice, mrp: listing.mrp,
     lowStockLevel: listing.lowStockLevel, available: listing.available,
     minimumOrderQuantity: listing.minimumOrderQuantity ?? "", quantityStep: listing.quantityStep ?? "",
-    quantityOptions: listing.quantityOptions.map(({ quantity, price }) => ({ quantity, price })),
+    quantityOptions: listing.quantityOptions.map(({ name, quantity, price }) => ({ name, quantity, price })),
   } : emptyForm;
 }
 
@@ -101,7 +101,7 @@ export default function ListingsScreen() {
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
       {load.kind === "failed" && <><Text className="text-body text-danger">{load.message}</Text><Button label={words.retry} onPress={() => void refresh()} variant="secondary" /></>}
       {load.kind === "loaded" && !selected && <>
-        <TextInput accessibilityLabel={words.search} placeholder={words.search} value={search} onChangeText={setSearch} className="rounded-input border border-border bg-surface px-3 py-3 text-body text-text" />
+        <TextInput accessibilityLabel={words.search} placeholder={words.search} value={search} onChangeText={setSearch} className="h-[52px] rounded-input border border-border bg-surface px-3 text-body text-text" />
         {visible.length === 0 && <Text className="text-body text-muted">{search ? words.searchEmpty : words.noItems}</Text>}
         {visible.map((item) => <Pressable key={item.packId} onPress={() => choose(item)} className="gap-1 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name}{item.brand ? ` · ${item.brand}` : ""}</Text>
@@ -127,11 +127,12 @@ export default function ListingsScreen() {
         <View className="gap-3 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">Quantity-price options</Text>
           {form.quantityOptions.map((option, index) => <View key={index} className="gap-2">
+            <Field label={words.optionName} value={option.name} onChange={(name) => edit("quantityOptions", form.quantityOptions.map((current, at) => at === index ? { ...current, name } : current))} error={wrong.some((name) => name.startsWith("quantityOptions"))} keyboardType="default" />
             <Field label={words.optionQuantity} value={option.quantity} onChange={(quantity) => edit("quantityOptions", form.quantityOptions.map((current, at) => at === index ? { ...current, quantity } : current))} error={wrong.some((name) => name.startsWith("quantityOptions"))} />
             <Field label={words.optionPrice} value={option.price} onChange={(price) => edit("quantityOptions", form.quantityOptions.map((current, at) => at === index ? { ...current, price } : current))} error={wrong.some((name) => name.startsWith("quantityOptions"))} />
             <Pressable accessibilityRole="button" onPress={() => edit("quantityOptions", form.quantityOptions.filter((_, at) => at !== index))}><Text className="text-secondary text-danger">{words.removeOption}</Text></Pressable>
           </View>)}
-          <Button label={words.addOption} onPress={() => edit("quantityOptions", [...form.quantityOptions, { quantity: "", price: "" }])} variant="secondary" />
+          <Button label={words.addOption} onPress={() => edit("quantityOptions", [...form.quantityOptions, { name: "", quantity: "", price: "" }])} variant="secondary" />
         </View>
         {message && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message === words.saved ? "text-success" : "text-danger"}`}>{message}</Text>}
         {wrong.map((field) => <Text key={field} className="text-secondary text-danger">{words.errors[field as keyof typeof words.errors] ?? words.invalid}</Text>)}
@@ -142,9 +143,9 @@ export default function ListingsScreen() {
   );
 }
 
-function Field({ label, value, onChange, error = false }: { label: string; value: string; onChange: (value: string) => void; error?: boolean }) {
+function Field({ label, value, onChange, error = false, keyboardType = "decimal-pad" }: { label: string; value: string; onChange: (value: string) => void; error?: boolean; keyboardType?: "decimal-pad" | "default" }) {
   return <View className="gap-1">
     <Text className="text-secondary font-semibold text-text">{label}</Text>
-    <TextInput accessibilityLabel={label} keyboardType="decimal-pad" value={value} onChangeText={onChange} className={`rounded-input border bg-surface px-3 py-3 text-body text-text ${error ? "border-danger" : "border-border"}`} />
+    <TextInput accessibilityLabel={label} keyboardType={keyboardType} value={value} onChangeText={onChange} className={`h-[52px] rounded-input border bg-surface px-3 text-body text-text ${error ? "border-danger" : "border-border"}`} />
   </View>;
 }

@@ -116,9 +116,9 @@ export default function OpeningStockScreen() {
           <Text className="text-body font-semibold text-text">{item.name} · {item.packQuantity} {item.baseUnit}</Text>
           <Text className="text-secondary text-muted">{item.openingStockRecorded ? `${words.saved} ${item.stock} ${item.baseUnit}` : `${words.quantity}: ${item.baseUnit}`}</Text>
           {!item.openingStockRecorded && <>
-          <TextInput accessibilityLabel={`${words.quantity} ${item.name}`} editable={!queued} keyboardType="decimal-pad" value={queued?.quantity ?? quantities[item.packId] ?? ""} onChangeText={(value) => setQuantities((current) => ({ ...current, [item.packId]: value }))} className="rounded-input border border-border bg-bg px-3 py-3 text-body text-text" />
-            {queued && <Text className="text-secondary text-warning">{words.stockQueued}</Text>}
-            {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-warning" : message[item.packId] === words.stockRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
+          <TextInput accessibilityLabel={`${words.quantity} ${item.name}`} editable={!queued} keyboardType="decimal-pad" value={queued?.quantity ?? quantities[item.packId] ?? ""} onChangeText={(value) => setQuantities((current) => ({ ...current, [item.packId]: value }))} className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
+            {queued && <Text className="text-secondary text-pending">{words.stockQueued}</Text>}
+            {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-pending" : message[item.packId] === words.stockRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
             <Button label={words.saveStock} onPress={() => void save(item)} busy={saving === item.packId} />
           </>}
         </View>;

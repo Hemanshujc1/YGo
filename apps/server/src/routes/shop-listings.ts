@@ -8,6 +8,7 @@ import {
   SaveShopListingBody,
   ShopListingParams,
   ShopListingsResponse,
+  type ShopListingCatalogItem,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
@@ -15,6 +16,13 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
 
 type Shop = { id: string; state: string };
 type Auth = { pool: Pool; clock: Clock; secret: string };
+type CatalogRow = {
+  packId: string; productId: string; name: string; brand: string | null; baseUnit: ShopListingCatalogItem["baseUnit"];
+  classification: ShopListingCatalogItem["classification"]; packQuantity: string; barcode: string | null;
+  listingId: string | null; onlinePrice: string | null; counterPrice: string | null; mrp: string | null;
+  lowStockLevel: string | null; available: boolean | null; minimumOrderQuantity: string | null; quantityStep: string | null;
+  stock: string; openingStockRecorded: boolean;
+};
 
 async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | undefined> {
   const result = await client.query<Shop>(
@@ -27,6 +35,31 @@ async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | 
 
 function notReady(reply: { code(status: number): { send(body: unknown): unknown } }) {
   return reply.code(409).send({ error: { code: "SHOP_LISTING_NOT_READY" } });
+}
+
+function requiredListingValue<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Saved shop listing has no ${field}`);
+  return value;
+}
+
+function projectCatalogItem(
+  row: CatalogRow,
+  quantityOptions: NonNullable<ShopListingCatalogItem["listing"]>["quantityOptions"] = [],
+): ShopListingCatalogItem {
+  return {
+    packId: row.packId, productId: row.productId, name: row.name, brand: row.brand,
+    baseUnit: row.baseUnit, classification: row.classification, packQuantity: row.packQuantity,
+    barcode: row.barcode, stock: row.stock, openingStockRecorded: row.openingStockRecorded,
+    listing: row.listingId === null ? null : {
+      id: row.listingId,
+      onlinePrice: requiredListingValue(row.onlinePrice, "online price"),
+      counterPrice: requiredListingValue(row.counterPrice, "counter price"),
+      mrp: requiredListingValue(row.mrp, "MRP"),
+      lowStockLevel: requiredListingValue(row.lowStockLevel, "low-stock level"),
+      available: requiredListingValue(row.available, "availability"),
+      minimumOrderQuantity: row.minimumOrderQuantity, quantityStep: row.quantityStep, quantityOptions,
+    },
+  };
 }
 
 const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name, p.brand,
@@ -55,40 +88,14 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       const shop = await ownerShop(client, who.accountId);
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "approved" && shop.state !== "live") return notReady(reply);
-      const rows = await client.query<Record<string, unknown>>(`${catalogSql} ORDER BY lower(p.name), pk.quantity`, [shop.id]);
+      const rows = await client.query<CatalogRow>(`${catalogSql} ORDER BY lower(p.name), pk.quantity`, [shop.id]);
       const items = await Promise.all(rows.rows.map(async (row) => {
-        if (typeof row.listingId !== "string") return {
-          packId: row.packId, productId: row.productId, name: row.name, brand: row.brand,
-          baseUnit: row.baseUnit, classification: row.classification, packQuantity: row.packQuantity,
-          barcode: row.barcode, listing: null, stock: "0", openingStockRecorded: false,
-        };
-        const options = await client.query<{ id: string; quantity: string; price: string }>(
-          `SELECT id, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity`,
+        if (!row.listingId) return projectCatalogItem(row);
+        const options = await client.query<{ id: string; name: string; quantity: string; price: string }>(
+          `SELECT id, name, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity`,
           [row.listingId],
         );
-        return {
-          packId: row.packId,
-          productId: row.productId,
-          name: row.name,
-          brand: row.brand,
-          baseUnit: row.baseUnit,
-          classification: row.classification,
-          packQuantity: row.packQuantity,
-          barcode: row.barcode,
-          stock: row.stock,
-          openingStockRecorded: row.openingStockRecorded,
-          listing: {
-            id: row.listingId,
-            onlinePrice: row.onlinePrice,
-            counterPrice: row.counterPrice,
-            mrp: row.mrp,
-            lowStockLevel: row.lowStockLevel,
-            available: row.available,
-            minimumOrderQuantity: row.minimumOrderQuantity,
-            quantityStep: row.quantityStep,
-            quantityOptions: options.rows,
-          },
-        };
+        return projectCatalogItem(row, options.rows);
       }));
       return reply.send({ items });
     });
@@ -140,21 +147,14 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       if (!listingId) throw new Error("Shop listing save returned no ID");
       await client.query("DELETE FROM shop_quantity_price_options WHERE listing_id = $1", [listingId]);
       for (const option of body.quantityOptions) {
-        await client.query("INSERT INTO shop_quantity_price_options (listing_id, quantity, price) VALUES ($1, $2, $3)", [listingId, option.quantity, option.price]);
+        await client.query("INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price) VALUES ($1, $2, $3, $4)", [listingId, option.name, option.quantity, option.price]);
       }
       const response = await client.query(`${catalogSql} AND pk.id = $2`, [shop.id, packId]);
-      const row = response.rows[0] as Record<string, unknown> | undefined;
+      const row = response.rows[0] as CatalogRow | undefined;
       if (!row) throw new Error("Saved shop listing disappeared");
-      const options = await client.query("SELECT id, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity", [listingId]);
+      const options = await client.query("SELECT id, name, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity", [listingId]);
       await client.query("COMMIT");
-      return reply.send({
-        packId: row.packId, productId: row.productId, name: row.name, brand: row.brand, baseUnit: row.baseUnit,
-        classification: row.classification, packQuantity: row.packQuantity, barcode: row.barcode, stock: row.stock,
-        openingStockRecorded: row.openingStockRecorded,
-        listing: { id: listingId, onlinePrice: row.onlinePrice, counterPrice: row.counterPrice, mrp: row.mrp,
-          lowStockLevel: row.lowStockLevel, available: row.available, minimumOrderQuantity: row.minimumOrderQuantity,
-          quantityStep: row.quantityStep, quantityOptions: options.rows },
-      });
+      return reply.send(projectCatalogItem(row, options.rows));
     });
   });
 

@@ -188,6 +188,7 @@ export const strings = {
     quantity: "Quantity in base units",
     optionQuantity: "Offer quantity in base units",
     optionPrice: "Offer price (₹)",
+    optionName: "Offer name",
     available: "Available to customers",
     saveStock: "Save opening stock",
     saveOffline: "Saved on this phone. It will sync when you're online.",

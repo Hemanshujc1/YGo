@@ -19,6 +19,12 @@ describe("shop listing contracts", () => {
     expect(OpeningStockBody.safeParse({ quantity: "1.25" }).success).toBe(false);
   });
 
+  it("requires a name for each quantity-price option", () => {
+    const required = { onlinePrice: "10", counterPrice: "11", mrp: "12", lowStockLevel: "0" };
+    expect(SaveShopListingBody.safeParse({ ...required, quantityOptions: [{ name: "Family pack", quantity: "2", price: "38" }] }).success).toBe(true);
+    expect(SaveShopListingBody.safeParse({ ...required, quantityOptions: [{ quantity: "2", price: "38" }] }).success).toBe(false);
+  });
+
   it("requires the API response to expose the first stock movement", () => {
     const response = {
       items: [{

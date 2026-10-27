@@ -228,6 +228,7 @@ export const shopListings = pgTable("shop_listings", {
 export const shopQuantityPriceOptions = pgTable("shop_quantity_price_options", {
   id: uuid("id").primaryKey().defaultRandom(),
   listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  name: text("name").notNull(),
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   price: numeric("price", { precision: 12, scale: 2 }).notNull(),
 }, (table) => [

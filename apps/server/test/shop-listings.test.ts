@@ -75,7 +75,7 @@ async function shop(state = "approved") {
 const listingBody = {
   onlinePrice: "20.50", counterPrice: "21", mrp: "25", lowStockLevel: "1.000",
   minimumOrderQuantity: "0.25", quantityStep: "0.05",
-  quantityOptions: [{ quantity: "2", price: "38" }],
+  quantityOptions: [{ name: "Family pack", quantity: "2", price: "38" }],
 };
 
 describe("Owner shop listings and opening stock", () => {
@@ -107,7 +107,7 @@ describe("Owner shop listings and opening stock", () => {
 
     const saved = await save();
     expect(saved.statusCode).toBe(200);
-    expect(saved.json()).toMatchObject({ listing: { onlinePrice: "20.50", counterPrice: "21.00", mrp: "25.00", minimumOrderQuantity: "0.250", quantityStep: "0.050", quantityOptions: [{ quantity: "2.000", price: "38.00" }] } });
+    expect(saved.json()).toMatchObject({ listing: { onlinePrice: "20.50", counterPrice: "21.00", mrp: "25.00", minimumOrderQuantity: "0.250", quantityStep: "0.050", quantityOptions: [{ name: "Family pack", quantity: "2.000", price: "38.00" }] } });
     const clientId = randomUUID();
     const first = await opening({ quantity: "2.500", clientId });
     const retry = await opening({ quantity: "2.5", clientId });

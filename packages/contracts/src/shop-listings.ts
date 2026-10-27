@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PackQuantity, ShopPrice } from "./fields";
+import { PackQuantity, ProductName, ShopPrice } from "./fields";
 
 export const BaseUnitQuantity = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
 export const SignedBaseUnitQuantity = z.string().regex(/^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
@@ -8,6 +8,7 @@ export const ShopListingParams = z.strictObject({ packId: z.uuid() });
 
 export const ShopQuantityPriceOption = z.strictObject({
   id: z.uuid(),
+  name: ProductName,
   quantity: PackQuantity,
   price: ShopPrice,
 });
@@ -41,6 +42,7 @@ export const ShopListingCatalogItem = z.strictObject({
 export const ShopListingsResponse = z.strictObject({ items: z.array(ShopListingCatalogItem) });
 
 export const ShopQuantityPriceOptionInput = z.strictObject({
+  name: ProductName,
   quantity: PackQuantity,
   price: ShopPrice,
 });

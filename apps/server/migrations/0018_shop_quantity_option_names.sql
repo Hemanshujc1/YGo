@@ -1,0 +1,1 @@
+ALTER TABLE "shop_quantity_price_options" ADD COLUMN "name" text NOT NULL;
