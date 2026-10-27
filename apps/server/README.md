@@ -138,3 +138,59 @@ Every non-2xx response is the `ErrorEnvelope` from `@ygo/contracts`: `{"error":{
 ## Google and Apple sign-in
 
 Follow the [step-by-step provider setup guide](../../docs/operations/social-sign-in.md), including local migration, app configuration and device checks.
+
+### Private visit photos (#320)
+
+Set `VISIT_PHOTO_BUCKET` to a dedicated **private** bucket. It reuses
+`S3_REGION` and optional `S3_ENDPOINT`; it must differ from
+`PRODUCT_IMAGE_BUCKET` and has no public URL base. AWS credentials use the
+SDK's normal credential chain. The route integration is tracked in #322:
+create `createS3FileStorage({ bucket, region, endpoint })` with these settings,
+pass it to `createVisitPhotoStorage(files)`, authorize the Admin, and resolve the
+upload ID or evidence key from the application's own records before calling it.
+Neither URLs nor storage keys come from request input.
+
+`createUpload` signs a JPEG PUT for the exact declared size for 15 minutes.
+`validate` downloads at most 10 MB, decodes the JPEG and reads EXIF GPS from the
+original. Missing/invalid GPS raises `VisitPhotoLocationMissingError`; invalid
+image bytes raise `InvalidVisitPhotoError`. Capture time is preserved as the
+camera's original text, or null. Validation writes the exact original to a
+separate content-addressed evidence key. Persist that returned key; never save
+the temporary upload key as evidence. Reusing an upload link cannot overwrite
+previously recorded evidence. `downloadUrl` signs a GET for 5 minutes with
+`private, no-store` caching. Application authorization belongs in #322.
+
+Privacy also requires storage configuration. For AWS, enable all S3 Block
+Public Access settings, bucket-owner-enforced ownership, encryption and
+versioning (see `docs/operations/provisioning.md`). Grant the server role
+GetObject/PutObject only in this bucket; no public bucket policy, ACL or CDN.
+Configure a lifecycle rule to expire `visit-uploads/` staging objects after one
+day. Keep `visit-photos/` originals for the retention policy in CONTEXT.md;
+do not apply the staging expiry to evidence. The storage adapter never sets a
+public ACL.
+
+The anonymous SeaweedFS command above is for public product images. Before
+using visit photos with a local S3 service, configure its authentication and
+bucket permissions. For SeaweedFS, write a local `s3.json` (keep it out of Git):
+
+```json
+{"identities":[{"name":"local-server","credentials":[{"accessKey":"local","secretKey":"local-secret"}],"actions":["Admin","Read","Write","List"]}]}
+```
+
+Mount it into the container with `-v "$PWD/s3.json:/etc/seaweedfs/s3.json:ro"`
+and add `-s3.config=/etc/seaweedfs/s3.json` to the `server` arguments above.
+This enables credential checks; do not add an anonymous identity. Create the
+private bucket using the authenticated S3 API and set `VISIT_PHOTO_BUCKET`.
+The example identity is for local development only.
+
+Confirm a signed PUT and signed GET succeed, then remove
+the signature and confirm both are denied. Also confirm an upload URL cannot
+GET an object or PUT to an evidence key. Repeat these checks against the
+provisioned bucket: URL parsing and adapter tests do not verify deployed bucket
+permissions. Unit tests use a private S3 protocol fixture that independently
+verifies the SigV4 signature, method, destination, size and content type.
+
+ExifReader parses GPS and capture metadata because the installed Sharp exposes
+raw EXIF rather than these fields. The AWS presigner signs the configured S3
+endpoint; no installed dependency provided this operation. ExifReader's shipped
+bundle needs no install script, so its optional custom-build script stays off.
