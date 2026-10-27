@@ -1,8 +1,19 @@
 import { type ErrorCode, PlaceSession, type SaveAddressBody } from "@ygo/contracts";
 import type { GeoAddress } from "@ygo/mobile/address-at";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AreaAnswer, Place } from "../src/lib/location-flow";
-import { addressBody, confirmAddress, type Geocoder, newSession, pickPlace, placeSessions, readPin, searchPlaces } from "../src/lib/map-place";
+import {
+  addressBody,
+  confirmAddress,
+  type Geocoder,
+  newSession,
+  pickPlace,
+  type PinView,
+  pinSpot,
+  placeSessions,
+  readPin,
+  searchPlaces,
+} from "../src/lib/map-place";
 
 const prabhat: GeoAddress = {
   isoCountryCode: "IN",
@@ -251,5 +262,217 @@ describe("confirmAddress", () => {
     expect(await confirmAddress(lost, place, other)).toEqual({ kind: "offline" });
     expect(await confirmAddress(works, place, other)).toEqual({ kind: "done" });
     expect(sent).toEqual([other, other, other]);
+  });
+});
+
+describe("pinSpot", () => {
+  const before = { latitude: 18.5196, longitude: 73.8399 };
+  const after = { latitude: 18.5590, longitude: 73.7868 };
+  // Each spot has its own pincode, so a saved body shows which spot it came from.
+  const beyond = { latitude: 18.5314, longitude: 73.8446 };
+  const pincodes = new Map([[before.latitude, "411005"], [after.latitude, "411045"], [beyond.latitude, "411007"]]);
+  const at = async ({ latitude }: { latitude: number }) => [{ ...prabhat, postalCode: pincodes.get(latitude) ?? null }];
+
+  // A geocoder whose answers wait until the test lands them, in any order.
+  const held = () => {
+    const asked: { latitude: number }[] = [];
+    const waiting: (() => void)[] = [];
+    const lookup = geocoder((point) => {
+      asked.push(point);
+      return new Promise((done) => waiting.push(() => void at(point).then(done)));
+    });
+    return { lookup, asked, land: (i: number) => waiting[i]?.() };
+  };
+
+  // What Confirm would send if tapped now: the body with the pin's spot, or nothing when Confirm is off.
+  const tap = (pin: ReturnType<typeof pinSpot>) => {
+    const place = pin.place();
+    return place && addressBody(place, "home", "Flat 4");
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("saves where the map stops when Confirm is tapped right after a swipe, never the spot before (#339)", async () => {
+    const pin = pinSpot(geocoder(at), () => {});
+    pin.open(before);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)?.point).toEqual(before);
+
+    // The swipe: the map starts moving, and Confirm is tapped while it still glides.
+    pin.moving(true);
+    expect(tap(pin)).toBeNull();
+
+    // The map stops; Confirm stays off until the new spot is read.
+    pin.moved(after);
+    pin.moving(false);
+    expect(tap(pin)).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
+  });
+
+  it("lets Confirm save the same spot again when the map stops where it started", async () => {
+    const pin = pinSpot(geocoder(at), () => {});
+    pin.open(before);
+    await vi.advanceTimersByTimeAsync(0);
+    // Android reports a move that ends where it began, as when the map opens.
+    pin.moving(true);
+    pin.moving(false);
+    expect(tap(pin)).toMatchObject({ point: before, pincode: "411005" });
+  });
+
+  it("keeps Confirm off when a read lands while the map is moving", async () => {
+    let land = () => {};
+    const slow = geocoder((point) => new Promise((done) => (land = () => void at(point).then(done))));
+    const views: PinView[] = [];
+    const pin = pinSpot(slow, (view) => views.push(view));
+    pin.open(before);
+    pin.moving(true);
+    land();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toBeNull();
+    expect(views.at(-1)?.reading).toBe(true);
+  });
+
+  it("never lets a late read of the old spot replace the newer one", async () => {
+    const waiting: (() => void)[] = [];
+    const held = geocoder((point) => new Promise((done) => waiting.push(() => void at(point).then(done))));
+    const views: PinView[] = [];
+    const pin = pinSpot(held, (view) => views.push(view));
+    pin.open(before);
+    pin.moving(true);
+    pin.moved(after);
+    pin.moving(false);
+    await vi.advanceTimersByTimeAsync(600);
+    // The new spot's read lands first, then the old one.
+    waiting[1]?.();
+    await vi.advanceTimersByTimeAsync(0);
+    waiting[0]?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
+    expect(views.at(-1)).toMatchObject({ reading: false, spot: { place: { pincode: "411045" } } });
+  });
+
+  it("ignores a read still on its way when the screen leaves, and asks nothing more", async () => {
+    const { lookup, asked, land } = held();
+    const views: PinView[] = [];
+    const pin = pinSpot(lookup, (view) => views.push(view));
+    pin.open(before);
+    pin.moving(true);
+    pin.moved(after);
+    pin.moving(false);
+    pin.leave();
+    const shown = views.length;
+    land(0);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(asked).toEqual([before]);
+    expect(views).toHaveLength(shown);
+    expect(tap(pin)).toBeNull();
+  });
+
+  it("reads where the map is, not where it opened, when the screen starts again after leaving", async () => {
+    // React runs a screen's effects again after leaving, as in development and after a hot reload.
+    const { lookup, land } = held();
+    const pin = pinSpot(lookup, () => {});
+    pin.open(before);
+    land(0);
+    await vi.advanceTimersByTimeAsync(0);
+    pin.moving(true);
+    pin.moved(after);
+    pin.moving(false);
+    await vi.advanceTimersByTimeAsync(600);
+    pin.leave();
+    pin.open(before);
+    expect(tap(pin)).toBeNull();
+    land(1);
+    land(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
+  });
+
+  it("turns Confirm on after starting again when the screen left while the map was moving", async () => {
+    // The map that was moving may be gone with its stop, so the screen that starts again must not wait for it.
+    const { lookup, land } = held();
+    const pin = pinSpot(lookup, () => {});
+    pin.open(before);
+    land(0);
+    await vi.advanceTimersByTimeAsync(0);
+    pin.moving(true);
+    pin.leave();
+    pin.open(before);
+    land(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toMatchObject({ point: before });
+  });
+
+  it("keeps Confirm off through repeated moves while a read is on its way, and saves only the last stop", async () => {
+    const { lookup, asked, land } = held();
+    const pin = pinSpot(lookup, () => {});
+    pin.open(before);
+    land(0);
+    await vi.advanceTimersByTimeAsync(0);
+    pin.moving(true);
+    pin.moved(after);
+    pin.moving(false);
+    await vi.advanceTimersByTimeAsync(600);
+    // The map moves on before the read of the spot after the first swipe lands.
+    pin.moving(true);
+    pin.moved(beyond);
+    pin.moving(false);
+    land(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(asked).toEqual([before, after, beyond]);
+    expect(tap(pin)).toBeNull();
+    land(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tap(pin)).toMatchObject({ point: beyond, pincode: "411007" });
+  });
+
+  describe("overlapping movement reports", () => {
+    it("stays off through several starts and turns on only after the stop's read (a drag, then a fling)", async () => {
+      const pin = pinSpot(geocoder(at), () => {});
+      pin.open(before);
+      await vi.advanceTimersByTimeAsync(0);
+      pin.moving(true);
+      pin.moving(true);
+      expect(tap(pin)).toBeNull();
+      pin.moved(after);
+      pin.moving(false);
+      expect(tap(pin)).toBeNull();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
+    });
+
+    it("stays off when the map starts again while a read is on its way, until it stops", async () => {
+      const { lookup, land } = held();
+      const pin = pinSpot(lookup, () => {});
+      pin.open(before);
+      land(0);
+      await vi.advanceTimersByTimeAsync(0);
+      pin.moving(true);
+      pin.moved(after);
+      pin.moving(false);
+      await vi.advanceTimersByTimeAsync(600);
+      pin.moving(true);
+      land(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tap(pin)).toBeNull();
+      // It stops where it was, so the read that landed is the right one.
+      pin.moving(false);
+      expect(tap(pin)).toMatchObject({ point: after, pincode: "411045" });
+    });
+
+    it("stays off when a stop arrives with no start before the first read lands", async () => {
+      const { lookup, land } = held();
+      const pin = pinSpot(lookup, () => {});
+      pin.open(before);
+      pin.moving(false);
+      expect(tap(pin)).toBeNull();
+      land(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tap(pin)).toMatchObject({ point: before, pincode: "411005" });
+    });
   });
 });

@@ -36,7 +36,11 @@ export async function spotNow(map: { getCamera: () => Promise<{ center: AddressP
  * Google's map on both phones (#307, Q5), moving under a pin fixed in the
  * middle (#242, Q6): the spot under the pin's point is the one chosen.
  * `onMoved` gets each new spot once the map stops; Android also reports the
- * opening spot, which is skipped. `locked` holds the map still and lets
+ * opening spot, which is skipped. `onMoving` hears when the map starts moving
+ * and when it stops, even where it began, so a screen can tell while the spot
+ * under the pin is not known yet (#339). Both phones may report several starts
+ * (a drag, then a fling) before one stop, always in order, so the newest
+ * report says whether the map moves. `locked` holds the map still and lets
  * touches pass through, for a preview or while a spot is being saved.
  * Each app passes its own Lucide `pin`, its bottom tip at the middle.
  * `ref` reads the spot under the pin at the moment of a tap.
@@ -44,6 +48,7 @@ export async function spotNow(map: { getCamera: () => Promise<{ center: AddressP
 export function PinMap({
   start,
   onMoved,
+  onMoving,
   locked = false,
   pin,
   className,
@@ -52,6 +57,7 @@ export function PinMap({
   ref?: Ref<PinMapHandle>;
   start: AddressPoint;
   onMoved?: (point: AddressPoint) => void;
+  onMoving?: (moving: boolean) => void;
   locked?: boolean;
   pin: ReactNode;
   className?: string;
@@ -66,11 +72,14 @@ export function PinMap({
         className="flex-1"
         provider={PROVIDER_GOOGLE}
         initialRegion={{ ...start, ...streetLevel }}
+        onRegionChangeStart={() => onMoving?.(true)}
         onRegionChangeComplete={({ latitude, longitude }) => {
           const point = { latitude, longitude };
-          if (samePoint(last.current, point)) return;
-          last.current = point;
-          onMoved?.(point);
+          if (!samePoint(last.current, point)) {
+            last.current = point;
+            onMoved?.(point);
+          }
+          onMoving?.(false);
         }}
         scrollEnabled={!locked}
         zoomEnabled={!locked}
