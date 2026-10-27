@@ -4,6 +4,7 @@ import {
   check,
   customType,
   date,
+  doublePrecision,
   index,
   integer,
   numeric,
@@ -31,10 +32,16 @@ export const accounts = pgTable("accounts", {
   name: text("name"),
   phone: text("phone").unique(),
   phoneVerified: boolean("phone_verified").notNull().default(false),
+  // In-person confirmation is independent of SMS verification (ACC-14).
+  phoneVisitConfirmedAt: timestamp("phone_visit_confirmed_at", { withTimezone: true }),
+  emailVisitConfirmedAt: timestamp("email_visit_confirmed_at", { withTimezone: true }),
   role: text("role").notNull().default("customer"),
   // System, Light or Dark, shared by both mobile apps (#195).
   theme: text("theme").notNull().default("system"),
-}, (table) => [check("accounts_theme_valid", sql`${table.theme} IN ('system', 'light', 'dark')`)]);
+}, (table) => [
+  check("accounts_theme_valid", sql`${table.theme} IN ('system', 'light', 'dark')`),
+  check("accounts_phone_confirmation_valid", sql`${table.phoneVisitConfirmedAt} IS NULL OR ${table.phone} IS NOT NULL`),
+]);
 
 // Admin authority is independent of the account's customer role and of tokens.
 export const adminMemberships = pgTable("admin_memberships", {
@@ -196,6 +203,76 @@ export const shopMembers = pgTable("shop_members", {
 }, (table) => [
   check("shop_members_role_valid", sql`${table.role} IN ('owner', 'staff')`),
   index("shop_members_shop_id_idx").on(table.shopId),
+]);
+
+// Pending uploads bind the server-declared size to a shop and actor. They are
+// disposable; durable visits never depend on their lifecycle (#321, DEL-10).
+export const visitPhotoUploads = pgTable("visit_photo_uploads", {
+  id: uuid("id").primaryKey(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  actorId: uuid("actor_id").notNull(),
+  byteLength: integer("byte_length").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("visit_photo_uploads_size_valid", sql`${table.byteLength} BETWEEN 1 AND 10000000`),
+  index("visit_photo_uploads_expiry_idx").on(table.expiresAt),
+]);
+
+// Actor IDs deliberately have no account FK: deleting personal details must
+// preserve the nameless actor and evidence history (DEL-12), like admin_actions.
+export const shopVisits = pgTable("shop_visits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  actorId: uuid("actor_id").notNull(),
+  visitDate: date("visit_date").notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  pan: boolean("pan").notNull(),
+  fssai: boolean("fssai").notNull(),
+  ownerPhone: boolean("owner_phone").notNull(),
+  ownerEmail: boolean("owner_email").notNull(),
+  alarmPermission: boolean("alarm_permission").notNull(),
+  testerOptIn: boolean("tester_opt_in").notNull(),
+  notes: text("notes"),
+}, (table) => [
+  check("shop_visits_date_valid", sql`isfinite(${table.visitDate}) AND ${table.visitDate} <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date`),
+  check("shop_visits_checks_complete", sql`${table.pan} AND ${table.fssai} AND ${table.ownerPhone} AND ${table.ownerEmail} AND ${table.alarmPermission} AND ${table.testerOptIn}`),
+  check("shop_visits_notes_valid", sql`${table.notes} IS NULL OR char_length(${table.notes}) <= 500`),
+  index("shop_visits_shop_recorded_idx").on(table.shopId, table.recordedAt.desc()),
+]);
+
+// Photo and GPS data may be purged a year after closure without deleting the
+// visit's date, actor or checks, which have the shop's eight-year clock (DEL-10).
+export const visitPhotos = pgTable("visit_photos", {
+  id: uuid("id").primaryKey(),
+  visitId: uuid("visit_id").notNull().unique().references(() => shopVisits.id),
+  objectKey: text("object_key").notNull().unique(),
+  latitude: doublePrecision("latitude").notNull(),
+  longitude: doublePrecision("longitude").notNull(),
+  // Camera-local EXIF text, without inventing a timezone.
+  capturedAt: text("captured_at"),
+}, (table) => [
+  check("visit_photos_key_valid", sql`btrim(${table.objectKey}) <> ''`),
+  check("visit_photos_latitude_valid", sql`${table.latitude} BETWEEN -90 AND 90`),
+  check("visit_photos_longitude_valid", sql`${table.longitude} BETWEEN -180 AND 180`),
+]);
+
+export const onboardingFees = pgTable("onboarding_fees", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  actorId: uuid("actor_id").notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  status: text("status").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }),
+  paymentDate: date("payment_date"),
+  reference: text("reference"),
+  reason: text("reason"),
+}, (table) => [
+  check("onboarding_fees_status_valid", sql`(${table.status} = 'waived' AND ${table.reason} IS NOT NULL AND ${table.amount} IS NULL AND ${table.paymentDate} IS NULL AND ${table.reference} IS NULL) OR (${table.status} = 'paid' AND ${table.amount} IS NOT NULL AND ${table.paymentDate} IS NOT NULL AND ${table.reference} IS NOT NULL)`),
+  check("onboarding_fees_amount_valid", sql`${table.amount} IS NULL OR (${table.amount} > 0 AND ${table.amount} <> 'NaN'::numeric)`),
+  check("onboarding_fees_date_valid", sql`${table.paymentDate} IS NULL OR (isfinite(${table.paymentDate}) AND ${table.paymentDate} <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)`),
+  check("onboarding_fees_reference_valid", sql`${table.reference} IS NULL OR (btrim(${table.reference}) <> '' AND char_length(${table.reference}) <= 500)`),
+  check("onboarding_fees_reason_valid", sql`${table.reason} IS NULL OR (btrim(${table.reason}) <> '' AND char_length(${table.reason}) <= 500)`),
+  index("onboarding_fees_shop_recorded_idx").on(table.shopId, table.recordedAt.desc()),
 ]);
 
 export const loginCodes = pgTable("login_codes", {
