@@ -221,7 +221,7 @@ export const shopListings = pgTable("shop_listings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("shop_listings_shop_pack_idx").on(table.shopId, table.packId),
-  check("shop_listings_prices_valid", sql`${table.onlinePrice} >= 0 AND ${table.onlinePrice} <> 'NaN'::numeric AND ${table.counterPrice} >= 0 AND ${table.counterPrice} <> 'NaN'::numeric AND ${table.mrp} >= 0 AND ${table.mrp} <> 'NaN'::numeric AND ${table.lowStockLevel} >= 0 AND ${table.lowStockLevel} <> 'NaN'::numeric`),
+  check("shop_listings_prices_valid", sql`${table.onlinePrice} >= 0 AND ${table.onlinePrice} <> 'NaN'::numeric AND ${table.counterPrice} >= 0 AND ${table.counterPrice} <> 'NaN'::numeric AND ${table.mrp} >= 0 AND ${table.mrp} <> 'NaN'::numeric AND ${table.onlinePrice} <= ${table.mrp} AND ${table.counterPrice} <= ${table.mrp} AND ${table.lowStockLevel} >= 0 AND ${table.lowStockLevel} <> 'NaN'::numeric`),
   check("shop_listings_measured_rules_pair", sql`((${table.minimumOrderQuantity} IS NULL) AND (${table.quantityStep} IS NULL)) OR (${table.minimumOrderQuantity} > 0 AND ${table.minimumOrderQuantity} <> 'NaN'::numeric AND ${table.quantityStep} > 0 AND ${table.quantityStep} <> 'NaN'::numeric)`),
 ]);
 

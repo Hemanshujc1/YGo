@@ -1,4 +1,4 @@
-import { OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
+import { OpeningStockBody, type ErrorCode, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import { createMMKV } from "react-native-mmkv";
 
 const storage = createMMKV({ id: "shop-opening-stock" });
@@ -29,4 +29,27 @@ export function queueOpeningStock(shopId: string, packId: string, entry: Opening
 
 export function clearOpeningStock(shopId: string, packId: string): void {
   storage.remove(key(shopId, packId));
+}
+
+export type OpeningStockSyncResult =
+  | { kind: "empty" }
+  | { kind: "synced" }
+  | { kind: "pending"; code: ErrorCode | null };
+
+export async function syncQueuedOpeningStock(
+  shopId: string,
+  packId: string,
+  send: (entry: OpeningStockEntry) => Promise<{ ok: true } | { ok: false; code: ErrorCode }>,
+): Promise<OpeningStockSyncResult> {
+  const entry = pendingOpeningStock(shopId, packId);
+  if (!entry) return { kind: "empty" };
+  let result: { ok: true } | { ok: false; code: ErrorCode };
+  try {
+    result = await send(entry);
+  } catch {
+    return { kind: "pending", code: null };
+  }
+  if (!result.ok) return { kind: "pending", code: result.code };
+  clearOpeningStock(shopId, packId);
+  return { kind: "synced" };
 }

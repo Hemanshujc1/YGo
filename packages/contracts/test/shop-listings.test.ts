@@ -25,6 +25,14 @@ describe("shop listing contracts", () => {
     expect(SaveShopListingBody.safeParse({ ...required, quantityOptions: [{ quantity: "2", price: "38" }] }).success).toBe(false);
   });
 
+  it("keeps online and counter prices at or below MRP without floating-point comparisons", () => {
+    const valid = { onlinePrice: "10.10", counterPrice: "10.10", mrp: "10.10", lowStockLevel: "0" };
+    expect(SaveShopListingBody.safeParse(valid).success).toBe(true);
+    expect(SaveShopListingBody.safeParse({ ...valid, onlinePrice: "10.11" }).success).toBe(false);
+    expect(SaveShopListingBody.safeParse({ ...valid, counterPrice: "10.11" }).success).toBe(false);
+    expect(SaveShopListingBody.safeParse({ ...valid, onlinePrice: "not-a-price" }).success).toBe(false);
+  });
+
   it("requires the API response to expose the first stock movement", () => {
     const response = {
       items: [{

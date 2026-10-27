@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  CountedPackQuantity,
   ErrorEnvelope,
   OpeningStockBody,
   OpeningStockResponse,
@@ -35,6 +34,10 @@ async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | 
 
 function notReady(reply: { code(status: number): { send(body: unknown): unknown } }) {
   return reply.code(409).send({ error: { code: "SHOP_LISTING_NOT_READY" } });
+}
+
+function isWholeBaseUnitQuantity(quantity: string): boolean {
+  return !/\.\d*[1-9]/.test(quantity);
 }
 
 function requiredListingValue<T>(value: T | null, field: string): T {
@@ -129,7 +132,7 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       if (product.classification === "counted" && (body.minimumOrderQuantity !== null || body.quantityStep !== null)) {
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["minimumOrderQuantity", "quantityStep"] } });
       }
-      if (product.baseUnit === "each" && [body.lowStockLevel, ...body.quantityOptions.map((option) => option.quantity)].some((quantity) => quantity !== "0" && !CountedPackQuantity.safeParse(quantity).success)) {
+      if (product.baseUnit === "each" && [body.lowStockLevel, ...body.quantityOptions.map((option) => option.quantity)].some((quantity) => !isWholeBaseUnitQuantity(quantity))) {
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["lowStockLevel", "quantityOptions"] } });
       }
       const saved = await client.query<{ id: string }>(
@@ -177,7 +180,7 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       );
       const row = listing.rows[0];
       if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-      if (row.baseUnit === "each" && body.quantity !== "0" && !CountedPackQuantity.safeParse(body.quantity).success) {
+      if (row.baseUnit === "each" && !isWholeBaseUnitQuantity(body.quantity)) {
         return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["quantity"] } });
       }
       const existing = await client.query<{ actorId: string; clientId: string; quantity: string; sameQuantity: boolean; createdAt: Date }>(

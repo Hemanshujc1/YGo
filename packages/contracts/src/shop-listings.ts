@@ -47,6 +47,14 @@ export const ShopQuantityPriceOptionInput = z.strictObject({
   price: ShopPrice,
 });
 
+function priceInPaise(price: string): string | null {
+  const parsed = ShopPrice.safeParse(price);
+  if (!parsed.success) return null;
+  const [whole, fraction = ""] = parsed.data.split(".");
+  if (whole === undefined) return null;
+  return `${whole.padStart(10, "0")}${fraction.padEnd(2, "0")}`;
+}
+
 export const SaveShopListingBody = z.strictObject({
   onlinePrice: ShopPrice,
   counterPrice: ShopPrice,
@@ -56,7 +64,18 @@ export const SaveShopListingBody = z.strictObject({
   minimumOrderQuantity: PackQuantity.nullable().default(null),
   quantityStep: PackQuantity.nullable().default(null),
   quantityOptions: z.array(ShopQuantityPriceOptionInput).max(20).default([]),
-}).refine((body) => (body.minimumOrderQuantity === null) === (body.quantityStep === null), { path: ["quantityStep"] });
+})
+  .refine((body) => (body.minimumOrderQuantity === null) === (body.quantityStep === null), { path: ["quantityStep"] })
+  .refine((body) => {
+    const onlinePrice = priceInPaise(body.onlinePrice);
+    const mrp = priceInPaise(body.mrp);
+    return onlinePrice === null || mrp === null || onlinePrice <= mrp;
+  }, { path: ["onlinePrice"] })
+  .refine((body) => {
+    const counterPrice = priceInPaise(body.counterPrice);
+    const mrp = priceInPaise(body.mrp);
+    return counterPrice === null || mrp === null || counterPrice <= mrp;
+  }, { path: ["counterPrice"] });
 
 export const OpeningStockBody = z.strictObject({
   quantity: BaseUnitQuantity,
