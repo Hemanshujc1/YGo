@@ -68,6 +68,16 @@ describe("Admin visit and onboarding fee screen", () => {
     expect(api.createVisitPhotoUpload).not.toHaveBeenCalled();
   });
 
+  it("rejects non-JPEG bytes even when the file declares image/jpeg", async () => {
+    const api = setup();
+    const spoofed = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], "shop.jpg", { type: "image/jpeg" });
+    fireEvent.change(await screen.findByLabelText(strings.visitPhoto), { target: { files: [spoofed] } });
+    for (const label of Object.values(strings.visitChecks)) fireEvent.click(screen.getByLabelText(label));
+    fireEvent.click(await screen.findByRole("button", { name: strings.recordVisit }));
+    expect(await screen.findByText(strings.visitInvalidFields.photo)).toBeTruthy();
+    expect(api.createVisitPhotoUpload).not.toHaveBeenCalled();
+  });
+
   it("rejects future visit dates before issuing an upload URL", async () => {
     const api = setup();
     const dateInput = await screen.findByLabelText(strings.visitDate) as HTMLInputElement;

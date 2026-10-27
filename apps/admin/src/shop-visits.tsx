@@ -14,6 +14,18 @@ type FeeField = "status" | "amount" | "paymentDate" | "reference" | "reason";
 type VisitChecks = Record<keyof ShopVisitChecksContract, boolean>;
 
 const emptyChecks = (): VisitChecks => ({ pan: false, fssai: false, ownerPhone: false, ownerEmail: false, alarmPermission: false, testerOptIn: false });
+async function hasJpegSignature(file: File): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (!(reader.result instanceof ArrayBuffer)) return resolve(false);
+      const signature = new Uint8Array(reader.result);
+      resolve(signature.length === 3 && signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file.slice(0, 3));
+  });
+}
 
 export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; application: ShopApplication }) {
   const [onboarding, setOnboarding] = useState<ShopOnboarding | null>(null);
@@ -70,6 +82,10 @@ export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; appl
 
     setVisitBusy(true);
     try {
+      if (!await hasJpegSignature(selectedPhoto)) {
+        setVisitErrors({ photo: strings.visitInvalidFields.photo });
+        return;
+      }
       const upload = await api.createVisitPhotoUpload(application.id, validUploadBody);
       if (!upload.ok) { setVisitError(strings.errors[upload.code]); return; }
       const uploaded = await fetch(upload.data.uploadUrl, {
