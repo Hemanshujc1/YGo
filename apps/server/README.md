@@ -148,17 +148,23 @@ SDK's normal credential chain. The route integration is tracked in #322:
 create `createS3FileStorage({ bucket, region, endpoint })` with these settings,
 pass it to `createVisitPhotoStorage(files)`, authorize the Admin, and resolve the
 upload ID or evidence key from the application's own records before calling it.
+Record the declared byte length when creating the upload and pass that trusted
+value to `validate(uploadId, declaredByteLength)`; never take a new size from
+the validation request.
 Neither URLs nor storage keys come from request input.
 
 `createUpload` signs a JPEG PUT for the exact declared size for 15 minutes.
-`validate` downloads at most 10 MB, decodes the JPEG and reads EXIF GPS from the
+`validate` downloads at most 10 MB, rejects bytes that differ from the recorded
+declared size, decodes the JPEG and reads EXIF GPS from the
 original. Missing/invalid GPS raises `VisitPhotoLocationMissingError`; invalid
 image bytes raise `InvalidVisitPhotoError`. Capture time is preserved as the
 camera's original text, or null. Validation writes the exact original to a
 separate content-addressed evidence key. Persist that returned key; never save
 the temporary upload key as evidence. Reusing an upload link cannot overwrite
 previously recorded evidence. `downloadUrl` signs a GET for 5 minutes with
-`private, no-store` caching. Application authorization belongs in #322.
+`private, no-store` caching. Upload and access URLs must be presigned HTTP(S);
+the unsigned local `file:` adapter is rejected in every environment. Use
+authenticated local S3 for development. Application authorization belongs in #322.
 
 Privacy also requires storage configuration. For AWS, enable all S3 Block
 Public Access settings, bucket-owner-enforced ownership, encryption and

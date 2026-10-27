@@ -5,6 +5,7 @@ import path from "node:path";
 import { createServer, type IncomingMessage } from "node:http";
 import { once } from "node:events";
 import sharp from "sharp";
+import ExifReader from "exifreader";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocalFileStorage, createS3FileStorage, FileTooLargeError } from "../src/adapters/file-storage";
 import { VISIT_PHOTO_MAX_BYTES } from "@ygo/contracts";
@@ -84,7 +85,7 @@ describe("private visit photos", () => {
   async function upload(source: Buffer) {
     const upload = await storage.createUpload({ contentType: "image/jpeg", byteLength: source.length });
     expect((await fetch(upload.uploadUrl, { method: "PUT", body: new Uint8Array(source), headers: { "content-type": "image/jpeg" } })).status).toBe(200);
-    return upload;
+    return { ...upload, byteLength: source.length };
   }
 
   it("signs only the configured private destination and intended method/headers", async () => {
@@ -104,7 +105,7 @@ describe("private visit photos", () => {
   it("reads GPS and capture time from the original, freezing exact bytes away from the upload", async () => {
     const source = await jpeg();
     const uploaded = await upload(source);
-    const photo = await storage.validate(uploaded.id);
+    const photo = await storage.validate(uploaded.id, uploaded.byteLength);
     expect(photo).toMatchObject({ latitude: -12.5, longitude: -77.25, capturedAt: "2020:01:02 03:04:05" });
     const downloadUrl = await storage.downloadUrl(photo.key);
     const url = new URL(downloadUrl);
@@ -124,25 +125,71 @@ describe("private visit photos", () => {
 
   it("permits missing capture time and zero coordinates", async () => {
     const result = await upload(await jpeg(true, false, "0/1 0/1 0/1", "N"));
-    expect(await storage.validate(result.id)).toMatchObject({ latitude: 0, capturedAt: null });
+    expect(await storage.validate(result.id, result.byteLength)).toMatchObject({ latitude: 0, capturedAt: null });
   });
 
   it.each(["missing", "out-of-range", "bad-ref"])("rejects %s EXIF GPS without saving evidence", async (kind) => {
     const source = await jpeg(kind !== "missing", true, kind === "out-of-range" ? "91/1 0/1 0/1" : undefined, kind === "bad-ref" ? "X" : "N");
     const result = await upload(source);
-    await expect(storage.validate(result.id)).rejects.toBeInstanceOf(VisitPhotoLocationMissingError);
+    await expect(storage.validate(result.id, result.byteLength)).rejects.toBeInstanceOf(VisitPhotoLocationMissingError);
     expect([...objects.keys()].some((key) => key.includes("/visit-photos/"))).toBe(false);
+  });
+
+  it.each([-1, 1])("rejects bytes differing from the trusted declared size by %s", async (difference) => {
+    const result = await upload(await jpeg());
+    await expect(storage.validate(result.id, result.byteLength + difference)).rejects.toThrow("declared size");
+    expect([...objects.keys()].some((key) => key.includes("/visit-photos/"))).toBe(false);
+  });
+
+  it.each([0, 1, 2])("rejects a zero GPS denominator in JPEG component %s", async (component) => {
+    const source = await jpeg();
+    // Sharp writes little-endian TIFF rationals for this latitude fixture.
+    const latitude = Buffer.alloc(24);
+    [12, 1, 30, 1, 0, 1].forEach((value, index) => latitude.writeUInt32LE(value, index * 4));
+    const offset = source.indexOf(latitude);
+    expect(offset).toBeGreaterThan(0);
+    source.writeUInt32LE(0, offset + component * 8 + 4);
+    const result = await upload(source);
+    await expect(storage.validate(result.id, result.byteLength)).rejects.toBeInstanceOf(VisitPhotoLocationMissingError);
+    expect([...objects.keys()].some((key) => key.includes("/visit-photos/"))).toBe(false);
+  });
+
+  it.each([
+    [[0, 0], [0, 1], [0, 1]],
+    [[12, 1], [30, 0], [0, 1]],
+    [[12, 1], [30, 1], [0, 0]],
+    [[-12, -1], [0, 1], [0, 1]],
+    [[-12, 1], [0, 1], [0, 1]],
+    [[Infinity, 1], [0, 1], [0, 1]],
+    [[12, NaN], [0, 1], [0, 1]],
+    [["12", 1], [0, 1], [0, 1]],
+    [[12, 1], null, [0, 1]],
+    [[12, 1], [0, 1]],
+    [[12, 1, 2], [0, 1], [0, 1]],
+    "malformed",
+  ].map((value) => [value]))("rejects malformed EXIF rational values %# without saving evidence", async (value) => {
+    const result = await upload(await jpeg());
+    const load = vi.spyOn(ExifReader, "load").mockReturnValue({ exif: {
+      GPSLatitude: { value }, GPSLatitudeRef: { value: ["N"] },
+      GPSLongitude: { value: [[77, 1], [15, 1], [0, 1]] }, GPSLongitudeRef: { value: ["W"] },
+    } } as unknown as ReturnType<typeof ExifReader.load>);
+    try {
+      await expect(storage.validate(result.id, result.byteLength)).rejects.toBeInstanceOf(VisitPhotoLocationMissingError);
+      expect([...objects.keys()].some((key) => key.includes("/visit-photos/"))).toBe(false);
+    } finally {
+      load.mockRestore();
+    }
   });
 
   it("rejects non-JPEG, corrupt JPEG and oversized data despite declared content type", async () => {
     const valid = await jpeg();
     for (const source of [Buffer.from("not JPEG"), valid.subarray(0, valid.length - 40), await sharp(valid).png().toBuffer()]) {
       const result = await upload(source);
-      await expect(storage.validate(result.id)).rejects.toBeInstanceOf(InvalidVisitPhotoError);
+      await expect(storage.validate(result.id, result.byteLength)).rejects.toBeInstanceOf(InvalidVisitPhotoError);
     }
     const result = await upload(valid);
     objects.set(new URL(result.uploadUrl).pathname, Buffer.alloc(VISIT_PHOTO_MAX_BYTES + 1));
-    await expect(storage.validate(result.id)).rejects.toThrow("exceeds 10 MB");
+    await expect(storage.validate(result.id, result.byteLength)).rejects.toThrow("exceeds 10 MB");
     await expect(storage.createUpload({ contentType: "image/jpeg", byteLength: VISIT_PHOTO_MAX_BYTES + 1 })).rejects.toThrow();
   });
 });
@@ -155,12 +202,23 @@ it("exercises the same visit validation through local FileStorage with bounded r
     const storage = createVisitPhotoStorage(files);
     const source = await jpeg();
     await files.write("visit-uploads/local.jpg", source, "image/jpeg");
-    const photo = await storage.validate("local");
+    const photo = await storage.validate("local", source.length);
     expect(photo).toMatchObject({ latitude: -12.5, longitude: -77.25 });
     expect(await files.read(photo.key, source.length)).toEqual(source);
     await expect(files.read(photo.key, source.length - 1)).rejects.toBeInstanceOf(FileTooLargeError);
     await expect(files.write("../escape.jpg", source, "image/jpeg")).rejects.toThrow("escapes");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("refuses unsigned local upload and access URLs in production", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  try {
+    const storage = createVisitPhotoStorage(createLocalFileStorage("/tmp/ygo-visit-unsigned"));
+    await expect(storage.createUpload({ contentType: "image/jpeg", byteLength: 10 })).rejects.toThrow("presigned HTTP");
+    await expect(storage.downloadUrl("visit-photos/photo.jpg")).rejects.toThrow("presigned HTTP");
+  } finally {
+    vi.unstubAllEnvs();
   }
 });
