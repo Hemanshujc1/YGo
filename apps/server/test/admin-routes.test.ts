@@ -1177,12 +1177,22 @@ describe("Catalog CSV import preview", () => {
     expect(productImagePuts).toEqual([]);
   });
 
-  it("checks byte limits on ZIP uploads and total expanded image data", async () => {
+  it("rejects a ZIP upload above the byte limit", async () => {
     const headers = await token();
     const tooLargeZip = await preview(headers, csv([row()]), {}, { zip: Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imagesZipBytes + 1) });
     expect(tooLargeZip.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("rejects ZIP entries above the total expanded image byte limit", async () => {
+    const headers = await token();
     const entries = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`p${i}.png`, Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes)]));
     expect((await preview(headers, csv([row()]), entries)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    expect(productImagePuts).toEqual([]);
+  });
+
+  it("checks actual expanded image bytes when ZIP size declarations lie", async () => {
+    const headers = await token();
     // A dishonest ZIP header must not bypass the limits on actual expanded bytes.
     const dishonest = Buffer.from(zipSync({ "apple.png": Buffer.concat([await image(), Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes)]) }));
     dishonest.writeUInt32LE(80, 22);
