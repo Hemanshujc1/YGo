@@ -1,6 +1,6 @@
 import type { AddressPoint } from "@ygo/contracts";
 import { Button, Text } from "@ygo/mobile";
-import { PinMap } from "@ygo/mobile/pin-map";
+import { PinMap, type PinMapHandle } from "@ygo/mobile/pin-map";
 import { useRef } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,8 +16,7 @@ const words = strings.application.form.map;
  */
 export function MapPicker({ start, onUse, onBack }: { start: AddressPoint; onUse: (point: AddressPoint) => void; onBack: () => void }) {
   const insets = useSafeAreaInsets();
-  // The spot under the pin; the map opens on `start`.
-  const spot = useRef(start);
+  const map = useRef<PinMapHandle>(null);
   return (
     <Modal visible animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onBack}>
       <View className="flex-1 bg-bg" style={{ paddingTop: insets.top, paddingBottom: insets.bottom + 16 }}>
@@ -34,10 +33,11 @@ export function MapPicker({ start, onUse, onBack }: { start: AddressPoint; onUse
             {words.title}
           </Text>
         </View>
-        <PinMap className="flex-1" start={start} onMoved={(point) => (spot.current = point)} pin={<MapPin size={40} className="mb-10 text-primary" />} />
+        <PinMap ref={map} className="flex-1" start={start} pin={<MapPin size={40} className="mb-10 text-primary" />} />
         <View className="gap-4 px-4 pt-4">
           <Text className="text-body text-muted">{words.hint}</Text>
-          <Button label={words.use} onPress={() => onUse(spot.current)} />
+          {/* The spot under the pin at the tap, so a tap while the map still glides never hands back the spot before. */}
+          <Button label={words.use} onPress={() => void map.current?.spot().then(onUse)} />
         </View>
       </View>
     </Modal>
