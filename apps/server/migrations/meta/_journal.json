@@ -113,6 +113,13 @@
       "when": 1792938816226,
       "tag": "0015_identity_challenges",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793090073166,
+      "tag": "0016_visit_fee_persistence",
+      "breakpoints": true
     }
   ]
 }
