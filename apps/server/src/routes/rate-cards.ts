@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
   ErrorEnvelope, PublishRateCardBody, PublishedRateCardResponse, RATE_CARD_KEYS, RateCardResponse,
-  ResolveRateCardQuery, type RateCardKey, type RateCardValues,
+  ResolveRateCardQuery, type RateCardKey, RateCardValues,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
@@ -52,23 +52,24 @@ function inflate(leaves: Array<{ field: string; value: string | number | boolean
   const value = new Map(leaves.map((leaf) => [leaf.field, leaf.value]));
   const text = (field: string) => value.get(field) as string;
   const nullable = (field: string) => value.has(field) ? text(field) : null;
+  const hasRule = (key: string) => leaves.some((leaf) => leaf.field.startsWith(`${key}.`));
   const values: RateCardValues = {};
-  if (value.has("commission.formula")) values.commission = {
+  if (hasRule("commission")) values.commission = {
     formula: text("commission.formula") as "fixed" | "percentage" | "fixed_plus_percentage" | "higher_of" | "lower_of",
     fixedAmount: nullable("commission.fixedAmount"), percentage: nullable("commission.percentage"),
     minimum: nullable("commission.minimum"), maximum: nullable("commission.maximum"),
     base: text("commission.base") as "before_shop_discount" | "after_shop_discount",
   };
-  if (value.has("deliveryFee.amount")) values.deliveryFee = {
+  if (hasRule("deliveryFee")) values.deliveryFee = {
     amount: text("deliveryFee.amount"), split: { platformPercentage: text("deliveryFee.platformPercentage"), shopPercentage: text("deliveryFee.shopPercentage") },
   };
-  if (value.has("smallCartFee.enabled")) values.smallCartFee = {
+  if (hasRule("smallCartFee")) values.smallCartFee = {
     enabled: value.get("smallCartFee.enabled") as boolean, threshold: text("smallCartFee.threshold"), amount: text("smallCartFee.amount"),
     cap: nullable("smallCartFee.cap"), split: { platformPercentage: text("smallCartFee.platformPercentage"), shopPercentage: text("smallCartFee.shopPercentage") },
   };
   if (value.has("deliveredContributionFloor")) values.deliveredContributionFloor = text("deliveredContributionFloor");
   if (value.has("minimumCart")) values.minimumCart = text("minimumCart");
-  if (value.has("pickup.enabled")) values.pickup = {
+  if (hasRule("pickup")) values.pickup = {
     enabled: value.get("pickup.enabled") as boolean, customerFee: text("pickup.customerFee"), shopFee: nullable("pickup.shopFee"),
     cap: nullable("pickup.cap"), contributionFloor: nullable("pickup.contributionFloor"),
   };
@@ -97,7 +98,8 @@ async function valuesFor(pool: Pool, version: number): Promise<RateCardValues> {
 
 /** Resolve the effective immutable card used by pricing, agreements and Admin. */
 export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: number, usage = { usesPickup: false, usesBargain: false }): Promise<RateCardResponse | undefined> {
-  const current = await pool.query<{ version: number }>("SELECT COALESCE(MAX(version), 0)::int AS version FROM rate_card_versions WHERE $1::bigint IS NULL OR version <= $1", [version ?? null]);
+  const current = await pool.query<{ version: number }>("SELECT COALESCE(MAX(version), 0)::int AS version FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
+  if (version !== undefined && current.rows[0]?.version === 0) return undefined;
   version = current.rows[0]?.version ?? 0;
   if (!(await pool.query("SELECT 1 FROM shops WHERE id = $1", [shopId])).rowCount) return undefined;
   if (categoryId && !(await pool.query("SELECT 1 FROM categories WHERE id = $1", [categoryId])).rowCount) return undefined;
@@ -112,7 +114,12 @@ export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: s
   if (usage.usesPickup) required.push("pickup");
   if (usage.usesBargain) required.push("bargainMinimumCommission");
   const pickup = values.pickup?.value as RateCardValues["pickup"] | undefined;
-  const missing = required.filter((key) => values[key] === undefined || (key === "pickup" && pickup?.contributionFloor === null));
+  const missing = RATE_CARD_KEYS.filter((key) => {
+    const entry = values[key];
+    if (!entry) return required.includes(key);
+    if (!RateCardValues.shape[key].safeParse(entry.value).success) return true;
+    return key === "pickup" && (usage.usesPickup || pickup?.enabled === true) && pickup?.contributionFloor == null;
+  });
   return { version, values, missing, complete: missing.length === 0 };
 }
 

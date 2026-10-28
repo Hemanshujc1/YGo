@@ -17,8 +17,18 @@ export const CommissionRule = z.strictObject({
   minimum: OptionalMoney,
   maximum: OptionalMoney,
   base: z.enum(["before_shop_discount", "after_shop_discount"]),
-}).refine((rule) => rule.formula === "percentage" || rule.fixedAmount !== null, { path: ["fixedAmount"] })
-  .refine((rule) => rule.formula === "fixed" || rule.percentage !== null, { path: ["percentage"] });
+}).refine((rule) => rule.formula === "percentage" ? rule.fixedAmount === null : rule.fixedAmount !== null, { path: ["fixedAmount"] })
+  .refine((rule) => rule.formula === "fixed" ? rule.percentage === null : rule.percentage !== null, { path: ["percentage"] })
+  .refine((rule) => {
+    if (rule.minimum === null || rule.maximum === null) return true;
+    // Invalid money already has a field error; compare valid bounds in exact paise.
+    if (!ShopPrice.safeParse(rule.minimum).success || !ShopPrice.safeParse(rule.maximum).success) return true;
+    const paise = (amount: string) => {
+      const [whole = "0", fraction = ""] = amount.trim().split(".");
+      return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+    };
+    return paise(rule.minimum) <= paise(rule.maximum);
+  }, { path: ["maximum"] });
 
 export const FeeSplit = z.strictObject({
   platformPercentage: RatePercentage,

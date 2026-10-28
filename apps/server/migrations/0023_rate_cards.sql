@@ -24,3 +24,21 @@ CREATE TABLE "rate_card_versions" (
 ALTER TABLE "rate_card_values" ADD CONSTRAINT "rate_card_values_version_rate_card_versions_version_fk" FOREIGN KEY ("version") REFERENCES "public"."rate_card_versions"("version") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rate_card_versions" ADD CONSTRAINT "rate_card_versions_actor_id_accounts_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."accounts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "rate_card_versions_scope_idx" ON "rate_card_versions" USING btree ("scope_type","scope_id","version" DESC NULLS LAST);
+--> statement-breakpoint
+CREATE FUNCTION reject_rate_card_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '% is immutable', TG_TABLE_NAME;
+END;
+$$;
+--> statement-breakpoint
+CREATE TRIGGER rate_card_versions_no_update_delete BEFORE UPDATE OR DELETE ON rate_card_versions
+FOR EACH ROW EXECUTE FUNCTION reject_rate_card_change();
+--> statement-breakpoint
+CREATE TRIGGER rate_card_versions_no_truncate BEFORE TRUNCATE ON rate_card_versions
+FOR EACH STATEMENT EXECUTE FUNCTION reject_rate_card_change();
+--> statement-breakpoint
+CREATE TRIGGER rate_card_values_no_update_delete BEFORE UPDATE OR DELETE ON rate_card_values
+FOR EACH ROW EXECUTE FUNCTION reject_rate_card_change();
+--> statement-breakpoint
+CREATE TRIGGER rate_card_values_no_truncate BEFORE TRUNCATE ON rate_card_values
+FOR EACH STATEMENT EXECUTE FUNCTION reject_rate_card_change();
