@@ -281,6 +281,53 @@ describe("Admin routes and browser sessions", () => {
     await database.pool.query("DELETE FROM area_manager_memberships WHERE account_id = $1", [managerId]);
   });
 
+  it("holds one Admin web role per account when two transactions race under READ COMMITTED (#343)", async () => {
+    type Write = (client: pg.PoolClient, account: string, other: string) => Promise<unknown>;
+    const insertAdmin: Write = (client, account) => client.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [account]);
+    const insertManager: Write = (client, account) => client.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [account]);
+    const moveAdmin: Write = (client, account, other) => client.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [account, other]);
+    const moveManager: Write = (client, account, other) => client.query("UPDATE area_manager_memberships SET account_id = $1 WHERE account_id = $2", [account, other]);
+    const cases: Array<[string, Write, Write, boolean]> = [
+      ["insert Admin vs insert Area Manager", insertAdmin, insertManager, false],
+      ["insert Area Manager vs insert Admin", insertManager, insertAdmin, false],
+      ["insert Area Manager vs move an Admin membership in", insertManager, moveAdmin, true],
+      ["insert Admin vs move an Area Manager membership in", insertAdmin, moveManager, true],
+      ["move an Admin membership in vs move an Area Manager membership in", moveAdmin, moveManager, true],
+    ];
+    const account = async (email: string) => String((await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ($1) RETURNING id", [email])).rows[0]?.id);
+    for (const [index, [label, first, second, needsMovers]] of cases.entries()) {
+      const target = await account(`race-target-${index}@example.com`);
+      const adminMover = await account(`race-admin-${index}@example.com`);
+      const managerMover = await account(`race-manager-${index}@example.com`);
+      if (needsMovers) {
+        await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [adminMover]);
+        await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [managerMover]);
+      }
+      const [one, two] = [await database.pool.connect(), await database.pool.connect()];
+      try {
+        for (const client of [one, two]) await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        await first(one, target, first === moveAdmin ? adminMover : managerMover);
+        const pid = Number((await two.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid);
+        const racing = second(two, target, second === moveAdmin ? adminMover : managerMover).then(() => "wrote", (error: { code?: string }) => error.code);
+        for (let waited = 0; ; waited += 10) {
+          const { rowCount } = await database.pool.query("SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock' AND wait_event = 'advisory'", [pid]);
+          if (rowCount) break;
+          if (waited > 3_000) throw new Error(`${label}: the second write never waited on the advisory lock`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        await one.query("COMMIT");
+        expect(await racing, label).toBe("23514");
+        await two.query("ROLLBACK");
+      } finally {
+        one.release();
+        two.release();
+      }
+      const { rows: [held] } = await database.pool.query<{ roles: number }>(
+        "SELECT (SELECT count(*) FROM admin_memberships WHERE account_id = $1)::int + (SELECT count(*) FROM area_manager_memberships WHERE account_id = $1)::int AS roles", [target]);
+      expect(held?.roles, label).toBe(1);
+    }
+  }, 30_000);
+
   it("hides membership on code request, rotates the cookie, enforces idle expiry and signs out", async () => {
     const unknown = await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "unknown@example.com" } });
     expect(unknown.statusCode).toBe(204);
