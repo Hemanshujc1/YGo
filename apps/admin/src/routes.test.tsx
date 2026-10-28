@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminRole } from "@ygo/contracts";
@@ -157,7 +157,7 @@ describe("Admin web", () => {
     const minimumCart = await screen.findByRole("textbox", { name: strings.rateCardFields.minimumCart });
     await waitFor(() => expect(minimumCart).toHaveProperty("value", "10"));
 
-    resolveRetry({ ok: true, data: { version: "1", values: { minimumCart: "99" } } });
+    await act(async () => { resolveRetry({ ok: true, data: { version: "1", values: { minimumCart: "99" } } }); });
     await waitFor(() => expect(minimumCart).toHaveProperty("value", "10"));
   });
 
