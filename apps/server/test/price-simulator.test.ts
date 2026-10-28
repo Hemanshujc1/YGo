@@ -171,6 +171,39 @@ describe("Price simulator (#357)", () => {
     expect(response.json().now).toMatchObject({ customerTotal: "5.00", shopKeeps: "-7.00", platformContribution: "12.00" });
   });
 
+  it("charges a fixed commission once per line, whatever the count, and once more for each further line", async () => {
+    const shopId = await newShop();
+    await publish({ type: "global" }, { ...globalCard, commission: { ...globalCard.commission, formula: "fixed", fixedAmount: "12", percentage: null } });
+    const lines = [await stock(shopId, { category: "Groceries", unitPrice: "10.00", count: 5 }), await stock(shopId, { category: "Groceries", unitPrice: "20.00", count: 3 })];
+    expect((await simulate({ shopId, lines })).json().now).toMatchObject({
+      lines: [{ lineTotal: "50.00", commission: "12.00" }, { lineTotal: "60.00", commission: "12.00" }], productValue: "110.00", commission: "24.00",
+    });
+  });
+
+  it("prices a listing the shop has marked unavailable, and a quantity option of one", async () => {
+    const shopId = await newShop();
+    await publish({ type: "global" }, globalCard);
+    const lines = [await stock(shopId, { category: "Groceries", unitPrice: "70.00", count: 1 }), await stock(shopId, { category: "Groceries", unitPrice: "45.00", count: 2, quantityOption: true })];
+    await database.pool.query("UPDATE shop_listings SET available = false WHERE shop_id = $1", [shopId]);
+    const response = await simulate({ shopId, lines });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().now).toMatchObject({ status: "priced", productValue: "160.00", commission: "16.00", customerTotal: "190.00" });
+  });
+
+  it("leaves every amount alone for a draft whose category is not in the basket, numbering it as the next version", async () => {
+    const shopId = await newShop();
+    await publish({ type: "global" }, globalCard);
+    const dairy = await category("Dairy");
+    const line = await stock(shopId, { category: "Groceries", unitPrice: "200.00", count: 1 });
+    const draft = { scope: { type: "category", id: dairy }, values: { commission: { ...globalCard.commission, formula: "fixed", fixedAmount: "50", percentage: null }, minimumCart: "999" } };
+    const { now, draft: tried } = (await simulate({ shopId, lines: [line], draft })).json();
+    const { rateCardVersion: nowVersion, ...nowAmounts } = now;
+    const { rateCardVersion: draftVersion, ...draftAmounts } = tried;
+    expect([nowVersion, draftVersion]).toEqual(["1", "2"]);
+    expect(draftAmounts).toEqual(nowAmounts);
+    expect(tried.lines[0].commissionSource).toEqual({ type: "global", id: null, version: "1" });
+  });
+
   it("refuses lines from another shop, unknown shops, bad baskets and callers who are not signed in", async () => {
     const shopId = await newShop();
     const otherShop = await newShop();
