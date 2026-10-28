@@ -70,9 +70,11 @@ export {
   RateCardScope,
   PublishRateCardBody,
   ResolveRateCardQuery,
+  RateCardScopeQuery,
   RateCardSource,
   EffectiveRateCardValue,
   RateCardResponse,
+  ScopedRateCardResponse,
   PublishedRateCardResponse,
 } from "./rate-cards";
 export { ADMIN_REFRESH_HEADER, APP_NAME_HEADER, APP_VERSION_HEADER, AppIdentity, AppName, AppVersion } from "./headers";

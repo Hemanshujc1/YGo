@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { RateCardDraft } from "@ygo/contracts";
 import {
   ErrorEnvelope, PublishRateCardBody, PublishedRateCardResponse, RATE_CARD_KEYS, RateCardResponse,
-  ResolveRateCardQuery, type RateCardKey, RateCardValues,
+  ResolveRateCardQuery, RateCardScopeQuery, ScopedRateCardResponse, type RateCardKey, RateCardValues,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
@@ -149,6 +149,16 @@ export function registerRateCardRoutes(app: FastifyInstance, { pool, clock, secr
     const { shopId, categoryId, version, usesPickup, usesBargain } = request.query as { shopId: string; categoryId?: string; version?: string; usesPickup: boolean; usesBargain: boolean };
     const card = await resolveRateCard(pool, shopId, categoryId, version, { usesPickup, usesBargain });
     return card ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
+  });
+  app.get("/v1/admin/rate-cards/scope", { schema: { querystring: RateCardScopeQuery, response: { 200: ScopedRateCardResponse, ...errors } } }, async (request, reply) => {
+    if (!await adminSignedIn(request, reply, auth)) return reply;
+    const { type, id, version } = request.query as { type: "global" | "category" | "shop"; id?: string; version?: string };
+    if (type !== "global") {
+      const table = type === "category" ? "categories" : "shops";
+      if (!(await pool.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id])).rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    }
+    const card = await latest(pool, type, id ?? null, version);
+    return { version: card?.version ?? "0", values: card ? await valuesFor(pool, card.version) : {} };
   });
   app.post("/v1/admin/rate-cards/publish", { schema: { body: PublishRateCardBody, response: { 201: PublishedRateCardResponse, ...errors } } }, async (request, reply) => {
     const who = await adminSignedIn(request, reply, auth); if (!who) return reply;
