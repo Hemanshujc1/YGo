@@ -114,7 +114,8 @@ describe("Admin routes and browser sessions", () => {
     const publish = (scope: object, values: object, reason: string) => app.inject({
       method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason },
     });
-    const effective = (version?: number | string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version === undefined ? "" : `&version=${version}`}`, headers });
+    const effective = (version?: string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version === undefined ? "" : `&version=${version}`}`, headers });
+    const scoped = (type: string, id?: string, version?: string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/scope?type=${type}${id ? `&id=${id}` : ""}${version ? `&version=${version}` : ""}`, headers });
     const snapshots: unknown[] = [];
     const global = {
       commission: { formula: "percentage", fixedAmount: null, percentage: "8.5", minimum: null, maximum: null, base: "after_shop_discount" },
@@ -125,7 +126,11 @@ describe("Admin routes and browser sessions", () => {
       maximumShopDiscountPercentage: "20",
     };
     expect((await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}` })).statusCode).toBe(401);
+    expect((await scoped("global")).json()).toEqual({ version: "0", values: {} });
+    expect((await scoped("shop", shopId)).json()).toEqual({ version: "0", values: {} });
+    expect((await scoped("category", categoryId)).json()).toEqual({ version: "0", values: {} });
     expect((await publish({ type: "global" }, global, "First pilot card")).json()).toEqual({ version: "1" });
+    expect((await scoped("global")).json()).toEqual({ version: "1", values: global });
     const first = (await effective()).json();
     snapshots.push(first);
     expect(first).toMatchObject({ version: "1", complete: true, missing: [] });
@@ -135,6 +140,8 @@ describe("Admin routes and browser sessions", () => {
     expect((await publish({ type: "category", id: categoryId }, { minimumCart: "80" }, "Groceries pilot basket")).json()).toEqual({ version: "2" });
     snapshots.push((await effective()).json());
     expect((await publish({ type: "shop", id: shopId }, { minimumCart: "60" }, "Shop-specific terms")).json()).toEqual({ version: "3" });
+    expect((await scoped("category", categoryId)).json()).toMatchObject({ version: "2", values: { minimumCart: "80" } });
+    expect((await scoped("shop", shopId)).json()).toMatchObject({ version: "3", values: { minimumCart: "60" } });
     snapshots.push((await effective()).json());
     expect((await effective()).json().values.minimumCart).toMatchObject({ value: "60", source: { type: "shop", id: shopId, version: "3" } });
 
@@ -157,7 +164,8 @@ describe("Admin routes and browser sessions", () => {
     // Later replacements at every scope must never leak into any earlier effective card.
     await publish({ type: "global" }, { ...global, commission: { ...global.commission, percentage: "12" }, minimumCart: "200" }, "Revise global terms");
     await publish({ type: "category", id: categoryId }, { deliveryFee: { amount: "30", split: { platformPercentage: "0", shopPercentage: "100" } } }, "Clear category minimum");
-    const fifth = (await effective(5)).json();
+    const fifth = (await effective("5")).json();
+    expect((await scoped("global", undefined, "4")).json()).toEqual({ version: "1", values: global });
     expect(fifth.values.commission.value.percentage).toBe("12");
     expect(fifth.values.minimumCart.source).toEqual({ type: "category", id: categoryId, version: "2" });
     const sixth = (await effective()).json();
@@ -165,7 +173,7 @@ describe("Admin routes and browser sessions", () => {
     expect(sixth.values.deliveryFee.source).toEqual({ type: "category", id: categoryId, version: "6" });
     snapshots.push(fifth, sixth);
     await publish({ type: "shop", id: shopId }, { commission: global.commission, minimumCart: "0" }, "New shop terms");
-    for (const [index, snapshot] of snapshots.entries()) expect((await effective(index + 1)).json()).toEqual(snapshot);
+    for (const [index, snapshot] of snapshots.entries()) expect((await effective(String(index + 1))).json()).toEqual(snapshot);
 
     for (const method of ["PUT", "PATCH", "DELETE"] as const) {
       for (const url of ["/v1/admin/rate-cards/publish", "/v1/admin/rate-cards/1"]) {
@@ -178,12 +186,12 @@ describe("Admin routes and browser sessions", () => {
         await expect(database.pool.query(sql)).rejects.toThrow("immutable");
       }
     }
-    expect((await effective(1)).json()).toEqual(first);
-    expect((await effective(999)).statusCode).toBe(404);
+    expect((await effective("1")).json()).toEqual(first);
+    expect((await effective("999")).statusCode).toBe(404);
     const gap = String((await database.pool.query("SELECT nextval('rate_card_versions_version_seq') AS version")).rows[0]?.version);
     await publish({ type: "shop", id: shopId }, {}, "Clear shop terms after a sequence gap");
     expect((await effective(gap)).statusCode).toBe(404);
-  });
+  }, 30_000);
 
   it("keeps rate-card versions exact past Number.MAX_SAFE_INTEGER and up to the bigint maximum (#355)", async () => {
     const token = (await signIn("/v1/admin/auth")).json().accessToken as string;

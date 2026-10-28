@@ -17,6 +17,7 @@ import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
 import { Products } from "./products";
+import { RateCards } from "./rate-cards";
 import { ShopApplications, ShopApplicationReview } from "./shop-applications";
 import { adminTheme, ThemePicker } from "./theme";
 import { fieldMessages } from "./lib/field-messages";
@@ -49,6 +50,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
   const nav = role === "admin" ? [
     { path: "/accounts", label: strings.accounts },
     { path: "/categories", label: strings.categories },
+    { path: "/rate-cards", label: strings.rateCards },
     { path: "/products", label: strings.products },
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
@@ -362,6 +364,20 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listCategories(), (data) => data.categories),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/rate-cards",
+      loader: async () => {
+        const [categories, shops] = await Promise.all([api.listCategories(), api.listShopApplications()]);
+        if (!categories.ok || !shops.ok) {
+          if ((!categories.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(categories.code)) || (!shops.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(shops.code))) return redirect("/sign-in");
+          throw new Error(strings.failed);
+        }
+        return { categories: categories.data.categories, shops: shops.data.applications };
+      },
+      element: <Page protectedArea api={api}><RateCards api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.rateCardsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({
