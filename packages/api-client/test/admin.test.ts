@@ -308,7 +308,7 @@ describe("Admin browser API client", () => {
     expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
   });
 
-  it("lists, reads, corrects, starts review of and approves shop applications", async () => {
+  it("lists, reads, corrects, assigns, starts review of and approves shop applications", async () => {
     const application = {
       id: "00000000-0000-4000-8000-000000000401",
       state: "submitted",
@@ -327,6 +327,7 @@ describe("Admin browser API client", () => {
       ownerPhone: "+919876543210",
       ownerEmail: "asha@example.com",
       submittedAt: "2026-10-25T10:00:00.000Z",
+      areaManager: { id: "00000000-0000-4000-8000-000000000402", name: "Ravi Patil", email: "ravi@example.com" },
     };
     const { client, calls } = setup(({ path, method }) => {
       if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
@@ -338,12 +339,15 @@ describe("Admin browser API client", () => {
     expect(await client.listShopApplications()).toEqual({ ok: true, data: { applications: [application] } });
     expect(await client.getShopApplication(application.id)).toEqual({ ok: true, data: application });
     expect(await client.correctShopApplication(application.id, correction)).toEqual({ ok: true, data: application });
+    const assignment = { areaManagerId: application.areaManager.id, reason: "Near their route" };
+    expect(await client.assignShopAreaManager(application.id, assignment)).toEqual({ ok: true, data: application });
     expect(await client.startShopApplicationReview(application.id)).toEqual({ ok: true, data: application });
     expect(await client.approveShopApplication(application.id)).toEqual({ ok: true, data: application });
     expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
       ["/v1/admin/shop-applications", "GET", undefined],
       [path, "GET", undefined],
       [path, "PATCH", correction],
+      [`${path}/area-manager`, "PUT", assignment],
       [`${path}/start-review`, "POST", undefined],
       [`${path}/approve`, "POST", undefined],
     ]);

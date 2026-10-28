@@ -33,6 +33,7 @@ const application = {
   pincode: "411038", location: { latitude: 18.5, longitude: 73.8 }, ownerName: "Owner Name", entityType: "proprietorship" as const,
   pan: "ABCDE1234F", fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000, upiId: "owner@upi",
   areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com", submittedAt: "2026-10-24T10:00:00.000Z",
+  areaManager: null as { id: string; name: string | null; email: string } | null,
 };
 
 /** The API client's role reads (#343): one answer per sign-in, gone once the session ends. */
@@ -74,9 +75,10 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listWaitlist: vi.fn().mockResolvedValue({ ok: true, data: { entries: [] } }),
     createArea: vi.fn(),
     editArea: vi.fn(),
-    listShopApplications: vi.fn(),
+    listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [] } }),
     getShopApplication: vi.fn(),
     correctShopApplication: vi.fn(),
+    assignShopAreaManager: vi.fn(),
     startShopApplicationReview: vi.fn(),
     approveShopApplication: vi.fn(),
     createVisitPhotoUpload: vi.fn(),
@@ -811,7 +813,7 @@ describe("Area Manager shell (#343)", () => {
     expect(links.map((link) => link.textContent)).toEqual([strings.applications]);
     expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
-    expect(api.listShopApplications).not.toHaveBeenCalled();
+    expect(api.listShopApplications).toHaveBeenCalled();
   });
 
   it("asks the server again after sign-out, so a signed-out Area Manager page goes to sign-in", async () => {
@@ -824,13 +826,13 @@ describe("Area Manager shell (#343)", () => {
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
-  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", `/applications/${application.id}`])(
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist"])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
       const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
-      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.getShopApplication]) {
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist]) {
         expect(call).not.toHaveBeenCalled();
       }
     },
@@ -861,6 +863,95 @@ describe("Area Manager shell (#343)", () => {
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
     expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(6);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+  });
+});
+
+describe("Area Manager applications (#299)", () => {
+  const ravi = { ...created, id: "00000000-0000-4000-8000-000000000003", name: "Ravi Patil", email: "ravi@example.com" };
+  const assigned = { ...application, areaManager: { id: ravi.id, name: ravi.name, email: ravi.email } };
+
+  it("shows Admin each shop's Area Manager on A06", async () => {
+    const other = { ...application, id: "00000000-0000-4000-8000-000000000502", shopName: "Corner Store" };
+    setup("/applications", { listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [assigned, other] } }) });
+    await screen.findByText(application.shopName);
+    expect(screen.getByRole("columnheader", { name: strings.roles.area_manager })).toBeTruthy();
+    const [first, second] = screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").at(4)?.textContent);
+    expect([first, second]).toEqual([ravi.name, "—"]);
+  });
+
+  it("lets Admin assign an Area Manager with a reason, then take the shop back", async () => {
+    const assignShopAreaManager = vi.fn().mockResolvedValueOnce({ ok: true, data: assigned }).mockResolvedValueOnce({ ok: true, data: application });
+    const { api } = setup(`/applications/${application.id}`, {
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }),
+      listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder, ravi] } }),
+      assignShopAreaManager,
+    });
+    await screen.findByRole("heading", { name: application.shopName });
+    expect(screen.getByText(strings.noAreaManager)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.assignAreaManager }));
+    const picker = await screen.findByRole("combobox", { name: strings.roles.area_manager });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([strings.noAreaManager, `${ravi.name} · ${ravi.email}`]);
+    fireEvent.change(picker, { target: { value: ravi.id } });
+    fireEvent.click(screen.getByRole("button", { name: strings.next }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveAreaManager }));
+    expect(await screen.findByText(strings.applicationInvalidFields.reason)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Near their route" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveAreaManager }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.areaManagerSaved);
+    expect(screen.getByText(ravi.name)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: strings.changeAreaManager }));
+    fireEvent.change(screen.getByRole("combobox", { name: strings.roles.area_manager }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.next }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Admin's own shop" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveAreaManager }));
+    await screen.findByRole("button", { name: strings.assignAreaManager });
+    expect(assignShopAreaManager.mock.calls).toEqual([
+      [application.id, { areaManagerId: ravi.id, reason: "Near their route" }],
+      [application.id, { areaManagerId: null, reason: "Admin's own shop" }],
+    ]);
+    expect(api.listAccounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the picker without saving when the Area Manager is unchanged", async () => {
+    const { api } = setup(`/applications/${application.id}`, {
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: assigned }),
+      listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [ravi] } }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: strings.changeAreaManager }));
+    await screen.findByRole("combobox", { name: strings.roles.area_manager });
+    fireEvent.click(screen.getByRole("button", { name: strings.next }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.assignShopAreaManager).not.toHaveBeenCalled();
+  });
+
+  it("lists an Area Manager's shops without the Area Manager column", async () => {
+    setup("/applications", { ...asRole("area_manager"), listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [assigned] } }) });
+    await screen.findByText(application.shopName);
+    expect(screen.queryByRole("columnheader", { name: strings.roles.area_manager })).toBeNull();
+    expect(screen.queryByText(ravi.name)).toBeNull();
+  });
+
+  it("lets an Area Manager correct fields on A07, while review, approval, assignment and the visit stay Admin's", async () => {
+    const { api } = setup(`/applications/${application.id}`, {
+      ...asRole("area_manager"),
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: assigned }),
+      correctShopApplication: vi.fn().mockResolvedValue({ ok: true, data: { ...assigned, shopName: "Fresh Foods" } }),
+    });
+    await screen.findByRole("heading", { name: application.shopName });
+    expect(screen.getByText(strings.adminDecides)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: strings.startReview })).toBeNull();
+    expect(screen.queryByRole("button", { name: strings.assignAreaManager })).toBeNull();
+    expect(screen.queryByRole("button", { name: strings.changeAreaManager })).toBeNull();
+    expect(screen.queryByText(strings.onboarding)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.shopName) }));
+    fireEvent.change(screen.getByLabelText(strings.shopName), { target: { value: "Fresh Foods" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Board at the visit" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
+    expect(await screen.findByText(strings.correctionSaved)).toBeTruthy();
+    expect(api.correctShopApplication).toHaveBeenCalledWith(application.id, { shopName: "Fresh Foods", reason: "Board at the visit" });
+    expect(api.getShopOnboarding).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
+  AdminShopApplication,
+  AssignShopAreaManagerBody,
   CorrectShopApplicationBody,
   ErrorEnvelope,
   MyShopApplicationResponse,
@@ -10,10 +12,11 @@ import {
   ShopApplicationParams,
   ShopApplicationsResponse,
   type AddressPoint,
+  type AdminRole,
   type ShopApplicationField,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { adminSignedIn, withAdminTransaction } from "../admin";
+import { adminSignedIn, adminWebSignedIn, withAdminTransaction, withAdminWebTransaction } from "../admin";
 import { withTransaction } from "../db";
 import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -23,21 +26,48 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
  * Area now holding its pincode: it follows an Admin Area edit (owner decision
  * on #280). A pincode later dropped from every Area reads as no Area.
  */
-const applicationSql = `SELECT s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
+const applicationColumns = `s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
   ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
   to_char(s.fssai_expiry, 'YYYY-MM-DD') AS "fssaiExpiry", s.service_radius_metres AS "serviceRadiusMetres",
   s.upi_id AS "upiId", ar.name AS "areaName", a.phone AS "ownerPhone", a.email AS "ownerEmail",
-  s.submitted_at AS "submittedAt"
-  FROM shops s
+  s.submitted_at AS "submittedAt"`;
+const applicationFrom = `FROM shops s
   JOIN shop_members m ON m.shop_id = s.id AND m.role = 'owner'
   JOIN accounts a ON a.id = m.account_id
   LEFT JOIN area_pincodes p ON p.pincode = s.pincode AND s.state <> 'draft'
   LEFT JOIN areas ar ON ar.id = p.area_id`;
+const applicationSql = `SELECT ${applicationColumns} ${applicationFrom}`;
+
+/** The Admin web's read: the same, with the assigned Area Manager (#299). */
+const adminApplicationSql = `SELECT ${applicationColumns},
+  CASE WHEN am.id IS NULL THEN NULL ELSE json_build_object('id', am.id, 'name', am.name, 'email', am.email) END AS "areaManager"
+  ${applicationFrom}
+  LEFT JOIN accounts am ON am.id = s.area_manager_id`;
 
 type ApplicationRow = Omit<ShopApplication, "submittedAt"> & { submittedAt: Date | null };
+type AdminApplicationRow = Omit<AdminShopApplication, "submittedAt"> & { submittedAt: Date | null };
 
-function fromRow(row: ApplicationRow): ShopApplication {
+function fromRow<Row extends ApplicationRow>(row: Row): Omit<Row, "submittedAt"> & { submittedAt: string | null } {
   return { ...row, submittedAt: row.submittedAt?.toISOString() ?? null };
+}
+
+/**
+ * The sent application `id` as the Admin web reads it, or null: a Draft is the
+ * Owner's own. An Area Manager (`areaManagerId`) finds only a shop assigned to
+ * them (#299); `lock` locks the shop's row, and the assignment is tested on
+ * the locked row, so a move by Admin is seen.
+ */
+async function adminApplication(client: Pool | PoolClient, id: string, areaManagerId: string | null, lock = false): Promise<AdminShopApplication | null> {
+  const row = await client.query<AdminApplicationRow>(
+    `${adminApplicationSql} WHERE s.id = $1 AND s.state <> 'draft' AND ($2::uuid IS NULL OR s.area_manager_id = $2)${lock ? " FOR UPDATE OF s" : ""}`,
+    [id, areaManagerId],
+  );
+  return row.rows[0] ? fromRow(row.rows[0]) : null;
+}
+
+/** The Area Manager a request is scoped to, or null for Admin, who sees every shop. */
+function scope(who: { accountId: string; role: AdminRole }): string | null {
+  return who.role === "area_manager" ? who.accountId : null;
 }
 
 /**
@@ -186,28 +216,35 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
   });
 
   // Admin sees only sent applications: a Draft answers NOT_FOUND (owner decision on #280).
+  // An Area Manager sees only the shops assigned to them; any other answers NOT_FOUND (#299).
   app.get("/v1/admin/shop-applications", { schema: { response: { 200: ShopApplicationsResponse, ...response } } }, async (request, reply) => {
-    if (!await adminSignedIn(request, reply, auth)) return reply;
-    const rows = await pool.query<ApplicationRow>(`${applicationSql} WHERE s.state <> 'draft' ORDER BY s.submitted_at, s.id`);
+    const who = await adminWebSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const rows = await pool.query<AdminApplicationRow>(
+      `${adminApplicationSql} WHERE s.state <> 'draft' AND ($1::uuid IS NULL OR s.area_manager_id = $1) ORDER BY s.submitted_at, s.id`,
+      [scope(who)],
+    );
     return { applications: rows.rows.map(fromRow) };
   });
 
-  app.get("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
-    if (!await adminSignedIn(request, reply, auth)) return reply;
-    const found = await application(pool, "s.id", (request.params as { id: string }).id);
-    if (!found || found.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+  app.get("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, response: { 200: AdminShopApplication, ...response } } }, async (request, reply) => {
+    const who = await adminWebSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const found = await adminApplication(pool, (request.params as { id: string }).id, scope(who));
+    if (!found) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     return found;
   });
 
   // Each changed field is logged by name with the reason, never its values (Q5 on #40).
-  app.patch("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, body: CorrectShopApplicationBody, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
-    const who = await adminSignedIn(request, reply, auth);
+  // An Area Manager corrects their own shops the same way, logged as the actor (#299).
+  app.patch("/v1/admin/shop-applications/:id", { schema: { params: ShopApplicationParams, body: CorrectShopApplicationBody, response: { 200: AdminShopApplication, ...response } } }, async (request, reply) => {
+    const who = await adminWebSignedIn(request, reply, auth);
     if (!who) return reply;
     const { id } = request.params as { id: string };
     const { reason, ...fields } = request.body as CorrectShopApplicationBody;
-    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
-      const old = await application(client, "s.id", id, true);
-      if (!old || old.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    return withAdminWebTransaction(pool, who, reply, async (client) => {
+      const old = await adminApplication(client, id, scope(who), true);
+      if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       // Compared after the contract's clean-up, so "abcde1234f" for "ABCDE1234F" is no change.
       const changed = Object.fromEntries(Object.entries(fields).filter(
         ([field, value]) => value !== undefined && !unchanged(field, value, old[field as ShopApplicationField]),
@@ -224,24 +261,51 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
          SELECT $1, 'shop.correct.' || field, $2, 'shop', $3 FROM unnest($4::text[]) AS field`,
         [who.accountId, id, reason, names],
       );
-      const saved = await application(client, "s.id", id);
+      const saved = await adminApplication(client, id, null);
+      await client.query("COMMIT");
+      return reply.code(200).send(saved);
+    });
+  });
+
+  // Admin assigns the shop to one Area Manager, moves it, or takes it back (null), with a reason (#299).
+  // The record names the shop, never who was picked, as for corrections.
+  app.put("/v1/admin/shop-applications/:id/area-manager", { schema: { params: ShopApplicationParams, body: AssignShopAreaManagerBody, response: { 200: AdminShopApplication, ...response } } }, async (request, reply) => {
+    const who = await adminSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as { id: string };
+    const { areaManagerId, reason } = request.body as AssignShopAreaManagerBody;
+    return withAdminTransaction(pool, who.accountId, reply, async (client) => {
+      const old = await adminApplication(client, id, null, true);
+      if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if ((old.areaManager?.id ?? null) === areaManagerId) return reply.code(200).send(old);
+      if (areaManagerId) {
+        const member = await client.query("SELECT 1 FROM area_manager_memberships WHERE account_id = $1 FOR KEY SHARE", [areaManagerId]);
+        if (!member.rowCount) return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["areaManagerId"] } });
+      }
+      await client.query("UPDATE shops SET area_manager_id = $1 WHERE id = $2", [areaManagerId, id]);
+      await client.query(
+        "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'shop.assign_area_manager', $2, 'shop', $3)",
+        [who.accountId, id, reason],
+      );
+      const saved = await adminApplication(client, id, null);
       await client.query("COMMIT");
       return reply.code(200).send(saved);
     });
   });
 
   // Admin moves each step by a click, with a fixed reason; opening it moves nothing (Q3 on #40).
+  // These stay Admin's: an Area Manager is refused (#299).
   for (const [path, from, to, action, reason] of [
     ["start-review", "submitted", "under_review", "shop.start_review", "Started review"],
     ["approve", "under_review", "approved", "shop.approve", "Approved"],
   ] as const) {
-    app.post(`/v1/admin/shop-applications/:id/${path}`, { schema: { params: ShopApplicationParams, response: { 200: ShopApplication, ...response } } }, async (request, reply) => {
+    app.post(`/v1/admin/shop-applications/:id/${path}`, { schema: { params: ShopApplicationParams, response: { 200: AdminShopApplication, ...response } } }, async (request, reply) => {
       const who = await adminSignedIn(request, reply, auth);
       if (!who) return reply;
       const { id } = request.params as { id: string };
       return withAdminTransaction(pool, who.accountId, reply, async (client) => {
-        const old = await application(client, "s.id", id, true);
-        if (!old || old.state === "draft") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        const old = await adminApplication(client, id, null, true);
+        if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         if (old.state !== from) return reply.code(409).send({ error: { code: "SHOP_STATE_CHANGE_REFUSED" } });
         await client.query("UPDATE shops SET state = $1 WHERE id = $2", [to, id]);
         await client.query(

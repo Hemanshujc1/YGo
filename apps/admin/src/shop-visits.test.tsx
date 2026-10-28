@@ -155,7 +155,7 @@ describe("Admin visit and onboarding fee screen", () => {
   });
 
   it("does not show visit recording on Draft applications", async () => {
-    const api = {} as ReturnType<typeof createAdminApiClient>;
+    const api = { currentRole: () => "admin" } as unknown as ReturnType<typeof createAdminApiClient>;
     const draft = { ...application, state: "draft" as const };
     const router = createMemoryRouter([{
       path: "/", loader: () => draft, element: <ShopApplicationReview api={api} />, hydrateFallbackElement: <div />,

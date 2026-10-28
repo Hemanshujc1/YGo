@@ -43,8 +43,7 @@ export async function adminSignedIn(
 /**
  * Lock current Admin membership for a save; the callback commits, otherwise cleanup rolls back.
  * Admin only: it locks `admin_memberships`, so an Area Manager always gets 403 here (#343).
- * A route that Area Managers may also use (#299) needs its own check and lock on
- * `area_manager_memberships`, with the shop-assignment test inside the same transaction.
+ * A route Area Managers may also use takes `withAdminWebTransaction`.
  */
 export async function withAdminTransaction<T>(
   pool: Pool,
@@ -54,6 +53,25 @@ export async function withAdminTransaction<T>(
 ): Promise<T | FastifyReply> {
   return withTransaction(pool, async (client) => {
     const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1 FOR KEY SHARE", [accountId]);
+    if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    return save(client);
+  });
+}
+
+/**
+ * Lock the caller's own membership, Admin or Area Manager, for a save (#299); 403 once it is gone.
+ * A route scoped to an Area Manager's shops tests the assignment under the shop's row lock in `save`,
+ * so a save can't land just after Admin moves the shop to someone else.
+ */
+export async function withAdminWebTransaction<T>(
+  pool: Pool,
+  who: { accountId: string; role: AdminRole },
+  reply: FastifyReply,
+  save: (client: PoolClient) => Promise<T>,
+): Promise<T | FastifyReply> {
+  const table = who.role === "admin" ? "admin_memberships" : "area_manager_memberships";
+  return withTransaction(pool, async (client) => {
+    const member = await client.query(`SELECT 1 FROM ${table} WHERE account_id = $1 FOR KEY SHARE`, [who.accountId]);
     if (!member.rowCount) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
     return save(client);
   });

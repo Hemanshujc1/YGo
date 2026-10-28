@@ -1,4 +1,4 @@
-import { CorrectShopApplicationBody, type ShopApplication } from "@ygo/contracts";
+import { AssignShopAreaManagerBody, CorrectShopApplicationBody, type AdminAccount, type AdminShopApplication } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatNumber, formatPhone } from "@ygo/format";
 import { useState, type FormEvent } from "react";
 import { Link, useLoaderData } from "react-router";
@@ -18,7 +18,7 @@ const fieldLabels: Record<EditableField, string> = {
   fssaiExpiry: strings.fssaiExpiry, serviceRadiusMetres: strings.serviceRadius, upiId: strings.upiId,
 };
 
-function applicationValue(application: ShopApplication, field: EditableField) {
+function applicationValue(application: AdminShopApplication, field: EditableField) {
   if (field === "location") {
     const point = application.location;
     return point ? `${point.latitude}, ${point.longitude}` : "—";
@@ -29,18 +29,25 @@ function applicationValue(application: ShopApplication, field: EditableField) {
   return value ?? "—";
 }
 
-export function ShopApplications() {
-  const applications = useLoaderData() as ShopApplication[];
+function areaManagerName(application: AdminShopApplication) {
+  return application.areaManager ? application.areaManager.name ?? application.areaManager.email : strings.noAreaManager;
+}
+
+export function ShopApplications({ api }: { api: AdminApi }) {
+  const applications = useLoaderData() as AdminShopApplication[];
+  // Every shop an Area Manager sees is theirs, so only Admin gets the Area Manager column (#299).
+  const admin = api.currentRole() === "admin";
   return <>
     <div className="mb-8"><h1 className="text-title-large font-semibold">{strings.applications}</h1><p className="mt-2 text-muted">{strings.applicationsIntro}</p></div>
     <section className="rounded-xl border border-border bg-surface">
-      {applications.length === 0 ? <p className="p-6 text-muted">{strings.noApplications}</p> : <div className="overflow-x-auto">
+      {applications.length === 0 ? <p className="p-6 text-muted">{admin ? strings.noApplications : strings.noAssignedShops}</p> : <div className="overflow-x-auto">
         <table className="w-full min-w-xl text-left"><thead className="bg-sunken"><tr>
-          {[strings.shopName, strings.owner, strings.pincode, strings.areas, strings.applicationReview].map((label) => <th key={label} className="p-3 font-medium">{label}</th>)}
+          {[strings.shopName, strings.owner, strings.pincode, strings.areas, ...(admin ? [strings.roles.area_manager] : []), strings.applicationReview].map((label) => <th key={label} className="p-3 font-medium">{label}</th>)}
         </tr></thead><tbody>{applications.map((application) => <tr key={application.id} className="border-t border-border">
           <td className="p-3"><Link className="text-primary underline" to={`/applications/${application.id}`}>{application.shopName}</Link></td>
           <td className="p-3">{application.ownerName}<br /><span className="text-muted">{application.ownerEmail}</span></td>
           <td className="p-3 tabular-nums">{application.pincode}</td><td className="p-3">{application.areaName ?? "—"}</td>
+          {admin && <td className="p-3">{application.areaManager ? areaManagerName(application) : "—"}</td>}
           <td className="p-3">{strings.applicationState[application.state]}</td>
         </tr>)}</tbody></table>
       </div>}
@@ -49,7 +56,8 @@ export function ShopApplications() {
 }
 
 export function ShopApplicationReview({ api }: { api: AdminApi }) {
-  const loaded = useLoaderData() as ShopApplication;
+  const loaded = useLoaderData() as AdminShopApplication;
+  const admin = api.currentRole() === "admin";
   const [application, setApplication] = useState(loaded);
   const [editing, setEditing] = useState<EditableField | null>(null);
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -120,14 +128,41 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
     finally { setBusy(false); }
   }
 
+  // Admin assigns the shop to an Area Manager, or none, then gives a reason (#299).
+  const [picking, setPicking] = useState(false);
+  const [areaManagers, setAreaManagers] = useState<AdminAccount[] | null>(null);
+  const [picked, setPicked] = useState("");
+
+  async function pick() {
+    setPicked(application.areaManager?.id ?? ""); setPicking(true); setReasonOpen(false); setErrors({}); setError(""); setNotice("");
+    if (areaManagers) return;
+    try {
+      const result = await api.listAccounts();
+      if (result.ok) setAreaManagers(result.data.accounts.filter((account) => account.role === "area_manager"));
+      else setError(strings.errors[result.code]);
+    } catch { setError(strings.failed); }
+  }
+
+  async function assign(reason: string) {
+    const parsed = AssignShopAreaManagerBody.safeParse({ areaManagerId: picked || null, reason });
+    if (!parsed.success) { setErrors({ reason: strings.applicationInvalidFields.reason }); return; }
+    setBusy(true); setErrors({}); setError("");
+    try {
+      const result = await api.assignShopAreaManager(application.id, parsed.data);
+      if (result.ok) { setApplication(result.data); setPicking(false); setReasonOpen(false); setNotice(strings.areaManagerSaved); }
+      else setError(strings.errors[result.code]);
+    } catch { setError(strings.failed); }
+    finally { setBusy(false); }
+  }
+
   const location = application.location;
   return <>
     <div className="mb-8 flex items-start justify-between gap-4"><div>
       <Link to="/applications" className="text-primary underline">{strings.backToApplications}</Link>
       <h1 className="mt-3 text-title-large font-semibold">{application.shopName}</h1>
       <p className="mt-2 text-muted">{strings.applicationState[application.state]}</p>
-    </div><div className="flex gap-2">{application.state === "submitted" && <button disabled={busy} onClick={() => void transition("startShopApplicationReview")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.startReview}</button>}
-      {application.state === "under_review" && <button disabled={busy} onClick={() => void transition("approveShopApplication")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.approveApplication}</button>}</div></div>
+    </div>{!admin ? application.state !== "approved" && <p className="max-w-sm rounded-lg bg-info-subtle p-3 text-on-info-subtle">{strings.adminDecides}</p> : <div className="flex gap-2">{application.state === "submitted" && <button disabled={busy} onClick={() => void transition("startShopApplicationReview")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.startReview}</button>}
+      {application.state === "under_review" && <button disabled={busy} onClick={() => void transition("approveShopApplication")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.approveApplication}</button>}</div>}</div>
     {notice && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{notice}</p>}
     {error && <p role="alert" className="mb-4 rounded-lg bg-danger-subtle p-3 text-on-danger-subtle">{error}</p>}
     <section className="rounded-xl border border-border bg-surface"><dl>
@@ -135,11 +170,15 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
         <dt className="font-medium">{fieldLabels[field]}</dt><dd className="min-w-48 flex-1">{field === "location" && location ? <>{applicationValue(application, field)} · <a className="text-primary underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}>{strings.openGoogleMaps}</a></> : field === "fssaiExpiry" && application.fssaiExpiry ? formatDate(`${application.fssaiExpiry}T00:00:00Z`) : applicationValue(application, field)}</dd>
         <button disabled={busy} onClick={() => edit(field)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{strings.editField(fieldLabels[field])}</button>
       </div>)}
+      {admin && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border p-4">
+        <dt className="font-medium">{strings.roles.area_manager}</dt><dd className="min-w-48 flex-1">{areaManagerName(application)}</dd>
+        <button disabled={busy} onClick={() => void pick()} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{application.areaManager ? strings.changeAreaManager : strings.assignAreaManager}</button>
+      </div>}
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.phone}</dt><dd className="mt-1 tabular-nums">{application.ownerPhone ? formatPhone(application.ownerPhone) : "—"}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.ownerEmail}</dt><dd className="mt-1">{application.ownerEmail}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.submittedAt}</dt><dd className="mt-1">{application.submittedAt ? formatDateTime(application.submittedAt) : "—"}</dd></div>
     </dl></section>
-    {application.state !== "draft" && <ShopVisitAndFeePanel api={api} application={application} />}
+    {admin && application.state !== "draft" && <ShopVisitAndFeePanel api={api} application={application} />}
     {editing && !reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setEditing(null); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="application-edit-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-border bg-raised p-6 shadow-xl">
       <h2 id="application-edit-title" className="text-body font-semibold">{strings.editField(fieldLabels[editing])}</h2>
@@ -154,6 +193,21 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
       </form>
       </section>
     </div>}
+    {picking && !reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setPicking(false); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="area-manager-title" className="w-full max-w-[520px] rounded-2xl border border-border bg-raised p-6 shadow-xl">
+        <h2 id="area-manager-title" className="text-body font-semibold">{strings.areaManagerDialog}</h2>
+        <form className="mt-6 space-y-4" noValidate onSubmit={(event) => { event.preventDefault(); if (picked === (application.areaManager?.id ?? "")) setPicking(false); else setReasonOpen(true); }}>
+          {areaManagers ? <label className="block font-medium">{strings.roles.area_manager}
+            <select autoFocus value={picked} onChange={(event) => setPicked(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-border-strong bg-surface px-3 font-normal">
+              <option value="">{strings.noAreaManager}</option>
+              {areaManagers.map((account) => <option key={account.id} value={account.id}>{account.name ? `${account.name} · ${account.email}` : account.email}</option>)}
+            </select></label> : !error && <p className="text-muted">{strings.areaManagersLoading}</p>}
+          {error && <p role="alert" className="text-danger">{error}</p>}
+          <div className="flex gap-3"><button disabled={!areaManagers} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.next}</button><button type="button" onClick={() => setPicking(false)} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
+        </form>
+      </section>
+    </div>}
+    {picking && reasonOpen && <ReasonDialog title={strings.areaManagerDialog} note={areaManagers?.find((account) => account.id === picked)?.email ?? strings.noAreaManager} confirmLabel={strings.saveAreaManager} busy={busy} reasonError={errors.reason} error={error} onConfirm={(reason) => void assign(reason)} onCancel={() => { setReasonOpen(false); setErrors({}); setError(""); }} />}
     {editing && reasonOpen && <ReasonDialog title={strings.editField(fieldLabels[editing])} confirmLabel={strings.saveCorrection} busy={busy} reasonError={errors.reason} error={error} onConfirm={(reason) => void save(reason)} onCancel={() => { setReasonOpen(false); setErrors({}); setError(""); }} />}
   </>;
 }

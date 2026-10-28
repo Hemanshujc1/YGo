@@ -17,7 +17,7 @@ import {
   MasterProductsResponse,
   Pack,
   PacksResponse,
-  ShopApplication,
+  AdminShopApplication,
   ShopApplicationsResponse,
   ShopVisit,
   ShopOnboarding,
@@ -27,6 +27,7 @@ import {
   type CreateVisitPhotoUploadBody,
   type RecordShopVisitBody,
   type RecordOnboardingFeeBody,
+  type AssignShopAreaManagerBody,
   type CorrectShopApplicationBody,
   type CreateAdminBody,
   type CreateAreaBody,
@@ -100,7 +101,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | SetThemeBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -265,23 +266,28 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     },
 
     /** `GET /v1/admin/shop-applications/:id` (A07). */
-    async getShopApplication(id: string): Promise<ApiResult<ShopApplication>> {
-      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}`), ShopApplication);
+    async getShopApplication(id: string): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}`), AdminShopApplication);
     },
 
     /** `PATCH /v1/admin/shop-applications/:id`: correct fields with a reason. */
-    async correctShopApplication(id: string, body: CorrectShopApplicationBody): Promise<ApiResult<ShopApplication>> {
-      return result(await adminRequest("PATCH", `/v1/admin/shop-applications/${encodeURIComponent(id)}`, body), ShopApplication);
+    async correctShopApplication(id: string, body: CorrectShopApplicationBody): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("PATCH", `/v1/admin/shop-applications/${encodeURIComponent(id)}`, body), AdminShopApplication);
+    },
+
+    /** `PUT /v1/admin/shop-applications/:id/area-manager`: assign, move or take back (null) with a reason (#299). */
+    async assignShopAreaManager(id: string, body: AssignShopAreaManagerBody): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("PUT", `/v1/admin/shop-applications/${encodeURIComponent(id)}/area-manager`, body), AdminShopApplication);
     },
 
     /** `POST /v1/admin/shop-applications/:id/start-review`: Submitted to Under Review. */
-    async startShopApplicationReview(id: string): Promise<ApiResult<ShopApplication>> {
-      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/start-review`), ShopApplication);
+    async startShopApplicationReview(id: string): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/start-review`), AdminShopApplication);
     },
 
     /** `POST /v1/admin/shop-applications/:id/approve`: Under Review to Approved. */
-    async approveShopApplication(id: string): Promise<ApiResult<ShopApplication>> {
-      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/approve`), ShopApplication);
+    async approveShopApplication(id: string): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/approve`), AdminShopApplication);
     },
 
     /** Issue a private PUT URL from the authenticated API; never substitute an input URL. */
