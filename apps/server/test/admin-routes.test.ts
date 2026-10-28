@@ -238,8 +238,8 @@ describe("Admin routes and browser sessions", () => {
       { method: "POST", url: "/v1/admin/categories", payload: { name: "Snacks" } },
       { method: "GET", url: "/v1/admin/products" },
       { method: "GET", url: `/v1/admin/products/${id}/packs` },
-      { method: "GET", url: "/v1/admin/shop-applications" },
-      { method: "GET", url: `/v1/admin/shop-applications/${id}` },
+      // Listing, reading and correcting applications are open to them since #299 (test/shops.test.ts).
+      { method: "PUT", url: `/v1/admin/shop-applications/${id}/area-manager`, payload: { areaManagerId: null, reason: "Mine" } },
       { method: "POST", url: `/v1/admin/shop-applications/${id}/start-review` },
       { method: "POST", url: `/v1/admin/shop-applications/${id}/approve` },
     ] as const;

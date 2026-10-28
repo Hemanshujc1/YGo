@@ -118,6 +118,8 @@ export {
   PlaceSession,
 } from "./places";
 export {
+  AdminShopApplication,
+  AssignShopAreaManagerBody,
   CorrectShopApplicationBody,
   MyShopApplicationResponse,
   SaveShopApplicationBody,

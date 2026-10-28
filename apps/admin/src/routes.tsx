@@ -313,10 +313,6 @@ function Accounts({ api }: { api: AdminApi }) {
   );
 }
 
-function Applications() {
-  return useLoaderData() === null ? <p className="text-muted">{strings.noAssignedShops}</p> : <ShopApplications />;
-}
-
 function RouteError({ api }: { api?: AdminApi }) {
   const error = useRouteError();
   const revalidator = useRevalidator();
@@ -341,6 +337,15 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   // Every signed-in page goes through this, so none can skip the role check (#343): Admin-only unless it names an `areaManager` loader.
   const guarded = ({ loader = () => null, areaManager, ...route }: GuardedRoute): RouteObject =>
     ({ ...route, loader: byRole(api, loader, areaManager) });
+  const applicationsLoader = listLoader(() => api.listShopApplications(), (data) => data.applications);
+  const applicationLoader: LoaderFunction = async ({ params }) => {
+    const id = params.id;
+    if (!id) throw new Error(strings.notFound);
+    const result = await api.getShopApplication(id);
+    if (result.ok) return result.data;
+    if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(result.code);
+  };
 
   return [
     guarded({ path: "/", loader: () => redirect("/accounts") }),
@@ -387,25 +392,19 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
+    // An Area Manager uses A06 and A07 too; the server shows them only their assigned shops (#299).
     guarded({
       path: "/applications",
-      // Assigning shops to an Area Manager comes in #299; until then they have none.
-      loader: listLoader(() => api.listShopApplications(), (data) => data.applications),
-      areaManager: () => null,
-      element: <Page protectedArea api={api}><Applications /></Page>,
+      loader: applicationsLoader,
+      areaManager: applicationsLoader,
+      element: <Page protectedArea api={api}><ShopApplications api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({
       path: "/applications/:id",
-      loader: async ({ params }) => {
-        const id = params.id;
-        if (!id) throw new Error(strings.notFound);
-        const result = await api.getShopApplication(id);
-        if (result.ok) return result.data;
-        if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
-        throw new Error(result.code);
-      },
+      loader: applicationLoader,
+      areaManager: applicationLoader,
       element: <Page protectedArea api={api}><ShopApplicationReview api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,

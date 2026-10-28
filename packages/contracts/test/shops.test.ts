@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import {
+  AdminShopApplication,
+  AssignShopAreaManagerBody,
   CalendarDate,
   CorrectShopApplicationBody,
   ErrorCode,
@@ -172,6 +174,35 @@ describe("ShopApplication", () => {
     expect(MyShopApplicationResponse.parse({ application: null })).toEqual({ application: null });
     const sent = { ...draft, ...complete, state: "submitted", areaName: "Kothrud", submittedAt: "2026-10-25T10:00:00.000Z" };
     expect(ShopApplication.parse(sent)).toEqual(sent);
+  });
+
+  it("carries the assigned Area Manager only in the Admin shape (#299)", () => {
+    const sent = {
+      id: "00000000-0000-4000-8000-000000000401",
+      state: "submitted",
+      ...complete,
+      areaName: "Kothrud",
+      ownerPhone: "+919876543210",
+      ownerEmail: "asha@example.com",
+      submittedAt: "2026-10-25T10:00:00.000Z",
+    };
+    const areaManager = { id: "00000000-0000-4000-8000-000000000402", name: "Ravi Patil", email: "ravi@example.com" };
+    expect(AdminShopApplication.parse({ ...sent, areaManager })).toEqual({ ...sent, areaManager });
+    expect(AdminShopApplication.parse({ ...sent, areaManager: null }).areaManager).toBeNull();
+    expect(ShopApplication.safeParse({ ...sent, areaManager }).success).toBe(false);
+  });
+});
+
+describe("AssignShopAreaManagerBody", () => {
+  it("takes an Area Manager or null, with a reason", () => {
+    const id = "00000000-0000-4000-8000-000000000402";
+    expect(AssignShopAreaManagerBody.parse({ areaManagerId: id, reason: " Near their route " })).toEqual({ areaManagerId: id, reason: "Near their route" });
+    expect(AssignShopAreaManagerBody.parse({ areaManagerId: null, reason: "Admin's own shop" }).areaManagerId).toBeNull();
+  });
+
+  it("refuses a missing reason or a bad id", () => {
+    expect(fieldsRefused(AssignShopAreaManagerBody, { areaManagerId: null })).toEqual(["reason"]);
+    expect(fieldsRefused(AssignShopAreaManagerBody, { areaManagerId: "ravi", reason: "Route" })).toEqual(["areaManagerId"]);
   });
 });
 

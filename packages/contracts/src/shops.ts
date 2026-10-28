@@ -124,8 +124,29 @@ export type ShopApplication = z.infer<typeof ShopApplication>;
 export const MyShopApplicationResponse = z.strictObject({ application: ShopApplication.nullable() });
 export type MyShopApplicationResponse = z.infer<typeof MyShopApplicationResponse>;
 
-/** `GET /v1/admin/shop-applications`: Submitted, Under Review and Approved, the longest waiting first. */
-export const ShopApplicationsResponse = z.strictObject({ applications: z.array(ShopApplication) });
+/**
+ * An application as the Admin web reads it: with the Area Manager Admin
+ * assigned it to, or null for Admin's own shop (#299). Only the Admin
+ * endpoints answer it, so an Owner never sees who manages their shop.
+ */
+export const AdminShopApplication = ShopApplication.extend({
+  areaManager: z.strictObject({ id: z.uuid(), name: z.string().nullable(), email: z.string() }).nullable(),
+});
+export type AdminShopApplication = z.infer<typeof AdminShopApplication>;
+
+/**
+ * `GET /v1/admin/shop-applications`: Submitted, Under Review and Approved, the longest waiting first.
+ * An Area Manager gets only the shops assigned to them (#299).
+ */
+export const ShopApplicationsResponse = z.strictObject({ applications: z.array(AdminShopApplication) });
 export type ShopApplicationsResponse = z.infer<typeof ShopApplicationsResponse>;
 
 export const ShopApplicationParams = z.strictObject({ id: z.uuid() });
+
+/**
+ * `PUT /v1/admin/shop-applications/:id/area-manager`: Admin assigns the shop to an
+ * Area Manager, moves it to another, or takes it back with null, with a reason (#299).
+ * An id that is not an Area Manager answers VALIDATION_FAILED naming `areaManagerId`.
+ */
+export const AssignShopAreaManagerBody = z.strictObject({ areaManagerId: z.uuid().nullable(), reason: AdminActionReason });
+export type AssignShopAreaManagerBody = z.infer<typeof AssignShopAreaManagerBody>;

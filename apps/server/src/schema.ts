@@ -188,7 +188,10 @@ export const shops = pgTable("shops", {
   upiId: text("upi_id"),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  // The Area Manager Admin assigned the shop to, paid on it (#299); none means Admin's own shop.
+  areaManagerId: uuid("area_manager_id").references(() => areaManagerMemberships.accountId),
 }, (table) => [
+  index("shops_area_manager_id_idx").on(table.areaManagerId),
   check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved')`),
   check("shops_entity_type_valid", sql`${table.entityType} IN ('proprietorship', 'partnership_firm', 'llp', 'company')`),
   check("shops_service_radius_valid", sql`${table.serviceRadiusMetres} BETWEEN 500 AND 5000 AND ${table.serviceRadiusMetres} % 500 = 0`),

@@ -1,0 +1,3 @@
+ALTER TABLE "shops" ADD COLUMN "area_manager_id" uuid;--> statement-breakpoint
+ALTER TABLE "shops" ADD CONSTRAINT "shops_area_manager_id_area_manager_memberships_account_id_fk" FOREIGN KEY ("area_manager_id") REFERENCES "public"."area_manager_memberships"("account_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "shops_area_manager_id_idx" ON "shops" USING btree ("area_manager_id");
