@@ -61,6 +61,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder] } }),
     createAccount: vi.fn().mockResolvedValue({ ok: true, data: created }),
     listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
+    getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "0", values: {} } }),
+    getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: 0, values: {}, missing: ["commission"], complete: false } }),
+    publishRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: 1 } }),
     listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
     previewCatalogImport: vi.fn(),
     commitCatalogImport: vi.fn(),
@@ -102,6 +105,89 @@ describe("Admin web", () => {
     fireEvent.click(await screen.findByRole("link", { name: strings.catalogImport.title }));
     await screen.findByRole("heading", { name: strings.catalogImport.title });
     expect(screen.getByRole("link", { name: strings.products }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("loads an exact scope card, previews independent shop/category sources, and publishes only on explicit confirmation", async () => {
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    const api = {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string }) => ({ ok: true, data: { version: "7", values: scope.type === "global" ? { minimumCart: "0" } : {} } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "7", values: { minimumCart: { value: "0", source: { type: "global", id: null, version: "7" } } }, missing: [], complete: true } }),
+      publishRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "8" } }),
+    };
+    setup("/rate-cards", api);
+    expect(await screen.findByRole("heading", { name: strings.rateCards })).toBeTruthy();
+    await waitFor(() => expect(api.getRateCardScope).toHaveBeenCalledWith({ type: "global" }));
+    expect(screen.getByRole("textbox", { name: strings.rateCardFields.minimumCart })).toHaveProperty("value", "0");
+    expect(api.publishRateCard).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewCategory }), { target: { value: stationery.id } });
+    await waitFor(() => expect(api.getEffectiveRateCard).toHaveBeenCalledWith({ shopId: shop.id, categoryId: stationery.id, usesPickup: false, usesBargain: false }));
+    await waitFor(() => expect(screen.getAllByText(strings.rateCardSources.global).length).toBeGreaterThan(1));
+    fireEvent.click(screen.getByRole("button", { name: strings.rateCardPublish }));
+    expect(api.publishRateCard).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Update global minimum" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.rateCardPublish }));
+    await waitFor(() => expect(api.publishRateCard).toHaveBeenCalledWith({ scope: { type: "global" }, values: { minimumCart: "0" }, reason: "Update global minimum" }));
+    expect(await screen.findByText(strings.rateCardPublished("8"))).toBeTruthy();
+  });
+
+  it("does not show a category edit as the draft for a different preview category", async () => {
+    const otherCategory = { id: "00000000-0000-4000-8000-000000000104", parentId: null, name: "Hardware", active: true, effectiveActive: true };
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    setup("/rate-cards", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery, otherCategory] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string; id?: string }) => ({ ok: true, data: { version: "2", values: scope.type === "category" && scope.id === stationery.id ? { minimumCart: "10" } : scope.type === "shop" ? { minimumCart: "15" } : {} } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "3", values: { minimumCart: { value: "25", source: { type: "global", id: null, version: "3" } } }, missing: [], complete: true } }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardScope }), { target: { value: "category" } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardCategory }), { target: { value: stationery.id } });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: strings.rateCardFields.minimumCart })).toHaveProperty("value", "10"));
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewCategory }), { target: { value: otherCategory.id } });
+    await waitFor(() => expect(screen.getAllByText(strings.rateCardDifferentDraftScope(stationery.name)).length).toBeGreaterThan(0));
+  });
+
+  it("marks a category draft field masked when the preview shop has a narrower override", async () => {
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    setup("/rate-cards", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string; id?: string }) => ({ ok: true, data: { version: "2", values: scope.type === "category" && scope.id === stationery.id ? { minimumCart: "10" } : scope.type === "shop" ? { minimumCart: "15" } : {} } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "3", values: { minimumCart: { value: "15", source: { type: "shop", id: shop.id, version: "3" } } }, missing: [], complete: true } }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardScope }), { target: { value: "category" } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardCategory }), { target: { value: stationery.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewCategory }), { target: { value: stationery.id } });
+    expect(await screen.findByText(strings.rateCardDraftMasked(strings.rateCardSources.shop))).toBeTruthy();
+  });
+
+  it("shows the broader value and source after clearing a shop override", async () => {
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    setup("/rate-cards", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string; id?: string }) => ({ ok: true, data: { version: "2", values: scope.type === "global" ? { minimumCart: "10" } : scope.type === "category" ? { minimumCart: "20" } : { minimumCart: "15" } } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "3", values: { minimumCart: { value: "15", source: { type: "shop", id: shop.id, version: "3" } } }, missing: [], complete: true } }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardScope }), { target: { value: "shop" } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardShop }), { target: { value: shop.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewCategory }), { target: { value: stationery.id } });
+    const minimumCart = await screen.findByRole("textbox", { name: strings.rateCardFields.minimumCart });
+    await waitFor(() => expect(minimumCart).toHaveProperty("value", "15"));
+    fireEvent.change(minimumCart, { target: { value: "" } });
+    const row = screen.getByRole("row", { name: /Minimum cart/ });
+    const draftCell = within(row).getAllByRole("cell")[2];
+    if (!draftCell) throw new Error("Draft cell is missing");
+    await waitFor(() => expect(draftCell.textContent).toContain('"20"'));
+    expect(within(draftCell).getByText(strings.rateCardSources.category)).toBeTruthy();
   });
 
   it("redirects an unauthenticated import-page visit to sign-in", async () => {
@@ -861,7 +947,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(6);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(7);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

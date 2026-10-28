@@ -11,6 +11,10 @@ import {
   AreasResponse,
   BrowserSession,
   WaitlistResponse,
+  RateCardScopeQuery,
+  ScopedRateCardResponse,
+  RateCardResponse,
+  PublishedRateCardResponse,
   CategoriesResponse,
   Category,
   MasterProduct,
@@ -30,6 +34,9 @@ import {
   type AssignShopAreaManagerBody,
   type CorrectShopApplicationBody,
   type CreateAdminBody,
+  type PublishRateCardBody,
+  type RateCardScope,
+  type ResolveRateCardQuery,
   type CreateAreaBody,
   type CreateCategoryBody,
   type CreateMasterProductBody,
@@ -206,6 +213,28 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `GET /v1/admin/categories`: list the global category tree. */
     async listCategories(): Promise<ApiResult<CategoriesResponse>> {
       return result(await adminRequest("GET", "/v1/admin/categories"), CategoriesResponse);
+    },
+    /** Latest complete card published at an exact scope; global has no id. */
+    async getRateCardScope(scope: RateCardScope, version?: string): Promise<ApiResult<ScopedRateCardResponse>> {
+      const query = new URLSearchParams({ type: scope.type });
+      if ("id" in scope) query.set("id", scope.id);
+      if (version) query.set("version", version);
+      const parsed = RateCardScopeQuery.safeParse({ ...scope, ...(version ? { version } : {}) });
+      if (!parsed.success) return { ok: false, status: 400, code: "VALIDATION_FAILED" };
+      return result(await adminRequest("GET", `/v1/admin/rate-cards/scope?${query}`), ScopedRateCardResponse);
+    },
+    /** Preview inheritance and source at a shop/category context. */
+    async getEffectiveRateCard(query: ResolveRateCardQuery): Promise<ApiResult<RateCardResponse>> {
+      const params = new URLSearchParams({ shopId: query.shopId });
+      if (query.categoryId) params.set("categoryId", query.categoryId);
+      if (query.usesPickup) params.set("usesPickup", "true");
+      if (query.usesBargain) params.set("usesBargain", "true");
+      if (query.version) params.set("version", String(query.version));
+      return result(await adminRequest("GET", `/v1/admin/rate-cards/effective?${params}`), RateCardResponse);
+    },
+    /** Explicit whole-card publication; every call creates an immutable version. */
+    async publishRateCard(body: PublishRateCardBody): Promise<ApiResult<PublishedRateCardResponse>> {
+      return result(await adminRequest("POST", "/v1/admin/rate-cards/publish", body), PublishedRateCardResponse);
     },
 
     /** `POST /v1/admin/categories`: create a top-level or child category. */

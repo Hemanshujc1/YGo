@@ -73,6 +73,10 @@ export const ResolveRateCardQuery = z.strictObject({
   shopId: z.uuid(), categoryId: z.uuid().optional(), version: RateCardVersion.optional(),
   usesPickup: z.stringbool().default(false), usesBargain: z.stringbool().default(false),
 });
+export type ResolveRateCardQuery = z.infer<typeof ResolveRateCardQuery>;
+export const RateCardScopeQuery = z.strictObject({
+  type: z.enum(["global", "category", "shop"]), id: z.uuid().optional(), version: z.union([z.literal("0"), RateCardVersion]).optional(),
+}).refine((scope) => scope.type === "global" ? scope.id === undefined : scope.id !== undefined, { path: ["id"] });
 
 export const RateCardSource = z.strictObject({ type: z.enum(["global", "category", "shop"]), id: z.uuid().nullable(), version: RateCardVersion });
 export const EffectiveRateCardValue = z.strictObject({ value: z.unknown(), source: RateCardSource });
@@ -84,5 +88,8 @@ export const RateCardResponse = z.strictObject({
   complete: z.boolean(),
 });
 export type RateCardResponse = z.infer<typeof RateCardResponse>;
+/** Latest immutable values published at exactly one scope, without inheritance. */
+export const ScopedRateCardResponse = z.strictObject({ version: z.union([z.literal("0"), RateCardVersion]), values: RateCardValues });
+export type ScopedRateCardResponse = z.infer<typeof ScopedRateCardResponse>;
 export const PublishedRateCardResponse = z.strictObject({ version: RateCardVersion });
 export type PublishedRateCardResponse = z.infer<typeof PublishedRateCardResponse>;
