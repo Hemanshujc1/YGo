@@ -35,6 +35,7 @@ export function RateCards({ api }: { api: Api }) {
   const [effective, setEffective] = useState<RateCardResponse>();
   const [previewScopes, setPreviewScopes] = useState<PreviewScopes>();
   const [loadingScope, setLoadingScope] = useState(false);
+  const [scopeRetry, setScopeRetry] = useState(0);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [scopeError, setScopeError] = useState("");
@@ -46,18 +47,8 @@ export function RateCards({ api }: { api: Api }) {
   const [published, setPublished] = useState<string | null>(null);
   const scope: RateCardScope | null = scopeType === "global" ? { type: "global" } : scopeId ? { type: scopeType, id: scopeId } : null;
 
-  async function loadScope(selected: RateCardScope) {
-    setLoadingScope(true); setScopeError(""); setPublished(null); setFieldIssues([]); setValues({});
-    try {
-      const result = await api.getRateCardScope(selected);
-      if (result.ok) { setValues(result.data.values); setVersion(result.data.version); }
-      else setScopeError(strings.errors[result.code]);
-    } catch { setScopeError(strings.failed); }
-    finally { setLoadingScope(false); }
-  }
-
   useEffect(() => {
-    if (!scope) { setValues({}); setVersion("0"); return; }
+    if (!scope) { setLoadingScope(false); setScopeError(""); setPublished(null); setValues({}); setVersion("0"); return; }
     let active = true;
     setLoadingScope(true); setScopeError(""); setPublished(null); setFieldIssues([]); setValues({});
     void api.getRateCardScope(scope).then((result) => {
@@ -66,7 +57,7 @@ export function RateCards({ api }: { api: Api }) {
       else setScopeError(strings.errors[result.code]);
     }).catch(() => { if (active) setScopeError(strings.failed); }).finally(() => { if (active) setLoadingScope(false); });
     return () => { active = false; };
-  }, [api, scopeType, scopeId]);
+  }, [api, scopeType, scopeId, scopeRetry]);
 
   useEffect(() => {
     if (!shopId) { setEffective(undefined); setPreviewError(""); setLoadingPreview(false); return; }
@@ -218,7 +209,7 @@ export function RateCards({ api }: { api: Api }) {
       {published !== null && <p role="status" className="rounded-lg bg-success-subtle p-3 text-on-success-subtle">{strings.rateCardPublished(published)}</p>}
       <button className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.rateCardPublish}</button>
     </form>}
-    {scopeError && loadingScope === false && !reasonOpen && <button type="button" onClick={() => { if (scope) void loadScope(scope); }} className="mt-3 text-primary underline">{strings.retry}</button>}
+    {scopeError && loadingScope === false && !reasonOpen && <button type="button" onClick={() => setScopeRetry((current) => current + 1)} className="mt-3 text-primary underline">{strings.retry}</button>}
     <section className="mt-8 rounded-xl border border-border bg-surface p-6"><h2 className="font-semibold">{strings.rateCardPreview}</h2><p className="mt-1 text-muted">{strings.rateCardPreviewHint}</p>
       <div className="mt-4 grid gap-4 md:grid-cols-2"><ScopePicker label={strings.rateCardPreviewShop} value={shopId} options={shops.map(({ id, shopName }) => ({ id, label: shopName }))} onChange={setShopId} /><ScopePicker label={strings.rateCardPreviewCategory} value={categoryId} options={categories.map(({ id, name }) => ({ id, label: name }))} onChange={setCategoryId} /></div>
       <div className="mt-4 flex gap-6"><label className="flex min-h-10 items-center gap-2"><input className="h-10 w-10" type="checkbox" checked={usesPickup} onChange={(event) => setUsesPickup(event.target.checked)} />{strings.rateCardUsesPickup}</label><label className="flex min-h-10 items-center gap-2"><input className="h-10 w-10" type="checkbox" checked={usesBargain} onChange={(event) => setUsesBargain(event.target.checked)} />{strings.rateCardUsesBargain}</label></div>

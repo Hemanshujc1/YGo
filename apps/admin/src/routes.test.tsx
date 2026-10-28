@@ -133,6 +133,49 @@ describe("Admin web", () => {
     expect(await screen.findByText(strings.rateCardPublished("8"))).toBeTruthy();
   });
 
+  it("keeps retried scope values from replacing the newly selected scope", async () => {
+    let resolveRetry!: (result: { ok: true; data: { version: string; values: { minimumCart: string } } }) => void;
+    let globalReads = 0;
+    setup("/rate-cards", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      getRateCardScope: vi.fn((scope: { type: string }) => {
+        if (scope.type === "global") {
+          globalReads += 1;
+          if (globalReads === 1) return Promise.resolve({ ok: false, code: "INTERNAL" });
+          return new Promise((resolve) => { resolveRetry = resolve as typeof resolveRetry; });
+        }
+        return Promise.resolve({ ok: true, data: { version: "2", values: { minimumCart: "10" } } });
+      }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    await screen.findByRole("button", { name: strings.retry });
+
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    await waitFor(() => expect(globalReads).toBe(2));
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardScope }), { target: { value: "category" } });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardCategory }), { target: { value: stationery.id } });
+    const minimumCart = await screen.findByRole("textbox", { name: strings.rateCardFields.minimumCart });
+    await waitFor(() => expect(minimumCart).toHaveProperty("value", "10"));
+
+    resolveRetry({ ok: true, data: { version: "1", values: { minimumCart: "99" } } });
+    await waitFor(() => expect(minimumCart).toHaveProperty("value", "10"));
+  });
+
+  it("clears the scope spinner when switching to a category with no selection", async () => {
+    let resolveGlobal!: (result: { ok: true; data: { version: string; values: Record<string, never> } }) => void;
+    setup("/rate-cards", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      getRateCardScope: vi.fn(() => new Promise((resolve) => { resolveGlobal = resolve as typeof resolveGlobal; })),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    expect(await screen.findByText(strings.rateCardsLoading)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardScope }), { target: { value: "category" } });
+    await waitFor(() => expect(screen.queryByText(strings.rateCardsLoading)).toBeNull());
+
+    resolveGlobal({ ok: true, data: { version: "1", values: {} } });
+  });
+
   it("does not show a category edit as the draft for a different preview category", async () => {
     const otherCategory = { id: "00000000-0000-4000-8000-000000000104", parentId: null, name: "Hardware", active: true, effectiveActive: true };
     const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
