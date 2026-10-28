@@ -261,10 +261,54 @@ describe("Price simulator (#357)", () => {
     expect((await simulate({ shopId: randomUUID(), lines: [mine] })).statusCode).toBe(404);
     expect((await simulate({ shopId, lines: [{ ...mine, count: 0 }] })).statusCode).toBe(400);
     expect((await simulate({ shopId, lines: [] })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: Array.from({ length: 101 }, () => mine) })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [{ ...mine, count: 1000 }] })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [{ ...mine, count: 1.5 }] })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [{ quantityOptionId: randomUUID(), count: 1 }] })).statusCode).toBe(404);
     expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "global" }, values: { minimumCart: "1.234" } } })).statusCode).toBe(400);
     expect((await simulate({ shopId, lines: [mine] }, {})).statusCode).toBe(401);
     const commission = globalCard.commission;
     expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "shop", id: otherShop }, values: { commission } } })).statusCode).toBe(404);
     expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "category", id: randomUUID() }, values: { commission } } })).statusCode).toBe(404);
+  });
+});
+
+describe("Admin shop listings for the price simulator (#358)", () => {
+  async function list(shopId: string) {
+    return app.inject({ method: "GET", url: `/v1/admin/shops/${shopId}/listings`, headers });
+  }
+  async function showable(listingId: string) {
+    await database.pool.query(
+      `UPDATE master_products SET published = true, image_256_key = 'a', image_512_key = 'b', image_1024_key = 'c'
+        WHERE id = (SELECT pack.product_id FROM shop_listings listing JOIN packs pack ON pack.id = listing.pack_id WHERE listing.id = $1)`, [listingId]);
+  }
+
+  it("returns the shop's listed packs at their online price with their quantity-price options, and nothing else", async () => {
+    const shopId = await newShop();
+    const pack = await stock(shopId, { category: "Groceries", unitPrice: "99.50", count: 1 });
+    const option = await stock(shopId, { category: "Dairy", unitPrice: "55.25", count: 1, quantityOption: true });
+    const hidden = await stock(shopId, { category: "Groceries", unitPrice: "10.00", count: 1 });
+    const theirs = await stock(await newShop(), { category: "Groceries", unitPrice: "20.00", count: 1 });
+    const packId = "listingId" in pack ? pack.listingId : "";
+    const optionListing = String((await database.pool.query("SELECT listing_id FROM shop_quantity_price_options WHERE id = $1",
+      ["quantityOptionId" in option ? option.quantityOptionId : ""])).rows[0]?.listing_id);
+    await showable(packId); await showable(optionListing);
+    if ("listingId" in theirs) await showable(theirs.listingId);
+    expect("listingId" in hidden).toBe(true);
+
+    const response = await list(shopId);
+    expect(response.statusCode).toBe(200);
+    const listings = response.json().listings as Array<{ listingId: string; onlinePrice: string; packQuantity: string; quantityOptions: unknown[] }>;
+    expect(listings.map((item) => item.listingId).sort()).toEqual([packId, optionListing].sort());
+    expect(listings.find((item) => item.listingId === packId)).toMatchObject({ onlinePrice: "99.50", packQuantity: "1", quantityOptions: [] });
+    expect(listings.find((item) => item.listingId === optionListing)).toMatchObject({
+      onlinePrice: "999.00", quantityOptions: [{ id: "quantityOptionId" in option ? option.quantityOptionId : "", name: "Twin pack", quantity: "2", price: "55.25" }],
+    });
+  });
+
+  it("refuses unknown shops, bad ids and callers who are not signed in", async () => {
+    expect((await list(randomUUID())).statusCode).toBe(404);
+    expect((await list("not-a-uuid")).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: `/v1/admin/shops/${await newShop()}/listings` })).statusCode).toBe(401);
   });
 });

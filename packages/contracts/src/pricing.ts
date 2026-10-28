@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RateCardKey, RateCardScope, RateCardSource, RateCardValues } from "./rate-cards";
-import { RateCardVersion } from "./fields";
+import { PackQuantity, RateCardVersion, ShopPrice } from "./fields";
 
 const LineCount = z.number().int().min(1).max(999);
 
@@ -70,3 +70,21 @@ export type DeliveredQuote = z.infer<typeof DeliveredQuote>;
 
 export const PriceSimulatorResponse = z.strictObject({ now: DeliveredQuote, draft: DeliveredQuote.nullable() });
 export type PriceSimulatorResponse = z.infer<typeof PriceSimulatorResponse>;
+
+export const SimulatorListingsParams = z.strictObject({ id: z.uuid() });
+export type SimulatorListingsParams = z.infer<typeof SimulatorListingsParams>;
+
+/** A pack the shop lists, at its online price, with the quantity-price options a basket line can name instead (#358). */
+export const SimulatorListing = z.strictObject({
+  listingId: z.uuid(),
+  name: z.string(),
+  brand: z.string().nullable(),
+  baseUnit: z.enum(["each", "kg", "l"]),
+  packQuantity: PackQuantity,
+  onlinePrice: ShopPrice,
+  quantityOptions: z.array(z.strictObject({ id: z.uuid(), name: z.string(), quantity: PackQuantity, price: ShopPrice })),
+});
+export type SimulatorListing = z.infer<typeof SimulatorListing>;
+
+export const SimulatorListingsResponse = z.strictObject({ listings: z.array(SimulatorListing) });
+export type SimulatorListingsResponse = z.infer<typeof SimulatorListingsResponse>;
