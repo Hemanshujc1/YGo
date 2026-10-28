@@ -254,6 +254,16 @@ describe("Admin routes and browser sessions", () => {
     expect((await adminRefresh(cookie(refreshed))).statusCode).toBe(403);
   });
 
+  it("never lets one account hold both Admin web roles (#343)", async () => {
+    const { rows: [manager] } = await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ('both@example.com') RETURNING id");
+    await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [manager?.id]);
+    await expect(database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [manager?.id])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("DELETE FROM area_manager_memberships WHERE account_id = $1", [manager?.id]);
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [manager?.id]);
+    await expect(database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [manager?.id])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("DELETE FROM admin_memberships WHERE account_id = $1", [manager?.id]);
+  });
+
   it("hides membership on code request, rotates the cookie, enforces idle expiry and signs out", async () => {
     const unknown = await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "unknown@example.com" } });
     expect(unknown.statusCode).toBe(204);

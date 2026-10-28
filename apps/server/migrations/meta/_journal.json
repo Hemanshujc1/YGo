@@ -127,6 +127,13 @@
       "when": 1793093743138,
       "tag": "0017_area_manager_memberships",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793172291562,
+      "tag": "0018_admin_web_role_exclusive",
+      "breakpoints": true
     }
   ]
 }

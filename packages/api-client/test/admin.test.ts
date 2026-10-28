@@ -186,6 +186,19 @@ describe("Admin browser API client", () => {
     expect(await malformed.client.setTheme({ theme: "dark" })).toEqual({ ok: false, status: 200, code: "INTERNAL" });
   });
 
+  it("asks for the role once per sign-in and forgets it when the session ends (#343)", async () => {
+    const { client, calls } = setup(({ path }) =>
+      path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : answer(200, areaManager));
+    expect(client.currentRole()).toBeNull();
+    expect(await client.role()).toEqual({ ok: true, data: "area_manager" });
+    expect(await client.role()).toEqual({ ok: true, data: "area_manager" });
+    expect(client.currentRole()).toBe("area_manager");
+    expect(calls.filter(({ path }) => path === "/v1/admin/me")).toHaveLength(1);
+    await client.signOut();
+    expect(client.currentRole()).toBeNull();
+    expect(await client.role()).toMatchObject({ ok: false, code: "UNAUTHENTICATED" });
+  });
+
   it("parses a created account and its role", async () => {
     const { client } = setup(({ path }) =>
       path.endsWith("/verify")

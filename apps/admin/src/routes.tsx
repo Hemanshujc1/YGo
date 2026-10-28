@@ -27,23 +27,17 @@ type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
 type FieldErrors = Partial<Record<Field, string>>;
 
-// The role the last page's loader read (#343), so the shell can draw it. Kept after a failed read, for the error page.
-const lastRole = new WeakMap<AdminApi, AdminRole>();
-
 /**
- * Reads the role on every page, then runs the Admin's loader; an Area Manager
- * gets theirs, by default Applications (#343). Checked first because a 403
- * from an Admin-only route would sign them out.
+ * Reads the role (asked once per sign-in), then runs the Admin's loader; an
+ * Area Manager gets theirs, by default Applications (#343). Checked first
+ * because a 403 from an Admin-only route would sign them out.
  */
 function byRole(api: AdminApi, admin: LoaderFunction, areaManager: LoaderFunction = () => redirect("/applications")): LoaderFunction {
   return async (args) => {
-    const me = await api.me();
-    if (me.ok) {
-      lastRole.set(api, me.data.role);
-      return me.data.role === "admin" ? admin(args) : areaManager(args);
-    }
-    if (me.code === "UNAUTHENTICATED" || me.code === "FORBIDDEN") return redirect("/sign-in");
-    throw new Error(me.code);
+    const role = await api.role();
+    if (role.ok) return role.data === "admin" ? admin(args) : areaManager(args);
+    if (role.code === "UNAUTHENTICATED" || role.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(role.code);
   };
 }
 
@@ -51,7 +45,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
   const location = useLocation();
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
-  const role = api && lastRole.get(api);
+  const role = api?.currentRole() ?? null;
   const nav = role === "admin" ? [
     { path: "/accounts", label: strings.accounts },
     { path: "/categories", label: strings.categories },
@@ -76,7 +70,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     <div className="min-h-screen bg-bg font-sans text-secondary text-text">
       <header className="border-b border-border bg-surface px-8 py-5">
         <div className="flex items-center justify-between gap-4">
-          <Link to="/" className="text-title font-semibold text-brand">{role === "area_manager" ? strings.areaManagerTitle : strings.title}</Link>
+          <Link to="/" className="text-title font-semibold text-brand">{role === "area_manager" ? strings.areaManagerTitle : protectedArea && !role ? strings.brand : strings.title}</Link>
           {protectedArea && api && <div className="flex items-center gap-4">
             <ThemePicker api={api} />
             <button disabled={signingOut} onClick={() => void signOut()} className="h-10 rounded-lg border border-border-strong px-4 text-primary">
@@ -341,34 +335,39 @@ function listLoader<T, List>(load: () => Promise<ApiResult<T>>, select: (data: T
   };
 }
 
+type GuardedRoute = Omit<RouteObject, "loader" | "children" | "index"> & { loader?: LoaderFunction; areaManager?: LoaderFunction };
+
 export function adminRoutes(api: AdminApi): RouteObject[] {
+  // Every signed-in page goes through this, so none can skip the role check (#343): Admin-only unless it names an `areaManager` loader.
+  const guarded = ({ loader = () => null, areaManager, ...route }: GuardedRoute): RouteObject =>
+    ({ ...route, loader: byRole(api, loader, areaManager) });
+
   return [
-    { path: "/", loader: byRole(api, () => redirect("/accounts")) },
+    guarded({ path: "/", loader: () => redirect("/accounts") }),
     { path: "/sign-in", element: <SignIn api={api} /> },
-    {
+    guarded({
       path: "/accounts",
-      loader: byRole(api, listLoader(() => api.listAccounts(), (data) => data.accounts)),
+      loader: listLoader(() => api.listAccounts(), (data) => data.accounts),
       element: <Accounts api={api} />,
       hydrateFallbackElement: <Page>{strings.loading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/categories",
-      loader: byRole(api, listLoader(() => api.listCategories(), (data) => data.categories)),
+      loader: listLoader(() => api.listCategories(), (data) => data.categories),
       element: <Page protectedArea api={api}><Categories api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.categoriesLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/products/import",
-      loader: byRole(api, () => null),
       element: <Page protectedArea api={api}><CatalogImport api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.checking}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/products",
-      loader: byRole(api, async () => {
+      loader: async () => {
         const [products, categories] = await Promise.all([api.listMasterProducts(), api.listCategories()]);
         if (!products.ok || !categories.ok) {
           if ((!products.ok && (products.code === "UNAUTHENTICATED" || products.code === "FORBIDDEN")) ||
@@ -376,47 +375,48 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
           throw new Error(strings.failed);
         }
         return { products: products.data.products, categories: categories.data.categories };
-      }),
+      },
       element: <Page protectedArea api={api}><Products api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.productsLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/areas",
-      loader: byRole(api, listLoader(() => api.listAreas(), (data) => data.areas)),
+      loader: listLoader(() => api.listAreas(), (data) => data.areas),
       element: <Page protectedArea api={api}><Areas api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.areasLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/applications",
       // Assigning shops to an Area Manager comes in #299; until then they have none.
-      loader: byRole(api, listLoader(() => api.listShopApplications(), (data) => data.applications), () => null),
+      loader: listLoader(() => api.listShopApplications(), (data) => data.applications),
+      areaManager: () => null,
       element: <Page protectedArea api={api}><Applications /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/applications/:id",
-      loader: byRole(api, async ({ params }) => {
+      loader: async ({ params }) => {
         const id = params.id;
         if (!id) throw new Error(strings.notFound);
         const result = await api.getShopApplication(id);
         if (result.ok) return result.data;
         if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
         throw new Error(result.code);
-      }),
+      },
       element: <Page protectedArea api={api}><ShopApplicationReview api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
-    {
+    }),
+    guarded({
       path: "/waitlist",
-      loader: byRole(api, listLoader(() => api.listWaitlist(), (data) => data.entries)),
+      loader: listLoader(() => api.listWaitlist(), (data) => data.entries),
       element: <Page protectedArea api={api}><Waitlist /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.waitlistLoading}</Page>,
       errorElement: <RouteError api={api} />,
-    },
+    }),
     { path: "*", element: <Page><Message>{strings.notFound}</Message></Page> },
   ];
 }

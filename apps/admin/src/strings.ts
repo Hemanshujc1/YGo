@@ -6,6 +6,8 @@ const invalidReason = "Give a reason (up to 500 characters).";
 // one file (CONTEXT.md: every string externalised from day one).
 export const strings = {
   title: "YGo Admin",
+  // Before the role is known, so no role's name shows on a signed-in page.
+  brand: "YGo",
   areaManagerTitle: "YGo Area Manager",
   areaManagerScope: "You are working on the shops assigned to you. Accounts, Areas, the catalog, the waitlist, starting a review and approving a shop belong to Admin.",
   noAssignedShops: "No shops are assigned to you yet.",

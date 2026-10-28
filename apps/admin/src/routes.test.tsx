@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AdminRole } from "@ygo/contracts";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { adminRoutes } from "./routes";
 import { strings } from "./strings";
@@ -34,6 +35,24 @@ const application = {
   areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com", submittedAt: "2026-10-24T10:00:00.000Z",
 };
 
+/** The API client's role reads (#343): one answer per sign-in, gone once the session ends. */
+function asRole(role: AdminRole) {
+  let known: AdminRole | null = null;
+  let ended = false;
+  return {
+    role: vi.fn(async () => {
+      if (ended) return { ok: false, status: 401, code: "UNAUTHENTICATED" };
+      known = role;
+      return { ok: true, data: role };
+    }),
+    currentRole: vi.fn(() => (ended ? null : known)),
+    signOut: vi.fn(async () => {
+      ended = true;
+      return { ok: true, data: undefined };
+    }),
+  };
+}
+
 function setup(path: string, overrides: Record<string, unknown> = {}) {
   const api = {
     requestCode: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
@@ -65,8 +84,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getVisitPhotoAccess: vi.fn(),
     recordOnboardingFee: vi.fn(),
     getShopOnboarding: vi.fn(),
-    signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     me: vi.fn().mockResolvedValue({ ok: true, data: founder }),
+    ...asRole("admin"),
     setTheme: vi.fn(),
     ...overrides,
   };
@@ -84,7 +103,7 @@ describe("Admin web", () => {
   });
 
   it("redirects an unauthenticated import-page visit to sign-in", async () => {
-    setup("/products/import", { me: vi.fn().mockResolvedValue({ ok: false, code: "UNAUTHENTICATED" }) });
+    setup("/products/import", { role: vi.fn().mockResolvedValue({ ok: false, code: "UNAUTHENTICATED" }) });
     await screen.findByRole("heading", { name: strings.signIn });
   });
 
@@ -778,7 +797,7 @@ describe("Area Manager shell (#343)", () => {
   const manager = { ...created, role: "area_manager" };
 
   it("signs an Area Manager in to Applications, with their own nav and scope banner", async () => {
-    const { api, router } = setup("/sign-in", { verifyCode: vi.fn().mockResolvedValue({ ok: true, data: manager }), me: vi.fn().mockResolvedValue({ ok: true, data: manager }) });
+    const { api, router } = setup("/sign-in", { verifyCode: vi.fn().mockResolvedValue({ ok: true, data: manager }), ...asRole("area_manager") });
     fireEvent.change(screen.getByLabelText(strings.email), { target: { value: manager.email } });
     fireEvent.click(screen.getByRole("button", { name: strings.sendCode }));
     fireEvent.change(await screen.findByLabelText(strings.code), { target: { value: "123456" } });
@@ -796,8 +815,7 @@ describe("Area Manager shell (#343)", () => {
   });
 
   it("asks the server again after sign-out, so a signed-out Area Manager page goes to sign-in", async () => {
-    const me = vi.fn().mockResolvedValueOnce({ ok: true, data: manager }).mockResolvedValue({ ok: false, status: 401, code: "UNAUTHENTICATED" });
-    const { router } = setup("/applications", { me });
+    const { router } = setup("/applications", asRole("area_manager"));
     await screen.findByText(strings.noAssignedShops);
     fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
     await screen.findByRole("heading", { name: strings.signIn });
@@ -809,7 +827,7 @@ describe("Area Manager shell (#343)", () => {
   it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", `/applications/${application.id}`])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
-      const { api, router } = setup(path, { me: vi.fn().mockResolvedValue({ ok: true, data: manager }) });
+      const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
       for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.getShopApplication]) {
@@ -817,6 +835,25 @@ describe("Area Manager shell (#343)", () => {
       }
     },
   );
+
+  it("draws no role's shell while the role is unknown or after the session ends", async () => {
+    setup("/applications", { role: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }), currentRole: vi.fn(() => null) });
+    expect(await screen.findByRole("link", { name: strings.brand })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: strings.areaManagerTitle })).toBeNull();
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("gives the next account on the same tab its own shell, not the previous one's", async () => {
+    const { api, router } = setup("/applications", asRole("area_manager"));
+    await screen.findByText(strings.noAssignedShops);
+    fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(api.currentRole()).toBeNull();
+    await router.navigate("/applications");
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+  });
 
   it("shows Admin the full nav and no scope banner", async () => {
     setup("/accounts");
@@ -839,8 +876,6 @@ describe("Admin theme (#263)", () => {
   const picker = () => screen.findByRole("group", { name: strings.theme });
   const option = (choice: "system" | "light" | "dark") => screen.getByRole("button", { name: strings.themes[choice] });
   const shown = () => document.documentElement.dataset.theme;
-  // The routes read the role first (#343); the theme's own account read comes next.
-  const signedInThen = (theme: Promise<unknown>) => vi.fn().mockResolvedValueOnce({ ok: true, data: founder }).mockReturnValue(theme);
   const deferred = <T,>() => {
     let resolve!: (value: T) => void;
     const promise = new Promise<T>((done) => { resolve = done; });
@@ -848,11 +883,10 @@ describe("Admin theme (#263)", () => {
   };
 
   it("shows no picker before sign-in, then takes the account's theme on sign-in", async () => {
-    // The role reads on "/" and "/accounts" answer; the theme's account load never does, so only the sign-in answer can set the theme.
+    // The theme's account load never answers, so only the sign-in answer can set the theme.
     setup("/sign-in", {
       verifyCode: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
-      me: vi.fn().mockResolvedValueOnce({ ok: true, data: founder }).mockResolvedValueOnce({ ok: true, data: founder })
-        .mockReturnValue(new Promise(() => undefined)),
+      me: vi.fn().mockReturnValue(new Promise(() => undefined)),
     });
     expect(screen.queryByRole("group", { name: strings.theme })).toBeNull();
     fireEvent.change(screen.getByLabelText(strings.email), { target: { value: founder.email } });
@@ -867,13 +901,13 @@ describe("Admin theme (#263)", () => {
   it("starts from this browser's copy, then the account's theme wins on load", async () => {
     localStorage.setItem(themeKey, "light");
     const me = deferred<unknown>();
-    const { api } = setup("/accounts", { me: signedInThen(me.promise) });
+    const { api } = setup("/accounts", { me: vi.fn().mockReturnValue(me.promise) });
     await picker();
     expect(option("light").getAttribute("aria-pressed")).toBe("true");
     me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
     await waitFor(() => expect(option("dark").getAttribute("aria-pressed")).toBe("true"));
     expect(shown()).toBe("dark");
-    expect(api.me).toHaveBeenCalledTimes(2);
+    expect(api.me).toHaveBeenCalledOnce();
   });
 
   it("applies a choice at once, saves it, and allows one save at a time", async () => {
@@ -914,7 +948,7 @@ describe("Admin theme (#263)", () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
     const { api } = setup("/accounts", {
-      me: signedInThen(me.promise),
+      me: vi.fn().mockReturnValue(me.promise),
       setTheme: vi.fn().mockReturnValue(save.promise),
     });
     await picker();
@@ -951,7 +985,7 @@ describe("Admin theme (#263)", () => {
   it("keeps a choice under way when the account answers during the save", async () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
-    setup("/accounts", { me: signedInThen(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
     await picker();
     fireEvent.click(option("dark"));
     me.resolve({ ok: true, data: { ...founder, theme: "light" } });
@@ -965,7 +999,7 @@ describe("Admin theme (#263)", () => {
   it("goes back to the account's theme, not the older one, when a save fails after the account answered", async () => {
     const me = deferred<unknown>();
     const save = deferred<unknown>();
-    setup("/accounts", { me: signedInThen(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
+    setup("/accounts", { me: vi.fn().mockReturnValue(me.promise), setTheme: vi.fn().mockReturnValue(save.promise) });
     await picker();
     fireEvent.click(option("light"));
     me.resolve({ ok: true, data: { ...founder, theme: "dark" } });
@@ -977,16 +1011,15 @@ describe("Admin theme (#263)", () => {
 
   it("loads the account's theme again on the next page when the first load fails", async () => {
     const me = vi.fn()
-      .mockResolvedValueOnce({ ok: true, data: founder })
       .mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" })
       .mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } });
     const { router } = setup("/accounts", { me });
     await picker();
-    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(me).toHaveBeenCalledOnce());
     expect(shown()).toBeUndefined();
     await router.navigate("/waitlist");
     await waitFor(() => expect(shown()).toBe("dark"));
-    expect(me).toHaveBeenCalledTimes(4);
+    expect(me).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the save message after moving to another page", async () => {

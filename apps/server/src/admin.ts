@@ -5,10 +5,9 @@ import type { Clock } from "./adapters/clock";
 import { withTransaction } from "./db";
 import { signedIn, type AuthKeys, type SignedIn } from "./tokens";
 
-/** Everyone who may sign in to the Admin web, with their role (#343). Accounts are created with one; Admin wins if both. */
+/** Everyone who may sign in to the Admin web, with their role (#343). The database allows an account only one (migration 0018). */
 export const ADMIN_WEB_MEMBERS = `(SELECT account_id, 'admin' AS role FROM admin_memberships
-  UNION ALL SELECT account_id, 'area_manager' AS role FROM area_manager_memberships
-  WHERE account_id NOT IN (SELECT account_id FROM admin_memberships))`;
+  UNION ALL SELECT account_id, 'area_manager' AS role FROM area_manager_memberships)`;
 
 /** Check current Admin or Area Manager membership after validating the session. */
 export async function adminWebSignedIn(
@@ -41,7 +40,12 @@ export async function adminSignedIn(
   return undefined;
 }
 
-/** Lock current membership for a save; the callback commits, otherwise cleanup rolls back. */
+/**
+ * Lock current Admin membership for a save; the callback commits, otherwise cleanup rolls back.
+ * Admin only: it locks `admin_memberships`, so an Area Manager always gets 403 here (#343).
+ * A route that Area Managers may also use (#299) needs its own check and lock on
+ * `area_manager_memberships`, with the shop-assignment test inside the same transaction.
+ */
 export async function withAdminTransaction<T>(
   pool: Pool,
   accountId: string,
