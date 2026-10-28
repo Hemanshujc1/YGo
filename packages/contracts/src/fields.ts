@@ -125,8 +125,8 @@ export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2
 const RATE_CARD_VERSION_MAX = 9_223_372_036_854_775_807n;
 
 /** A published rate-card version as canonical decimal digits, exact across the whole bigint range (#355). */
-// One check: zod would run a separate refine even after the regex failed, and BigInt throws on non-digits.
-export const RateCardVersion = z.string().refine((value) => /^[1-9]\d{0,18}$/.test(value) && BigInt(value) <= RATE_CARD_VERSION_MAX);
+// zod runs the refine even after the regex fails, so it guards BigInt against non-digits.
+export const RateCardVersion = z.string().regex(/^[1-9]\d{0,18}$/).refine((value) => !/^\d+$/.test(value) || BigInt(value) <= RATE_CARD_VERSION_MAX);
 
 /** A non-negative percentage with up to four decimals, stored exactly rather than as a JS float (#44, MNY-3). */
 export const RatePercentage = z.string().trim().regex(/^(?:0|[1-9]\d?|100)(?:\.\d{1,4})?$/)

@@ -114,7 +114,7 @@ describe("Admin routes and browser sessions", () => {
     const publish = (scope: object, values: object, reason: string) => app.inject({
       method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason },
     });
-    const effective = (version?: number | string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version ? `&version=${version}` : ""}`, headers });
+    const effective = (version?: number | string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version === undefined ? "" : `&version=${version}`}`, headers });
     const snapshots: unknown[] = [];
     const global = {
       commission: { formula: "percentage", fixedAmount: null, percentage: "8.5", minimum: null, maximum: null, base: "after_shop_discount" },
