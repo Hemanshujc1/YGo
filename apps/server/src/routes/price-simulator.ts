@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import {
   type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey,
-  type RateCardResponse,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn } from "../admin";
@@ -18,10 +17,14 @@ const ORDER_KEYS: RateCardKey[] = ["deliveryFee", "smallCartFee", "deliveredCont
  */
 export async function deliveredQuote(pool: Pool, shopId: string, lines: BasketLine[], version?: string, draft?: RateCardDraft): Promise<DeliveredQuote> {
   // Order-level values resolve shop → global; resolving without a category ignores category cards (#357).
-  const order = await resolveRateCard(pool, shopId, undefined, version, undefined, draft) as RateCardResponse;
+  const resolve = async (categoryId?: string) => {
+    const card = await resolveRateCard(pool, shopId, categoryId, version, undefined, draft);
+    if (!card) throw new Error("Rate card did not resolve for a checked shop and category");
+    return card;
+  };
+  const order = await resolve();
   const categories = [...new Set(lines.map((line) => line.categoryId))];
-  const byCategory = new Map(await Promise.all(categories.map(async (id) =>
-    [id, await resolveRateCard(pool, shopId, id, version, undefined, draft) as RateCardResponse] as const)));
+  const byCategory = new Map(await Promise.all(categories.map(async (id) => [id, await resolve(id)] as const)));
   const missing = ORDER_KEYS.filter((key) => order.missing.includes(key));
   if ([...byCategory.values()].some((card) => card.missing.includes("commission"))) missing.unshift("commission");
   if (missing.length) return { status: "incomplete", rateCardVersion: order.version, missing };
@@ -63,10 +66,17 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
         JOIN master_products product ON product.id = pack.product_id
         ORDER BY entry.position`, [shopId, JSON.stringify(lines)]);
     if (rows.length !== lines.length) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    // A draft for another shop or an unknown category would silently change nothing.
+    if (draft?.scope.type === "shop" && draft.scope.id !== shopId) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (draft?.scope.type === "category" && !(await pool.query("SELECT 1 FROM categories WHERE id = $1", [draft.scope.id])).rowCount) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    }
     const basket = rows.map((row, index) => ({ ...row, count: lines[index]?.count ?? 0 }));
-    // Pin one published version so both quotes and every category read the same cards.
+    // Pin the latest published version so both quotes and every category read the same cards.
+    // Before any card exists there is nothing to pin, and the reads may see a first card published meanwhile.
     const { rows: [latest] } = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions");
     const pinned = latest?.version === "0" ? undefined : latest?.version;
-    return { now: await deliveredQuote(pool, shopId, basket, pinned), draft: draft ? await deliveredQuote(pool, shopId, basket, pinned, draft) : null };
+    const [now, tried] = await Promise.all([deliveredQuote(pool, shopId, basket, pinned), draft && deliveredQuote(pool, shopId, basket, pinned, draft)]);
+    return { now, draft: tried ?? null };
   });
 }

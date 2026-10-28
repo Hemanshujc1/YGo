@@ -161,6 +161,16 @@ describe("Price simulator (#357)", () => {
     expect((await simulate({ shopId, lines: [line] })).json().now).toMatchObject({ status: "priced", smallCartFee: null, customerTotal: "230.00" });
   });
 
+  it("shows a shop keeping less than nothing when its fixed commission exceeds the line", async () => {
+    const shopId = await newShop();
+    await publish({ type: "global" }, { ...globalCard, commission: { ...globalCard.commission, formula: "fixed", fixedAmount: "12", percentage: null },
+      deliveryFee: { amount: "0", split: { platformPercentage: "100", shopPercentage: "0" } } });
+    const line = await stock(shopId, { category: "Groceries", unitPrice: "5.00", count: 1 });
+    const response = await simulate({ shopId, lines: [line] });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().now).toMatchObject({ customerTotal: "5.00", shopKeeps: "-7.00", platformContribution: "12.00" });
+  });
+
   it("refuses lines from another shop, unknown shops, bad baskets and callers who are not signed in", async () => {
     const shopId = await newShop();
     const otherShop = await newShop();
@@ -174,5 +184,8 @@ describe("Price simulator (#357)", () => {
     expect((await simulate({ shopId, lines: [] })).statusCode).toBe(400);
     expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "global" }, values: { minimumCart: "1.234" } } })).statusCode).toBe(400);
     expect((await simulate({ shopId, lines: [mine] }, {})).statusCode).toBe(401);
+    const commission = globalCard.commission;
+    expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "shop", id: otherShop }, values: { commission } } })).statusCode).toBe(404);
+    expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "category", id: randomUUID() }, values: { commission } } })).statusCode).toBe(404);
   });
 });

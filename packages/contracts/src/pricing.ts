@@ -22,8 +22,8 @@ export const PriceSimulatorBody = z.strictObject({
 });
 export type PriceSimulatorBody = z.infer<typeof PriceSimulatorBody>;
 
-/** Rupees with exactly two decimals, as the SQL engine writes them. */
-const Amount = z.string().regex(/^\d+\.\d{2}$/);
+/** Rupees with exactly two decimals, as the SQL engine writes them; what the shop keeps can go below zero. */
+const Amount = z.string().regex(/^-?\d+\.\d{2}$/);
 const SplitFee = z.strictObject({ amount: Amount, platformShare: Amount, shopShare: Amount });
 
 export const QuoteReasonCode = z.enum(["BELOW_MINIMUM_CART", "BELOW_CONTRIBUTION_FLOOR"]);
