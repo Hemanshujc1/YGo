@@ -288,12 +288,17 @@ describe("Admin shop listings for the price simulator (#358)", () => {
     const pack = await stock(shopId, { category: "Groceries", unitPrice: "99.50", count: 1 });
     const option = await stock(shopId, { category: "Dairy", unitPrice: "55.25", count: 1, quantityOption: true });
     const hidden = await stock(shopId, { category: "Groceries", unitPrice: "10.00", count: 1 });
+    const unavailable = await stock(shopId, { category: "Groceries", unitPrice: "30.00", count: 1 });
     const theirs = await stock(await newShop(), { category: "Groceries", unitPrice: "20.00", count: 1 });
     const packId = "listingId" in pack ? pack.listingId : "";
     const optionListing = String((await database.pool.query("SELECT listing_id FROM shop_quantity_price_options WHERE id = $1",
       ["quantityOptionId" in option ? option.quantityOptionId : ""])).rows[0]?.listing_id);
     await showable(packId); await showable(optionListing);
     if ("listingId" in theirs) await showable(theirs.listingId);
+    if ("listingId" in unavailable) {
+      await showable(unavailable.listingId);
+      await database.pool.query("UPDATE shop_listings SET available = false WHERE id = $1", [unavailable.listingId]);
+    }
     expect("listingId" in hidden).toBe(true);
 
     const response = await list(shopId);

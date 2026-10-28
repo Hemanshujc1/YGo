@@ -69,7 +69,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
         JOIN master_products product ON product.id = pack.product_id
         JOIN categories category ON category.id = product.category_id
         LEFT JOIN categories parent ON parent.id = category.parent_id
-        WHERE listing.shop_id = $1 AND pack.active AND product.active AND product.published AND category.active AND COALESCE(parent.active, true)
+        WHERE listing.shop_id = $1 AND listing.available AND pack.active AND product.active AND product.published AND category.active AND COALESCE(parent.active, true)
         ORDER BY lower(product.name), pack.quantity`, [id]);
     return { listings: rows };
   });

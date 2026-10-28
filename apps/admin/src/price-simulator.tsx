@@ -4,7 +4,7 @@ import {
   type RateCardValues as Values, type SimulatorListing,
 } from "@ygo/contracts";
 import { formatMoney } from "@ygo/format";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLoaderData } from "react-router";
 import { RateCardFields, rateCardIssues, type FieldIssue } from "./components/rate-card-fields";
 import { ScopeChip, ScopePicker } from "./components/scope";
@@ -54,7 +54,7 @@ function Placeable({ quote }: { quote: Priced }) {
 
 function Result({ result, labels }: { result: PriceSimulatorResponse; labels: string[] }) {
   const columns = [{ name: text.now, quote: result.now }, ...(result.draft ? [{ name: text.draft, quote: result.draft }] : [])];
-  const figure = (render: (quote: Priced) => ReactNode) => columns.map(({ name, quote }) => <td key={name} className="p-3 tabular-nums">{quote.status === "priced" ? render(quote) : "—"}</td>);
+  const figure = (render: (quote: Priced) => ReactNode) => columns.map(({ name, quote }) => <td key={name} className="p-3 tabular-nums">{quote.status === "priced" ? render(quote) : text.notPriced}</td>);
   const figures: Array<{ label: string; hint?: string; strong?: boolean; render: (quote: Priced) => ReactNode }> = [
     { label: text.productValue, render: (quote) => money(quote.productValue) },
     { label: text.commission, render: (quote) => money(quote.commission) },
@@ -109,6 +109,9 @@ export function PriceSimulator({ api }: { api: Api }) {
   const [fieldIssues, setFieldIssues] = useState<FieldIssue[]>([]);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState("");
+  const [draftInvalid, setDraftInvalid] = useState("");
+  // Each calculation takes a number; an answer that comes back after the shop changed is dropped.
+  const run = useRef(0);
   const [result, setResult] = useState<{ response: PriceSimulatorResponse; labels: string[] }>();
   const draftScope: RateCardScope | null = draftType === "global" ? { type: "global" }
     : draftType === "category" ? (draftCategoryId ? { type: "category", id: draftCategoryId } : null)
@@ -116,7 +119,8 @@ export function PriceSimulator({ api }: { api: Api }) {
   const draftScopeKey = draftScope ? `${draftScope.type}:${"id" in draftScope ? draftScope.id : ""}` : "";
 
   useEffect(() => {
-    setListings(undefined); setListingsError(""); setCounts({}); setBadCounts([]); setBasketError(""); setResult(undefined);
+    run.current += 1;
+    setListings(undefined); setListingsError(""); setCounts({}); setBadCounts([]); setBasketError(""); setResult(undefined); setRunError(""); setRunning(false);
     if (!shopId) return;
     let active = true;
     void api.listSimulatorListings(shopId).then((answer) => {
@@ -141,11 +145,11 @@ export function PriceSimulator({ api }: { api: Api }) {
 
   async function calculate(event: FormEvent) {
     event.preventDefault();
-    setBasketError(""); setBadCounts([]); setFieldIssues([]); setRunError("");
-    const basket = rows(listings ?? []).filter((row) => (counts[row.key] ?? "").trim() !== "");
+    setBasketError(""); setBadCounts([]); setFieldIssues([]); setRunError(""); setDraftInvalid("");
+    const basket = allRows.filter((row) => (counts[row.key] ?? "").trim() !== "");
     if (!basket.length) { setBasketError(text.emptyBasket); return; }
     if (draftOn && !draftScope) { setDraftError(text.chooseDraftScope); return; }
-    if (draftOn && (loadingDraft || draftError)) return;
+    if (draftBlocked) return;
     const parsed = PriceSimulatorBody.safeParse({
       shopId, lines: basket.map((row) => ({ ...row.line, count: Number(counts[row.key]) })),
       ...(draftOn && draftScope ? { draft: { scope: draftScope, values: draftValues } } : {}),
@@ -154,19 +158,33 @@ export function PriceSimulator({ api }: { api: Api }) {
       const issues = parsed.error.issues;
       setBadCounts(issues.flatMap((item) => item.path[0] === "lines" && typeof item.path[1] === "number" ? [basket[item.path[1]]?.key ?? ""] : []));
       if (issues.some((item) => item.path[0] === "lines" && item.path.length === 1)) setBasketError(text.tooManyLines);
-      setFieldIssues(rateCardIssues(issues.filter((item) => item.path[0] === "draft"), "draft.values."));
+      const draftIssues = issues.filter((item) => item.path[0] === "draft");
+      setFieldIssues(rateCardIssues(draftIssues, "draft.values."));
+      // Not every draft problem has its own box (a fee without a split, say), so the draft also gets one message naming the rules.
+      if (draftIssues.length) {
+        const names = [...new Set(draftIssues.map((item) => item.path[1] === "values" && typeof item.path[2] === "string" ? item.path[2] : ""))]
+          .map((key) => (strings.rateCardFields as Record<string, string>)[key]).filter(Boolean);
+        setDraftInvalid(names.length ? text.draftInvalid(names.join(", ")) : text.draftInvalidGeneral);
+      }
       return;
     }
+    const mine = ++run.current;
     setRunning(true);
     try {
       const answer = await api.simulatePrice(parsed.data);
+      if (mine !== run.current) return;
       if (answer.ok) setResult({ response: answer.data, labels: basket.map((row) => row.label) });
       else { setResult(undefined); setRunError(strings.errors[answer.code]); }
-    } catch { setResult(undefined); setRunError(strings.failed); }
-    finally { setRunning(false); }
+    } catch { if (mine === run.current) { setResult(undefined); setRunError(strings.failed); } }
+    finally { if (mine === run.current) setRunning(false); }
   }
 
-  const shown = rows(listings ?? []).filter((row) => row.label.toLowerCase().includes(filter.trim().toLowerCase()));
+  const allRows = useMemo(() => rows(listings ?? []), [listings]);
+  const shown = useMemo(() => allRows.filter((row) => row.label.toLowerCase().includes(filter.trim().toLowerCase())), [allRows, filter]);
+  const inBasket = allRows.filter((row) => (counts[row.key] ?? "").trim() !== "");
+  const hiddenInBasket = inBasket.filter((row) => !shown.includes(row)).length;
+  const hiddenBadCount = badCounts.some((key) => !shown.some((row) => row.key === key));
+  const draftBlocked = draftOn && (loadingDraft || !!draftError);
   return <section>
     <h1 className="text-title-large font-semibold">{strings.priceSimulator}</h1>
     <p className="mt-2 text-muted">{text.intro} {text.deliveredOnly}</p>
@@ -187,6 +205,8 @@ export function PriceSimulator({ api }: { api: Api }) {
                 {badCounts.includes(row.key) && <span role="alert" className="block text-sm text-danger">{text.invalidCount}</span>}</td>
             </tr>)}</tbody>
           </table></div>
+          <p role="status" className="mt-4 text-muted">{text.inBasket(inBasket.length, hiddenInBasket)}</p>
+          {hiddenBadCount && <p role="alert" className="mt-2 text-danger">{text.hiddenBadCount}</p>}
         </>}
         {basketError && <p role="alert" className="mt-4 text-danger">{basketError}</p>}
       </div>
@@ -207,8 +227,9 @@ export function PriceSimulator({ api }: { api: Api }) {
           </>}
         </div>}
       </div>
+      {draftInvalid && <p role="alert" className="text-danger">{draftInvalid}</p>}
       {runError && <p role="alert" className="rounded-lg bg-danger-subtle p-3 text-on-danger-subtle">{runError}</p>}
-      <button disabled={running} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{running ? text.calculating : text.calculate}</button>
+      <button disabled={running || draftBlocked} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{running ? text.calculating : text.calculate}</button>
     </form>
     {result && <Result result={result.response} labels={result.labels} />}
   </section>;

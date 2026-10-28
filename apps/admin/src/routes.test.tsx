@@ -1405,6 +1405,47 @@ describe("Price simulator (A05, #358)", () => {
     expect(await screen.findByText(strings.simulator.noListings)).toBeTruthy();
   });
 
+  it("drops an answer that comes back after the shop changed", async () => {
+    const other = { ...shop, id: "00000000-0000-4000-8000-000000000503", shopName: "Other Mart" };
+    let answer: (value: unknown) => void = () => {};
+    const { api } = await open({
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop, other] } }),
+      simulatePrice: vi.fn(() => new Promise((resolve) => { answer = resolve; })),
+    });
+    count(riceLabel, "2");
+    calculate();
+    await waitFor(() => expect(api.simulatePrice).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox", { name: strings.simulator.shop }), { target: { value: other.id } });
+    await waitFor(() => expect(api.listSimulatorListings).toHaveBeenCalledWith(other.id));
+    answer({ ok: true, data: { now: priced(), draft: null } });
+    await screen.findByText(riceLabel);
+    expect(screen.queryByText("₹260.50")).toBeNull();
+    expect(screen.getByRole("button", { name: strings.simulator.calculate })).toHaveProperty("disabled", false);
+  });
+
+  it("names a draft problem that has no box of its own, and waits for the draft to load", async () => {
+    let loaded: (value: unknown) => void = () => {};
+    const { api } = await open({ getRateCardScope: vi.fn(() => new Promise((resolve) => { loaded = resolve; })) });
+    count(riceLabel, "1");
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.simulator.tryDraft }));
+    await screen.findByText(strings.simulator.draftLoading);
+    expect(screen.getByRole("button", { name: strings.simulator.calculate })).toHaveProperty("disabled", true);
+    loaded({ ok: true, data: { version: "7", values: { deliveryFee: { amount: "30" } } } });
+    await screen.findByRole("textbox", { name: strings.rateCardDeliveryAmount });
+    calculate();
+    expect(await screen.findByText(strings.simulator.draftInvalid(strings.rateCardFields.deliveryFee))).toBeTruthy();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("counts filtered-out lines in the basket and points at a bad count the filter hides", async () => {
+    await open();
+    count(riceLabel, "1000"); count(twinLabel, "1");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.filter }), { target: { value: "twin" } });
+    expect(screen.getByText(strings.simulator.inBasket(2, 1))).toBeTruthy();
+    calculate();
+    expect(await screen.findByText(strings.simulator.hiddenBadCount)).toBeTruthy();
+  });
+
   it("shows a failed calculation and keeps the basket", async () => {
     await open({ simulatePrice: vi.fn().mockResolvedValue({ ok: false, status: 404, code: "NOT_FOUND" }) });
     count(riceLabel, "2");

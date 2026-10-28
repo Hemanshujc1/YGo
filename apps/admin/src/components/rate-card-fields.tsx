@@ -11,7 +11,8 @@ const options = { formulas: ["fixed", "percentage", "fixed_plus_percentage", "hi
 /** Turns contract issues into the field messages the inputs below show; `prefix` strips a wrapper such as `draft.values.`. */
 export function rateCardIssues(issues: Array<{ path: PropertyKey[] }>, prefix = ""): FieldIssue[] {
   return issues.map((item) => {
-    const path = item.path.join(".").slice(prefix.length);
+    const full = item.path.join(".");
+    const path = full.startsWith(prefix) ? full.slice(prefix.length) : full;
     return { path, message: (strings.rateCardIssueMessages as Record<string, string>)[path] ?? strings.rateCardIssueMessages.default };
   });
 }
