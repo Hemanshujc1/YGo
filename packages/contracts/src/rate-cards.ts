@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminActionReason, percentageUnits, RatePercentage, ShopPrice } from "./fields";
+import { AdminActionReason, percentageUnits, RateCardVersion, RatePercentage, ShopPrice } from "./fields";
 
 export const RATE_CARD_KEYS = [
   "commission", "deliveryFee", "smallCartFee", "deliveredContributionFloor", "minimumCart",
@@ -70,18 +70,19 @@ export type RateCardScope = z.infer<typeof RateCardScope>;
 export const PublishRateCardBody = z.strictObject({ scope: RateCardScope, values: RateCardValues, reason: AdminActionReason });
 export type PublishRateCardBody = z.infer<typeof PublishRateCardBody>;
 export const ResolveRateCardQuery = z.strictObject({
-  shopId: z.uuid(), categoryId: z.uuid().optional(), version: z.coerce.number().int().positive().optional(),
+  shopId: z.uuid(), categoryId: z.uuid().optional(), version: RateCardVersion.optional(),
   usesPickup: z.stringbool().default(false), usesBargain: z.stringbool().default(false),
 });
 
-export const RateCardSource = z.strictObject({ type: z.enum(["global", "category", "shop"]), id: z.uuid().nullable(), version: z.number().int().positive() });
+export const RateCardSource = z.strictObject({ type: z.enum(["global", "category", "shop"]), id: z.uuid().nullable(), version: RateCardVersion });
 export const EffectiveRateCardValue = z.strictObject({ value: z.unknown(), source: RateCardSource });
 export const RateCardResponse = z.strictObject({
-  version: z.number().int().nonnegative(),
+  /** "0" until the first card is published. */
+  version: z.union([z.literal("0"), RateCardVersion]),
   values: z.partialRecord(RateCardKey, EffectiveRateCardValue),
   missing: z.array(RateCardKey),
   complete: z.boolean(),
 });
 export type RateCardResponse = z.infer<typeof RateCardResponse>;
-export const PublishedRateCardResponse = z.strictObject({ version: z.number().int().positive() });
+export const PublishedRateCardResponse = z.strictObject({ version: RateCardVersion });
 export type PublishedRateCardResponse = z.infer<typeof PublishedRateCardResponse>;

@@ -114,7 +114,7 @@ describe("Admin routes and browser sessions", () => {
     const publish = (scope: object, values: object, reason: string) => app.inject({
       method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason },
     });
-    const effective = (version?: number) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version ? `&version=${version}` : ""}`, headers });
+    const effective = (version?: number | string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version ? `&version=${version}` : ""}`, headers });
     const snapshots: unknown[] = [];
     const global = {
       commission: { formula: "percentage", fixedAmount: null, percentage: "8.5", minimum: null, maximum: null, base: "after_shop_discount" },
@@ -125,29 +125,29 @@ describe("Admin routes and browser sessions", () => {
       maximumShopDiscountPercentage: "20",
     };
     expect((await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}` })).statusCode).toBe(401);
-    expect((await publish({ type: "global" }, global, "First pilot card")).json()).toEqual({ version: 1 });
+    expect((await publish({ type: "global" }, global, "First pilot card")).json()).toEqual({ version: "1" });
     const first = (await effective()).json();
     snapshots.push(first);
-    expect(first).toMatchObject({ version: 1, complete: true, missing: [] });
-    expect(first.values.deliveredContributionFloor).toMatchObject({ value: "0", source: { type: "global", id: null, version: 1 } });
+    expect(first).toMatchObject({ version: "1", complete: true, missing: [] });
+    expect(first.values.deliveredContributionFloor).toMatchObject({ value: "0", source: { type: "global", id: null, version: "1" } });
     expect(first.values.statementGraceDays.value).toBe(0);
 
-    expect((await publish({ type: "category", id: categoryId }, { minimumCart: "80" }, "Groceries pilot basket")).json()).toEqual({ version: 2 });
+    expect((await publish({ type: "category", id: categoryId }, { minimumCart: "80" }, "Groceries pilot basket")).json()).toEqual({ version: "2" });
     snapshots.push((await effective()).json());
-    expect((await publish({ type: "shop", id: shopId }, { minimumCart: "60" }, "Shop-specific terms")).json()).toEqual({ version: 3 });
+    expect((await publish({ type: "shop", id: shopId }, { minimumCart: "60" }, "Shop-specific terms")).json()).toEqual({ version: "3" });
     snapshots.push((await effective()).json());
-    expect((await effective()).json().values.minimumCart).toMatchObject({ value: "60", source: { type: "shop", id: shopId, version: 3 } });
+    expect((await effective()).json().values.minimumCart).toMatchObject({ value: "60", source: { type: "shop", id: shopId, version: "3" } });
 
-    expect((await publish({ type: "shop", id: shopId }, {}, "Return to inherited terms")).json()).toEqual({ version: 4 });
+    expect((await publish({ type: "shop", id: shopId }, {}, "Return to inherited terms")).json()).toEqual({ version: "4" });
     const inherited = (await effective()).json();
     snapshots.push(inherited);
-    expect(inherited).toMatchObject({ version: 4, complete: true });
-    expect(inherited.values.minimumCart).toMatchObject({ value: "80", source: { type: "category", id: categoryId, version: 2 } });
+    expect(inherited).toMatchObject({ version: "4", complete: true });
+    expect(inherited.values.minimumCart).toMatchObject({ value: "80", source: { type: "category", id: categoryId, version: "2" } });
     const historical = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}&version=3`, headers })).json();
-    expect(historical).toMatchObject({ version: 3, values: { minimumCart: { value: "60", source: { type: "shop", version: 3 } } } });
-    const stored = await database.pool.query("SELECT version::int, reason FROM rate_card_versions ORDER BY version");
+    expect(historical).toMatchObject({ version: "3", values: { minimumCart: { value: "60", source: { type: "shop", version: "3" } } } });
+    const stored = await database.pool.query("SELECT version, reason FROM rate_card_versions ORDER BY version");
     expect(stored.rows).toHaveLength(4);
-    expect(stored.rows[2]).toMatchObject({ version: 3, reason: "Shop-specific terms" });
+    expect(stored.rows[2]).toMatchObject({ version: "3", reason: "Shop-specific terms" });
     expect((await database.pool.query("SELECT money_value FROM rate_card_values WHERE version = 3 AND field = 'minimumCart'")).rows).toEqual([{ money_value: "60.00" }]);
     const conditional = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&usesPickup=true&usesBargain=true`, headers })).json();
     expect(conditional).toMatchObject({ complete: false, missing: ["pickup", "bargainMinimumCommission"] });
@@ -159,10 +159,10 @@ describe("Admin routes and browser sessions", () => {
     await publish({ type: "category", id: categoryId }, { deliveryFee: { amount: "30", split: { platformPercentage: "0", shopPercentage: "100" } } }, "Clear category minimum");
     const fifth = (await effective(5)).json();
     expect(fifth.values.commission.value.percentage).toBe("12");
-    expect(fifth.values.minimumCart.source).toEqual({ type: "category", id: categoryId, version: 2 });
+    expect(fifth.values.minimumCart.source).toEqual({ type: "category", id: categoryId, version: "2" });
     const sixth = (await effective()).json();
-    expect(sixth.values.minimumCart).toEqual({ value: "200", source: { type: "global", id: null, version: 5 } });
-    expect(sixth.values.deliveryFee.source).toEqual({ type: "category", id: categoryId, version: 6 });
+    expect(sixth.values.minimumCart).toEqual({ value: "200", source: { type: "global", id: null, version: "5" } });
+    expect(sixth.values.deliveryFee.source).toEqual({ type: "category", id: categoryId, version: "6" });
     snapshots.push(fifth, sixth);
     await publish({ type: "shop", id: shopId }, { commission: global.commission, minimumCart: "0" }, "New shop terms");
     for (const [index, snapshot] of snapshots.entries()) expect((await effective(index + 1)).json()).toEqual(snapshot);
@@ -180,9 +180,44 @@ describe("Admin routes and browser sessions", () => {
     }
     expect((await effective(1)).json()).toEqual(first);
     expect((await effective(999)).statusCode).toBe(404);
-    const gap = Number((await database.pool.query("SELECT nextval('rate_card_versions_version_seq') AS version")).rows[0]?.version);
+    const gap = String((await database.pool.query("SELECT nextval('rate_card_versions_version_seq') AS version")).rows[0]?.version);
     await publish({ type: "shop", id: shopId }, {}, "Clear shop terms after a sequence gap");
     expect((await effective(gap)).statusCode).toBe(404);
+  });
+
+  it("keeps rate-card versions exact past Number.MAX_SAFE_INTEGER and up to the bigint maximum (#355)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const shopId = String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const publish = (scope: object, minimumCart: string) => app.inject({
+      method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values: { minimumCart }, reason: "Large version" },
+    });
+    const effective = (version?: string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}${version === undefined ? "" : `&version=${version}`}`, headers });
+    const skipTo = (last: string) => database.pool.query("SELECT setval('rate_card_versions_version_seq', $1::bigint)", [last]);
+
+    expect((await effective()).json()).toMatchObject({ version: "0", values: {} });
+    // 9007199254740993 is the first integer a JavaScript number cannot hold.
+    await skipTo("9007199254740992");
+    expect((await publish({ type: "global" }, "10")).json()).toEqual({ version: "9007199254740993" });
+    expect((await publish({ type: "shop", id: shopId }, "20")).json()).toEqual({ version: "9007199254740994" });
+    expect((await effective()).json()).toMatchObject({ version: "9007199254740994", values: { minimumCart: { value: "20", source: { type: "shop", version: "9007199254740994" } } } });
+    expect((await effective("9007199254740993")).json()).toMatchObject({ version: "9007199254740993", values: { minimumCart: { value: "10", source: { type: "global", version: "9007199254740993" } } } });
+    expect((await effective("9007199254740992")).statusCode).toBe(404);
+    expect((await effective("9007199254740995")).statusCode).toBe(404);
+
+    await skipTo("9223372036854775806");
+    expect((await publish({ type: "shop", id: shopId }, "30")).json()).toEqual({ version: "9223372036854775807" });
+    expect((await effective("9223372036854775807")).json()).toMatchObject({ version: "9223372036854775807", values: { minimumCart: { value: "30", source: { type: "shop", version: "9223372036854775807" } } } });
+    expect((await effective("9223372036854775806")).statusCode).toBe(404);
+    expect((await effective("9007199254740994")).json().values.minimumCart.source.version).toBe("9007199254740994");
+    expect((await database.pool.query("SELECT version FROM rate_card_versions ORDER BY version")).rows.map((row) => row.version))
+      .toEqual(["9007199254740993", "9007199254740994", "9223372036854775807"]);
+    expect((await database.pool.query("SELECT DISTINCT version FROM rate_card_values ORDER BY version")).rows.map((row) => row.version))
+      .toEqual(["9007199254740993", "9007199254740994", "9223372036854775807"]);
+
+    for (const version of ["9223372036854775808", "99999999999999999999", "0", "007", "+3", "-1", "1.0", "1e3", "%201", ""]) {
+      expect((await effective(version)).statusCode, version).toBe(400);
+    }
   });
 
   it("checks every nested rule and conditional field before declaring a rate card complete (#44)", async () => {

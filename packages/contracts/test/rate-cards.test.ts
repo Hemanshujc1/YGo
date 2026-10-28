@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommissionRule, FeeSplit, RatePercentage } from "../src/index";
+import { CommissionRule, FeeSplit, PublishedRateCardResponse, RateCardResponse, RateCardSource, RateCardVersion, RatePercentage, ResolveRateCardQuery } from "../src/index";
 
 describe("rate-card percentage input (#44)", () => {
   it("refuses malformed percentages without throwing and sums decimal shares exactly", () => {
@@ -19,5 +19,21 @@ describe("rate-card percentage input (#44)", () => {
       expect(CommissionRule.safeParse({ ...rule, fixedAmount: formula === "percentage" ? "1" : null }).success).toBe(false);
       expect(CommissionRule.safeParse({ ...rule, percentage: formula === "fixed" ? "1" : null }).success).toBe(false);
     }
+  });
+
+  it("carries versions as exact canonical bigint strings on every surface (#355)", () => {
+    for (const value of ["1", "9007199254740993", "9223372036854775807"]) expect(RateCardVersion.parse(value)).toBe(value);
+    for (const value of ["0", "007", "+3", "-1", "1.0", "1e3", " 1", "", "9223372036854775808", "99999999999999999999"]) {
+      expect(RateCardVersion.safeParse(value).success, value).toBe(false);
+    }
+    for (const value of [1, 9007199254740993n]) expect(RateCardVersion.safeParse(value).success).toBe(false);
+    const shopId = "00000000-0000-4000-8000-000000000000";
+    expect(ResolveRateCardQuery.parse({ shopId, version: "9223372036854775807" }).version).toBe("9223372036854775807");
+    expect(ResolveRateCardQuery.safeParse({ shopId, version: "9223372036854775808" }).success).toBe(false);
+    expect(PublishedRateCardResponse.safeParse({ version: 3 }).success).toBe(false);
+    expect(RateCardSource.safeParse({ type: "global", id: null, version: "9007199254740993" }).success).toBe(true);
+    const empty = { values: {}, missing: [], complete: true };
+    expect(RateCardResponse.safeParse({ ...empty, version: "0" }).success).toBe(true);
+    expect(RateCardResponse.safeParse({ ...empty, version: 0 }).success).toBe(false);
   });
 });

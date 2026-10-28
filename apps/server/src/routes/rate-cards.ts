@@ -8,7 +8,8 @@ import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
 import { deriveKeys } from "../tokens";
 
-type StoredCard = { version: number; scopeType: "global" | "category" | "shop"; scopeId: string | null };
+// Versions stay decimal strings, as pg returns bigint, so no value is rounded (#355).
+type StoredCard = { version: string; scopeType: "global" | "category" | "shop"; scopeId: string | null };
 type LeafKind = "money" | "percentage" | "integer" | "boolean" | "text";
 type Leaf = { field: string; kind: LeafKind; value: string | number | boolean };
 
@@ -81,15 +82,15 @@ function inflate(leaves: Array<{ field: string; value: string | number | boolean
   return values;
 }
 
-async function latest(client: Pool | PoolClient, type: StoredCard["scopeType"], id: string | null, version?: number): Promise<StoredCard | undefined> {
+async function latest(client: Pool | PoolClient, type: StoredCard["scopeType"], id: string | null, version?: string): Promise<StoredCard | undefined> {
   const result = await client.query<StoredCard>(
-    `SELECT version::int, scope_type AS "scopeType", scope_id AS "scopeId" FROM rate_card_versions
+    `SELECT version, scope_type AS "scopeType", scope_id AS "scopeId" FROM rate_card_versions
       WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2 AND ($3::bigint IS NULL OR version <= $3)
       ORDER BY version DESC LIMIT 1`, [type, id, version ?? null]);
   return result.rows[0];
 }
 
-async function valuesFor(pool: Pool, version: number): Promise<RateCardValues> {
+async function valuesFor(pool: Pool, version: string): Promise<RateCardValues> {
   const rows = await pool.query<{ field: string; money: string | null; percentage: string | null; integer: number | null; boolean: boolean | null; text: string | null }>(
     `SELECT field, trim_scale(money_value)::text AS money, trim_scale(percentage_value)::text AS percentage, integer_value AS integer,
       boolean_value AS boolean, text_value AS text FROM rate_card_values WHERE version = $1`, [version]);
@@ -97,10 +98,10 @@ async function valuesFor(pool: Pool, version: number): Promise<RateCardValues> {
 }
 
 /** Resolve the effective immutable card used by pricing, agreements and Admin. */
-export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: number, usage = { usesPickup: false, usesBargain: false }): Promise<RateCardResponse | undefined> {
-  const current = await pool.query<{ version: number }>("SELECT COALESCE(MAX(version), 0)::int AS version FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
-  if (version !== undefined && current.rows[0]?.version === 0) return undefined;
-  version = current.rows[0]?.version ?? 0;
+export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: string, usage = { usesPickup: false, usesBargain: false }): Promise<RateCardResponse | undefined> {
+  const current = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
+  if (version !== undefined && current.rows[0]?.version === "0") return undefined;
+  version = current.rows[0]?.version ?? "0";
   if (!(await pool.query("SELECT 1 FROM shops WHERE id = $1", [shopId])).rowCount) return undefined;
   if (categoryId && !(await pool.query("SELECT 1 FROM categories WHERE id = $1", [categoryId])).rowCount) return undefined;
   const cards = (await Promise.all([latest(pool, "global", null, version), categoryId ? latest(pool, "category", categoryId, version) : undefined, latest(pool, "shop", shopId, version)]))
@@ -128,7 +129,7 @@ export function registerRateCardRoutes(app: FastifyInstance, { pool, clock, secr
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
   app.get("/v1/admin/rate-cards/effective", { schema: { querystring: ResolveRateCardQuery, response: { 200: RateCardResponse, ...errors } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
-    const { shopId, categoryId, version, usesPickup, usesBargain } = request.query as { shopId: string; categoryId?: string; version?: number; usesPickup: boolean; usesBargain: boolean };
+    const { shopId, categoryId, version, usesPickup, usesBargain } = request.query as { shopId: string; categoryId?: string; version?: string; usesPickup: boolean; usesBargain: boolean };
     const card = await resolveRateCard(pool, shopId, categoryId, version, { usesPickup, usesBargain });
     return card ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
   });
@@ -143,8 +144,8 @@ export function registerRateCardRoutes(app: FastifyInstance, { pool, clock, secr
         const table = scope.type === "category" ? "categories" : "shops";
         if (!(await client.query(`SELECT 1 FROM ${table} WHERE id = $1`, [scopeId])).rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       }
-      const inserted = await client.query<{ version: number }>(
-        "INSERT INTO rate_card_versions (actor_id, scope_type, scope_id, reason, published_at) VALUES ($1, $2, $3, $4, $5) RETURNING version::int",
+      const inserted = await client.query<{ version: string }>(
+        "INSERT INTO rate_card_versions (actor_id, scope_type, scope_id, reason, published_at) VALUES ($1, $2, $3, $4, $5) RETURNING version",
         [who.accountId, scope.type, scopeId, reason, clock.now()]);
       const version = inserted.rows[0]?.version; if (!version) throw new Error("Rate-card publication returned no version");
       for (const leaf of flatten(values)) {
