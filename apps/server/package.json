@@ -32,6 +32,7 @@
     "@types/node": "26.6.4",
     "@types/pg": "8.23.1",
     "@ygo/eslint-config": "workspace:*",
+    "@ygo/pricing": "workspace:*",
     "@ygo/tsconfig": "workspace:*",
     "drizzle-kit": "0.31.11",
     "esbuild": "0.28.2",

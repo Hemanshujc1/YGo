@@ -409,6 +409,9 @@ importers:
       '@ygo/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
+      '@ygo/pricing':
+        specifier: workspace:*
+        version: link:../../packages/pricing
       '@ygo/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

@@ -1,6 +1,6 @@
 # @ygo/pricing
 
-Empty until counter billing needs it.
+Holds the delivered-route worked examples (`src/worked-examples.ts`, #357); counter-bill arithmetic comes with counter billing.
 
 ## What this package is not
 
