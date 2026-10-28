@@ -50,7 +50,7 @@ YGo lets a customer order from local shops within roughly 2 to 3 km and have the
 | **Owner** | Shopkeeper app | Everything in the shop, including prices, money views, staff and settings; may deliver the shop's own orders |
 | **Staff** | Shopkeeper app | Orders, stock, counter billing; delivers when flagged `can deliver` |
 | **Admin** | Admin web | Runs the platform. In stage one this is the founder |
-| **Area Manager** | Admin web, scoped to one Area | Onboards and supports shops in that Area. First item cut if time runs short |
+| **Area Manager** | Admin web, scoped to the shops assigned to them | Onboards and supports the shops Admin assigns to them. First item cut if time runs short |
 
 ## 3. Launch plan
 
@@ -293,8 +293,8 @@ Online prepayment and any payment gateway; refunds and any payment from the plat
 - **ADM-6** Statements, payments received, manual adjustments, shop balances and limits.
 - **ADM-7** Queues: complaints, repayments disputed or overdue, orders that went ahead below the contribution floor, product requests, deletion requests with their age, flagged counter bills, flagged product requests, proof exceptions, flagged customers, orders unanswered at 120 seconds, and sync actions that failed.
 - **ADM-8** A dashboard of tiles and nothing more: orders today by status, live shops, outstanding balances, open queue counts, and the four launch measures G-1 to G-4.
-- **ADM-9** Area Managers and their payouts, as a share of commission actually collected in their Area, worked out weekly on the same Monday-to-Sunday week as statements (D-18).
-- **ADM-12** An Area Manager works only inside their own Area (D-15). There they may see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting, because each of those moves money or removes someone from the platform. Only Admin moves a shop to Live (ONB-1).
+- **ADM-9** Area Managers and their payouts, as a share of commission actually collected from the shops assigned to them (commission collected after a reassignment counts for the new Area Manager), worked out weekly on the same Monday-to-Sunday week as statements (D-18).
+- **ADM-12** An Area Manager works only on the shops Admin assigns to them (D-15); they have no Area, several may work in one Area, and a shop has at most one. On those shops they may see the shop and its application, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. They may not touch rate cards, coupons, statements, payments, suspension, customer blocks, the catalog or any setting, because each of those moves money or removes someone from the platform. Only Admin starts a review, approves, moves a shop to Live (ONB-1) or assigns a shop to an Area Manager.
 - **ADM-10** Every admin action is recorded from day one. There is no screen for the record in Phase 1.
 - **ADM-11** Customers: look up, see the state of the phone number (ACC-14), block and unblock, change an email for recovery, restore a deleted account inside its window. The switch that stops new customer sign-ups (ACC-3) is here.
 
@@ -437,7 +437,7 @@ Still the owner's, already known, and not blockers for the build: every value on
 
 | # | Question | Decision | Requirement |
 |---|---|---|---|
-| D-15 | What may an Area Manager see and do in the Admin web? | Inside their own Area only: see shops and applications, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. Nothing that moves money or removes someone from the platform | ADM-12 |
+| D-15 | What may an Area Manager see and do in the Admin web? | On the shops assigned to them only: see the shop and its application, correct an application's fields, record the visit, see orders and the queues without acting on them, and see their own payout. Nothing that moves money or removes someone from the platform | ADM-12 |
 
 ### 8.5 Found while reviewing the designs, settled on 14 Oct 2026
 
@@ -480,6 +480,7 @@ Still the owner's, already known, and not blockers for the build: every value on
 | Customer name | The approved specification collected no customer name, though the shop and the deliverer need to know who is at the door and DEL-3 already removes a name on deletion | A name is collected with the phone number at first sign-in and shown on that person's orders (ACC-2, DLV-7). Owner decision, 14 Oct 2026, while reviewing the Customer designs |
 | Admin's customer screen | The phone-number state and the sign-up switch were required by ACC-14 and ACC-3 and missing from the list of Admin screens | ADM-11 |
 | Area Manager permissions | "Onboards and supports the shops" is the whole of what was decided. No list of screens exists | Settled as D-15 (ADM-12) |
+| Area Manager scope | An Area Manager ran exactly one Area, so two could not share one and each was paid on the whole Area | No Area: Admin assigns shops, and payout follows the current assignment (ADM-9, ADM-12, D-15). Owner decision, 27 Oct 2026, [#299](https://github.com/Hemanshujc1/YGo/issues/299) |
 
 ## 10. User stories
 
@@ -636,13 +637,13 @@ Each story names the requirement that holds its rule. A story adds no rule of it
 135. As an Admin, I want counter bills whose total the server disagrees with, and sync actions that failed, flagged to me (BIL-9, ADM-7).
 136. As an Admin, I want a dashboard of tiles including the four launch measures (ADM-8).
 137. As an Admin, I want to create Admin and Area Manager accounts (ACC-8).
-138. As an Admin, I want each Area Manager's payout worked out from the commission actually collected in their Area (ADM-9).
+138. As an Admin, I want each Area Manager's payout worked out from the commission actually collected from the shops assigned to them (ADM-9).
 139. As an Admin, I want every admin action recorded from the first day (ADM-10).
 140. As an Admin, I want sign-in by SMS and the tax outputs built and switched off, so that stage two needs no new release for them (ACC-10, MNY-12).
 
 ### 10.6 Others
 
-141. As an Area Manager, I want to sign in to the Admin web and work only inside my own Area: see its shops and applications, correct an application, record a visit, watch its orders and queues, and see my payout (ADM-12).
+141. As an Area Manager, I want to sign in to the Admin web and work only on the shops assigned to me: see them and their applications, correct an application, record a visit, watch their orders and queues, and see my payout (ADM-12).
 142. As a store reviewer at Google or Apple, I want a demo account that lets me see the app working (ACC-13).
 
 ## 11. Implementation decisions
@@ -686,7 +687,7 @@ Rules that cut across modules:
 - **Timed work runs as jobs**, each started by a timer outside the service and leaving a record of its run (ADR-0004): order expiry and the re-alert, confirmation timeouts, pickup expiry, the bargain hold, the Monday statement, the balance check, FSSAI expiry, the deletion steps, stock reconciliation.
 - **A placed order's prices, rules and amounts are written once and never rewritten** (MNY-7). A correction is a new record.
 - **The server sends codes, never display text.** Every piece of text lives in the apps (Q-2).
-- **Every request is scoped to the caller's role and shop** in the service, and an Area Manager's to their Area.
+- **Every request is scoped to the caller's role and shop** in the service, and an Area Manager's to the shops assigned to them.
 - **The first Admin account is created by a command run at deployment**, because no Admin exists yet to create it (ACC-8).
 
 ### 11.3 Things the server reaches, each behind one interface

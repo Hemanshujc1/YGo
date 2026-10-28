@@ -21,6 +21,7 @@ import {
 import type { IdentityVerifier } from "../adapters/identity-verifier";
 import type { Clock } from "../adapters/clock";
 import type { Mailer } from "../adapters/mailer";
+import { ADMIN_WEB_MEMBERS } from "../admin";
 import {
   GRACE_MS,
   REFRESH_TTL_MS,
@@ -227,7 +228,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
         clientReleased = true;
         if (browser) {
           const member = await pool.query(
-            "SELECT 1 FROM accounts a JOIN admin_memberships m ON m.account_id = a.id WHERE a.email = $1",
+            `SELECT 1 FROM accounts a JOIN ${ADMIN_WEB_MEMBERS} m ON m.account_id = a.id WHERE a.email = $1`,
             [email],
           );
           if (!member.rowCount) {
@@ -355,7 +356,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
         const accountResult = browser
           ? await client.query<Account>(
               `SELECT a.id, a.email, a.name, a.phone, a.theme FROM accounts a
-               JOIN admin_memberships m ON m.account_id = a.id WHERE a.email = $1`,
+               JOIN ${ADMIN_WEB_MEMBERS} m ON m.account_id = a.id WHERE a.email = $1`,
               [email],
             )
           : await client.query<Account>(
@@ -436,7 +437,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
           return reply.code(403).send({ error: { code: "FORBIDDEN" } });
         }
         if (browser) {
-          const member = await client.query("SELECT 1 FROM admin_memberships WHERE account_id = $1", [session.account_id]);
+          const member = await client.query(`SELECT 1 FROM ${ADMIN_WEB_MEMBERS} m WHERE m.account_id = $1`, [session.account_id]);
           if (!member.rowCount) {
             await client.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
             await client.query("COMMIT");

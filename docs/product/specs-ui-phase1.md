@@ -212,7 +212,7 @@ The left nav has these groups:
 
 The **Area Manager** state, drawn on most screens, uses the Area Manager shell (design system 7.1). The Area Manager can:
 
-- see their own Area only
+- see only the shops assigned to them
 - correct applications and record visits
 - see the queues and orders without acting on them
 - see their own payout
@@ -272,8 +272,8 @@ Everything else is absent or labelled "view only" (`ADM-12`).
 |---|---|---|---|---|
 | **A21 Customers** | Look up a customer. Shows the phone state and the refusal count. Block and unblock with a reason; nothing blocks automatically | search, customer found, block, blocked, not found, loading, error | ADM-11, ACC-14, TRU-5 | [#72](https://github.com/Hemanshujc1/YGo/issues/72) |
 | **A22 Account recovery and deletion** | Change an email for recovery, only after the checks: for an Owner, a PAN, FSSAI or visit-record match; for a Customer, a completed order is needed. Restore a deleted account within 7 days. Act on deletion requests | change email, checks not done, no completed order, email changed, error, restore deleted, restore refused, deletion request | ADM-11, ACC-12, DEL-4, DEL-9 | [#83](https://github.com/Hemanshujc1/YGo/issues/83), [#92](https://github.com/Hemanshujc1/YGo/issues/92), [#93](https://github.com/Hemanshujc1/YGo/issues/93) |
-| **A23 Admin and Area Manager accounts** | Created by an Admin only, never by sign-up. The created state says "They can sign in now" | accounts, new account, email in use, created, loading, error | ACC-8 | [#37](https://github.com/Hemanshujc1/YGo/issues/37) |
-| **A24 Area Manager payouts** | A share of the commission actually collected in the Area, worked out **weekly on the statement week** (D-18) | payouts, change share, nothing collected, loading, error, Area Manager | ADM-9 | [#96](https://github.com/Hemanshujc1/YGo/issues/96) |
+| **A23 Admin and Area Manager accounts** | Created by an Admin only, never by sign-up. New account chooses Admin or Area Manager; the list shows each Role. No edit or remove. The created state says "They can sign in now" | accounts, new account, email in use, created, loading, error | ACC-8 | [#37](https://github.com/Hemanshujc1/YGo/issues/37) |
+| **A24 Area Manager payouts** | A share of the commission actually collected from the shops assigned to each Area Manager, counted for whoever is assigned when it is collected, worked out **weekly on the statement week** (D-18) | payouts, change share, nothing collected, loading, error, Area Manager | ADM-9 | [#96](https://github.com/Hemanshujc1/YGo/issues/96) |
 
 ### Queue items
 

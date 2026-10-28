@@ -1,5 +1,7 @@
 import {
   Account,
+  AdminAccount,
+  type AdminRole,
   CATALOG_IMPORT_FILE_FIELDS,
   CatalogImportPreviewResponse,
   CatalogImportResponse,
@@ -54,9 +56,11 @@ interface AdminLife {
   access: string | null;
   renewing: Promise<Answer | null> | null;
   ended: boolean;
+  /** Read once from `/v1/admin/me` for this sign-in; gone with it. */
+  role: AdminRole | null;
 }
 
-const life = (access: string | null, ended = false): AdminLife => ({ access, renewing: null, ended });
+const life = (access: string | null, ended = false): AdminLife => ({ access, renewing: null, ended, role: null });
 
 /** Admin's refresh token stays in the browser's httpOnly cookie, outside this client. */
 export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }: AdminApiClientOptions) {
@@ -126,6 +130,13 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return retried;
   }
 
+  async function me(): Promise<ApiResult<AdminAccount>> {
+    const on = current;
+    const answered = result(await adminRequest("GET", "/v1/admin/me"), AdminAccount);
+    if (answered.ok && on === current && !on.ended) on.role = answered.data.role;
+    return answered;
+  }
+
   function importFiles(files: Record<CatalogImportFileField, File>): FormData {
     const body = new FormData();
     for (const field of CATALOG_IMPORT_FILE_FIELDS) body.append(field, files[field]);
@@ -163,9 +174,17 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       return { ok: true, data: answered.data.account };
     },
 
-    /** `GET /v1/admin/me`: the signed-in Admin's own account, theme included. */
-    async me(): Promise<ApiResult<Account>> {
-      return result(await adminRequest("GET", "/v1/admin/me"), Account);
+    /** `GET /v1/admin/me`: the signed-in Admin's or Area Manager's own account, with theme and role (#343). */
+    me,
+    /** The signed-in role, asking the server only the first time in a sign-in (#343). */
+    async role(): Promise<ApiResult<AdminRole>> {
+      if (current.role) return { ok: true, data: current.role };
+      const answered = await me();
+      return answered.ok ? { ok: true, data: answered.data.role } : answered;
+    },
+    /** The role read in this sign-in, or null before the first read and after the session ends. */
+    currentRole(): AdminRole | null {
+      return current.ended ? null : current.role;
     },
 
     /** `PUT /v1/admin/me/theme`: save the theme on the account, shared with the mobile apps (#263). */
@@ -173,14 +192,14 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       return result(await adminRequest("PUT", "/v1/admin/me/theme", body), Account);
     },
 
-    /** `GET /v1/admin/accounts`: Admin memberships and their accounts. */
+    /** `GET /v1/admin/accounts`: Admin and Area Manager accounts, each with its role. */
     async listAccounts(): Promise<ApiResult<AdminAccountsResponse>> {
       return result(await adminRequest("GET", "/v1/admin/accounts"), AdminAccountsResponse);
     },
 
-    /** `POST /v1/admin/accounts`: create an Admin with a recorded reason. */
-    async createAccount(body: CreateAdminBody): Promise<ApiResult<Account>> {
-      return result(await adminRequest("POST", "/v1/admin/accounts", body), Account);
+    /** `POST /v1/admin/accounts`: create an Admin or Area Manager with a recorded reason. */
+    async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
+      return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
     },
 
     /** `GET /v1/admin/categories`: list the global category tree. */

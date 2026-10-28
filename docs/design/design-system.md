@@ -290,7 +290,7 @@ Same tokens as mobile, separate components (ADR-0007, ADR-0009: no UI shared wit
 - **Table:** header on `sunken`, 14 / 20, scrolls horizontally rather than wrapping below 720 wide. Queue rows show **age** ("2 d 4 h", "19 d · 4 left").
 - **Tile:** large figure (28 / 36, tabular), label, a one-line detail. Dashboard is tiles only (`ADM-8`).
 - **Source chip:** shows where a rate-card value came from: Global, Category, This shop (`MNY-3`).
-- **Scope notice:** the Area Manager sees "Area Manager · Kothrud only" and a plain note of what is unavailable (`ADM-12`).
+- **Scope notice:** the Area Manager sees "You are working on the shops assigned to you" and a plain note of what is unavailable (`ADM-12`).
 - **Navigation:** left side nav, Queues carries a count badge. **Modal:** 520 wide, on a scrim.
 
 ### 7.1 Patterns the Admin screens added
@@ -307,7 +307,7 @@ Same tokens as mobile, separate components (ADR-0007, ADR-0009: no UI shared wit
   7. a confirm modal that says who will see the reason
 
   A recorded outcome replaces the Decision section with what was decided, by whom and when.
-- **Area Manager shell** (A04, every "Area Manager" state): the nav says "YGo Area Manager", and read-only areas carry the label "view only". A scope banner says "You are working in Kothrud only" and lists what belongs to Admin. Wherever a decision is Admin's, the Decision section says "Admin decides this item. You can see it but not act on it." There are no disabled buttons.
+- **Area Manager shell** (A04, every "Area Manager" state): the nav says "YGo Area Manager", and read-only areas carry the label "view only". A scope banner says "You are working on the shops assigned to you" and lists what belongs to Admin. Wherever a decision is Admin's, the Decision section says "Admin decides this item. You can see it but not act on it." There are no disabled buttons.
 - **Go-Live blocker notice** (A03): "Cannot go Live yet" names each empty rate-card value and links to Set. A typed 0 counts as set (`MNY-13`).
 - **Draft-versus-now table** (A05, A16): two columns of figures, "Now" and "Draft", each with a source chip. A draft is tried out and never saved.
 - **Three-step import** (A12): "1. Choose file › 2. Check › 3. Import". The check step shows a table of problem rows (row number and the problem in plain words) and a "Download rows with problems" button. A file with any problem row imports nothing.

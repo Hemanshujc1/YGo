@@ -1,22 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody } from "@ygo/contracts";
+import { Account, AdminAccount, AdminAccountsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody, type AdminRole } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { adminSignedIn } from "../admin";
+import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn } from "../admin";
 import { deriveKeys } from "../tokens";
+
+// Where each role's membership lives and the action that records its creation (#343).
+const created: Record<AdminRole, { table: string; action: string }> = {
+  admin: { table: "admin_memberships", action: "admin.create" },
+  area_manager: { table: "area_manager_memberships", action: "area_manager.create" },
+};
 
 export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
 
-  // Admin's own account. /v1/me stays mobile-only (#246); the theme column is shared (#263).
+  // The signed-in Admin or Area Manager and their role (#343). /v1/me stays mobile-only (#246); the theme column is shared (#263).
   app.get(
     "/v1/admin/me",
-    { schema: { response: { 200: Account, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    { schema: { response: { 200: AdminAccount, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await adminSignedIn(request, reply, auth);
+      const who = await adminWebSignedIn(request, reply, auth);
       if (!who) return reply;
       const result = await pool.query<Account>("SELECT id, email, name, phone, theme FROM accounts WHERE id = $1", [who.accountId]);
-      return reply.code(200).send(result.rows[0]);
+      return reply.code(200).send({ ...result.rows[0], role: who.role });
     },
   );
 
@@ -24,7 +30,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
     "/v1/admin/me/theme",
     { schema: { body: SetThemeBody, response: { 200: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      const who = await adminSignedIn(request, reply, auth);
+      const who = await adminWebSignedIn(request, reply, auth);
       if (!who) return reply;
       const { theme } = request.body as SetThemeBody;
       const result = await pool.query<Account>(
@@ -40,8 +46,8 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
     { schema: { response: { 200: AdminAccountsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
       if (!await adminSignedIn(request, reply, auth)) return reply;
-      const accounts = await pool.query<Account>(
-        "SELECT a.id, a.email, a.name, a.phone, a.theme FROM accounts a JOIN admin_memberships m ON m.account_id = a.id ORDER BY a.email",
+      const accounts = await pool.query<AdminAccount>(
+        `SELECT a.id, a.email, a.name, a.phone, a.theme, m.role FROM accounts a JOIN ${ADMIN_WEB_MEMBERS} m ON m.account_id = a.id ORDER BY a.email`,
       );
       return reply.code(200).send({ accounts: accounts.rows });
     },
@@ -49,11 +55,11 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
 
   app.post(
     "/v1/admin/accounts",
-    { schema: { body: CreateAdminBody, response: { 201: Account, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 409: ErrorEnvelope } } },
+    { schema: { body: CreateAdminBody, response: { 201: AdminAccount, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 409: ErrorEnvelope } } },
     async (request, reply) => {
       const who = await adminSignedIn(request, reply, auth);
       if (!who) return reply;
-      const { email, name, phone, reason } = request.body as CreateAdminBody;
+      const { email, name, phone, role, reason } = request.body as CreateAdminBody;
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
@@ -77,14 +83,15 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
         );
         const account = inserted.rows[0];
         if (!account) throw new Error("Admin insert returned no account");
-        await client.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [account.id]);
+        const { table, action } = created[role];
+        await client.query(`INSERT INTO ${table} (account_id) VALUES ($1)`, [account.id]);
         await client.query(
-          "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, 'admin.create', $2, $3)",
-          [who.accountId, account.id, reason],
+          "INSERT INTO admin_actions (actor_id, action, target_id, reason) VALUES ($1, $2, $3, $4)",
+          [who.accountId, action, account.id, reason],
         );
         await client.query("COMMIT");
-        request.log.info({ action: "admin.create" }, "Admin action recorded");
-        return reply.code(201).send(account);
+        request.log.info({ action }, "Admin action recorded");
+        return reply.code(201).send({ ...account, role });
       } catch (error) {
         await client.query("ROLLBACK");
         if ((error as { code?: string; constraint?: string }).code === "23505") {

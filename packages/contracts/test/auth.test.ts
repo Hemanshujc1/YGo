@@ -144,11 +144,13 @@ describe("CreateAdminBody", () => {
       email: " Asha@Example.com ",
       name: " Asha   Kulkarni ",
       phone: "98765 43210",
+      role: "area_manager",
       reason: "  Operations coverage  ",
     })).toEqual({
       email: "asha@example.com",
       name: "Asha Kulkarni",
       phone: "+919876543210",
+      role: "area_manager",
       reason: "Operations coverage",
     });
   });
@@ -159,7 +161,7 @@ describe("CreateAdminBody", () => {
       name: "4sha",
       phone: "12345",
       reason: "   ",
-    })).toEqual(["email", "name", "phone", "reason"]);
+    })).toEqual(["email", "name", "phone", "role", "reason"]);
   });
 
   it("refuses a reason over 500 characters", () => {
@@ -167,6 +169,7 @@ describe("CreateAdminBody", () => {
       email: account.email,
       name: account.name,
       phone: account.phone,
+      role: "admin",
       reason: "a".repeat(501),
     })).toEqual(["reason"]);
   });
@@ -174,19 +177,23 @@ describe("CreateAdminBody", () => {
   it("refuses unexpected account roles", () => {
     expect(fieldsRefused(CreateAdminBody, {
       email: account.email, name: account.name, phone: account.phone,
-      reason: "Operations coverage", role: "area-manager",
+      reason: "Operations coverage", role: "owner",
     })).toEqual(["role"]);
   });
 });
 
 describe("AdminAccountsResponse", () => {
-  it("accepts an Admin account list", () => {
-    expect(AdminAccountsResponse.parse({ accounts: [account] })).toEqual({ accounts: [account] });
+  const admin = { ...account, role: "admin" };
+  const areaManager = { ...account, role: "area_manager" };
+
+  it("accepts Admin and Area Manager accounts", () => {
+    expect(AdminAccountsResponse.parse({ accounts: [admin, areaManager] })).toEqual({ accounts: [admin, areaManager] });
     expect(AdminAccountsResponse.parse({ accounts: [] })).toEqual({ accounts: [] });
   });
 
   it("refuses an invalid account", () => {
-    expect(fieldsRefused(AdminAccountsResponse, { accounts: [{ ...account, id: "bad" }] })).toEqual(["accounts.0.id"]);
+    expect(fieldsRefused(AdminAccountsResponse, { accounts: [{ ...admin, id: "bad" }] })).toEqual(["accounts.0.id"]);
+    expect(fieldsRefused(AdminAccountsResponse, { accounts: [account] })).toEqual(["accounts.0.role"]);
   });
 });
 

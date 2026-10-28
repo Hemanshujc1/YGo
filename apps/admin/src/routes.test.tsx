@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AdminRole } from "@ygo/contracts";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { adminRoutes } from "./routes";
 import { strings } from "./strings";
@@ -13,8 +14,8 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
 });
 
-const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system" };
-const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Admin", phone: "+919876543211", theme: "system" };
+const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system", role: "admin" };
+const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Manager", phone: "+919876543211", theme: "system", role: "area_manager" };
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
 const stationery = { id: "00000000-0000-4000-8000-000000000102", parentId: null, name: "Stationery", active: true, effectiveActive: true };
 const snacks = { id: "00000000-0000-4000-8000-000000000103", parentId: groceries.id, name: "Snacks", active: true, effectiveActive: false };
@@ -33,6 +34,24 @@ const application = {
   pan: "ABCDE1234F", fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000, upiId: "owner@upi",
   areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com", submittedAt: "2026-10-24T10:00:00.000Z",
 };
+
+/** The API client's role reads (#343): one answer per sign-in, gone once the session ends. */
+function asRole(role: AdminRole) {
+  let known: AdminRole | null = null;
+  let ended = false;
+  return {
+    role: vi.fn(async () => {
+      if (ended) return { ok: false, status: 401, code: "UNAUTHENTICATED" };
+      known = role;
+      return { ok: true, data: role };
+    }),
+    currentRole: vi.fn(() => (ended ? null : known)),
+    signOut: vi.fn(async () => {
+      ended = true;
+      return { ok: true, data: undefined };
+    }),
+  };
+}
 
 function setup(path: string, overrides: Record<string, unknown> = {}) {
   const api = {
@@ -65,8 +84,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getVisitPhotoAccess: vi.fn(),
     recordOnboardingFee: vi.fn(),
     getShopOnboarding: vi.fn(),
-    signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     me: vi.fn().mockResolvedValue({ ok: true, data: founder }),
+    ...asRole("admin"),
     setTheme: vi.fn(),
     ...overrides,
   };
@@ -84,7 +103,7 @@ describe("Admin web", () => {
   });
 
   it("redirects an unauthenticated import-page visit to sign-in", async () => {
-    setup("/products/import", { me: vi.fn().mockResolvedValue({ ok: false, code: "UNAUTHENTICATED" }) });
+    setup("/products/import", { role: vi.fn().mockResolvedValue({ ok: false, code: "UNAUTHENTICATED" }) });
     await screen.findByRole("heading", { name: strings.signIn });
   });
 
@@ -138,13 +157,17 @@ describe("Admin web", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.newAccount }));
     fireEvent.click(screen.getByRole("button", { name: strings.create }));
     expect(await screen.findByText(strings.invalidFields.email)).toBeTruthy();
+    expect(screen.getByText(strings.invalidFields.role)).toBeTruthy();
     expect(api.createAccount).not.toHaveBeenCalled();
     fillCreate();
     fireEvent.click(screen.getByRole("button", { name: strings.create }));
     expect(await screen.findByText(strings.created)).toBeTruthy();
-    expect(api.createAccount).toHaveBeenCalledWith({ email: created.email, name: created.name, phone: created.phone, reason: "Coverage" });
+    expect(api.createAccount).toHaveBeenCalledWith({ email: created.email, name: created.name, phone: created.phone, role: "area_manager", reason: "Coverage" });
     fireEvent.click(screen.getByRole("button", { name: strings.backToAccounts }));
-    expect(await screen.findByText(created.email)).toBeTruthy();
+    const row = (await screen.findByText(created.email)).closest("tr");
+    expect(screen.getByRole("columnheader", { name: strings.role })).toBeTruthy();
+    expect(row?.textContent).toContain(strings.roles.area_manager);
+    expect(screen.getByText(founder.email).closest("tr")?.textContent).toContain(strings.roles.admin);
   });
 
   it.each(["EMAIL_IN_USE", "PHONE_IN_USE"] as const)("shows %s at its field", async (code) => {
@@ -770,10 +793,82 @@ describe("Admin web", () => {
   });
 });
 
+describe("Area Manager shell (#343)", () => {
+  const manager = { ...created, role: "area_manager" };
+
+  it("signs an Area Manager in to Applications, with their own nav and scope banner", async () => {
+    const { api, router } = setup("/sign-in", { verifyCode: vi.fn().mockResolvedValue({ ok: true, data: manager }), ...asRole("area_manager") });
+    fireEvent.change(screen.getByLabelText(strings.email), { target: { value: manager.email } });
+    fireEvent.click(screen.getByRole("button", { name: strings.sendCode }));
+    fireEvent.change(await screen.findByLabelText(strings.code), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.verify }));
+    expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/applications");
+    expect(screen.getByRole("link", { name: strings.areaManagerTitle })).toBeTruthy();
+    expect(screen.queryByText(strings.title)).toBeNull();
+    expect(screen.getByText(strings.areaManagerScope)).toBeTruthy();
+    const links = within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([strings.applications]);
+    expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
+    expect(api.listShopApplications).not.toHaveBeenCalled();
+  });
+
+  it("asks the server again after sign-out, so a signed-out Area Manager page goes to sign-in", async () => {
+    const { router } = setup("/applications", asRole("area_manager"));
+    await screen.findByText(strings.noAssignedShops);
+    fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
+    await screen.findByRole("heading", { name: strings.signIn });
+    await router.navigate("/applications");
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", `/applications/${application.id}`])(
+    "sends an Area Manager from %s to Applications without asking the server",
+    async (path) => {
+      const { api, router } = setup(path, asRole("area_manager"));
+      expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
+      expect(router.state.location.pathname).toBe("/applications");
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.getShopApplication]) {
+        expect(call).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("draws no role's shell while the role is unknown or after the session ends", async () => {
+    setup("/applications", { role: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }), currentRole: vi.fn(() => null) });
+    expect(await screen.findByRole("link", { name: strings.brand })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: strings.areaManagerTitle })).toBeNull();
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("gives the next account on the same tab its own shell, not the previous one's", async () => {
+    const { api, router } = setup("/applications", asRole("area_manager"));
+    await screen.findByText(strings.noAssignedShops);
+    fireEvent.click(screen.getByRole("button", { name: strings.signOut }));
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(api.currentRole()).toBeNull();
+    await router.navigate("/applications");
+    await screen.findByRole("heading", { name: strings.signIn });
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+  });
+
+  it("shows Admin the full nav and no scope banner", async () => {
+    setup("/accounts");
+    await screen.findByText(founder.email);
+    expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(6);
+    expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
+  });
+});
+
 function fillCreate() {
   fireEvent.change(screen.getByLabelText(strings.email), { target: { value: created.email } });
   fireEvent.change(screen.getByLabelText(strings.name), { target: { value: created.name } });
   fireEvent.change(screen.getByLabelText(strings.phone), { target: { value: created.phone } });
+  fireEvent.click(screen.getByLabelText(strings.roles.area_manager));
   fireEvent.change(screen.getByLabelText(strings.reason), { target: { value: "Coverage" } });
 }
 
@@ -788,7 +883,7 @@ describe("Admin theme (#263)", () => {
   };
 
   it("shows no picker before sign-in, then takes the account's theme on sign-in", async () => {
-    // The account load never answers here, so only the sign-in answer can set the theme.
+    // The theme's account load never answers, so only the sign-in answer can set the theme.
     setup("/sign-in", {
       verifyCode: vi.fn().mockResolvedValue({ ok: true, data: { ...founder, theme: "dark" } }),
       me: vi.fn().mockReturnValue(new Promise(() => undefined)),

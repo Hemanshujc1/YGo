@@ -50,11 +50,16 @@ export type ThemeChoice = z.infer<typeof ThemeChoice>;
 export const SetThemeBody = z.strictObject({ theme: ThemeChoice });
 export type SetThemeBody = z.infer<typeof SetThemeBody>;
 
-/** `POST /v1/admin/accounts`: create an Admin account and record why. Answers 201 with the `Account`. */
+/** Who an Admin web account is (#343). An Area Manager works only on the shops assigned to them. */
+export const AdminRole = z.enum(["admin", "area_manager"]);
+export type AdminRole = z.infer<typeof AdminRole>;
+
+/** `POST /v1/admin/accounts`: create an Admin or Area Manager account and record why. Answers 201 with the `AdminAccount`. */
 export const CreateAdminBody = z.strictObject({
   email: Email,
   name: PersonName,
   phone: Phone,
+  role: AdminRole,
   reason: AdminActionReason,
 });
 export type CreateAdminBody = z.infer<typeof CreateAdminBody>;
@@ -74,8 +79,12 @@ export const Account = z.object({
 });
 export type Account = z.infer<typeof Account>;
 
-/** `GET /v1/admin/accounts`: the Admin accounts. */
-export const AdminAccountsResponse = z.strictObject({ accounts: z.array(Account) });
+/** An Admin web account and its role, from `GET /v1/admin/me` and the A23 list. */
+export const AdminAccount = Account.extend({ role: AdminRole });
+export type AdminAccount = z.infer<typeof AdminAccount>;
+
+/** `GET /v1/admin/accounts`: the Admin and Area Manager accounts. */
+export const AdminAccountsResponse = z.strictObject({ accounts: z.array(AdminAccount) });
 export type AdminAccountsResponse = z.infer<typeof AdminAccountsResponse>;
 
 /**

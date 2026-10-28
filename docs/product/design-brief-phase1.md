@@ -27,7 +27,7 @@ Phase 1 opens with a soft launch: one to two weeks, **12 to 20 hand-onboarded sh
 | **Staff** | Shopkeeper app | Take orders, adjust stock, make counter bills, add products from the master catalog, deliver when flagged `can deliver` | Same counter pressure. Sees the prices needed to bill and to handle orders, and cannot edit them. Has no access to the Owner-only areas listed below | Low to moderate |
 | **Deliverer** (the Owner, or Staff who can deliver) | Delivery tab in the Shopkeeper app | Complete a handover: proof photo, 4-digit code, record cash or UPI | Outdoors, one hand, bright sun, often offline | Low to moderate |
 | **Admin** | Admin web | Run the platform through queues, rate cards and statements. In stage one this is the founder | Many queues, money accuracy, every action needs a reason | High |
-| **Area Manager** | Admin web, one Area only | Onboard and support shops. Mostly reads; acts on very little (`ADM-12`) | Must see clearly what they cannot do | Moderate |
+| **Area Manager** | Admin web, assigned shops only | Onboard and support shops. Mostly reads; acts on very little (`ADM-12`) | Must see clearly what they cannot do | Moderate |
 
 **Owner-only in the Shopkeeper app** (`CONTEXT.md`, Roles): changing online or counter prices, creating or editing coupons, setting Bargain floor prices, the statement, balance owed and reports, adding or deactivating Staff, and shop settings (opening hours, service radius, fulfilment modes, minimum order). Staff see a price wherever a bill or an order needs it, read-only. Design each of these areas as absent for Staff, not as a disabled control. Hiding is presentation only: the backend enforces every permission, and no screen may rely on a hidden control to protect anything.
 
@@ -168,7 +168,7 @@ Every screen covers these states where they apply: **loading, empty, error, succ
 | Orders | Live monitor, detail, forced transition with reason | |
 | Money | Rate cards showing which level a value came from, coupons, price simulator, statements, payments, adjustments, balances and limits | |
 | People | Customers (lookup, phone state, block), Admin and Area Manager accounts, payouts | |
-| Area Manager view | The same screens, scoped to one Area and mostly read-only (`ADM-12`) | Show what is unavailable plainly |
+| Area Manager view | The same screens, scoped to the shops assigned to them and mostly read-only (`ADM-12`) | Show what is unavailable plainly |
 
 Every Admin action that changes something asks for a reason.
 

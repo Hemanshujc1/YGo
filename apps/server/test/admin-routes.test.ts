@@ -171,11 +171,11 @@ describe("Admin routes and browser sessions", () => {
     const token = signed.json().accessToken as string;
     expect((await accounts()).statusCode).toBe(401);
     expect((await accounts(token)).json().accounts).toHaveLength(1);
-    const payload = { email: "second-admin@example.com", name: "Meera Shah", phone: "+919876543211", reason: "Coverage for the evening shift" };
+    const payload = { email: "second-admin@example.com", name: "Meera Shah", phone: "+919876543211", role: "admin", reason: "Coverage for the evening shift" };
     const created = await app.inject({ method: "POST", url: "/v1/admin/accounts", headers: { authorization: `Bearer ${token}` }, payload });
     expect(created.statusCode).toBe(201);
     const account = created.json();
-    expect(account).toMatchObject({ email: payload.email, name: payload.name, phone: payload.phone });
+    expect(account).toMatchObject({ email: payload.email, name: payload.name, phone: payload.phone, role: "admin" });
     expect((await accounts(token)).json().accounts).toHaveLength(2);
     const rows = await database.pool.query(
       `SELECT a.role, m.account_id, x.actor_id, x.action, x.reason, x.target_id
@@ -190,7 +190,7 @@ describe("Admin routes and browser sessions", () => {
   it("refuses both conflicts and rolls back when writing the action fails", async () => {
     const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
     const create = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/accounts", headers: { authorization: `Bearer ${token}` }, payload });
-    const base = { email: "new-admin@example.com", name: "Meera Shah", phone: "+919876543211", reason: "Evening coverage" };
+    const base = { email: "new-admin@example.com", name: "Meera Shah", phone: "+919876543211", role: "admin", reason: "Evening coverage" };
     expect((await create({ ...base, email: admin.email })).json()).toEqual({ error: { code: "EMAIL_IN_USE" } });
     expect((await create({ ...base, phone: admin.phone })).json()).toEqual({ error: { code: "PHONE_IN_USE" } });
     expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions")).rows[0].n).toBe(1);
@@ -201,6 +201,132 @@ describe("Admin routes and browser sessions", () => {
     expect((await database.pool.query("SELECT 1 FROM accounts WHERE email = $1", [base.email])).rowCount).toBe(0);
     expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions")).rows[0].n).toBe(1);
   });
+
+  it("creates an Area Manager who signs in and refreshes, while every Admin route refuses them (#343)", async () => {
+    const adminToken = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const manager = { email: "area-manager@example.com", name: "Ravi Patil", phone: "+919876543212", role: "area_manager", reason: "Onboards Kothrud shops" };
+    const created = await app.inject({ method: "POST", url: "/v1/admin/accounts", headers: { authorization: `Bearer ${adminToken}` }, payload: manager });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ email: manager.email, role: "area_manager" });
+    expect((await accounts(adminToken)).json().accounts.map((row: { email: string; role: string }) => [row.email, row.role])).toEqual([
+      [manager.email, "area_manager"], [admin.email, "admin"],
+    ]);
+    const rows = await database.pool.query(
+      `SELECT x.action, x.reason, (SELECT count(*)::int FROM admin_memberships WHERE account_id = $1) AS admin
+       FROM area_manager_memberships m JOIN admin_actions x ON x.target_id = m.account_id WHERE m.account_id = $1`,
+      [created.json().id],
+    );
+    expect(rows.rows).toEqual([{ action: "area_manager.create", reason: manager.reason, admin: 0 }]);
+
+    clock.advance(30_000);
+    const signed = await signIn("/v1/admin/auth", manager.email);
+    const token = signed.json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    expect((await app.inject({ method: "GET", url: "/v1/admin/me", headers })).json()).toMatchObject({ email: manager.email, role: "area_manager" });
+    expect((await app.inject({ method: "PUT", url: "/v1/admin/me/theme", headers, payload: { theme: "dark" } })).statusCode).toBe(200);
+    const refreshed = await adminRefresh(cookie(signed));
+    expect(refreshed.statusCode).toBe(200);
+
+    const id = randomUUID();
+    const adminOnly = [
+      { method: "GET", url: "/v1/admin/accounts" },
+      { method: "POST", url: "/v1/admin/accounts", payload: { ...manager, email: "other@example.com", phone: "+919876543213" } },
+      { method: "GET", url: "/v1/admin/waitlist" },
+      { method: "GET", url: "/v1/admin/areas" },
+      { method: "POST", url: "/v1/admin/areas", payload: { name: "Baner", pincodes: ["411045"], reason: "New Area" } },
+      { method: "GET", url: "/v1/admin/categories" },
+      { method: "POST", url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "GET", url: "/v1/admin/products" },
+      { method: "GET", url: `/v1/admin/products/${id}/packs` },
+      { method: "GET", url: "/v1/admin/shop-applications" },
+      { method: "GET", url: `/v1/admin/shop-applications/${id}` },
+      { method: "POST", url: `/v1/admin/shop-applications/${id}/start-review` },
+      { method: "POST", url: `/v1/admin/shop-applications/${id}/approve` },
+    ] as const;
+    for (const request of adminOnly) {
+      const response = await app.inject({ ...request, headers: { authorization: `Bearer ${refreshed.json().accessToken}` } });
+      expect([request.url, response.statusCode]).toEqual([request.url, 403]);
+    }
+    expect((await database.pool.query("SELECT 1 FROM accounts WHERE email = 'other@example.com'")).rowCount).toBe(0);
+
+    await database.pool.query("DELETE FROM area_manager_memberships");
+    expect((await app.inject({ method: "GET", url: "/v1/admin/me", headers })).statusCode).toBe(403);
+    expect((await adminRefresh(cookie(refreshed))).statusCode).toBe(403);
+  });
+
+  it("never lets one account hold both Admin web roles (#343)", async () => {
+    const { rows: [manager] } = await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ('both@example.com') RETURNING id");
+    await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [manager?.id]);
+    await expect(database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [manager?.id])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("DELETE FROM area_manager_memberships WHERE account_id = $1", [manager?.id]);
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [manager?.id]);
+    await expect(database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [manager?.id])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("DELETE FROM admin_memberships WHERE account_id = $1", [manager?.id]);
+  });
+
+  it("never lets a membership move onto an account that holds the other Admin web role (#343)", async () => {
+    const ids: string[] = [];
+    for (const email of ["moved-admin@example.com", "moved-manager@example.com", "moved-free@example.com"]) {
+      const { rows: [account] } = await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ($1) RETURNING id", [email]);
+      ids.push(String(account?.id));
+    }
+    const [adminId, managerId, freeId] = ids;
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [adminId]);
+    await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [managerId]);
+    await expect(database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [managerId, adminId])).rejects.toMatchObject({ code: "23514" });
+    await expect(database.pool.query("UPDATE area_manager_memberships SET account_id = $1 WHERE account_id = $2", [adminId, managerId])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $1", [adminId]);
+    await database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [freeId, adminId]);
+    await database.pool.query("DELETE FROM admin_memberships WHERE account_id = $1", [freeId]);
+    await database.pool.query("DELETE FROM area_manager_memberships WHERE account_id = $1", [managerId]);
+  });
+
+  it("holds one Admin web role per account when two transactions race under READ COMMITTED (#343)", async () => {
+    type Write = (client: pg.PoolClient, account: string, other: string) => Promise<unknown>;
+    const insertAdmin: Write = (client, account) => client.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [account]);
+    const insertManager: Write = (client, account) => client.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [account]);
+    const moveAdmin: Write = (client, account, other) => client.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [account, other]);
+    const moveManager: Write = (client, account, other) => client.query("UPDATE area_manager_memberships SET account_id = $1 WHERE account_id = $2", [account, other]);
+    const cases: Array<[string, Write, Write, boolean]> = [
+      ["insert Admin vs insert Area Manager", insertAdmin, insertManager, false],
+      ["insert Area Manager vs insert Admin", insertManager, insertAdmin, false],
+      ["insert Area Manager vs move an Admin membership in", insertManager, moveAdmin, true],
+      ["insert Admin vs move an Area Manager membership in", insertAdmin, moveManager, true],
+      ["move an Admin membership in vs move an Area Manager membership in", moveAdmin, moveManager, true],
+    ];
+    const account = async (email: string) => String((await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ($1) RETURNING id", [email])).rows[0]?.id);
+    for (const [index, [label, first, second, needsMovers]] of cases.entries()) {
+      const target = await account(`race-target-${index}@example.com`);
+      const adminMover = await account(`race-admin-${index}@example.com`);
+      const managerMover = await account(`race-manager-${index}@example.com`);
+      if (needsMovers) {
+        await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [adminMover]);
+        await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [managerMover]);
+      }
+      const [one, two] = [await database.pool.connect(), await database.pool.connect()];
+      try {
+        for (const client of [one, two]) await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        await first(one, target, first === moveAdmin ? adminMover : managerMover);
+        const pid = Number((await two.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid);
+        const racing = second(two, target, second === moveAdmin ? adminMover : managerMover).then(() => "wrote", (error: { code?: string }) => error.code);
+        for (let waited = 0; ; waited += 10) {
+          const { rowCount } = await database.pool.query("SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock' AND wait_event = 'advisory'", [pid]);
+          if (rowCount) break;
+          if (waited > 3_000) throw new Error(`${label}: the second write never waited on the advisory lock`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        await one.query("COMMIT");
+        expect(await racing, label).toBe("23514");
+        await two.query("ROLLBACK");
+      } finally {
+        one.release();
+        two.release();
+      }
+      const { rows: [held] } = await database.pool.query<{ roles: number }>(
+        "SELECT (SELECT count(*) FROM admin_memberships WHERE account_id = $1)::int + (SELECT count(*) FROM area_manager_memberships WHERE account_id = $1)::int AS roles", [target]);
+      expect(held?.roles, label).toBe(1);
+    }
+  }, 30_000);
 
   it("hides membership on code request, rotates the cookie, enforces idle expiry and signs out", async () => {
     const unknown = await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "unknown@example.com" } });
@@ -256,7 +382,7 @@ describe("Admin routes and browser sessions", () => {
     expect((await accounts(mobileBody.accessToken)).statusCode).toBe(403);
     const refused = await app.inject({
       method: "POST", url: "/v1/admin/accounts", headers: { authorization: `Bearer ${mobileBody.accessToken}` },
-      payload: { email: "refused@example.com", name: "Meera Shah", phone: "+919876543211", reason: "No permission" },
+      payload: { email: "refused@example.com", name: "Meera Shah", phone: "+919876543211", role: "admin", reason: "No permission" },
     });
     expect(refused.statusCode).toBe(403);
     expect((await database.pool.query("SELECT 1 FROM accounts WHERE email = 'refused@example.com'")).rowCount).toBe(0);
@@ -291,7 +417,7 @@ describe("Admin routes and browser sessions", () => {
 
     clock.advance(30_000);
     const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
-    expect((await me(token)).json()).toMatchObject({ email: admin.email, name: admin.name, phone: admin.phone, theme: "system" });
+    expect((await me(token)).json()).toMatchObject({ email: admin.email, name: admin.name, phone: admin.phone, theme: "system", role: "admin" });
     const saved = await setTheme(token, { theme: "dark" });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({ email: admin.email, theme: "dark" });
