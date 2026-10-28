@@ -60,6 +60,11 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     correctShopApplication: vi.fn(),
     startShopApplicationReview: vi.fn(),
     approveShopApplication: vi.fn(),
+    createVisitPhotoUpload: vi.fn(),
+    recordShopVisit: vi.fn(),
+    getVisitPhotoAccess: vi.fn(),
+    recordOnboardingFee: vi.fn(),
+    getShopOnboarding: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     me: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     setTheme: vi.fn(),
@@ -408,7 +413,11 @@ describe("Admin web", () => {
   });
 
   it("lists applications with their states and opens the review", async () => {
-    const { api } = setup("/applications", { listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [application] } }), getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }) });
+    const { api } = setup("/applications", {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [application] } }),
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }),
+      getShopOnboarding: vi.fn().mockResolvedValue({ ok: true, data: { visits: [], fees: [], ownerPhoneState: "unverified", ownerEmailConfirmedAt: null } }),
+    });
     await screen.findByRole("heading", { name: strings.applications });
     expect(screen.getByText(application.shopName)).toBeTruthy();
     expect(screen.getByText(strings.applicationState.submitted)).toBeTruthy();
