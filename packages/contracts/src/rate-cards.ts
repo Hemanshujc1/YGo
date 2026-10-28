@@ -23,7 +23,7 @@ export const CommissionRule = z.strictObject({
 export const FeeSplit = z.strictObject({
   platformPercentage: RatePercentage,
   shopPercentage: RatePercentage,
-}).refine((split) => percentageUnits(split.platformPercentage) + percentageUnits(split.shopPercentage) === 1_000_000, { path: ["shopPercentage"] });
+}).refine((split) => percentageUnits(split.platformPercentage) + percentageUnits(split.shopPercentage) === 1_000_000n, { path: ["shopPercentage"] });
 
 export const DeliveryFeeRule = z.strictObject({ amount: ShopPrice, split: FeeSplit });
 export const SmallCartFeeRule = z.strictObject({
@@ -59,7 +59,10 @@ export type RateCardScope = z.infer<typeof RateCardScope>;
 
 export const PublishRateCardBody = z.strictObject({ scope: RateCardScope, values: RateCardValues, reason: AdminActionReason });
 export type PublishRateCardBody = z.infer<typeof PublishRateCardBody>;
-export const ResolveRateCardQuery = z.strictObject({ shopId: z.uuid(), categoryId: z.uuid().optional(), version: z.coerce.number().int().positive().optional() });
+export const ResolveRateCardQuery = z.strictObject({
+  shopId: z.uuid(), categoryId: z.uuid().optional(), version: z.coerce.number().int().positive().optional(),
+  usesPickup: z.stringbool().default(false), usesBargain: z.stringbool().default(false),
+});
 
 export const RateCardSource = z.strictObject({ type: z.enum(["global", "category", "shop"]), id: z.uuid().nullable(), version: z.number().int().positive() });
 export const EffectiveRateCardValue = z.strictObject({ value: z.unknown(), source: RateCardSource });

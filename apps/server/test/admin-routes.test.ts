@@ -140,9 +140,12 @@ describe("Admin routes and browser sessions", () => {
     expect(inherited.values.minimumCart).toMatchObject({ value: "80", source: { type: "category", id: categoryId, version: 2 } });
     const historical = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}&version=3`, headers })).json();
     expect(historical).toMatchObject({ version: 3, values: { minimumCart: { value: "60", source: { type: "shop", version: 3 } } } });
-    const stored = await database.pool.query("SELECT version::int, values, reason FROM rate_card_versions ORDER BY version");
+    const stored = await database.pool.query("SELECT version::int, reason FROM rate_card_versions ORDER BY version");
     expect(stored.rows).toHaveLength(4);
-    expect(stored.rows[2]).toMatchObject({ version: 3, values: { minimumCart: "60" }, reason: "Shop-specific terms" });
+    expect(stored.rows[2]).toMatchObject({ version: 3, reason: "Shop-specific terms" });
+    expect((await database.pool.query("SELECT money_value FROM rate_card_values WHERE version = 3 AND field = 'minimumCart'")).rows).toEqual([{ money_value: "60.00" }]);
+    const conditional = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&usesPickup=true&usesBargain=true`, headers })).json();
+    expect(conditional).toMatchObject({ complete: false, missing: ["pickup", "bargainMinimumCommission"] });
     expect((await database.pool.query("SELECT reason FROM admin_actions WHERE action = 'rate_card.publish' ORDER BY created_at")).rows.map((row) => row.reason)).toEqual([
       "First pilot card", "Groceries pilot basket", "Shop-specific terms", "Return to inherited terms",
     ]);

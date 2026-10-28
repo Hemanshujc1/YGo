@@ -123,12 +123,12 @@ export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2
 
 /** A non-negative percentage with up to four decimals, stored exactly rather than as a JS float (#44, MNY-3). */
 export const RatePercentage = z.string().trim().regex(/^(?:0|[1-9]\d?|100)(?:\.\d{1,4})?$/)
-  .refine((value) => percentageUnits(value) <= 1_000_000);
+  .refine((value) => percentageUnits(value) <= 1_000_000n);
 
 /** Exact ten-thousandths of one percentage point; validation must not round through a binary float. */
-export function percentageUnits(value: string): number {
+export function percentageUnits(value: string): bigint {
   const [whole = "0", fraction = ""] = value.split(".");
-  return Number(whole) * 10_000 + Number(fraction.padEnd(4, "0"));
+  return BigInt(whole) * 10_000n + BigInt(fraction.padEnd(4, "0") || "0");
 }
 
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
