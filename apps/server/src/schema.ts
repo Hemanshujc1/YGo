@@ -219,7 +219,7 @@ export const shopMembers = pgTable("shop_members", {
 // exactly which configuration it used. A publication stores the complete snapshot for one
 // scope; an omitted key clears that override and inherits from the broader scope (#44).
 export const rateCardVersions = pgTable("rate_card_versions", {
-  version: bigint("version", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  version: bigint("version", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
   actorId: uuid("actor_id").notNull().references(() => accounts.id),
   scopeType: text("scope_type").notNull(),
   scopeId: uuid("scope_id"),
@@ -234,7 +234,7 @@ export const rateCardVersions = pgTable("rate_card_versions", {
 // Each immutable scope snapshot is decomposed into exact typed leaves. Money and
 // percentages remain PostgreSQL NUMERIC; no financial value is hidden in JSON (#44, ADR-0002).
 export const rateCardValues = pgTable("rate_card_values", {
-  version: bigint("version", { mode: "number" }).notNull().references(() => rateCardVersions.version, { onDelete: "cascade" }),
+  version: bigint("version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version, { onDelete: "cascade" }),
   field: text("field").notNull(),
   moneyValue: numeric("money_value", { precision: 12, scale: 2 }),
   percentageValue: numeric("percentage_value", { precision: 7, scale: 4 }),

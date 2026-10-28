@@ -51,6 +51,7 @@ export {
   ShopAddress,
   ShopPrice,
   RatePercentage,
+  RateCardVersion,
   percentageUnits,
   ShopEntityType,
   ShopName,
