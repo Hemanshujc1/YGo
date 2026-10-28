@@ -124,15 +124,36 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1793093743138,
-      "tag": "0017_area_manager_memberships",
+      "when": 1793109707883,
+      "tag": "0017_shop_listings",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
-      "when": 1793172291562,
-      "tag": "0018_admin_web_role_exclusive",
+      "when": 1793111204588,
+      "tag": "0018_shop_quantity_option_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793121977527,
+      "tag": "0019_shop_listing_mrp_ceiling",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793172781992,
+      "tag": "0020_area_manager_memberships",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793172782556,
+      "tag": "0021_admin_web_role_exclusive",
       "breakpoints": true
     }
   ]

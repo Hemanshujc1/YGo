@@ -1,6 +1,6 @@
 {
-  "id": "1db2aadb-f62a-403c-9200-e8d8e5bbd5cb",
-  "prevId": "457f1a07-4b8c-4061-a54b-899fca62568d",
+  "id": "d00683ec-a04e-4933-94d6-399380039d5b",
+  "prevId": "d8d706e7-a313-427b-89e3-495d5c9ecb92",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -73,17 +73,17 @@
       "uniqueConstraints": {
         "accounts_email_unique": {
           "name": "accounts_email_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "accounts_phone_unique": {
           "name": "accounts_phone_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "phone"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -161,10 +161,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"admin_actions\".\"action\" = 'admin.bootstrap'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -210,55 +210,15 @@
         "admin_memberships_account_id_accounts_id_fk": {
           "name": "admin_memberships_account_id_accounts_id_fk",
           "tableFrom": "admin_memberships",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.area_manager_memberships": {
-      "name": "area_manager_memberships",
-      "schema": "",
-      "columns": {
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "area_manager_memberships_account_id_accounts_id_fk": {
-          "name": "area_manager_memberships_account_id_accounts_id_fk",
-          "tableFrom": "area_manager_memberships",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "tableTo": "accounts",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -296,24 +256,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "area_pincodes_area_id_areas_id_fk": {
           "name": "area_pincodes_area_id_areas_id_fk",
           "tableFrom": "area_pincodes",
+          "tableTo": "areas",
           "columnsFrom": [
             "area_id"
           ],
-          "tableTo": "areas",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -353,15 +313,15 @@
           "columns": [
             {
               "expression": "lower(\"name\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -413,16 +373,16 @@
           "columns": [
             {
               "expression": "lower(\"name\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"categories\".\"parent_id\" IS NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "categories_child_name_idx": {
           "name": "categories_child_name_idx",
@@ -435,31 +395,31 @@
             },
             {
               "expression": "lower(\"name\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"categories\".\"parent_id\" IS NOT NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "categories_parent_id_categories_id_fk": {
           "name": "categories_parent_id_categories_id_fk",
           "tableFrom": "categories",
+          "tableTo": "categories",
           "columnsFrom": [
             "parent_id"
           ],
-          "tableTo": "categories",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -522,9 +482,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "email_code_sends_address_sent_at_idx": {
           "name": "email_code_sends_address_sent_at_idx",
@@ -543,9 +503,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -603,9 +563,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "identity_challenges_address_idx": {
           "name": "identity_challenges_address_idx",
@@ -618,9 +578,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -690,9 +650,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -750,9 +710,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -886,21 +846,21 @@
           "columns": [
             {
               "expression": "lower(\"name\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             },
             {
               "expression": "coalesce(lower(\"brand\"), '')",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "master_products_category_id_idx": {
           "name": "master_products_category_id_idx",
@@ -913,24 +873,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "master_products_category_id_categories_id_fk": {
           "name": "master_products_category_id_categories_id_fk",
           "tableFrom": "master_products",
+          "tableTo": "categories",
           "columnsFrom": [
             "category_id"
           ],
-          "tableTo": "categories",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1043,24 +1003,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "onboarding_fees_shop_id_shops_id_fk": {
           "name": "onboarding_fees_shop_id_shops_id_fk",
           "tableFrom": "onboarding_fees",
+          "tableTo": "shops",
           "columnsFrom": [
             "shop_id"
           ],
-          "tableTo": "shops",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1145,9 +1105,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "packs_barcode_idx": {
           "name": "packs_barcode_idx",
@@ -1160,24 +1120,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "packs_product_id_master_products_id_fk": {
           "name": "packs_product_id_master_products_id_fk",
           "tableFrom": "packs",
+          "tableTo": "master_products",
           "columnsFrom": [
             "product_id"
           ],
-          "tableTo": "master_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1242,9 +1202,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "refresh_tokens_one_current_idx": {
           "name": "refresh_tokens_one_current_idx",
@@ -1257,25 +1217,25 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"refresh_tokens\".\"replaced_at\" IS NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "refresh_tokens_session_id_sessions_id_fk": {
           "name": "refresh_tokens_session_id_sessions_id_fk",
           "tableFrom": "refresh_tokens",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1356,9 +1316,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "saved_addresses_home_work_idx": {
           "name": "saved_addresses_home_work_idx",
@@ -1377,25 +1337,25 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"saved_addresses\".\"label\" <> 'other'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "saved_addresses_account_id_accounts_id_fk": {
           "name": "saved_addresses_account_id_accounts_id_fk",
           "tableFrom": "saved_addresses",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1452,15 +1412,15 @@
         "sessions_account_id_accounts_id_fk": {
           "name": "sessions_account_id_accounts_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1470,6 +1430,154 @@
         "sessions_kind_valid": {
           "name": "sessions_kind_valid",
           "value": "\"sessions\".\"kind\" IN ('mobile', 'admin_web')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.shop_listings": {
+      "name": "shop_listings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "shop_id": {
+          "name": "shop_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pack_id": {
+          "name": "pack_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "online_price": {
+          "name": "online_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "counter_price": {
+          "name": "counter_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mrp": {
+          "name": "mrp",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "low_stock_level": {
+          "name": "low_stock_level",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "available": {
+          "name": "available",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "minimum_order_quantity": {
+          "name": "minimum_order_quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity_step": {
+          "name": "quantity_step",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "shop_listings_shop_pack_idx": {
+          "name": "shop_listings_shop_pack_idx",
+          "columns": [
+            {
+              "expression": "shop_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pack_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "shop_listings_shop_id_shops_id_fk": {
+          "name": "shop_listings_shop_id_shops_id_fk",
+          "tableFrom": "shop_listings",
+          "tableTo": "shops",
+          "columnsFrom": [
+            "shop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "shop_listings_pack_id_packs_id_fk": {
+          "name": "shop_listings_pack_id_packs_id_fk",
+          "tableFrom": "shop_listings",
+          "tableTo": "packs",
+          "columnsFrom": [
+            "pack_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "shop_listings_prices_valid": {
+          "name": "shop_listings_prices_valid",
+          "value": "\"shop_listings\".\"online_price\" >= 0 AND \"shop_listings\".\"online_price\" <> 'NaN'::numeric AND \"shop_listings\".\"counter_price\" >= 0 AND \"shop_listings\".\"counter_price\" <> 'NaN'::numeric AND \"shop_listings\".\"mrp\" >= 0 AND \"shop_listings\".\"mrp\" <> 'NaN'::numeric AND \"shop_listings\".\"low_stock_level\" >= 0 AND \"shop_listings\".\"low_stock_level\" <> 'NaN'::numeric"
+        },
+        "shop_listings_measured_rules_pair": {
+          "name": "shop_listings_measured_rules_pair",
+          "value": "((\"shop_listings\".\"minimum_order_quantity\" IS NULL) AND (\"shop_listings\".\"quantity_step\" IS NULL)) OR (\"shop_listings\".\"minimum_order_quantity\" > 0 AND \"shop_listings\".\"minimum_order_quantity\" <> 'NaN'::numeric AND \"shop_listings\".\"quantity_step\" > 0 AND \"shop_listings\".\"quantity_step\" <> 'NaN'::numeric)"
         }
       },
       "isRLSEnabled": false
@@ -1509,37 +1617,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "shop_members_account_id_accounts_id_fk": {
           "name": "shop_members_account_id_accounts_id_fk",
           "tableFrom": "shop_members",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shop_members_shop_id_shops_id_fk": {
           "name": "shop_members_shop_id_shops_id_fk",
           "tableFrom": "shop_members",
+          "tableTo": "shops",
           "columnsFrom": [
             "shop_id"
           ],
-          "tableTo": "shops",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1549,6 +1657,91 @@
         "shop_members_role_valid": {
           "name": "shop_members_role_valid",
           "value": "\"shop_members\".\"role\" IN ('owner', 'staff')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.shop_quantity_price_options": {
+      "name": "shop_quantity_price_options",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "listing_id": {
+          "name": "listing_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price": {
+          "name": "price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "shop_quantity_price_options_quantity_idx": {
+          "name": "shop_quantity_price_options_quantity_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "quantity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "shop_quantity_price_options_listing_id_shop_listings_id_fk": {
+          "name": "shop_quantity_price_options_listing_id_shop_listings_id_fk",
+          "tableFrom": "shop_quantity_price_options",
+          "tableTo": "shop_listings",
+          "columnsFrom": [
+            "listing_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "shop_quantity_price_options_valid": {
+          "name": "shop_quantity_price_options_valid",
+          "value": "\"shop_quantity_price_options\".\"quantity\" > 0 AND \"shop_quantity_price_options\".\"quantity\" <> 'NaN'::numeric AND \"shop_quantity_price_options\".\"price\" >= 0 AND \"shop_quantity_price_options\".\"price\" <> 'NaN'::numeric"
         }
       },
       "isRLSEnabled": false
@@ -1650,24 +1843,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "shop_visits_shop_id_shops_id_fk": {
           "name": "shop_visits_shop_id_shops_id_fk",
           "tableFrom": "shop_visits",
+          "tableTo": "shops",
           "columnsFrom": [
             "shop_id"
           ],
-          "tableTo": "shops",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1812,6 +2005,124 @@
       },
       "isRLSEnabled": false
     },
+    "public.stock_movements": {
+      "name": "stock_movements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "listing_id": {
+          "name": "listing_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "stock_movements_client_id_idx": {
+          "name": "stock_movements_client_id_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_movements_one_opening_idx": {
+          "name": "stock_movements_one_opening_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"stock_movements\".\"kind\" = 'opening'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_movements_listing_id_shop_listings_id_fk": {
+          "name": "stock_movements_listing_id_shop_listings_id_fk",
+          "tableFrom": "stock_movements",
+          "tableTo": "shop_listings",
+          "columnsFrom": [
+            "listing_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stock_movements_kind_valid": {
+          "name": "stock_movements_kind_valid",
+          "value": "\"stock_movements\".\"kind\" IN ('opening')"
+        },
+        "stock_movements_quantity_valid": {
+          "name": "stock_movements_quantity_valid",
+          "value": "\"stock_movements\".\"quantity\" >= 0 AND \"stock_movements\".\"quantity\" <> 'NaN'::numeric"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.visit_photo_uploads": {
       "name": "visit_photo_uploads",
       "schema": "",
@@ -1859,24 +2170,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "visit_photo_uploads_shop_id_shops_id_fk": {
           "name": "visit_photo_uploads_shop_id_shops_id_fk",
           "tableFrom": "visit_photo_uploads",
+          "tableTo": "shops",
           "columnsFrom": [
             "shop_id"
           ],
-          "tableTo": "shops",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1936,32 +2247,32 @@
         "visit_photos_visit_id_shop_visits_id_fk": {
           "name": "visit_photos_visit_id_shop_visits_id_fk",
           "tableFrom": "visit_photos",
+          "tableTo": "shop_visits",
           "columnsFrom": [
             "visit_id"
           ],
-          "tableTo": "shop_visits",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "visit_photos_visit_id_unique": {
           "name": "visit_photos_visit_id_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "visit_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "visit_photos_object_key_unique": {
           "name": "visit_photos_object_key_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "object_key"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2015,15 +2326,15 @@
         "waitlist_entries_account_id_accounts_id_fk": {
           "name": "waitlist_entries_account_id_accounts_id_fk",
           "tableFrom": "waitlist_entries",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2043,10 +2354,10 @@
   },
   "enums": {},
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

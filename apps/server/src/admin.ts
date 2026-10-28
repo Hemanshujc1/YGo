@@ -5,7 +5,7 @@ import type { Clock } from "./adapters/clock";
 import { withTransaction } from "./db";
 import { signedIn, type AuthKeys, type SignedIn } from "./tokens";
 
-/** Everyone who may sign in to the Admin web, with their role (#343). The database allows an account only one (migration 0018). */
+/** Everyone who may sign in to the Admin web, with their role (#343). The database allows an account only one (migration 0021). */
 export const ADMIN_WEB_MEMBERS = `(SELECT account_id, 'admin' AS role FROM admin_memberships
   UNION ALL SELECT account_id, 'area_manager' AS role FROM area_manager_memberships)`;
 

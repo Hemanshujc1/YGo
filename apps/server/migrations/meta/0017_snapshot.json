@@ -1,5 +1,5 @@
 {
-  "id": "457f1a07-4b8c-4061-a54b-899fca62568d",
+  "id": "d8d706e7-a313-427b-89e3-495d5c9ecb92",
   "prevId": "2c95e71d-c150-41ea-abd1-14b5856c9d35",
   "version": "7",
   "dialect": "postgresql",
@@ -210,46 +210,6 @@
         "admin_memberships_account_id_accounts_id_fk": {
           "name": "admin_memberships_account_id_accounts_id_fk",
           "tableFrom": "admin_memberships",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.area_manager_memberships": {
-      "name": "area_manager_memberships",
-      "schema": "",
-      "columns": {
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "area_manager_memberships_account_id_accounts_id_fk": {
-          "name": "area_manager_memberships_account_id_accounts_id_fk",
-          "tableFrom": "area_manager_memberships",
           "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
@@ -1474,6 +1434,154 @@
       },
       "isRLSEnabled": false
     },
+    "public.shop_listings": {
+      "name": "shop_listings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "shop_id": {
+          "name": "shop_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pack_id": {
+          "name": "pack_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "online_price": {
+          "name": "online_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "counter_price": {
+          "name": "counter_price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mrp": {
+          "name": "mrp",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "low_stock_level": {
+          "name": "low_stock_level",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "available": {
+          "name": "available",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "minimum_order_quantity": {
+          "name": "minimum_order_quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity_step": {
+          "name": "quantity_step",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "shop_listings_shop_pack_idx": {
+          "name": "shop_listings_shop_pack_idx",
+          "columns": [
+            {
+              "expression": "shop_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pack_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "shop_listings_shop_id_shops_id_fk": {
+          "name": "shop_listings_shop_id_shops_id_fk",
+          "tableFrom": "shop_listings",
+          "tableTo": "shops",
+          "columnsFrom": [
+            "shop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "shop_listings_pack_id_packs_id_fk": {
+          "name": "shop_listings_pack_id_packs_id_fk",
+          "tableFrom": "shop_listings",
+          "tableTo": "packs",
+          "columnsFrom": [
+            "pack_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "shop_listings_prices_valid": {
+          "name": "shop_listings_prices_valid",
+          "value": "\"shop_listings\".\"online_price\" >= 0 AND \"shop_listings\".\"online_price\" <> 'NaN'::numeric AND \"shop_listings\".\"counter_price\" >= 0 AND \"shop_listings\".\"counter_price\" <> 'NaN'::numeric AND \"shop_listings\".\"mrp\" >= 0 AND \"shop_listings\".\"mrp\" <> 'NaN'::numeric AND \"shop_listings\".\"low_stock_level\" >= 0 AND \"shop_listings\".\"low_stock_level\" <> 'NaN'::numeric"
+        },
+        "shop_listings_measured_rules_pair": {
+          "name": "shop_listings_measured_rules_pair",
+          "value": "((\"shop_listings\".\"minimum_order_quantity\" IS NULL) AND (\"shop_listings\".\"quantity_step\" IS NULL)) OR (\"shop_listings\".\"minimum_order_quantity\" > 0 AND \"shop_listings\".\"minimum_order_quantity\" <> 'NaN'::numeric AND \"shop_listings\".\"quantity_step\" > 0 AND \"shop_listings\".\"quantity_step\" <> 'NaN'::numeric)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.shop_members": {
       "name": "shop_members",
       "schema": "",
@@ -1549,6 +1657,85 @@
         "shop_members_role_valid": {
           "name": "shop_members_role_valid",
           "value": "\"shop_members\".\"role\" IN ('owner', 'staff')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.shop_quantity_price_options": {
+      "name": "shop_quantity_price_options",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "listing_id": {
+          "name": "listing_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price": {
+          "name": "price",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "shop_quantity_price_options_quantity_idx": {
+          "name": "shop_quantity_price_options_quantity_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "quantity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "shop_quantity_price_options_listing_id_shop_listings_id_fk": {
+          "name": "shop_quantity_price_options_listing_id_shop_listings_id_fk",
+          "tableFrom": "shop_quantity_price_options",
+          "tableTo": "shop_listings",
+          "columnsFrom": [
+            "listing_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "shop_quantity_price_options_valid": {
+          "name": "shop_quantity_price_options_valid",
+          "value": "\"shop_quantity_price_options\".\"quantity\" > 0 AND \"shop_quantity_price_options\".\"quantity\" <> 'NaN'::numeric AND \"shop_quantity_price_options\".\"price\" >= 0 AND \"shop_quantity_price_options\".\"price\" <> 'NaN'::numeric"
         }
       },
       "isRLSEnabled": false
@@ -1808,6 +1995,124 @@
         "shops_sent_complete": {
           "name": "shops_sent_complete",
           "value": "\"shops\".\"state\" = 'draft' OR (\"shops\".\"shop_name\" IS NOT NULL AND \"shops\".\"address\" IS NOT NULL\n    AND \"shops\".\"pincode\" IS NOT NULL AND \"shops\".\"location\" IS NOT NULL AND \"shops\".\"owner_name\" IS NOT NULL\n    AND \"shops\".\"entity_type\" IS NOT NULL AND \"shops\".\"pan\" IS NOT NULL AND \"shops\".\"fssai_number\" IS NOT NULL\n    AND \"shops\".\"fssai_expiry\" IS NOT NULL AND \"shops\".\"upi_id\" IS NOT NULL\n    AND \"shops\".\"submitted_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.stock_movements": {
+      "name": "stock_movements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "listing_id": {
+          "name": "listing_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "stock_movements_client_id_idx": {
+          "name": "stock_movements_client_id_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_movements_one_opening_idx": {
+          "name": "stock_movements_one_opening_idx",
+          "columns": [
+            {
+              "expression": "listing_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"stock_movements\".\"kind\" = 'opening'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_movements_listing_id_shop_listings_id_fk": {
+          "name": "stock_movements_listing_id_shop_listings_id_fk",
+          "tableFrom": "stock_movements",
+          "tableTo": "shop_listings",
+          "columnsFrom": [
+            "listing_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stock_movements_kind_valid": {
+          "name": "stock_movements_kind_valid",
+          "value": "\"stock_movements\".\"kind\" IN ('opening')"
+        },
+        "stock_movements_quantity_valid": {
+          "name": "stock_movements_quantity_valid",
+          "value": "\"stock_movements\".\"quantity\" >= 0 AND \"stock_movements\".\"quantity\" <> 'NaN'::numeric"
         }
       },
       "isRLSEnabled": false

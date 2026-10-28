@@ -29,6 +29,7 @@ import { registerPackRoutes } from "./routes/packs";
 import { registerPlaceRoutes } from "./routes/places";
 import { registerProfileRoutes } from "./routes/profile";
 import { registerShopRoutes } from "./routes/shops";
+import { registerShopListingRoutes } from "./routes/shop-listings";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
@@ -118,6 +119,7 @@ export function buildApp({
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
   }
 
