@@ -420,6 +420,7 @@ describe("Admin routes and browser sessions", () => {
       { method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${id}` },
       { method: "POST", url: "/v1/admin/rate-cards/publish", payload: { scope: { type: "global" }, values: {}, reason: "No access" } },
       { method: "POST", url: "/v1/admin/price-simulator", payload: { shopId: id, lines: [{ listingId: id, count: 1 }] } },
+      { method: "GET", url: `/v1/admin/shops/${id}/listings` },
       { method: "GET", url: "/v1/admin/products" },
       { method: "GET", url: `/v1/admin/products/${id}/packs` },
       // Listing, reading and correcting applications are open to them since #299 (test/shops.test.ts).

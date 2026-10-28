@@ -16,6 +16,7 @@ import {
 import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
+import { PriceSimulator } from "./price-simulator";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
 import { ShopApplications, ShopApplicationReview } from "./shop-applications";
@@ -51,6 +52,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/accounts", label: strings.accounts },
     { path: "/categories", label: strings.categories },
     { path: "/rate-cards", label: strings.rateCards },
+    { path: "/price-simulator", label: strings.priceSimulator },
     { path: "/products", label: strings.products },
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
@@ -349,6 +351,16 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     throw new Error(result.code);
   };
 
+  // Rate cards (A03) and the price simulator (A05) both pick from every category and every shop.
+  const rateCardLoader = async () => {
+    const [categories, shops] = await Promise.all([api.listCategories(), api.listShopApplications()]);
+    if (!categories.ok || !shops.ok) {
+      if ((!categories.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(categories.code)) || (!shops.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(shops.code))) return redirect("/sign-in");
+      throw new Error(strings.failed);
+    }
+    return { categories: categories.data.categories, shops: shops.data.applications };
+  };
+
   return [
     guarded({ path: "/", loader: () => redirect("/accounts") }),
     { path: "/sign-in", element: <SignIn api={api} /> },
@@ -368,16 +380,16 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     }),
     guarded({
       path: "/rate-cards",
-      loader: async () => {
-        const [categories, shops] = await Promise.all([api.listCategories(), api.listShopApplications()]);
-        if (!categories.ok || !shops.ok) {
-          if ((!categories.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(categories.code)) || (!shops.ok && ["UNAUTHENTICATED", "FORBIDDEN"].includes(shops.code))) return redirect("/sign-in");
-          throw new Error(strings.failed);
-        }
-        return { categories: categories.data.categories, shops: shops.data.applications };
-      },
+      loader: rateCardLoader,
       element: <Page protectedArea api={api}><RateCards api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.rateCardsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/price-simulator",
+      loader: rateCardLoader,
+      element: <Page protectedArea api={api}><PriceSimulator api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.simulator.loading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

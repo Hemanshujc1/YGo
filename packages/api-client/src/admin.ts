@@ -15,6 +15,9 @@ import {
   ScopedRateCardResponse,
   RateCardResponse,
   PublishedRateCardResponse,
+  PriceSimulatorResponse,
+  SimulatorListingsResponse,
+  type PriceSimulatorBody,
   CategoriesResponse,
   Category,
   MasterProduct,
@@ -108,7 +111,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -235,6 +238,15 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** Explicit whole-card publication; every call creates an immutable version. */
     async publishRateCard(body: PublishRateCardBody): Promise<ApiResult<PublishedRateCardResponse>> {
       return result(await adminRequest("POST", "/v1/admin/rate-cards/publish", body), PublishedRateCardResponse);
+    },
+
+    /** `GET /v1/admin/shops/:id/listings`: the packs and quantity-price options a simulated basket can hold. */
+    async listSimulatorListings(shopId: string): Promise<ApiResult<SimulatorListingsResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/shops/${encodeURIComponent(shopId)}/listings`), SimulatorListingsResponse);
+    },
+    /** `POST /v1/admin/price-simulator`: price a basket now, and under an unsaved draft rule when one is given. */
+    async simulatePrice(body: PriceSimulatorBody): Promise<ApiResult<PriceSimulatorResponse>> {
+      return result(await adminRequest("POST", "/v1/admin/price-simulator", body), PriceSimulatorResponse);
     },
 
     /** `POST /v1/admin/categories`: create a top-level or child category. */

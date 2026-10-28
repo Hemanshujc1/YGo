@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import {
   type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey,
+  SimulatorListingsParams, SimulatorListingsResponse, type SimulatorListing,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn } from "../admin";
@@ -52,6 +53,27 @@ export async function deliveredQuote(pool: Pool, shopId: string, lines: BasketLi
 export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
+  // What A05 builds a basket from: the shop's listed packs a customer can see, each with its quantity-price options (#358).
+  app.get("/v1/admin/shops/:id/listings", { schema: { params: SimulatorListingsParams, response: { 200: SimulatorListingsResponse, ...errors } } }, async (request, reply) => {
+    if (!await adminSignedIn(request, reply, auth)) return reply;
+    const { id } = request.params as SimulatorListingsParams;
+    if (!(await pool.query("SELECT 1 FROM shops WHERE id = $1", [id])).rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const { rows } = await pool.query<SimulatorListing>(
+      `SELECT listing.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
+          trim_scale(pack.quantity)::text AS "packQuantity", listing.online_price::text AS "onlinePrice",
+          COALESCE((SELECT jsonb_agg(jsonb_build_object('id', option.id, 'name', option.name,
+              'quantity', trim_scale(option.quantity)::text, 'price', option.price::text) ORDER BY option.quantity)
+            FROM shop_quantity_price_options option WHERE option.listing_id = listing.id), '[]') AS "quantityOptions"
+        FROM shop_listings listing
+        JOIN packs pack ON pack.id = listing.pack_id
+        JOIN master_products product ON product.id = pack.product_id
+        JOIN categories category ON category.id = product.category_id
+        LEFT JOIN categories parent ON parent.id = category.parent_id
+        WHERE listing.shop_id = $1 AND listing.available AND pack.active AND product.active AND product.published AND category.active AND COALESCE(parent.active, true)
+        ORDER BY lower(product.name), pack.quantity`, [id]);
+    return { listings: rows };
+  });
+
   app.post("/v1/admin/price-simulator", { schema: { body: PriceSimulatorBody, response: { 200: PriceSimulatorResponse, ...errors } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
     const { shopId, lines, draft } = request.body as PriceSimulatorBody;

@@ -191,4 +191,7 @@ export {
   IncompleteQuote,
   DeliveredQuote,
   PriceSimulatorResponse,
+  SimulatorListingsParams,
+  SimulatorListing,
+  SimulatorListingsResponse,
 } from "./pricing";

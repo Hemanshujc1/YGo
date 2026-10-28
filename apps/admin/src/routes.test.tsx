@@ -64,6 +64,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "0", values: {} } }),
     getEffectiveRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: 0, values: {}, missing: ["commission"], complete: false } }),
     publishRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: 1 } }),
+    listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [] } }),
+    simulatePrice: vi.fn(),
     listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
     previewCatalogImport: vi.fn(),
     commitCatalogImport: vi.fn(),
@@ -955,13 +957,13 @@ describe("Area Manager shell (#343)", () => {
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
-  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist"])(
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", "/price-simulator"])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
       const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
-      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist]) {
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings]) {
         expect(call).not.toHaveBeenCalled();
       }
     },
@@ -990,7 +992,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(7);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(8);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });
@@ -1263,5 +1265,192 @@ describe("Admin theme (#263)", () => {
       new Function(script)();
       expect(document.documentElement.dataset.theme).toBe(attribute);
     }
+  });
+});
+
+describe("Price simulator (A05, #358)", () => {
+  const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+  const listingId = "00000000-0000-4000-8000-000000000801";
+  const optionId = "00000000-0000-4000-8000-000000000802";
+  const rice = {
+    listingId, name: "Rice", brand: "Farm", baseUnit: "kg", packQuantity: "1", onlinePrice: "60.00",
+    quantityOptions: [{ id: optionId, name: "Twin pack", quantity: "2", price: "110.50" }],
+  };
+  const riceLabel = "Rice · Farm · 1 kg";
+  const twinLabel = "Rice · Farm · 1 kg · Twin pack (2 kg)";
+  const global = (version: string) => ({ type: "global", id: null, version });
+  const priced = (overrides: Record<string, unknown> = {}) => ({
+    status: "priced", rateCardVersion: "7",
+    lines: [
+      { listingId, quantityOptionId: null, categoryId: stationery.id, unitPrice: "60.00", count: 2, lineTotal: "120.00", commission: "12.00", commissionSource: global("7") },
+      { listingId, quantityOptionId: optionId, categoryId: stationery.id, unitPrice: "110.50", count: 1, lineTotal: "110.50", commission: "11.05", commissionSource: global("7") },
+    ],
+    sources: { deliveryFee: global("7"), minimumCart: global("7"), deliveredContributionFloor: global("7") },
+    productValue: "230.50", commission: "23.05", deliveryFee: { amount: "30.00", platformShare: "6.00", shopShare: "24.00" }, smallCartFee: null,
+    customerTotal: "260.50", shopKeeps: "231.45", platformContribution: "29.05", placeable: true, reasons: [],
+    ...overrides,
+  });
+
+  async function open(overrides: Record<string, unknown> = {}) {
+    const result = setup("/price-simulator", {
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice] } }),
+      simulatePrice: vi.fn().mockResolvedValue({ ok: true, data: { now: priced(), draft: null } }),
+      ...overrides,
+    });
+    await screen.findByRole("heading", { name: strings.priceSimulator });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.simulator.shop }), { target: { value: shop.id } });
+    await screen.findByText(riceLabel);
+    return result;
+  }
+  const count = (label: string, value: string) => fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.countFor(label) }), { target: { value } });
+  const calculate = () => fireEvent.click(screen.getByRole("button", { name: strings.simulator.calculate }));
+
+  it("prices a basket of packs and quantity options, explaining what the shop keeps", async () => {
+    const { api } = await open();
+    expect(api.listSimulatorListings).toHaveBeenCalledWith(shop.id);
+    expect(screen.getByText(twinLabel)).toBeTruthy();
+    count(riceLabel, "2"); count(twinLabel, "1");
+    calculate();
+    await waitFor(() => expect(api.simulatePrice).toHaveBeenCalledWith({ shopId: shop.id, lines: [{ listingId, count: 2 }, { quantityOptionId: optionId, count: 1 }] }));
+    expect(await screen.findByText("₹260.50")).toBeTruthy();
+    expect(screen.getByText("₹231.45")).toBeTruthy();
+    expect(screen.getByText(strings.simulator.shopKeepsHint)).toBeTruthy();
+    expect(screen.getByText("₹29.05")).toBeTruthy();
+    expect(screen.getByText(strings.simulator.shares("₹6.00", "₹24.00"))).toBeTruthy();
+    expect(screen.getByText(strings.simulator.yes)).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: strings.simulator.draft })).toBeNull();
+    expect(screen.getAllByText(strings.rateCardSources.global).length).toBeGreaterThan(1);
+  });
+
+  it("tries a draft that starts from the published scope values, beside Now, and never publishes it", async () => {
+    const draft = priced({ customerTotal: "250.50", placeable: false, reasons: [{ code: "BELOW_MINIMUM_CART", shortfall: "69.50" }] });
+    const { api } = await open({
+      getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "7", values: { minimumCart: "100", statementGraceDays: 7 } } }),
+      simulatePrice: vi.fn().mockResolvedValue({ ok: true, data: { now: priced(), draft } }),
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.simulator.tryDraft }));
+    await waitFor(() => expect(api.getRateCardScope).toHaveBeenCalledWith({ type: "global" }));
+    const minimum = await screen.findByRole("textbox", { name: strings.rateCardFields.minimumCart });
+    expect(minimum).toHaveProperty("value", "100");
+    expect(screen.queryByRole("textbox", { name: strings.rateCardFields.statementGraceDays })).toBeNull();
+    fireEvent.change(minimum, { target: { value: "300" } });
+    count(riceLabel, "2");
+    calculate();
+    await waitFor(() => expect(api.simulatePrice).toHaveBeenCalledWith({
+      shopId: shop.id, lines: [{ listingId, count: 2 }],
+      draft: { scope: { type: "global" }, values: { minimumCart: "300", statementGraceDays: 7 } },
+    }));
+    expect(await screen.findByRole("columnheader", { name: strings.simulator.draft })).toBeTruthy();
+    expect(screen.getByText("₹250.50")).toBeTruthy();
+    expect(screen.getByText(strings.simulator.reasons.BELOW_MINIMUM_CART("₹69.50"))).toBeTruthy();
+    expect(api.publishRateCard).not.toHaveBeenCalled();
+  });
+
+  it("drafts at this shop's scope and checks the draft's values before asking the server", async () => {
+    const { api } = await open();
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.simulator.tryDraft }));
+    fireEvent.change(screen.getByRole("combobox", { name: strings.simulator.draftScope }), { target: { value: "shop" } });
+    await waitFor(() => expect(api.getRateCardScope).toHaveBeenCalledWith({ type: "shop", id: shop.id }));
+    fireEvent.change(await screen.findByRole("textbox", { name: strings.rateCardFields.minimumCart }), { target: { value: "1.234" } });
+    count(riceLabel, "1");
+    calculate();
+    expect(await screen.findByText(strings.rateCardIssueMessages.minimumCart)).toBeTruthy();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("names what the rate card is missing, with a way to the rate cards", async () => {
+    await open({ simulatePrice: vi.fn().mockResolvedValue({ ok: true, data: { now: { status: "incomplete", rateCardVersion: "0", missing: ["commission", "deliveryFee"] }, draft: null } }) });
+    count(riceLabel, "1");
+    calculate();
+    expect(await screen.findByText(strings.simulator.incomplete(strings.simulator.now, "Commission, Delivery fee"), { exact: false })).toBeTruthy();
+    expect(screen.getByRole("link", { name: strings.simulator.openRateCards }).getAttribute("href")).toBe("/rate-cards");
+  });
+
+  it("checks the basket on this page: an empty basket, a bad count and more than 100 lines", async () => {
+    const many = Array.from({ length: 101 }, (_, index) => ({
+      ...rice, listingId: `00000000-0000-4000-8000-${String(900000000000 + index)}`, name: `Item ${index}`, quantityOptions: [],
+    }));
+    const { api } = await open({ listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice, ...many] } }) });
+    calculate();
+    expect(await screen.findByText(strings.simulator.emptyBasket)).toBeTruthy();
+    count(riceLabel, "1000");
+    calculate();
+    expect(await screen.findByText(strings.simulator.invalidCount)).toBeTruthy();
+    // One query for all 102 count boxes; a role lookup per box is too slow in jsdom.
+    for (const input of document.querySelectorAll("input[aria-label^='Count of']")) fireEvent.change(input, { target: { value: "1" } });
+    calculate();
+    expect(await screen.findByText(strings.simulator.tooManyLines)).toBeTruthy();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("filters the items, says when a shop has none, and retries a failed load", async () => {
+    const empty = { ...shop, id: "00000000-0000-4000-8000-000000000502", shopName: "Empty Mart" };
+    const listSimulatorListings = vi.fn(async (id: string) => id === empty.id
+      ? { ok: true, data: { listings: [] } }
+      : listSimulatorListings.mock.calls.length === 1 ? { ok: false, status: 503, code: "UNAVAILABLE" } : { ok: true, data: { listings: [rice] } });
+    setup("/price-simulator", {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop, empty] } }),
+      listSimulatorListings,
+    });
+    fireEvent.change(await screen.findByRole("combobox", { name: strings.simulator.shop }), { target: { value: shop.id } });
+    expect(await screen.findByText(strings.errors.UNAVAILABLE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.retry }));
+    await screen.findByText(riceLabel);
+    fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.filter }), { target: { value: "twin" } });
+    expect(screen.queryByText(riceLabel)).toBeNull();
+    expect(screen.getByText(twinLabel)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: strings.simulator.shop }), { target: { value: empty.id } });
+    expect(await screen.findByText(strings.simulator.noListings)).toBeTruthy();
+  });
+
+  it("drops an answer that comes back after the shop changed", async () => {
+    const other = { ...shop, id: "00000000-0000-4000-8000-000000000503", shopName: "Other Mart" };
+    let answer: (value: unknown) => void = () => {};
+    const { api } = await open({
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop, other] } }),
+      simulatePrice: vi.fn(() => new Promise((resolve) => { answer = resolve; })),
+    });
+    count(riceLabel, "2");
+    calculate();
+    await waitFor(() => expect(api.simulatePrice).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox", { name: strings.simulator.shop }), { target: { value: other.id } });
+    await waitFor(() => expect(api.listSimulatorListings).toHaveBeenCalledWith(other.id));
+    answer({ ok: true, data: { now: priced(), draft: null } });
+    await screen.findByText(riceLabel);
+    expect(screen.queryByText("₹260.50")).toBeNull();
+    expect(screen.getByRole("button", { name: strings.simulator.calculate })).toHaveProperty("disabled", false);
+  });
+
+  it("names a draft problem that has no box of its own, and waits for the draft to load", async () => {
+    let loaded: (value: unknown) => void = () => {};
+    const { api } = await open({ getRateCardScope: vi.fn(() => new Promise((resolve) => { loaded = resolve; })) });
+    count(riceLabel, "1");
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.simulator.tryDraft }));
+    await screen.findByText(strings.simulator.draftLoading);
+    expect(screen.getByRole("button", { name: strings.simulator.calculate })).toHaveProperty("disabled", true);
+    loaded({ ok: true, data: { version: "7", values: { deliveryFee: { amount: "30" } } } });
+    await screen.findByRole("textbox", { name: strings.rateCardDeliveryAmount });
+    calculate();
+    expect(await screen.findByText(strings.simulator.draftInvalid(strings.rateCardFields.deliveryFee))).toBeTruthy();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("counts filtered-out lines in the basket and points at a bad count the filter hides", async () => {
+    await open();
+    count(riceLabel, "1000"); count(twinLabel, "1");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.filter }), { target: { value: "twin" } });
+    expect(screen.getByText(strings.simulator.inBasket(2, 1))).toBeTruthy();
+    calculate();
+    expect(await screen.findByText(strings.simulator.hiddenBadCount)).toBeTruthy();
+  });
+
+  it("shows a failed calculation and keeps the basket", async () => {
+    await open({ simulatePrice: vi.fn().mockResolvedValue({ ok: false, status: 404, code: "NOT_FOUND" }) });
+    count(riceLabel, "2");
+    calculate();
+    expect(await screen.findByText(strings.errors.NOT_FOUND)).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: strings.simulator.countFor(riceLabel) })).toHaveProperty("value", "2");
   });
 });
