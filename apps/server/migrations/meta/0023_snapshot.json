@@ -1,6 +1,6 @@
 {
-  "id": "e4f40f16-ac2f-407e-80e5-c5bd75a319b3",
-  "prevId": "fab8e807-db46-4a11-9d28-d15edd734e0c",
+  "id": "d17f0a24-3d8b-4210-a33f-c181cadfc2f4",
+  "prevId": "dc6f8e88-25ac-4d22-9567-9a5bd1320a72",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1195,6 +1195,88 @@
       },
       "isRLSEnabled": false
     },
+    "public.rate_card_values": {
+      "name": "rate_card_values",
+      "schema": "",
+      "columns": {
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field": {
+          "name": "field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "money_value": {
+          "name": "money_value",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "percentage_value": {
+          "name": "percentage_value",
+          "type": "numeric(7, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "integer_value": {
+          "name": "integer_value",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "boolean_value": {
+          "name": "boolean_value",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text_value": {
+          "name": "text_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "rate_card_values_version_rate_card_versions_version_fk": {
+          "name": "rate_card_values_version_rate_card_versions_version_fk",
+          "tableFrom": "rate_card_values",
+          "tableTo": "rate_card_versions",
+          "columnsFrom": [
+            "version"
+          ],
+          "columnsTo": [
+            "version"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "rate_card_values_version_field_pk": {
+          "name": "rate_card_values_version_field_pk",
+          "columns": [
+            "version",
+            "field"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "rate_card_values_one_value": {
+          "name": "rate_card_values_one_value",
+          "value": "num_nonnulls(\"rate_card_values\".\"money_value\", \"rate_card_values\".\"percentage_value\", \"rate_card_values\".\"integer_value\", \"rate_card_values\".\"boolean_value\", \"rate_card_values\".\"text_value\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.rate_card_versions": {
       "name": "rate_card_versions",
       "schema": "",
@@ -1233,12 +1315,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "values": {
-          "name": "values",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
         },
         "reason": {
           "name": "reason",
