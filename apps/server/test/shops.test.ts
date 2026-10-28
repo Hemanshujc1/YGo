@@ -8,7 +8,7 @@ import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
-import { connectDatabase } from "../src/db";
+import { connectDatabase, withTransaction } from "../src/db";
 
 const rootUrl = inject("databaseUrl");
 const secret = "01234567890123456789012345678901";
@@ -75,30 +75,26 @@ async function area(pincode: string, paused = false) {
  * removes `pincode` is open; the save commits once `request` waits for it.
  */
 async function duringAreaSave<T>(pincode: string, request: () => Promise<T>): Promise<T> {
-  const admin = await database.pool.connect();
+  let pending!: Promise<T>;
   try {
-    await admin.query("BEGIN");
-    await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
-    await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
-    const adminPid = (await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
-    let settled = false;
-    const pending = request().finally(() => { settled = true; });
-    // Wait until the request's pincode check (routes/shops.ts) is blocked by this save itself.
-    const blocked = `SELECT 1 FROM pg_stat_activity
-      WHERE $1 = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
-        AND query = 'LOCK TABLE area_pincodes IN SHARE MODE'`;
-    const deadline = Date.now() + 3000;
-    while (!(await database.pool.query(blocked, [adminPid])).rowCount) {
-      if (settled) throw new Error("The request finished without waiting on the Area save's pincode lock.");
-      if (Date.now() > deadline) throw new Error("The request never blocked on the Area save's pincode lock within 3 s.");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await admin.query("COMMIT");
-    return await pending;
+    await withTransaction(database.pool, async (admin) => {
+      const pid = (await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
+      await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
+      pending = request();
+      // Observe rejections immediately while polling; awaiting below still reports them.
+      void pending.catch(() => {});
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query = 'LOCK TABLE area_pincodes IN SHARE MODE'
+          AND $1::int = ANY(pg_blocking_pids(pid))`, [pid])).rows[0].n, { timeout: 5_000 }).toBe(1);
+      await admin.query("COMMIT");
+    });
   } finally {
-    await admin.query("ROLLBACK"); // ends the save if the wait failed; a no-op after COMMIT
-    admin.release();
+    // Let the request finish after COMMIT/ROLLBACK releases its lock, even on a failed poll.
+    await pending;
   }
+  return pending;
 }
 
 // The FSSAI check reads the real clock (the contract's rule), not the test clock.
@@ -227,6 +223,26 @@ describe("shop application", () => {
     expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
     expect(await read(headers)).toEqual({ application: started });
   });
+
+  it("times out instead of accepting an unrelated lock, and rolls back the Area save", async () => {
+    await area("411038");
+    const blocker = await database.pool.connect();
+    const unrelated = await database.pool.connect();
+    try {
+      const pid = (await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      await blocker.query("SELECT pg_advisory_lock(214)");
+      const waiting = unrelated.query("SELECT pg_advisory_xact_lock(214)");
+      try {
+        await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid))`, [pid])).rows[0].n).toBe(1);
+        await expect(duringAreaSave("411038", async () => undefined)).rejects.toThrow();
+        expect((await database.pool.query("SELECT 1 FROM area_pincodes WHERE pincode = '411038'")).rowCount).toBe(1);
+      } finally {
+        await blocker.query("SELECT pg_advisory_unlock_all()");
+        await waiting;
+      }
+    } finally { blocker.release(); unrelated.release(); }
+  }, 10_000);
 
   it("names each missing field and a past FSSAI expiry together", async () => {
     await area("411038");

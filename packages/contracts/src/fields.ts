@@ -121,6 +121,17 @@ export const PackBarcode = z.string().regex(/^(?:\d{8}|\d{12}|\d{13})$/);
 /** A non-negative rupee price with at most two decimals (CAT-1, ADR-0002). */
 export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
 
+/** A non-negative percentage with up to four decimals, stored exactly rather than as a JS float (#44, MNY-3). */
+export const RatePercentage = z.string().trim().regex(/^(?:0|[1-9]\d?|100)(?:\.\d{1,4})?$/)
+  .refine((value) => percentageUnits(value) <= 1_000_000n);
+
+/** Exact ten-thousandths of one percentage point; validation must not round through a binary float. */
+export function percentageUnits(value: string): bigint {
+  if (!/^\d+(?:\.\d{1,4})?$/.test(value)) return 1_000_001n;
+  const [whole = "0", fraction = ""] = value.split(".");
+  return BigInt(whole) * 10_000n + BigInt(fraction.padEnd(4, "0") || "0");
+}
+
 /** A PAN: 5 letters, 4 digits, 1 letter, stored in capitals (ONB-3). */
 export const Pan = z
   .string()

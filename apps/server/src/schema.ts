@@ -7,6 +7,7 @@ import {
   doublePrecision,
   index,
   integer,
+  bigint,
   numeric,
   pgTable,
   primaryKey,
@@ -212,6 +213,37 @@ export const shopMembers = pgTable("shop_members", {
 }, (table) => [
   check("shop_members_role_valid", sql`${table.role} IN ('owner', 'staff')`),
   index("shop_members_shop_id_idx").on(table.shopId),
+]);
+
+// One immutable publication number covers every scope, so an order or agreement can name
+// exactly which configuration it used. A publication stores the complete snapshot for one
+// scope; an omitted key clears that override and inherits from the broader scope (#44).
+export const rateCardVersions = pgTable("rate_card_versions", {
+  version: bigint("version", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  actorId: uuid("actor_id").notNull().references(() => accounts.id),
+  scopeType: text("scope_type").notNull(),
+  scopeId: uuid("scope_id"),
+  reason: text("reason").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("rate_card_versions_scope_valid", sql`(${table.scopeType} = 'global' AND ${table.scopeId} IS NULL) OR (${table.scopeType} IN ('area', 'category', 'shop') AND ${table.scopeId} IS NOT NULL)`),
+  check("rate_card_versions_reason_valid", sql`btrim(${table.reason}) <> '' AND char_length(${table.reason}) <= 500`),
+  index("rate_card_versions_scope_idx").on(table.scopeType, table.scopeId, table.version.desc()),
+]);
+
+// Each immutable scope snapshot is decomposed into exact typed leaves. Money and
+// percentages remain PostgreSQL NUMERIC; no financial value is hidden in JSON (#44, ADR-0002).
+export const rateCardValues = pgTable("rate_card_values", {
+  version: bigint("version", { mode: "number" }).notNull().references(() => rateCardVersions.version, { onDelete: "cascade" }),
+  field: text("field").notNull(),
+  moneyValue: numeric("money_value", { precision: 12, scale: 2 }),
+  percentageValue: numeric("percentage_value", { precision: 7, scale: 4 }),
+  integerValue: integer("integer_value"),
+  booleanValue: boolean("boolean_value"),
+  textValue: text("text_value"),
+}, (table) => [
+  primaryKey({ columns: [table.version, table.field] }),
+  check("rate_card_values_one_value", sql`num_nonnulls(${table.moneyValue}, ${table.percentageValue}, ${table.integerValue}, ${table.booleanValue}, ${table.textValue}) = 1`),
 ]);
 
 // Shop-owned pack settings and base-unit inventory (#43, CAT-1, CAT-2, CAT-4).

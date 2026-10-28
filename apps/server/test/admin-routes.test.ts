@@ -106,6 +106,144 @@ function accounts(token?: string) {
 }
 
 describe("Admin routes and browser sessions", () => {
+  it("publishes immutable rate-card versions and resolves shop, category and global sources (#44, MNY-3, MNY-13)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const categoryId = String((await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0]?.id);
+    const shopId = String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const publish = (scope: object, values: object, reason: string) => app.inject({
+      method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason },
+    });
+    const effective = (version?: number) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}${version ? `&version=${version}` : ""}`, headers });
+    const snapshots: unknown[] = [];
+    const global = {
+      commission: { formula: "percentage", fixedAmount: null, percentage: "8.5", minimum: null, maximum: null, base: "after_shop_discount" },
+      deliveryFee: { amount: "20", split: { platformPercentage: "25", shopPercentage: "75" } },
+      deliveredContributionFloor: "0",
+      minimumCart: "100",
+      statementGraceDays: 0,
+      maximumShopDiscountPercentage: "20",
+    };
+    expect((await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}` })).statusCode).toBe(401);
+    expect((await publish({ type: "global" }, global, "First pilot card")).json()).toEqual({ version: 1 });
+    const first = (await effective()).json();
+    snapshots.push(first);
+    expect(first).toMatchObject({ version: 1, complete: true, missing: [] });
+    expect(first.values.deliveredContributionFloor).toMatchObject({ value: "0", source: { type: "global", id: null, version: 1 } });
+    expect(first.values.statementGraceDays.value).toBe(0);
+
+    expect((await publish({ type: "category", id: categoryId }, { minimumCart: "80" }, "Groceries pilot basket")).json()).toEqual({ version: 2 });
+    snapshots.push((await effective()).json());
+    expect((await publish({ type: "shop", id: shopId }, { minimumCart: "60" }, "Shop-specific terms")).json()).toEqual({ version: 3 });
+    snapshots.push((await effective()).json());
+    expect((await effective()).json().values.minimumCart).toMatchObject({ value: "60", source: { type: "shop", id: shopId, version: 3 } });
+
+    expect((await publish({ type: "shop", id: shopId }, {}, "Return to inherited terms")).json()).toEqual({ version: 4 });
+    const inherited = (await effective()).json();
+    snapshots.push(inherited);
+    expect(inherited).toMatchObject({ version: 4, complete: true });
+    expect(inherited.values.minimumCart).toMatchObject({ value: "80", source: { type: "category", id: categoryId, version: 2 } });
+    const historical = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}&version=3`, headers })).json();
+    expect(historical).toMatchObject({ version: 3, values: { minimumCart: { value: "60", source: { type: "shop", version: 3 } } } });
+    const stored = await database.pool.query("SELECT version::int, reason FROM rate_card_versions ORDER BY version");
+    expect(stored.rows).toHaveLength(4);
+    expect(stored.rows[2]).toMatchObject({ version: 3, reason: "Shop-specific terms" });
+    expect((await database.pool.query("SELECT money_value FROM rate_card_values WHERE version = 3 AND field = 'minimumCart'")).rows).toEqual([{ money_value: "60.00" }]);
+    const conditional = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&usesPickup=true&usesBargain=true`, headers })).json();
+    expect(conditional).toMatchObject({ complete: false, missing: ["pickup", "bargainMinimumCommission"] });
+    expect((await database.pool.query("SELECT reason FROM admin_actions WHERE action = 'rate_card.publish' ORDER BY created_at")).rows.map((row) => row.reason)).toEqual([
+      "First pilot card", "Groceries pilot basket", "Shop-specific terms", "Return to inherited terms",
+    ]);
+    // Later replacements at every scope must never leak into any earlier effective card.
+    await publish({ type: "global" }, { ...global, commission: { ...global.commission, percentage: "12" }, minimumCart: "200" }, "Revise global terms");
+    await publish({ type: "category", id: categoryId }, { deliveryFee: { amount: "30", split: { platformPercentage: "0", shopPercentage: "100" } } }, "Clear category minimum");
+    const fifth = (await effective(5)).json();
+    expect(fifth.values.commission.value.percentage).toBe("12");
+    expect(fifth.values.minimumCart.source).toEqual({ type: "category", id: categoryId, version: 2 });
+    const sixth = (await effective()).json();
+    expect(sixth.values.minimumCart).toEqual({ value: "200", source: { type: "global", id: null, version: 5 } });
+    expect(sixth.values.deliveryFee.source).toEqual({ type: "category", id: categoryId, version: 6 });
+    snapshots.push(fifth, sixth);
+    await publish({ type: "shop", id: shopId }, { commission: global.commission, minimumCart: "0" }, "New shop terms");
+    for (const [index, snapshot] of snapshots.entries()) expect((await effective(index + 1)).json()).toEqual(snapshot);
+
+    for (const method of ["PUT", "PATCH", "DELETE"] as const) {
+      for (const url of ["/v1/admin/rate-cards/publish", "/v1/admin/rate-cards/1"]) {
+        expect((await app.inject({ method, url, headers, payload: { values: {} } })).statusCode).toBe(404);
+      }
+    }
+    for (const table of ["rate_card_versions", "rate_card_values"]) {
+      const column = table === "rate_card_versions" ? "reason" : "money_value";
+      for (const sql of [`UPDATE ${table} SET ${column} = ${column} WHERE version = 1`, `DELETE FROM ${table} WHERE version = 1`, `TRUNCATE ${table} CASCADE`]) {
+        await expect(database.pool.query(sql)).rejects.toThrow("immutable");
+      }
+    }
+    expect((await effective(1)).json()).toEqual(first);
+    expect((await effective(999)).statusCode).toBe(404);
+    const gap = Number((await database.pool.query("SELECT nextval('rate_card_versions_version_seq') AS version")).rows[0]?.version);
+    await publish({ type: "shop", id: shopId }, {}, "Clear shop terms after a sequence gap");
+    expect((await effective(gap)).statusCode).toBe(404);
+  });
+
+  it("checks every nested rule and conditional field before declaring a rate card complete (#44)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const shopId = String((await database.pool.query("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const values = {
+      commission: { formula: "fixed_plus_percentage", fixedAmount: "1", percentage: "5", minimum: "1", maximum: "10", base: "after_shop_discount" },
+      deliveryFee: { amount: "0", split: { platformPercentage: "0", shopPercentage: "100" } },
+      smallCartFee: { enabled: false, threshold: "0", amount: "0", cap: null, split: { platformPercentage: "100", shopPercentage: "0" } },
+      pickup: { enabled: true, customerFee: "0", shopFee: null, cap: null, contributionFloor: "0" },
+      bargainMinimumCommission: "0", deliveredContributionFloor: "0", minimumCart: "0", statementGraceDays: 0,
+    };
+    const published = await app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope: { type: "global" }, values, reason: "Complete rules including intentional zeroes" } });
+    expect(published.statusCode).toBe(201);
+    const effective = (usage = "&usesPickup=true&usesBargain=true") => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}${usage}`, headers });
+    expect((await effective()).json()).toMatchObject({ complete: true, missing: [] });
+
+    // Simulate incomplete legacy/imported snapshots; publishing new input rejects these shapes.
+    const fields = [
+      "commission.formula", "commission.fixedAmount", "commission.percentage", "commission.base",
+      "deliveryFee.amount", "deliveryFee.platformPercentage", "deliveryFee.shopPercentage",
+      "smallCartFee.enabled", "smallCartFee.threshold", "smallCartFee.amount", "smallCartFee.platformPercentage", "smallCartFee.shopPercentage",
+      "pickup.enabled", "pickup.customerFee", "pickup.contributionFloor", "bargainMinimumCommission",
+    ];
+    for (const field of fields) {
+      const inserted = await database.pool.query("INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) SELECT actor_id, scope_type, 'Incomplete imported snapshot', published_at FROM rate_card_versions WHERE version = 1 RETURNING version");
+      await database.pool.query(`INSERT INTO rate_card_values SELECT $1, field, money_value, percentage_value, integer_value, boolean_value, text_value FROM rate_card_values WHERE version = 1 AND field <> $2`, [inserted.rows[0]?.version, field]);
+      const key = field.split(".")[0];
+      expect((await effective()).json(), field).toMatchObject({ complete: false, missing: [key] });
+      if (key === "pickup" && field !== "pickup.contributionFloor") expect((await effective("")).json(), field).toMatchObject({ complete: false, missing: [key] });
+    }
+    for (const [field, column, replacement, key] of [
+      ["commission.maximum", "money_value", "0", "commission"],
+      ["commission.formula", "text_value", "fixed", "commission"],
+      ["deliveryFee.shopPercentage", "percentage_value", "99", "deliveryFee"],
+      ["smallCartFee.platformPercentage", "percentage_value", "99", "smallCartFee"],
+    ]) {
+      const inserted = await database.pool.query("INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) SELECT actor_id, scope_type, 'Invalid imported rule', published_at FROM rate_card_versions WHERE version = 1 RETURNING version");
+      const columns = ["money_value", "percentage_value", "integer_value", "boolean_value", "text_value"].map((name) => name === column ? `CASE WHEN field = $2 THEN $3::${name === "text_value" ? "text" : "numeric"} ELSE ${name} END` : name);
+      await database.pool.query(`INSERT INTO rate_card_values SELECT $1, field, ${columns.join(", ")} FROM rate_card_values WHERE version = 1`, [inserted.rows[0]?.version, field, replacement]);
+      expect((await effective()).json(), field).toMatchObject({ complete: false, missing: [key] });
+    }
+  });
+
+  it("reports missing rate-card values and rejects an invalid split or scope target (#44, MNY-13)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const shopId = String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const publish = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload });
+    expect((await publish({ scope: { type: "global" }, values: { minimumCart: "0" }, reason: "Begin configuration" })).statusCode).toBe(201);
+    const card = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}`, headers })).json();
+    expect(card.complete).toBe(false);
+    expect(card.missing).toEqual(["commission", "deliveryFee", "deliveredContributionFloor", "statementGraceDays"]);
+    expect(card.values.minimumCart.value).toBe("0");
+    expect((await publish({
+      scope: { type: "global" }, reason: "Bad split", values: { deliveryFee: { amount: "10", split: { platformPercentage: "60", shopPercentage: "30" } } },
+    })).statusCode).toBe(400);
+    expect((await publish({ scope: { type: "shop", id: randomUUID() }, values: {}, reason: "Unknown shop" })).statusCode).toBe(404);
+  });
+
   it("seeds global categories and requires an Admin web session", async () => {
     const get = (token?: string) => app.inject({ method: "GET", url: "/v1/admin/categories", headers: token ? { authorization: `Bearer ${token}` } : {} });
     expect((await get()).statusCode).toBe(401);
@@ -236,6 +374,8 @@ describe("Admin routes and browser sessions", () => {
       { method: "POST", url: "/v1/admin/areas", payload: { name: "Baner", pincodes: ["411045"], reason: "New Area" } },
       { method: "GET", url: "/v1/admin/categories" },
       { method: "POST", url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${id}` },
+      { method: "POST", url: "/v1/admin/rate-cards/publish", payload: { scope: { type: "global" }, values: {}, reason: "No access" } },
       { method: "GET", url: "/v1/admin/products" },
       { method: "GET", url: `/v1/admin/products/${id}/packs` },
       // Listing, reading and correcting applications are open to them since #299 (test/shops.test.ts).
