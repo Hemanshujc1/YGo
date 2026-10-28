@@ -17,6 +17,8 @@ import {
   ShopApplication,
   ShopListingsResponse,
   OpeningStockResponse,
+  ShopAgreementResponse,
+  type AcceptShopAgreementBody,
   type ShopListingCatalogItem,
   type SaveShopListingBody as SaveShopListingInput,
   type OpeningStockBody as OpeningStockInput,
@@ -399,6 +401,16 @@ export function createApiClient({
     /** `POST /v1/me/shop-listings/:packId/opening-stock`: append the first stock movement; clientId makes offline retries safe. */
     async openingStock(packId: string, body: OpeningStockInput): Promise<ApiResult<OpeningStockResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-listings/${encodeURIComponent(packId)}/opening-stock`, body), OpeningStockResponse);
+    },
+
+    /** `GET /v1/me/shop-agreement`: the onboarding agreement's rate card and the last acceptance (S19). */
+    async shopAgreement(): Promise<ApiResult<ShopAgreementResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-agreement"), ShopAgreementResponse);
+    },
+
+    /** `POST /v1/me/shop-agreement`: accepts the agreement and rate-card versions the Owner read. */
+    async acceptShopAgreement(body: AcceptShopAgreementBody): Promise<ApiResult<ShopAgreementResponse>> {
+      return result(await signedIn("POST", "/v1/me/shop-agreement", body), ShopAgreementResponse);
     },
 
     /**

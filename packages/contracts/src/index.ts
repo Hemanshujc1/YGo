@@ -195,3 +195,11 @@ export {
   SimulatorListing,
   SimulatorListingsResponse,
 } from "./pricing";
+export {
+  AGREEMENT_VERSION,
+  AgreementVersion,
+  CategoryCommission,
+  ShopAgreementAcceptance,
+  ShopAgreementResponse,
+  AcceptShopAgreementBody,
+} from "./shop-agreement";

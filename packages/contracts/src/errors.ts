@@ -50,6 +50,11 @@ import { CatalogImportRowErrors } from "./catalog";
  * Shop setup (#43):
  * - SHOP_LISTING_NOT_READY (409): the shop has not been Approved yet.
  * - OPENING_STOCK_ALREADY_RECORDED (409): an opening movement already exists for this listing.
+ * Onboarding agreement (#362):
+ * - SHOP_NOT_APPROVED (409): the shop is not Approved or Live yet.
+ * - RATE_CARD_INCOMPLETE (409): the shop's rate card is missing a required value (MNY-13).
+ * - AGREEMENT_OUTDATED (409): the agreement version accepted is not the current one.
+ * - RATE_CARD_CHANGED (409): a newer rate card affecting the shop was published after the one read.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -81,6 +86,10 @@ export const ErrorCode = z.enum([
   "VISIT_PHOTO_LOCATION_MISSING",
   "SHOP_LISTING_NOT_READY",
   "OPENING_STOCK_ALREADY_RECORDED",
+  "SHOP_NOT_APPROVED",
+  "RATE_CARD_INCOMPLETE",
+  "AGREEMENT_OUTDATED",
+  "RATE_CARD_CHANGED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
