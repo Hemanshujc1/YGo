@@ -284,7 +284,7 @@ function Accounts({ api }: { api: AdminApi }) {
                 )}
                 {field === "reason" && <p className="mt-1 text-secondary text-muted">{strings.reasonHint}</p>}
                 {errors[field] && <p role="alert" className="mt-1 text-secondary text-danger">{errors[field]}</p>}
-                {field === "phone" && <fieldset className="mt-4">
+                {field === "phone" && <fieldset className="mt-4" aria-invalid={Boolean(errors.role)} aria-describedby={errors.role ? "role-error" : undefined}>
                   <legend className="mb-2 font-medium">{strings.role}</legend>
                   <div className="flex gap-6">
                     {(["admin", "area_manager"] as const).map((role) => <label key={role} className="flex items-center gap-2">
@@ -292,7 +292,7 @@ function Accounts({ api }: { api: AdminApi }) {
                       {strings.roles[role]}
                     </label>)}
                   </div>
-                  {errors.role && <p role="alert" className="mt-1 text-secondary text-danger">{errors.role}</p>}
+                  {errors.role && <p id="role-error" role="alert" className="mt-1 text-secondary text-danger">{errors.role}</p>}
                 </fieldset>}
               </div>
             ))}
