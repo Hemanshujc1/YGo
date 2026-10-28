@@ -162,6 +162,13 @@
       "when": 1793176546426,
       "tag": "0022_shop_area_manager",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793182844048,
+      "tag": "0023_rate_cards",
+      "breakpoints": true
     }
   ]
 }

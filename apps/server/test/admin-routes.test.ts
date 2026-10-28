@@ -106,6 +106,64 @@ function accounts(token?: string) {
 }
 
 describe("Admin routes and browser sessions", () => {
+  it("publishes immutable rate-card versions and resolves shop, category and global sources (#44, MNY-3, MNY-13)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const categoryId = String((await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = 'Groceries'")).rows[0]?.id);
+    const shopId = String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const publish = (scope: object, values: object, reason: string) => app.inject({
+      method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason },
+    });
+    const effective = () => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}`, headers });
+    const global = {
+      commission: { formula: "percentage", fixedAmount: null, percentage: "8.5", minimum: null, maximum: null, base: "after_shop_discount" },
+      deliveryFee: { amount: "20", split: { platformPercentage: "25", shopPercentage: "75" } },
+      deliveredContributionFloor: "0",
+      minimumCart: "100",
+      statementGraceDays: 0,
+      maximumShopDiscountPercentage: "20",
+    };
+    expect((await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}` })).statusCode).toBe(401);
+    expect((await publish({ type: "global" }, global, "First pilot card")).json()).toEqual({ version: 1 });
+    const first = (await effective()).json();
+    expect(first).toMatchObject({ version: 1, complete: true, missing: [] });
+    expect(first.values.deliveredContributionFloor).toMatchObject({ value: "0", source: { type: "global", id: null, version: 1 } });
+    expect(first.values.statementGraceDays.value).toBe(0);
+
+    expect((await publish({ type: "category", id: categoryId }, { minimumCart: "80" }, "Groceries pilot basket")).json()).toEqual({ version: 2 });
+    expect((await publish({ type: "shop", id: shopId }, { minimumCart: "60" }, "Shop-specific terms")).json()).toEqual({ version: 3 });
+    expect((await effective()).json().values.minimumCart).toMatchObject({ value: "60", source: { type: "shop", id: shopId, version: 3 } });
+
+    expect((await publish({ type: "shop", id: shopId }, {}, "Return to inherited terms")).json()).toEqual({ version: 4 });
+    const inherited = (await effective()).json();
+    expect(inherited).toMatchObject({ version: 4, complete: true });
+    expect(inherited.values.minimumCart).toMatchObject({ value: "80", source: { type: "category", id: categoryId, version: 2 } });
+    const historical = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}&version=3`, headers })).json();
+    expect(historical).toMatchObject({ version: 3, values: { minimumCart: { value: "60", source: { type: "shop", version: 3 } } } });
+    const stored = await database.pool.query("SELECT version::int, values, reason FROM rate_card_versions ORDER BY version");
+    expect(stored.rows).toHaveLength(4);
+    expect(stored.rows[2]).toMatchObject({ version: 3, values: { minimumCart: "60" }, reason: "Shop-specific terms" });
+    expect((await database.pool.query("SELECT reason FROM admin_actions WHERE action = 'rate_card.publish' ORDER BY created_at")).rows.map((row) => row.reason)).toEqual([
+      "First pilot card", "Groceries pilot basket", "Shop-specific terms", "Return to inherited terms",
+    ]);
+  });
+
+  it("reports missing rate-card values and rejects an invalid split or scope target (#44, MNY-13)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const shopId = String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+    const publish = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload });
+    expect((await publish({ scope: { type: "global" }, values: { minimumCart: "0" }, reason: "Begin configuration" })).statusCode).toBe(201);
+    const card = (await app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}`, headers })).json();
+    expect(card.complete).toBe(false);
+    expect(card.missing).toEqual(["commission", "deliveryFee", "deliveredContributionFloor", "statementGraceDays"]);
+    expect(card.values.minimumCart.value).toBe("0");
+    expect((await publish({
+      scope: { type: "global" }, reason: "Bad split", values: { deliveryFee: { amount: "10", split: { platformPercentage: "60", shopPercentage: "30" } } },
+    })).statusCode).toBe(400);
+    expect((await publish({ scope: { type: "shop", id: randomUUID() }, values: {}, reason: "Unknown shop" })).statusCode).toBe(404);
+  });
+
   it("seeds global categories and requires an Admin web session", async () => {
     const get = (token?: string) => app.inject({ method: "GET", url: "/v1/admin/categories", headers: token ? { authorization: `Bearer ${token}` } : {} });
     expect((await get()).statusCode).toBe(401);
@@ -236,6 +294,8 @@ describe("Admin routes and browser sessions", () => {
       { method: "POST", url: "/v1/admin/areas", payload: { name: "Baner", pincodes: ["411045"], reason: "New Area" } },
       { method: "GET", url: "/v1/admin/categories" },
       { method: "POST", url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${id}` },
+      { method: "POST", url: "/v1/admin/rate-cards/publish", payload: { scope: { type: "global" }, values: {}, reason: "No access" } },
       { method: "GET", url: "/v1/admin/products" },
       { method: "GET", url: `/v1/admin/products/${id}/packs` },
       // Listing, reading and correcting applications are open to them since #299 (test/shops.test.ts).
