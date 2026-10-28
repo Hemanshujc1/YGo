@@ -264,6 +264,23 @@ describe("Admin routes and browser sessions", () => {
     await database.pool.query("DELETE FROM admin_memberships WHERE account_id = $1", [manager?.id]);
   });
 
+  it("never lets a membership move onto an account that holds the other Admin web role (#343)", async () => {
+    const ids: string[] = [];
+    for (const email of ["moved-admin@example.com", "moved-manager@example.com", "moved-free@example.com"]) {
+      const { rows: [account] } = await database.pool.query<{ id: string }>("INSERT INTO accounts (email) VALUES ($1) RETURNING id", [email]);
+      ids.push(String(account?.id));
+    }
+    const [adminId, managerId, freeId] = ids;
+    await database.pool.query("INSERT INTO admin_memberships (account_id) VALUES ($1)", [adminId]);
+    await database.pool.query("INSERT INTO area_manager_memberships (account_id) VALUES ($1)", [managerId]);
+    await expect(database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [managerId, adminId])).rejects.toMatchObject({ code: "23514" });
+    await expect(database.pool.query("UPDATE area_manager_memberships SET account_id = $1 WHERE account_id = $2", [adminId, managerId])).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $1", [adminId]);
+    await database.pool.query("UPDATE admin_memberships SET account_id = $1 WHERE account_id = $2", [freeId, adminId]);
+    await database.pool.query("DELETE FROM admin_memberships WHERE account_id = $1", [freeId]);
+    await database.pool.query("DELETE FROM area_manager_memberships WHERE account_id = $1", [managerId]);
+  });
+
   it("hides membership on code request, rotates the cookie, enforces idle expiry and signs out", async () => {
     const unknown = await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: "unknown@example.com" } });
     expect(unknown.statusCode).toBe(204);
