@@ -109,8 +109,16 @@ export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: s
   version = current.rows[0]?.version ?? "0";
   const next = current.rows[0]?.next ?? "1";
   if (!(await pool.query("SELECT 1 FROM shops WHERE id = $1", [shopId])).rowCount) return undefined;
-  if (categoryId && !(await pool.query("SELECT 1 FROM categories WHERE id = $1", [categoryId])).rowCount) return undefined;
-  const scopes: Array<[StoredCard["scopeType"], string | null]> = [["global", null], ...(categoryId ? [["category", categoryId] satisfies [StoredCard["scopeType"], string]] : []), ["shop", shopId]];
+  const scopes: Array<[StoredCard["scopeType"], string | null]> = [["global", null]];
+  if (categoryId) {
+    const category = await pool.query<{ parentId: string | null }>(`SELECT parent_id AS "parentId" FROM categories WHERE id = $1`, [categoryId]);
+    if (!category.rowCount) return undefined;
+    // A child category inherits its parent's card field by field: global → parent → child → shop (#357).
+    const parentId = category.rows[0]?.parentId;
+    if (parentId) scopes.push(["category", parentId]);
+    scopes.push(["category", categoryId]);
+  }
+  scopes.push(["shop", shopId]);
   const cards = (await Promise.all(scopes.map(async ([type, id]) => {
     if (draft && draft.scope.type === type && ("id" in draft.scope ? draft.scope.id : null) === id) return { version: next, scopeType: type, scopeId: id, values: draft.values };
     const card = await latest(pool, type, id, version);

@@ -204,6 +204,52 @@ describe("Price simulator (#357)", () => {
     expect(tried.lines[0].commissionSource).toEqual({ type: "global", id: null, version: "1" });
   });
 
+  it("falls back to the parent category's commission, below the child's and the shop's, for Now and for drafts", async () => {
+    const shopId = await newShop();
+    const dairy = await category("Dairy");
+    const milk = String((await database.pool.query("INSERT INTO categories (name, parent_id) VALUES ('Milk', $1) RETURNING id", [dairy])).rows[0]?.id);
+    const fixed = (amount: string) => ({ ...globalCard.commission, formula: "fixed", fixedAmount: amount, percentage: null });
+    await publish({ type: "global" }, globalCard);
+    // The parent's minimum cart stays out of order-level values, like any category card's.
+    await publish({ type: "category", id: dairy }, { commission: fixed("5"), minimumCart: "999" });
+    const line = await stock(shopId, { category: "Milk", unitPrice: "200.00", count: 1 });
+    const quote = async (draft?: object) => (await simulate({ shopId, lines: [line], ...(draft ? { draft } : {}) })).json();
+
+    // Parent fallback, in Now and in a draft on the parent.
+    let result = await quote({ scope: { type: "category", id: dairy }, values: { commission: fixed("7") } });
+    expect(result.now).toMatchObject({ reasons: [{ code: "BELOW_CONTRIBUTION_FLOOR", shortfall: "4.00" }], lines: [{ categoryId: milk, commission: "5.00", commissionSource: { type: "category", id: dairy, version: "2" } }] });
+    expect(result.draft.lines[0]).toMatchObject({ commission: "7.00", commissionSource: { type: "category", id: dairy, version: "3" } });
+
+    // The child overrides the parent, and a parent draft cannot reach past it.
+    await publish({ type: "category", id: milk }, { commission: fixed("3") });
+    result = await quote({ scope: { type: "category", id: dairy }, values: { commission: fixed("9") } });
+    expect(result.now.lines[0]).toMatchObject({ commission: "3.00", commissionSource: { type: "category", id: milk, version: "3" } });
+    expect(result.draft.lines[0]).toMatchObject({ commission: "3.00", commissionSource: { type: "category", id: milk, version: "3" } });
+
+    // The shop overrides both, and a child draft cannot reach past it.
+    await publish({ type: "shop", id: shopId }, { commission: { ...globalCard.commission, percentage: "2" } });
+    result = await quote({ scope: { type: "category", id: milk }, values: { commission: fixed("1") } });
+    expect(result.now.lines[0]).toMatchObject({ commission: "4.00", commissionSource: { type: "shop", id: shopId, version: "4" } });
+    expect(result.draft.lines[0]).toMatchObject({ commission: "4.00", commissionSource: { type: "shop", id: shopId, version: "4" } });
+  });
+
+  it("resolves a child category field by field: the child's own fields, then the parent's, then global", async () => {
+    const shopId = await newShop();
+    const dairy = await category("Dairy");
+    const milk = String((await database.pool.query("INSERT INTO categories (name, parent_id) VALUES ('Milk', $1) RETURNING id", [dairy])).rows[0]?.id);
+    await publish({ type: "global" }, globalCard);
+    await publish({ type: "category", id: dairy }, { commission: { ...globalCard.commission, percentage: "5" }, statementGraceDays: 3 });
+    await publish({ type: "category", id: milk }, { commission: { ...globalCard.commission, percentage: "4" } });
+    const effective = (categoryId: string) => app.inject({ method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${shopId}&categoryId=${categoryId}`, headers });
+
+    const card = (await effective(milk)).json();
+    expect(card.values.commission).toMatchObject({ value: { percentage: "4" }, source: { type: "category", id: milk, version: "3" } });
+    expect(card.values.statementGraceDays).toEqual({ value: 3, source: { type: "category", id: dairy, version: "2" } });
+    expect(card.values.deliveryFee.source).toEqual({ type: "global", id: null, version: "1" });
+    // The parent itself never reads its child's card.
+    expect((await effective(dairy)).json().values.commission.source).toEqual({ type: "category", id: dairy, version: "2" });
+  });
+
   it("refuses lines from another shop, unknown shops, bad baskets and callers who are not signed in", async () => {
     const shopId = await newShop();
     const otherShop = await newShop();

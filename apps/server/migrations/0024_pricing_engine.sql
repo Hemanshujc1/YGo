@@ -3,7 +3,7 @@
 -- Amounts leave as text with two decimals, so no JSON reader turns them into floating point.
 
 -- One line's commission (MNY-2): the formula on its base, then the optional minimum and maximum, rounded half-up once.
--- With no shop discounts yet (#63), the base is the line total whichever `base` the rule names.
+-- With no shop discounts yet, the base is the line total whichever `base` the rule names; #63 applies `after_shop_discount`.
 CREATE FUNCTION pricing_line_commission(base numeric, rule jsonb) RETURNS numeric LANGUAGE sql IMMUTABLE STRICT AS $$
   -- GREATEST and LEAST skip nulls, so an absent minimum or maximum leaves the amount alone.
   SELECT round(LEAST(GREATEST(raw, (rule->>'minimum')::numeric), (rule->>'maximum')::numeric), 2)

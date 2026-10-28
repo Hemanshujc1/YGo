@@ -42,7 +42,7 @@ The administrator should be able to preview and publish a rule, see its effectiv
 
 Support global, area, category, area-and-category, and individual-shop settings. Shop settings may override any specific field while inheriting the remaining fields from broader settings. Display the effective value and source for every field.
 
-Recommended precedence for each field: **shop override → area-and-category override → category override → area override → global default**. Make the precedence itself explicit in admin documentation and resolve conflicts deterministically.
+Recommended precedence for each field: **shop override → area-and-category override → category override → area override → global default**. Make the precedence itself explicit in admin documentation and resolve conflicts deterministically. A category setting covers its child categories, which can override it field by field: global → parent category → child category → shop (#357).
 
 For a mixed-category cart, calculate category commission per eligible line item. Define an explicit order-level floor policy in admin configuration, such as the highest applicable floor or a shop-specific floor. Never silently add all category floors together. Phase 1 policy (#357): order-level values, namely the delivery fee, small-cart fee, minimum cart and contribution floor, resolve shop → global and ignore category settings; only commission follows each line's category. Initially, treat each shop's basket as a separate order and quote; multi-shop checkout can combine their displayed totals while preserving separate settlements.
 
