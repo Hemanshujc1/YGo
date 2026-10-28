@@ -23,7 +23,8 @@ it("upgrades existing accounts without promoting visit confirmation or changing 
     await cp(migrations, previous, { recursive: true });
     const journalPath = join(previous, "meta/_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as { entries: { tag: string }[] };
-    journal.entries = journal.entries.filter((entry) => entry.tag !== "0016_visit_fee_persistence");
+    // Recreate the pre-0016 schema even as later migrations are added.
+    journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 16);
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle({ client }), { migrationsFolder: previous });
     await client.query(`INSERT INTO accounts (email, phone_verified) VALUES

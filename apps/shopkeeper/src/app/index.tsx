@@ -1,7 +1,8 @@
 import type { ShopApplication } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Link } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ApplicationForm } from "../components/application-form";
@@ -90,6 +91,21 @@ export default function Home() {
     return (
       <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
+        {application.state === "approved" && (
+          <View className="gap-3">
+            <Text accessibilityRole="header" className="text-title font-semibold text-text">{strings.shopSetup.title}</Text>
+            <Link href="/listings" asChild>
+              <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+                <Text className="text-body font-semibold text-on-primary">{strings.shopSetup.listings}</Text>
+              </Pressable>
+            </Link>
+            <Link href="/opening-stock" asChild>
+              <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+                <Text className="text-body font-semibold text-primary">{strings.shopSetup.stock}</Text>
+              </Pressable>
+            </Link>
+          </View>
+        )}
       </Plain>
     );
   }

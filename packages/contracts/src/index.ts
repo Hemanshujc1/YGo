@@ -47,6 +47,7 @@ export {
   OnboardingPaymentReference,
   ServiceRadiusMetres,
   ShopAddress,
+  ShopPrice,
   ShopEntityType,
   ShopName,
   UpiId,
@@ -125,6 +126,20 @@ export {
   ShopState,
   type ShopApplicationField,
 } from "./shops";
+
+export {
+  BaseUnitQuantity,
+  OpeningStockBody,
+  OpeningStockResponse,
+  SaveShopListingBody,
+  ShopListingCatalogItem,
+  ShopListingParams,
+  ShopListingsResponse,
+  ShopListingSettings,
+  ShopQuantityPriceOption,
+  ShopQuantityPriceOptionInput,
+  SignedBaseUnitQuantity,
+} from "./shop-listings";
 
 export {
   PhoneConfirmationState,

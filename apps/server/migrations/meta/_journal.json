@@ -120,6 +120,27 @@
       "when": 1793090073166,
       "tag": "0016_visit_fee_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793109707883,
+      "tag": "0017_shop_listings",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793111204588,
+      "tag": "0018_shop_quantity_option_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793121977527,
+      "tag": "0019_shop_listing_mrp_ceiling",
+      "breakpoints": true
     }
   ]
 }
