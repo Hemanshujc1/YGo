@@ -127,6 +127,7 @@ export const RatePercentage = z.string().trim().regex(/^(?:0|[1-9]\d?|100)(?:\.\
 
 /** Exact ten-thousandths of one percentage point; validation must not round through a binary float. */
 export function percentageUnits(value: string): bigint {
+  if (!/^\d+(?:\.\d{1,4})?$/.test(value)) return 1_000_001n;
   const [whole = "0", fraction = ""] = value.split(".");
   return BigInt(whole) * 10_000n + BigInt(fraction.padEnd(4, "0") || "0");
 }
