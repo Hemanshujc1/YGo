@@ -179,3 +179,14 @@ export {
   OnboardingFee,
   ShopOnboarding,
 } from "./shop-visits";
+export {
+  QuoteLine,
+  RateCardDraft,
+  PriceSimulatorBody,
+  QuoteReasonCode,
+  QuoteReason,
+  PricedQuote,
+  IncompleteQuote,
+  DeliveredQuote,
+  PriceSimulatorResponse,
+} from "./pricing";

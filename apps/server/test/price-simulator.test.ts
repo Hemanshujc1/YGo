@@ -1,0 +1,178 @@
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
+import { DELIVERED_EXAMPLES, type ExampleLine } from "@ygo/pricing";
+import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
+import { createLocalClock } from "../src/adapters/clock";
+import { createLocalMailer } from "../src/adapters/mailer";
+import { buildApp } from "../src/app";
+import { bootstrapAdmin } from "../src/bootstrap";
+import { connectDatabase } from "../src/db";
+
+const rootUrl = inject("databaseUrl");
+const secret = "01234567890123456789012345678901";
+const adminEmail = "admin@example.com";
+const clock = createLocalClock(new Date("2030-01-01T00:00:00.000Z"));
+const mailer = createLocalMailer();
+let name: string;
+let database: ReturnType<typeof connectDatabase>;
+let app: ReturnType<typeof buildApp>;
+let headers: { authorization: string };
+
+beforeEach(async () => {
+  name = `ygo_pricing_${randomUUID().replaceAll("-", "")}`;
+  const root = new pg.Client({ connectionString: rootUrl });
+  await root.connect();
+  try { await root.query(`CREATE DATABASE ${name}`); } finally { await root.end(); }
+  const url = new URL(rootUrl);
+  url.pathname = `/${name}`;
+  const client = new pg.Client({ connectionString: url.href });
+  try {
+    await client.connect();
+    await migrate(drizzle({ client }), { migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)) });
+  } finally { await client.end(); }
+  database = connectDatabase(url.href);
+  await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
+  clock.set(new Date("2030-01-01T00:00:00.000Z"));
+  mailer.sent.length = 0;
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: adminEmail } });
+  const code = mailer.sent.findLast((sent) => sent.to === adminEmail)?.text.match(/code is (\d{6})/)?.[1];
+  const signed = await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: adminEmail, code } });
+  headers = { authorization: `Bearer ${signed.json().accessToken as string}` };
+});
+
+afterEach(async () => {
+  await app.close();
+  await database.close();
+  const root = new pg.Client({ connectionString: rootUrl });
+  try { await root.connect(); await root.query(`DROP DATABASE ${name} WITH (FORCE)`); } finally { await root.end(); }
+});
+
+async function newShop(): Promise<string> {
+  return String((await database.pool.query("INSERT INTO shops (created_at) VALUES ($1) RETURNING id", [clock.now()])).rows[0]?.id);
+}
+
+async function category(label: string): Promise<string> {
+  const found = await database.pool.query("SELECT id FROM categories WHERE name = $1", [label]);
+  return String((found.rows[0] ?? (await database.pool.query("INSERT INTO categories (name) VALUES ($1) RETURNING id", [label])).rows[0])?.id);
+}
+
+/** Lists one product for the line and returns the simulator's basket line for it. */
+async function stock(shopId: string, line: ExampleLine): Promise<{ listingId: string; count: number } | { quantityOptionId: string; count: number }> {
+  const productId = (await database.pool.query(
+    "INSERT INTO master_products (name, category_id, base_unit, classification) VALUES ($1, $2, 'each', 'counted') RETURNING id",
+    [`Product ${randomUUID()}`, await category(line.category)])).rows[0]?.id;
+  const packId = (await database.pool.query("INSERT INTO packs (product_id, quantity) VALUES ($1, '1') RETURNING id", [productId])).rows[0]?.id;
+  const listingPrice = line.quantityOption ? "999.00" : line.unitPrice;
+  const listingId = String((await database.pool.query(
+    "INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp) VALUES ($1, $2, $3, $3, $3) RETURNING id",
+    [shopId, packId, listingPrice])).rows[0]?.id);
+  if (!line.quantityOption) return { listingId, count: line.count };
+  const optionId = String((await database.pool.query(
+    "INSERT INTO shop_quantity_price_options (listing_id, quantity, price, name) VALUES ($1, '2', $2, 'Twin pack') RETURNING id",
+    [listingId, line.unitPrice])).rows[0]?.id);
+  return { quantityOptionId: optionId, count: line.count };
+}
+
+function publish(scope: object, values: object) {
+  return app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason: "Worked example" } });
+}
+
+function simulate(payload: object, auth: Record<string, string> = headers) {
+  return app.inject({ method: "POST", url: "/v1/admin/price-simulator", headers: auth, payload });
+}
+
+const globalCard = {
+  commission: { formula: "percentage", fixedAmount: null, percentage: "10", minimum: null, maximum: null, base: "before_shop_discount" },
+  deliveryFee: { amount: "30", split: { platformPercentage: "20", shopPercentage: "80" } },
+  deliveredContributionFloor: "15", minimumCart: "100", statementGraceDays: 7,
+};
+
+describe("Delivered-route worked examples through the price simulator (#357, Q-6)", () => {
+  it.each(DELIVERED_EXAMPLES.map((example) => [example.name, example] as const))("%s", async (_name, example) => {
+    const shopId = await newShop();
+    for (const card of example.cards) {
+      const scope = card.scope.type === "shop" ? { type: "shop", id: shopId }
+        : card.scope.type === "category" ? { type: "category", id: await category(card.scope.category) } : card.scope;
+      expect((await publish(scope, card.values)).statusCode).toBe(201);
+    }
+    const lines = [];
+    for (const line of example.lines) lines.push(await stock(shopId, line));
+
+    const response = await simulate({ shopId, lines });
+    expect(response.statusCode).toBe(200);
+    const { now, draft } = response.json();
+    expect(draft).toBeNull();
+    expect(now).toMatchObject({ status: "priced", ...example.expected });
+  });
+});
+
+describe("Price simulator (#357)", () => {
+  it("shows each line's price, category and commission source, and the order-level sources", async () => {
+    const shopId = await newShop();
+    const dairy = await category("Dairy");
+    await publish({ type: "global" }, globalCard);
+    await publish({ type: "category", id: dairy }, { commission: { ...globalCard.commission, percentage: "5" }, minimumCart: "500" });
+    const line = await stock(shopId, { category: "Dairy", unitPrice: "120.00", count: 1 });
+
+    const { now } = (await simulate({ shopId, lines: [line] })).json();
+    expect(now.rateCardVersion).toBe("2");
+    expect(now.lines).toEqual([{
+      ...line, quantityOptionId: null, categoryId: dairy, unitPrice: "120.00", count: 1, lineTotal: "120.00", commission: "6.00",
+      commissionSource: { type: "category", id: dairy, version: "2" },
+    }]);
+    expect(now.sources).toEqual({
+      deliveryFee: { type: "global", id: null, version: "1" },
+      deliveredContributionFloor: { type: "global", id: null, version: "1" },
+      minimumCart: { type: "global", id: null, version: "1" },
+    });
+  });
+
+  it("tries a draft rule as if published next, beside Now, without saving it", async () => {
+    const shopId = await newShop();
+    await publish({ type: "global" }, globalCard);
+    const line = await stock(shopId, { category: "Groceries", unitPrice: "200.00", count: 1 });
+    const draft = { scope: { type: "shop", id: shopId }, values: { commission: { ...globalCard.commission, percentage: "2" } } };
+
+    const response = await simulate({ shopId, lines: [line], draft });
+    expect(response.statusCode).toBe(200);
+    const { now, draft: tried } = response.json();
+    expect(now).toMatchObject({ rateCardVersion: "1", commission: "20.00", platformContribution: "26.00", placeable: true });
+    expect(tried).toMatchObject({ rateCardVersion: "2", commission: "4.00", platformContribution: "10.00", placeable: false,
+      reasons: [{ code: "BELOW_CONTRIBUTION_FLOOR", shortfall: "5.00" }] });
+    expect(tried.lines[0].commissionSource).toEqual({ type: "shop", id: shopId, version: "2" });
+    // The draft's other fields still inherit from the published global card.
+    expect(tried.sources.deliveryFee).toEqual({ type: "global", id: null, version: "1" });
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM rate_card_versions")).rows[0]?.n).toBe(1);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE action = 'rate_card.publish'")).rows[0]?.n).toBe(1);
+  });
+
+  it("names the missing values when the rate card cannot price a delivered order, and prices a first draft", async () => {
+    const shopId = await newShop();
+    const line = await stock(shopId, { category: "Groceries", unitPrice: "200.00", count: 1 });
+    const { now, draft } = (await simulate({ shopId, lines: [line], draft: { scope: { type: "global" }, values: globalCard } })).json();
+    expect(now).toEqual({ status: "incomplete", rateCardVersion: "0", missing: ["commission", "deliveryFee", "deliveredContributionFloor", "minimumCart"] });
+    expect(draft).toMatchObject({ status: "priced", rateCardVersion: "1", customerTotal: "230.00" });
+
+    await publish({ type: "global" }, { ...globalCard, smallCartFee: { enabled: true, threshold: "50", amount: "5", cap: null, split: { platformPercentage: "100", shopPercentage: "0" } } });
+    expect((await simulate({ shopId, lines: [line] })).json().now).toMatchObject({ status: "priced", smallCartFee: null, customerTotal: "230.00" });
+  });
+
+  it("refuses lines from another shop, unknown shops, bad baskets and callers who are not signed in", async () => {
+    const shopId = await newShop();
+    const otherShop = await newShop();
+    await publish({ type: "global" }, globalCard);
+    const mine = await stock(shopId, { category: "Groceries", unitPrice: "200.00", count: 1 });
+    const theirs = await stock(otherShop, { category: "Groceries", unitPrice: "10.00", count: 1, quantityOption: true });
+
+    expect((await simulate({ shopId, lines: [mine, theirs] })).statusCode).toBe(404);
+    expect((await simulate({ shopId: randomUUID(), lines: [mine] })).statusCode).toBe(404);
+    expect((await simulate({ shopId, lines: [{ ...mine, count: 0 }] })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [] })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [mine], draft: { scope: { type: "global" }, values: { minimumCart: "1.234" } } })).statusCode).toBe(400);
+    expect((await simulate({ shopId, lines: [mine] }, {})).statusCode).toBe(401);
+  });
+});

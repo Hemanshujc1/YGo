@@ -44,7 +44,7 @@ Support global, area, category, area-and-category, and individual-shop settings.
 
 Recommended precedence for each field: **shop override → area-and-category override → category override → area override → global default**. Make the precedence itself explicit in admin documentation and resolve conflicts deterministically.
 
-For a mixed-category cart, calculate category commission per eligible line item. Define an explicit order-level floor policy in admin configuration, such as the highest applicable floor or a shop-specific floor. Never silently add all category floors together. Initially, treat each shop's basket as a separate order and quote; multi-shop checkout can combine their displayed totals while preserving separate settlements.
+For a mixed-category cart, calculate category commission per eligible line item. Define an explicit order-level floor policy in admin configuration, such as the highest applicable floor or a shop-specific floor. Never silently add all category floors together. Phase 1 policy (#357): order-level values, namely the delivery fee, small-cart fee, minimum cart and contribution floor, resolve shop → global and ignore category settings; only commission follows each line's category. Initially, treat each shop's basket as a separate order and quote; multi-shop checkout can combine their displayed totals while preserving separate settlements.
 
 ## Order ledger and formulas
 

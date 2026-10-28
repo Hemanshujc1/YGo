@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
+import type { RateCardDraft } from "@ygo/contracts";
 import {
   ErrorEnvelope, PublishRateCardBody, PublishedRateCardResponse, RATE_CARD_KEYS, RateCardResponse,
   ResolveRateCardQuery, type RateCardKey, RateCardValues,
@@ -97,19 +98,27 @@ async function valuesFor(pool: Pool, version: string): Promise<RateCardValues> {
   return inflate(rows.rows.map((row) => ({ field: row.field, value: row.money ?? row.percentage ?? row.integer ?? row.boolean ?? String(row.text) })));
 }
 
-/** Resolve the effective immutable card used by pricing, agreements and Admin. */
-export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: string, usage = { usesPickup: false, usesBargain: false }): Promise<RateCardResponse | undefined> {
-  const current = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
+/**
+ * Resolve the effective immutable card used by pricing, agreements and Admin.
+ * A draft replaces the card at its own scope as if published right after `version`, and is never saved (#357).
+ */
+export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: string, usage = { usesPickup: false, usesBargain: false }, draft?: RateCardDraft): Promise<RateCardResponse | undefined> {
+  const current = await pool.query<{ version: string; next: string }>(
+    "SELECT COALESCE(MAX(version), 0) AS version, COALESCE(MAX(version), 0)::numeric + 1 AS next FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
   if (version !== undefined && current.rows[0]?.version === "0") return undefined;
   version = current.rows[0]?.version ?? "0";
+  const next = current.rows[0]?.next ?? "1";
   if (!(await pool.query("SELECT 1 FROM shops WHERE id = $1", [shopId])).rowCount) return undefined;
   if (categoryId && !(await pool.query("SELECT 1 FROM categories WHERE id = $1", [categoryId])).rowCount) return undefined;
-  const cards = (await Promise.all([latest(pool, "global", null, version), categoryId ? latest(pool, "category", categoryId, version) : undefined, latest(pool, "shop", shopId, version)]))
-    .filter((card): card is StoredCard => card !== undefined);
+  const scopes: Array<[StoredCard["scopeType"], string | null]> = [["global", null], ...(categoryId ? [["category", categoryId] satisfies [StoredCard["scopeType"], string]] : []), ["shop", shopId]];
+  const cards = (await Promise.all(scopes.map(async ([type, id]) => {
+    if (draft && draft.scope.type === type && ("id" in draft.scope ? draft.scope.id : null) === id) return { version: next, scopeType: type, scopeId: id, values: draft.values };
+    const card = await latest(pool, type, id, version);
+    return card && { ...card, values: await valuesFor(pool, card.version) };
+  }))).filter((card) => card !== undefined);
   const values: RateCardResponse["values"] = {};
   for (const card of cards) {
-    const scoped = await valuesFor(pool, card.version);
-    for (const key of RATE_CARD_KEYS) if (scoped[key] !== undefined) values[key] = { value: scoped[key], source: { type: card.scopeType, id: card.scopeId, version: card.version } };
+    for (const key of RATE_CARD_KEYS) if (card.values[key] !== undefined) values[key] = { value: card.values[key], source: { type: card.scopeType, id: card.scopeId, version: card.version } };
   }
   const required: RateCardKey[] = ["commission", "deliveryFee", "deliveredContributionFloor", "minimumCart", "statementGraceDays"];
   if (usage.usesPickup) required.push("pickup");
@@ -121,7 +130,7 @@ export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: s
     if (!RateCardValues.shape[key].safeParse(entry.value).success) return true;
     return key === "pickup" && (usage.usesPickup || pickup?.enabled === true) && pickup?.contributionFloor == null;
   });
-  return { version, values, missing, complete: missing.length === 0 };
+  return { version: draft ? next : version, values, missing, complete: missing.length === 0 };
 }
 
 export function registerRateCardRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
