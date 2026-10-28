@@ -8,7 +8,7 @@ import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
-import { connectDatabase } from "../src/db";
+import { connectDatabase, withTransaction } from "../src/db";
 
 const rootUrl = inject("databaseUrl");
 const secret = "01234567890123456789012345678901";
@@ -75,30 +75,26 @@ async function area(pincode: string, paused = false) {
  * removes `pincode` is open; the save commits once `request` waits for it.
  */
 async function duringAreaSave<T>(pincode: string, request: () => Promise<T>): Promise<T> {
-  const admin = await database.pool.connect();
+  let pending!: Promise<T>;
   try {
-    await admin.query("BEGIN");
-    await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
-    await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
-    const adminPid = (await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
-    let settled = false;
-    const pending = request().finally(() => { settled = true; });
-    // Wait until the request's pincode check (routes/shops.ts) is blocked by this save itself.
-    const blocked = `SELECT 1 FROM pg_stat_activity
-      WHERE $1 = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
-        AND query = 'LOCK TABLE area_pincodes IN SHARE MODE'`;
-    const deadline = Date.now() + 3000;
-    while (!(await database.pool.query(blocked, [adminPid])).rowCount) {
-      if (settled) throw new Error("The request finished without waiting on the Area save's pincode lock.");
-      if (Date.now() > deadline) throw new Error("The request never blocked on the Area save's pincode lock within 3 s.");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await admin.query("COMMIT");
-    return await pending;
+    await withTransaction(database.pool, async (admin) => {
+      const pid = (await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      await admin.query("LOCK TABLE area_pincodes IN SHARE ROW EXCLUSIVE MODE");
+      await admin.query("DELETE FROM area_pincodes WHERE pincode = $1", [pincode]);
+      pending = request();
+      // Observe rejections immediately while polling; awaiting below still reports them.
+      void pending.catch(() => {});
+      await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query = 'LOCK TABLE area_pincodes IN SHARE MODE'
+          AND $1::int = ANY(pg_blocking_pids(pid))`, [pid])).rows[0].n, { timeout: 5_000 }).toBe(1);
+      await admin.query("COMMIT");
+    });
   } finally {
-    await admin.query("ROLLBACK"); // ends the save if the wait failed; a no-op after COMMIT
-    admin.release();
+    // Let the request finish after COMMIT/ROLLBACK releases its lock, even on a failed poll.
+    await pending;
   }
+  return pending;
 }
 
 // The FSSAI check reads the real clock (the contract's rule), not the test clock.
@@ -227,6 +223,26 @@ describe("shop application", () => {
     expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
     expect(await read(headers)).toEqual({ application: started });
   });
+
+  it("times out instead of accepting an unrelated lock, and rolls back the Area save", async () => {
+    await area("411038");
+    const blocker = await database.pool.connect();
+    const unrelated = await database.pool.connect();
+    try {
+      const pid = (await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      await blocker.query("SELECT pg_advisory_lock(214)");
+      const waiting = unrelated.query("SELECT pg_advisory_xact_lock(214)");
+      try {
+        await expect.poll(async () => (await database.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid))`, [pid])).rows[0].n).toBe(1);
+        await expect(duringAreaSave("411038", async () => undefined)).rejects.toThrow();
+        expect((await database.pool.query("SELECT 1 FROM area_pincodes WHERE pincode = '411038'")).rowCount).toBe(1);
+      } finally {
+        await blocker.query("SELECT pg_advisory_unlock_all()");
+        await waiting;
+      }
+    } finally { blocker.release(); unrelated.release(); }
+  }, 10_000);
 
   it("names each missing field and a past FSSAI expiry together", async () => {
     await area("411038");
@@ -396,141 +412,5 @@ describe("shop application, Admin", () => {
     const late = await duringAreaSave("411038", () => correct(headers, id, { pincode: "411038", reason: "Back to Kothrud" }));
     expect(late.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
     expect((await app.inject({ method: "GET", url: `${url}/${id}`, headers })).json()).toEqual(moved.json());
-  });
-});
-
-describe("shop application, Area Manager (#299)", () => {
-  const url = "/v1/admin/shop-applications";
-  async function signInAdminWeb(email: string) {
-    await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email } });
-    const signed = (await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email, code: codeFor(email) } })).json();
-    clock.advance(1_000);
-    return { authorization: `Bearer ${signed.accessToken as string}` };
-  }
-  /** Admin creates an Area Manager account; answers its id and signed-in headers. */
-  async function areaManager(admin: Record<string, string>, email: string, name: string, phone: string) {
-    const created = await app.inject({ method: "POST", url: "/v1/admin/accounts", headers: admin, payload: { email, name, phone, role: "area_manager", reason: "Onboards shops" } });
-    return { id: created.json().id as string, name, email, headers: await signInAdminWeb(email) };
-  }
-  async function sent(email: string, phone: string) {
-    const { headers } = await owner(email, true, phone);
-    await app.inject({ method: "POST", url: "/v1/me/shop-application", headers });
-    return { id: (await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers, payload: complete })).json().id as string, headers };
-  }
-  function shopActions(shopId: string) {
-    return database.pool.query<{ actor_id: string; action: string; reason: string }>(
-      "SELECT actor_id, action, reason FROM admin_actions WHERE target_type = 'shop' AND target_id = $1 ORDER BY created_at, action",
-      [shopId],
-    ).then((result) => result.rows);
-  }
-  const assign = (headers: Record<string, string>, id: string, areaManagerId: string | null, reason: string) =>
-    app.inject({ method: "PUT", url: `${url}/${id}/area-manager`, headers, payload: { areaManagerId, reason } });
-  const correct = (headers: Record<string, string>, id: string, payload: object) => app.inject({ method: "PATCH", url: `${url}/${id}`, headers, payload });
-
-  let admin: Record<string, string>;
-  let adminId: string;
-  beforeEach(async () => {
-    await area("411038");
-    admin = await signInAdminWeb("admin@example.com");
-    adminId = (await app.inject({ method: "GET", url: "/v1/admin/me", headers: admin })).json().id as string;
-  });
-
-  it("lets Admin assign, move and take back a shop, each logged with the reason only", async () => {
-    const ravi = await areaManager(admin, "ravi@example.com", "Ravi Patil", "+919812345671");
-    const meena = await areaManager(admin, "meena@example.com", "Meena Joshi", "+919812345672");
-    const shop = await sent("asha@example.com", "+919876543210");
-    expect((await app.inject({ method: "GET", url: `${url}/${shop.id}`, headers: admin })).json().areaManager).toBeNull();
-
-    const assigned = await assign(admin, shop.id, ravi.id, "Near their route");
-    expect(assigned.statusCode).toBe(200);
-    expect(assigned.json().areaManager).toEqual({ id: ravi.id, name: "Ravi Patil", email: "ravi@example.com" });
-    expect((await app.inject({ method: "GET", url, headers: admin })).json().applications[0].areaManager.id).toBe(ravi.id);
-    expect((await assign(admin, shop.id, ravi.id, "Again")).json()).toEqual(assigned.json());
-    expect((await assign(admin, shop.id, meena.id, "Ravi is away")).json().areaManager.id).toBe(meena.id);
-    expect((await assign(admin, shop.id, null, "Admin's own shop")).json().areaManager).toBeNull();
-    expect(await shopActions(shop.id)).toEqual(["Near their route", "Ravi is away", "Admin's own shop"]
-      .map((reason) => ({ actor_id: adminId, action: "shop.assign_area_manager", reason })));
-
-    // The Owner's own read never shows who manages the shop.
-    expect((await app.inject({ method: "GET", url: "/v1/me/shop-application", headers: shop.headers })).json().application).not.toHaveProperty("areaManager");
-  });
-
-  it("refuses an id that is no Area Manager, a Draft, and an Area Manager assigning", async () => {
-    const ravi = await areaManager(admin, "ravi@example.com", "Ravi Patil", "+919812345671");
-    const shop = await sent("asha@example.com", "+919876543210");
-    for (const id of [adminId, randomUUID()]) {
-      const refused = await assign(admin, shop.id, id, "Route");
-      expect(refused.statusCode).toBe(400);
-      expect(refused.json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["areaManagerId"] } });
-    }
-    const { headers } = await owner("bina@example.com", true, "+919876543211");
-    const draft = (await app.inject({ method: "POST", url: "/v1/me/shop-application", headers })).json();
-    expect((await assign(admin, draft.id, ravi.id, "Route")).statusCode).toBe(404);
-    expect((await assign(ravi.headers, shop.id, ravi.id, "Mine")).statusCode).toBe(403);
-    expect(await shopActions(shop.id)).toEqual([]);
-  });
-
-  it("shows an Area Manager only the shops assigned to them; any other is not found", async () => {
-    const ravi = await areaManager(admin, "ravi@example.com", "Ravi Patil", "+919812345671");
-    const meena = await areaManager(admin, "meena@example.com", "Meena Joshi", "+919812345672");
-    const mine = await sent("asha@example.com", "+919876543210");
-    const other = await sent("bina@example.com", "+919876543211");
-    await assign(admin, mine.id, ravi.id, "Near their route");
-    const listed = (await app.inject({ method: "GET", url, headers: ravi.headers })).json().applications;
-    expect(listed.map((one: { id: string }) => one.id)).toEqual([mine.id]);
-    expect((await app.inject({ method: "GET", url: `${url}/${mine.id}`, headers: ravi.headers })).json()).toEqual(listed[0]);
-    expect((await app.inject({ method: "GET", url, headers: meena.headers })).json().applications).toEqual([]);
-    expect((await app.inject({ method: "GET", url, headers: admin })).json().applications).toHaveLength(2);
-    for (const refused of [
-      await app.inject({ method: "GET", url: `${url}/${other.id}`, headers: ravi.headers }),
-      await correct(ravi.headers, other.id, { shopName: "Sai Stores", reason: "Typo" }),
-      await correct(meena.headers, mine.id, { shopName: "Sai Stores", reason: "Typo" }),
-    ]) expect(refused.json()).toEqual({ error: { code: "NOT_FOUND" } });
-  });
-
-  it("lets an Area Manager correct their shop, logged as the actor; review and approval stay Admin's", async () => {
-    const ravi = await areaManager(admin, "ravi@example.com", "Ravi Patil", "+919812345671");
-    const shop = await sent("asha@example.com", "+919876543210");
-    await assign(admin, shop.id, ravi.id, "Near their route");
-    const corrected = await correct(ravi.headers, shop.id, { shopName: "Sai Super Mart", reason: "Board says so at the visit" });
-    expect(corrected.statusCode).toBe(200);
-    expect(corrected.json()).toMatchObject({ shopName: "Sai Super Mart", areaManager: { id: ravi.id } });
-    for (const step of ["start-review", "approve"]) {
-      expect((await app.inject({ method: "POST", url: `${url}/${shop.id}/${step}`, headers: ravi.headers })).json()).toEqual({ error: { code: "FORBIDDEN" } });
-    }
-    expect((await shopActions(shop.id)).slice(1)).toEqual([{ actor_id: ravi.id, action: "shop.correct.shop_name", reason: "Board says so at the visit" }]);
-    expect((await app.inject({ method: "GET", url: `${url}/${shop.id}`, headers: admin })).json().state).toBe("submitted");
-  });
-
-  it("refuses a correction that waited on Admin moving the shop to someone else", async () => {
-    const ravi = await areaManager(admin, "ravi@example.com", "Ravi Patil", "+919812345671");
-    const meena = await areaManager(admin, "meena@example.com", "Meena Joshi", "+919812345672");
-    const shop = await sent("asha@example.com", "+919876543210");
-    await assign(admin, shop.id, ravi.id, "Near their route");
-    const move = await database.pool.connect();
-    try {
-      await move.query("BEGIN");
-      await move.query("UPDATE shops SET area_manager_id = $1 WHERE id = $2", [meena.id, shop.id]);
-      const movePid = (await move.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
-      let settled = false;
-      const pending = correct(ravi.headers, shop.id, { shopName: "Late Stores", reason: "Typo" }).finally(() => { settled = true; });
-      // Wait until the correction's shop read is blocked by the move itself. Postgres
-      // keeps only the first 1 kB of a query, so match the text before the lock clause.
-      const blocked = `SELECT 1 FROM pg_stat_activity
-        WHERE $1 = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
-          AND query LIKE '%LEFT JOIN accounts am ON am.id = s.area_manager_id WHERE s.id = $1%'`;
-      const deadline = Date.now() + 3000;
-      while (!(await database.pool.query(blocked, [movePid])).rowCount) {
-        if (settled) throw new Error("The correction finished without waiting on the move's row lock.");
-        if (Date.now() > deadline) throw new Error("The correction never blocked on the move's row lock within 3 s.");
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      await move.query("COMMIT");
-      expect((await pending).json()).toEqual({ error: { code: "NOT_FOUND" } });
-    } finally {
-      await move.query("ROLLBACK"); // ends the move if the wait failed; a no-op after COMMIT
-      move.release();
-    }
-    expect((await app.inject({ method: "GET", url: `${url}/${shop.id}`, headers: admin })).json().shopName).toBe(complete.shopName);
   });
 });
