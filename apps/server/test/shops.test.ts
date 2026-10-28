@@ -499,13 +499,26 @@ describe("shop application, Area Manager (#299)", () => {
     try {
       await move.query("BEGIN");
       await move.query("UPDATE shops SET area_manager_id = $1 WHERE id = $2", [meena.id, shop.id]);
+      const movePid = (await move.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
       let settled = false;
       const pending = correct(ravi.headers, shop.id, { shopName: "Late Stores", reason: "Typo" }).finally(() => { settled = true; });
-      const waiting = "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
-      while (!settled && !(await database.pool.query(waiting)).rowCount) await new Promise((resolve) => setTimeout(resolve, 10));
+      // Wait until the correction's shop read is blocked by the move itself. Postgres
+      // keeps only the first 1 kB of a query, so match the text before the lock clause.
+      const blocked = `SELECT 1 FROM pg_stat_activity
+        WHERE $1 = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
+          AND query LIKE '%LEFT JOIN accounts am ON am.id = s.area_manager_id WHERE s.id = $1%'`;
+      const deadline = Date.now() + 3000;
+      while (!(await database.pool.query(blocked, [movePid])).rowCount) {
+        if (settled) throw new Error("The correction finished without waiting on the move's row lock.");
+        if (Date.now() > deadline) throw new Error("The correction never blocked on the move's row lock within 3 s.");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       await move.query("COMMIT");
       expect((await pending).json()).toEqual({ error: { code: "NOT_FOUND" } });
-    } finally { move.release(); }
+    } finally {
+      await move.query("ROLLBACK"); // ends the move if the wait failed; a no-op after COMMIT
+      move.release();
+    }
     expect((await app.inject({ method: "GET", url: `${url}/${shop.id}`, headers: admin })).json().shopName).toBe(complete.shopName);
   });
 });
