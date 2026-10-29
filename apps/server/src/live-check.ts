@@ -22,7 +22,8 @@ export async function liveCheck(client: Pool | PoolClient, shopId: string, now: 
   const row = await client.query<Record<Exclude<LiveBlocker, "rate_card">, boolean>>(
     `SELECT s.fssai_expiry <= $2::date AS fssai_expired,
        NOT EXISTS (SELECT 1 FROM area_pincodes p WHERE p.pincode = s.pincode) AS pincode_not_in_area,
-       NOT EXISTS (SELECT 1 FROM shop_visits v JOIN visit_photos ph ON ph.visit_id = v.id WHERE v.shop_id = s.id) AS visit,
+       -- Any visit counts: the visit route stores its photo with it, and DEL-10 removes a photo only after closure.
+       NOT EXISTS (SELECT 1 FROM shop_visits v WHERE v.shop_id = s.id) AS visit,
        NOT (a.phone_verified OR a.phone_visit_confirmed_at IS NOT NULL) AS owner_phone,
        a.email_visit_confirmed_at IS NULL AS owner_email,
        NOT EXISTS (SELECT 1 FROM onboarding_fees f WHERE f.shop_id = s.id AND f.status IN ('paid', 'waived')) AS fee,
