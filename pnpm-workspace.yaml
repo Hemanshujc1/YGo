@@ -22,3 +22,6 @@ supportedArchitectures:
   - current
   - linux-x64
   - linux-arm64
+
+patchedDependencies:
+  react-native-screens@4.26.0: patches/react-native-screens@4.26.0.patch
