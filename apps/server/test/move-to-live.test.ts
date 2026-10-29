@@ -104,13 +104,16 @@ const check = (shopId: string, headers: Record<string, string> = admin) => app.i
 const goLive = (shopId: string, headers: Record<string, string> = admin) => app.inject({ method: "POST", url: url(shopId, "go-live"), headers });
 const accept = (headers: Record<string, string>, rateCardVersion: string) =>
   app.inject({ method: "POST", url: "/v1/me/shop-agreement", headers, payload: { agreementVersion: AGREEMENT_VERSION, rateCardVersion } });
+// Monday, 9:00 AM – 9:00 PM (#371).
+const hours = (headers: Record<string, string>) =>
+  app.inject({ method: "PUT", url: "/v1/me/shop-hours", headers, payload: { ranges: [{ weekday: 1, opens: 540, closes: 1260 }] } });
 const blockers = async (shopId: string) => (await check(shopId)).json().blockers as string[];
 
 describe("Move to Live (#363, ONB-2, ADM-12)", () => {
   it("names each blocker as it clears, then moves the shop to Live with its fixed reason", async () => {
     const owner = await shop();
     expect((await check(owner.shopId)).json()).toEqual({
-      blockers: ["visit", "owner_phone", "owner_email", "fee", "rate_card", "agreement"],
+      blockers: ["visit", "owner_phone", "owner_email", "fee", "rate_card", "hours", "agreement"],
       rateCardMissing: ["commission", "deliveryFee", "deliveredContributionFloor", "minimumCart", "statementGraceDays"],
     });
     // The Owner's S14 reads the same list while Approved.
@@ -121,8 +124,10 @@ describe("Move to Live (#363, ONB-2, ADM-12)", () => {
     expect(refused.json().error).toEqual({ code: "SHOP_NOT_READY", liveCheck: (await check(owner.shopId)).json() });
 
     await visit(owner.shopId, owner.id);
-    expect(await blockers(owner.shopId)).toEqual(["fee", "rate_card", "agreement"]);
+    expect(await blockers(owner.shopId)).toEqual(["fee", "rate_card", "hours", "agreement"]);
     await database.pool.query("INSERT INTO onboarding_fees (shop_id, actor_id, status, reason) VALUES ($1, $2, 'waived', 'Pilot shop')", [owner.shopId, adminId]);
+    expect(await blockers(owner.shopId)).toEqual(["rate_card", "hours", "agreement"]);
+    expect((await hours(owner.headers)).statusCode).toBe(200);
     expect(await blockers(owner.shopId)).toEqual(["rate_card", "agreement"]);
     const partial = await publish({ ...card, statementGraceDays: undefined });
     expect((await check(owner.shopId)).json()).toEqual({ blockers: ["rate_card", "agreement"], rateCardMissing: ["statementGraceDays"] });
@@ -149,6 +154,7 @@ describe("Move to Live (#363, ONB-2, ADM-12)", () => {
     const owner = await shop();
     await visit(owner.shopId, owner.id);
     await database.pool.query("INSERT INTO onboarding_fees (shop_id, actor_id, status, amount, payment_date, reference) VALUES ($1, $2, 'paid', 999, '2026-01-01', 'UPI 123')", [owner.shopId, adminId]);
+    await hours(owner.headers);
     await accept(owner.headers, await publish(card));
     expect(await blockers(owner.shopId)).toEqual([]);
 

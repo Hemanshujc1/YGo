@@ -11,6 +11,7 @@ import {
   numeric,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -259,6 +260,20 @@ export const shopAgreementAcceptances = pgTable("shop_agreement_acceptances", {
 }, (table) => [
   check("shop_agreement_acceptances_version_valid", sql`${table.agreementVersion} > 0`),
   index("shop_agreement_acceptances_shop_idx").on(table.shopId, table.acceptedAt.desc()),
+]);
+
+// Weekly opening hours (#371): one row a range, listed under the day it opens, in minutes past
+// midnight in India. A close at or before the open ends the next day. A shop with no rows has
+// no hours yet, which blocks Live (owner's answers 4, 8 and 12 on #371).
+export const shopHours = pgTable("shop_hours", {
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  weekday: smallint("weekday").notNull(),
+  opens: smallint("opens").notNull(),
+  closes: smallint("closes").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.shopId, table.weekday, table.opens] }),
+  check("shop_hours_weekday_valid", sql`${table.weekday} BETWEEN 1 AND 7`),
+  check("shop_hours_times_valid", sql`${table.opens} BETWEEN 0 AND 1410 AND ${table.opens} % 30 = 0 AND ${table.closes} BETWEEN 0 AND 1410 AND ${table.closes} % 30 = 0`),
 ]);
 
 // Shop-owned pack settings and base-unit inventory (#43, CAT-1, CAT-2, CAT-4).

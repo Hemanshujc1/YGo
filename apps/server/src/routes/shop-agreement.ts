@@ -16,7 +16,7 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
 
 /** The Owner's shop, locked when `lock`; undefined for an account that owns none. */
-async function ownerShop(client: Pool | PoolClient, accountId: string, lock = false) {
+export async function ownerShop(client: Pool | PoolClient, accountId: string, lock = false) {
   const row = await client.query<{ id: string; state: string }>(
     `SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
      WHERE m.account_id = $1 AND m.role = 'owner'${lock ? " FOR UPDATE OF s" : ""}`, [accountId]);

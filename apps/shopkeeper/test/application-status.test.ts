@@ -27,12 +27,13 @@ describe("steps", () => {
 });
 
 describe("waiting (#363)", () => {
-  it("words each blocker in the server's order, with acceptance as the Owner's own step", () => {
-    expect(waiting({ blockers: ["visit", "fee", "rate_card", "agreement"], rateCardMissing: ["commission"] })).toEqual([
-      { blocker: "visit", line: strings.shopSetup.waiting.blockers.visit, own: false },
-      { blocker: "fee", line: strings.shopSetup.waiting.blockers.fee, own: false },
-      { blocker: "rate_card", line: strings.shopSetup.waiting.blockers.rate_card, own: false },
-      { blocker: "agreement", line: strings.shopSetup.waiting.blockers.agreement, own: true },
+  it("words each blocker in the server's order, with hours and acceptance as the Owner's own steps", () => {
+    expect(waiting({ blockers: ["visit", "fee", "rate_card", "hours", "agreement"], rateCardMissing: ["commission"] })).toEqual([
+      { blocker: "visit", line: strings.shopSetup.waiting.blockers.visit, href: null },
+      { blocker: "fee", line: strings.shopSetup.waiting.blockers.fee, href: null },
+      { blocker: "rate_card", line: strings.shopSetup.waiting.blockers.rate_card, href: null },
+      { blocker: "hours", line: strings.shopSetup.waiting.blockers.hours, href: "/hours" },
+      { blocker: "agreement", line: strings.shopSetup.waiting.blockers.agreement, href: "/agreement" },
     ]);
   });
 

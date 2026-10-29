@@ -22,6 +22,8 @@ import {
   OpeningStockResponse,
   ShopAgreementResponse,
   type AcceptShopAgreementBody,
+  ShopHoursResponse,
+  type ShopHours,
   type ShopListingCatalogItem,
   type SaveShopListingBody as SaveShopListingInput,
   type OpeningStockBody as OpeningStockInput,
@@ -426,6 +428,16 @@ export function createApiClient({
     /** `POST /v1/me/shop-agreement`: accepts the agreement and rate-card versions the Owner read. */
     async acceptShopAgreement(body: AcceptShopAgreementBody): Promise<ApiResult<ShopAgreementResponse>> {
       return result(await signedIn("POST", "/v1/me/shop-agreement", body), ShopAgreementResponse);
+    },
+
+    /** `GET /v1/me/shop-hours`: the Owner's weekly opening hours, empty until first saved (#371). */
+    async shopHours(): Promise<ApiResult<ShopHoursResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-hours"), ShopHoursResponse);
+    },
+
+    /** `PUT /v1/me/shop-hours`: replaces the whole week. */
+    async saveShopHours(body: ShopHours): Promise<ApiResult<ShopHoursResponse>> {
+      return result(await signedIn("PUT", "/v1/me/shop-hours", body), ShopHoursResponse);
     },
 
     /**

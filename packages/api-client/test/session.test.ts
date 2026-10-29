@@ -365,6 +365,16 @@ describe("each call", () => {
     expect(await client.shopPage(id, here)).toEqual({ ok: false, status: 404, code: "NOT_FOUND" });
   });
 
+  it("reads and saves the Owner's opening hours (#371)", async () => {
+    const ranges = [{ weekday: 1, opens: 540, closes: 1260 }];
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { ranges }));
+    await client.verifyCode(signIn);
+    expect(await client.shopHours()).toEqual({ ok: true, data: { ranges } });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/shop-hours" });
+    expect(await client.saveShopHours({ ranges })).toEqual({ ok: true, data: { ranges } });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-hours", body: { ranges } });
+  });
+
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {
     const { client, stored } = setup(() => answer(200, { accessToken: "a1", account }));
     expect(await client.verifyCode({ email: "asha@example.com", code: "123456" })).toEqual({
