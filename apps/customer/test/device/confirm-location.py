@@ -36,10 +36,14 @@ def screen():
     return nodes
 
 
-def wait_for(predicate):
+def wait_for(predicate, before_text=None):
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
-        found = next((n for n in screen() if predicate(n)), None)
+        nodes = screen()
+        if before_text is not None:
+            end = next((i for i, n in enumerate(nodes) if n.get("text") == before_text), len(nodes))
+            nodes = nodes[:end]
+        found = next((n for n in nodes if predicate(n)), None)
         if found is not None:
             return found
         time.sleep(0.5)
@@ -68,10 +72,10 @@ if args.search:
     adb("shell", "input", "keyevent", "4")
     tap(button("Search"))
     airport = lambda n: "airport" in (n.get("text", "") + n.get("content-desc", "")).lower() and not n.get("class", "").endswith("EditText")
-    tap(wait_for(airport))
+    tap(wait_for(airport, before_text="Saved addresses"))
     wait_for(lambda n: n.get("content-desc") == "Google Map")
     tap(button("Back"))
-    tap(wait_for(airport))
+    tap(wait_for(airport, before_text="Saved addresses"))
 
 field = wait_for(lambda n: n.get("class", "").endswith("EditText") and n.get("content-desc") == "Flat, house or floor")
 tap(field)
