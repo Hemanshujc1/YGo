@@ -52,6 +52,16 @@ On iOS a wrong bundle ID also shows a blank map; the Xcode console names Google'
 
 `pnpm --filter @ygo/customer build` runs `expo export` for Android and iOS into `dist/`. The gate runs it to prove the JavaScript bundles.
 
+## Native location regression
+
+With a signed-in test account on a connected Android development build, the local API and Customer Metro running, and maps/geocoding configured, run:
+
+```sh
+ANDROID_SERIAL=<device> python3 apps/customer/test/device/confirm-location.py --search
+```
+
+This checks airport search, map Back/reopen and confirming an Other address outside the service radius (#387). It saves an Other address on the test account. Without `--search`, it opens the airport coordinates directly to isolate map locking on save. This needs a real native map; the Vitest map mock cannot reproduce Android view parenting.
+
 ## Styling
 
 NativeWind classes over `@ygo/tokens` roles only, such as `bg-surface` and `text-muted`. `tailwind.config.js` loads the same `@ygo/tokens/tailwind` plugin as the web apps, which replaces Tailwind's palette and switches to the dark values with the theme in use. `metro.config.js` sets 1rem to 16, as on the web, so the spacing scale matches the design system. Inline `style` is only for values known at runtime, such as safe-area insets.
