@@ -1,11 +1,12 @@
 import type { ShopOpenChange, ShopOpenStatus } from "@ygo/contracts";
+import { formatDayTime } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { api } from "../api";
-import { settle, untilChoices, when } from "../lib/open-switch";
+import { settle, untilChoices } from "../lib/open-switch";
 import { strings } from "../strings";
 import { TimeSheet } from "./time-sheet";
 
@@ -77,7 +78,7 @@ export function OpenSwitch() {
     else setPicking(true);
   }
 
-  const line = saved.until ? (saved.setByOwner ? words.untilByYou : words.until)(when(saved.until, now, words.tomorrow)) : null;
+  const line = saved.until ? (saved.setByOwner ? words.untilByYou : words.until)(formatDayTime(saved.until, now, words.tomorrow)) : null;
   return (
     <View className="gap-2 rounded-card border border-border bg-surface p-4">
       <View className="flex-row items-center gap-3">
@@ -92,7 +93,7 @@ export function OpenSwitch() {
         <TimeSheet
           title={words.pickUntil}
           times={untilChoices(now, saved.nextOpening)}
-          label={(at) => when(at, now, words.tomorrow)}
+          label={(at) => formatDayTime(at, now, words.tomorrow)}
           cancel={words.cancel}
           onPick={(at) => {
             setPicking(false);

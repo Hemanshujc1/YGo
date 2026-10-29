@@ -174,6 +174,9 @@ export const strings = {
     none: "No shop delivers here yet. Shops on YGo each choose how far they deliver.",
     noPin: "Choose your place on the map to see shops that deliver to you.",
     card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
+    // A closed shop's card (owner's answer 9 on #371).
+    closed: (when: string) => `Closed · opens ${when}`,
+    tomorrow: "tomorrow",
   },
   // C05 Shop page (#370).
   shop: {
@@ -190,6 +193,16 @@ export const strings = {
     mrp: (amount: string) => `MRP ${amount}`,
     off: (percent: number) => `${percent}% off`,
     units: { g: "g", kg: "kg", ml: "ml", l: "L", pc: "pc", pcs: "pcs" },
+    // The opening hours line and its week (owner's answer 10 on #371, 1–3 on #381).
+    hours: {
+      openToday: (ranges: string) => `Open today, ${ranges}`,
+      openUntil: (when: string) => `Open now · until ${when}`,
+      closedNow: (when: string) => `Closed now · opens ${when}`,
+      allDay: "Open 24 hours",
+      closed: "Closed",
+      days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      week: "Opening hours for the week",
+    },
   },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
-import { feedQuery } from "../lib/feed";
+import { closedLine, feedQuery } from "../lib/feed";
 import { askArea, type AreaAnswer, newestOnly, placeLabel, stale } from "../lib/location-flow";
 import { savedPlace } from "../lib/saved-place";
 import { strings } from "../strings";
@@ -120,6 +120,7 @@ function Shops({ query }: { query: FeedQuery }) {
     );
   }
   if (!state.shops.length) return <Text className="mt-4 text-body text-muted">{words.none}</Text>;
+  const now = Date.now();
   return (
     <View className="mt-4 gap-3">
       {state.shops.map((shop) => (
@@ -133,6 +134,7 @@ function Shops({ query }: { query: FeedQuery }) {
           <Text className="mt-1 text-secondary tabular-nums text-muted">
             {words.card(shop.estimatedMinutes, formatMoney(Number(shop.deliveryFee)))}
           </Text>
+          {!shop.open && <Text className="mt-1 text-secondary tabular-nums text-muted">{closedLine(shop, now)}</Text>}
         </Pressable>
       ))}
     </View>

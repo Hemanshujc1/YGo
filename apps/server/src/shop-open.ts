@@ -11,6 +11,16 @@ function weekMinute(minutes: number): number {
   return ((Math.floor(local / MINUTES_PER_DAY) + 3) % 7) * MINUTES_PER_DAY + (local % MINUTES_PER_DAY);
 }
 
+/** Today's weekday in India, 1 Monday to 7 Sunday. */
+export function indiaWeekday(now: Date): number {
+  return Math.floor(weekMinute(Math.floor(now.getTime() / MINUTE)) / MINUTES_PER_DAY) + 1;
+}
+
+/** The Owner's switch as stored on `shops`, or null when it was never set. */
+export function overrideOf(row: { open_override: boolean | null; open_override_until: Date | null }) {
+  return row.open_override === null || !row.open_override_until ? null : { open: row.open_override, until: row.open_override_until };
+}
+
 /** What the weekly hours alone say at `now`, and when they next open and close (owner's answers 1 and 2 on #380). */
 export function schedule(ranges: readonly ShopHoursRange[], now: Date) {
   const minutes = Math.floor(now.getTime() / MINUTE);

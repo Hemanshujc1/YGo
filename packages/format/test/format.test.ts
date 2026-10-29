@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -27,6 +27,14 @@ function expectIndianFormats() {
   it("names the weekday in India, where 1 Jan 2030 6:30 PM UTC is already Wednesday", () => {
     expect(formatWeekday("2030-01-01T12:00:00Z")).toBe("Tue");
     expect(formatWeekday("2030-01-01T18:30:00Z")).toBe("Wed");
+  });
+
+  it("says when in India: a time today, tomorrow, or a weekday further on", () => {
+    const ist = (local: string) => Date.parse(`${local}+05:30`);
+    const now = ist("2030-01-01T23:00:00");
+    expect(formatDayTime(ist("2030-01-01T23:30:00"), now, "tomorrow")).toBe("11:30 PM");
+    expect(formatDayTime(new Date(ist("2030-01-02T09:00:00")).toISOString(), now, "tomorrow")).toBe("tomorrow 9:00 AM");
+    expect(formatDayTime(ist("2030-01-03T09:00:00"), now, "tomorrow")).toBe("Thu 9:00 AM");
   });
 }
 

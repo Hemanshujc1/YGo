@@ -44,6 +44,17 @@ const indianWeekday = new Intl.DateTimeFormat(locale, { timeZone, weekday: "shor
 // The short weekday in India: "Tue".
 export const formatWeekday = (value: Date | string | number) => indianWeekday.format(new Date(value));
 
+const DAY = 24 * 60 * 60_000;
+const indiaDay = (at: number) => Math.floor((at + 330 * 60_000) / DAY);
+
+// When something happens, from `now`, in India: "9:00 PM" today, "tomorrow 9:00 AM", or "Tue 9:00 AM"
+// further on (#380, #381). The app passes its own word for tomorrow.
+export const formatDayTime = (value: Date | string | number, now: number, tomorrow: string) => {
+  const days = indiaDay(new Date(value).getTime()) - indiaDay(now);
+  const time = formatTime(value);
+  return days === 0 ? time : days === 1 ? `${tomorrow} ${time}` : `${formatWeekday(value)} ${time}`;
+};
+
 export const formatDateTime = (value: Date | string | number) =>
   `${formatDate(value)}, ${formatTime(value)}`;
 
