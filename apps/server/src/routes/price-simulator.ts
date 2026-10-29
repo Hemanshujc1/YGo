@@ -65,7 +65,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
           COALESCE((SELECT jsonb_agg(jsonb_build_object('id', option.id, 'name', option.name,
               'quantity', trim_scale(option.quantity)::text, 'price', option.price::text) ORDER BY option.quantity)
             FROM shop_quantity_price_options option WHERE option.listing_id = listing.id), '[]') AS "quantityOptions"
-        FROM ${visibleListings("$1")}
+        FROM ${visibleListings}
         ORDER BY lower(product.name), pack.quantity`, [id]);
     return { listings: rows };
   });

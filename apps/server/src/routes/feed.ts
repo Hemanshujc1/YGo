@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import {
-  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type FeedShop, type RateCardValues,
+  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type RateCardValues,
   ShopPageParams, ShopPageResponse, type ShopPagePack, type ShopPageProduct,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -15,7 +15,7 @@ export function estimatedMinutes(metres: number): number {
   return Math.ceil((10 + (4 * metres) / 1000) / 5) * 5;
 }
 
-type ServingShop = FeedShop & { minimumOrder: string; fssaiNumber: string };
+type ServingShop = ShopPageResponse["shop"];
 
 /**
  * The shops that can take this place's orders today, nearest first: every rule of C04 (owner's answers 6 and 13 on #47).
@@ -74,7 +74,7 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
           CASE WHEN listing.online_price < listing.mrp THEN listing.mrp::text END AS mrp,
           CASE WHEN listing.online_price < listing.mrp THEN floor((listing.mrp - listing.online_price) * 100 / listing.mrp)::int END AS "discountPercent",
           COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = listing.id), 0) <= 0 AS "outOfStock"
-        FROM ${visibleListings("$1")}
+        FROM ${visibleListings}
         ORDER BY lower(COALESCE(parent.name, category.name)), lower(product.name), product.id, pack.quantity`, [id]);
     const groups: ShopPageResponse["groups"] = [];
     for (const { category, id: productId, name, brand, baseUnit, ...pack } of rows) {

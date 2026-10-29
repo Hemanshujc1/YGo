@@ -1,8 +1,8 @@
 import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
 import { formatMoney } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
-import { useLocalSearchParams, useNavigation } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
@@ -70,8 +70,7 @@ function Page({ page }: { page: ShopPageResponse }) {
   return (
     <>
       <View className="rounded-card border border-border bg-surface p-4">
-        <Text accessibilityRole="header" className="text-title font-semibold text-text">{shop.name}</Text>
-        <Text className="mt-1 text-secondary tabular-nums text-muted">{strings.feed.card(shop.estimatedMinutes, money(shop.deliveryFee))}</Text>
+        <Text className="text-body tabular-nums text-text">{strings.feed.card(shop.estimatedMinutes, money(shop.deliveryFee))}</Text>
         <View className="mt-3 gap-1 border-t border-border pt-3">
           <Text className="text-body tabular-nums text-text">{words.minimumOrder(money(shop.minimumOrder))}</Text>
           <Text className="text-secondary tabular-nums text-muted">{words.fssai(shop.fssaiNumber)}</Text>
@@ -95,10 +94,17 @@ export default function ShopPage() {
   const [state, setState] = useState<PageState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
 
-  useEffect(() => {
+  // Asked again each time the page shows, as Home does, so stock and prices stay current.
+  useFocusEffect(useCallback(() => {
     let current = true;
     setState({ kind: "loading" });
-    api.shopPage(id, { pincode, latitude: Number(latitude), longitude: Number(longitude) }).then(
+    // Home's link carries the place; a link without one (or a broken one) has nothing to check.
+    const query = { pincode, latitude: Number(latitude), longitude: Number(longitude) };
+    if (!id || !pincode || !Number.isFinite(query.latitude) || !Number.isFinite(query.longitude)) {
+      setState({ kind: "not-serving" });
+      return;
+    }
+    api.shopPage(id, query).then(
       (result) => {
         if (!current) return;
         if (result.ok) setState({ kind: "loaded", page: result.data });
@@ -110,7 +116,7 @@ export default function ShopPage() {
     return () => {
       current = false;
     };
-  }, [id, pincode, latitude, longitude, attempt]);
+  }, [id, pincode, latitude, longitude, attempt]));
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
