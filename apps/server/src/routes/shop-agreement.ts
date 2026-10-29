@@ -40,7 +40,10 @@ function sameRule(a: unknown, b: unknown): boolean {
 
 /** What S19 shows: the shop's card, each category whose commission differs, and the last acceptance. */
 async function agreement(pool: Pool, shopId: string): Promise<ShopAgreementResponse> {
-  const card = await resolveRateCard(pool, shopId);
+  // Every card below is read as of this version, so a publish landing mid-read never pairs one card with another's number.
+  const version = await affectingVersion(pool, shopId);
+  const asOf = version === "0" ? undefined : version;
+  const card = await resolveRateCard(pool, shopId, undefined, asOf);
   if (!card) throw new Error("Shop vanished while reading its agreement");
   const rateCard = Object.fromEntries(RATE_CARD_KEYS.flatMap((key) => {
     const parsed = RateCardValues.shape[key].safeParse(card.values[key]?.value);
@@ -54,12 +57,11 @@ async function agreement(pool: Pool, shopId: string): Promise<ShopAgreementRespo
      ORDER BY lower(c.name), c.id`);
   const categoryCommissions: CategoryCommission[] = [];
   for (const category of categories.rows) {
-    const commission = CommissionRule.safeParse((await resolveRateCard(pool, shopId, category.id))?.values.commission?.value);
+    const commission = CommissionRule.safeParse((await resolveRateCard(pool, shopId, category.id, asOf))?.values.commission?.value);
     if (commission.success && !sameRule(commission.data, rateCard.commission)) {
       categoryCommissions.push({ categoryId: category.id, name: category.name, commission: commission.data });
     }
   }
-  const version = await affectingVersion(pool, shopId);
   const last = await pool.query<{ agreementVersion: number; rateCardVersion: string; acceptedAt: Date }>(
     `SELECT agreement_version AS "agreementVersion", rate_card_version::text AS "rateCardVersion", accepted_at AS "acceptedAt"
      FROM shop_agreement_acceptances WHERE shop_id = $1
@@ -102,7 +104,9 @@ export function registerShopAgreementRoutes(app: FastifyInstance, { pool, clock,
       // Holds off a publish until this commits, so the version checked is the one stored.
       await client.query("LOCK TABLE rate_card_versions IN SHARE MODE");
       if (await affectingVersion(client, shop.id) !== body.rateCardVersion) return reply.code(409).send({ error: { code: "RATE_CARD_CHANGED" } });
-      if (!(await resolveRateCard(pool, shop.id))?.complete) return reply.code(409).send({ error: { code: "RATE_CARD_INCOMPLETE" } });
+      // The shop has no pickup or Bargain switch yet, so only the card's own pickup rule adds a requirement;
+      // #65 and #78 pass the shop's switches here when they add them.
+      if (!(await resolveRateCard(pool, shop.id, undefined, body.rateCardVersion))?.complete) return reply.code(409).send({ error: { code: "RATE_CARD_INCOMPLETE" } });
       await client.query(
         `INSERT INTO shop_agreement_acceptances (shop_id, account_id, agreement_version, rate_card_version, accepted_at)
          VALUES ($1, $2, $3, $4, $5)`, [shop.id, who.accountId, body.agreementVersion, body.rateCardVersion, clock.now()]);

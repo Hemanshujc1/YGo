@@ -145,6 +145,11 @@ describe("Onboarding agreement (#362, ONB-5)", () => {
     const incomplete = await accept(owner.headers, { agreementVersion: AGREEMENT_VERSION, rateCardVersion: partial });
     expect(incomplete.json().error.code).toBe("RATE_CARD_INCOMPLETE");
 
+    // A pickup rule switched on needs its contribution rule before it can be accepted.
+    const pickup = await publish({ type: "global" }, { ...globalCard, pickup: { enabled: true, customerFee: "10", shopFee: null, cap: null } });
+    expect((await read(owner.headers)).json().missing).toEqual(["pickup"]);
+    expect((await accept(owner.headers, { agreementVersion: AGREEMENT_VERSION, rateCardVersion: pickup })).json().error.code).toBe("RATE_CARD_INCOMPLETE");
+
     const version = await publish({ type: "global" }, globalCard);
     const outdated = await accept(owner.headers, { agreementVersion: AGREEMENT_VERSION + 1, rateCardVersion: version });
     expect(outdated.statusCode).toBe(409);

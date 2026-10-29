@@ -179,19 +179,19 @@ export const strings = {
     sections: [
       {
         title: "What you must not sell",
-        body: "Never sell these through YGo, online or at your counter: prescription medicines and pharmacy of any kind, alcohol, tobacco, nicotine, pan masala and gutkha, prepared and restaurant food, raw meat, fish and poultry, live animals, fireworks, weapons and ammunition, pesticides and agro-chemicals, fuel, LPG and cylinders, lottery and gambling, adult products, and infant milk substitutes and feeding bottles. Eggs and condoms are allowed.",
+        body: "Never sell these through YGo, in the customer app or in YGo counter billing: prescription medicines and pharmacy of any kind, alcohol, tobacco, nicotine, pan masala and gutkha, prepared and restaurant food, raw meat, fish and poultry, live animals, fireworks, weapons and ammunition, pesticides and agro-chemicals, fuel, LPG and cylinders, lottery and gambling, adult products, and infant milk substitutes and feeding bottles. Eggs and condoms are allowed.",
       },
       {
         title: "Suspension",
-        body: "If your shop sells any of these, YGo can suspend it. YGo can also suspend it for other serious reasons, such as a statement or a repayment to a customer left unpaid. A suspended shop leaves the customer app and takes no new orders. Orders already accepted still finish, and your counter billing and stock keep working. You will see the reason.",
+        body: "If your shop sells any of these through YGo, YGo can suspend it. YGo can also suspend it for other serious reasons, such as a statement or a repayment to a customer left unpaid. A suspended shop leaves the customer app and takes no new orders. Orders already accepted still finish, and your counter billing and stock keep working. You will see the reason.",
       },
       {
         title: "Paying back a customer",
-        body: "When YGo upholds a customer's complaint and records an amount owed, your shop pays that customer directly within 7 days. YGo never holds or passes on this money.",
+        body: "When YGo upholds a customer's complaint and records an amount owed, your shop pays that customer directly within seven calendar days of the day YGo records it. The app shows you the amount and the due date. YGo never holds or passes on this money.",
       },
       {
         title: "Tax",
-        body: "In this first stage, YGo's weekly statement is not a tax invoice and carries no GST, so you cannot claim input tax credit on the commission.",
+        body: "In this first stage, YGo's weekly statement is a commercial invoice, not a tax invoice. It has no GST line and no GSTIN, so no input tax credit is available to your shop on YGo's commission.",
       },
     ],
     rateCardTitle: "Your rate card",
