@@ -8,7 +8,9 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type FieldErrors = Partial<Record<keyof SearchTermBody, string>>;
 
-const byWords = (a: SearchTerm, b: SearchTerm) => a.typedWord.localeCompare(b.typedWord) || a.catalogWord.localeCompare(b.catalogWord);
+// Plain character order, as the server sorts (COLLATE "C"), so rows don't move after a save.
+const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+const byWords = (a: SearchTerm, b: SearchTerm) => order(a.typedWord, b.typedWord) || order(a.catalogWord, b.catalogWord);
 
 /** A13 search terms (#397, DSC-3): the denylist joins this page with #69. */
 export function SearchTerms({ api }: { api: AdminApi }) {
@@ -48,6 +50,11 @@ export function SearchTerms({ api }: { api: AdminApi }) {
       if (result.ok) {
         setTerms((current) => [...current.filter((term) => term.id !== result.data.id), result.data].sort(byWords));
         setDone(editing ? strings.searchTermSaved : strings.searchTermAdded);
+        setForm(false);
+      } else if (editing && result.code === "NOT_FOUND") {
+        // Removed elsewhere: drop it here too.
+        setTerms((current) => current.filter((term) => term.id !== editing.id));
+        setError(strings.errors.NOT_FOUND);
         setForm(false);
       } else if (result.code === "VALIDATION_FAILED" && result.fields?.length) {
         setErrors(fieldMessages(result.fields, strings.searchTermInvalidFields));
@@ -109,7 +116,7 @@ export function SearchTerms({ api }: { api: AdminApi }) {
           {errors.catalogWord && <p role="alert" className="mt-1 text-secondary text-danger">{errors.catalogWord}</p>}</div>
         {error && <p role="alert" className="text-danger">{error}</p>}
         <div className="flex gap-3"><button disabled={busy} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{busy ? strings.saving : strings.saveSearchTerm}</button>
-          <button type="button" disabled={busy} onClick={() => setForm(false)} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
+          <button type="button" disabled={busy} onClick={() => { setError(""); setForm(false); }} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
       </form>
     </section>}
   </>;

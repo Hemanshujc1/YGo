@@ -367,6 +367,8 @@ describe("Admin routes and browser sessions", () => {
     expect((await edit(id, { typedWord: "kaanda", catalogWord: "onion" })).json()).toEqual({ id, typedWord: "kaanda", catalogWord: "onion" });
     expect((await edit(moong, { typedWord: "dal", catalogWord: "toor dal" })).statusCode).toBe(409);
     expect((await edit(randomUUID(), { typedWord: "dal", catalogWord: "urad dal" })).statusCode).toBe(404);
+    // Saving unchanged words records nothing (the five rows below).
+    expect((await edit(id, { typedWord: "kaanda", catalogWord: "onion" })).statusCode).toBe(200);
 
     const remove = (termId: string) => app.inject({ method: "DELETE", url: `/v1/admin/search-terms/${termId}`, headers });
     expect((await remove(moong)).statusCode).toBe(204);

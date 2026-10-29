@@ -5,7 +5,7 @@ import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
 import { deriveKeys } from "../tokens";
 
-const termSql = `SELECT id, typed_word AS "typedWord", catalog_word AS "catalogWord" FROM search_terms`;
+const columns = `id, typed_word AS "typedWord", catalog_word AS "catalogWord"`;
 
 /** The record keeps the words themselves, so it still says what a removed term was (owner's answer 4 on #49). */
 async function record(client: PoolClient, accountId: string, action: string, id: string, reason: string): Promise<void> {
@@ -25,7 +25,7 @@ export function registerSearchTermRoutes(app: FastifyInstance, { pool, clock, se
 
   app.get("/v1/admin/search-terms", { schema: { response: { 200: SearchTermsResponse, ...response } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
-    const rows = await pool.query<SearchTerm>(`${termSql} ORDER BY typed_word, catalog_word`);
+    const rows = await pool.query<SearchTerm>(`SELECT ${columns} FROM search_terms ORDER BY typed_word COLLATE "C", catalog_word COLLATE "C"`);
     return { terms: rows.rows };
   });
 
@@ -35,7 +35,7 @@ export function registerSearchTermRoutes(app: FastifyInstance, { pool, clock, se
     const body = request.body as SearchTermBody;
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       const saved = await client.query<SearchTerm>(
-        `INSERT INTO search_terms (typed_word, catalog_word) VALUES ($1, $2) RETURNING id, typed_word AS "typedWord", catalog_word AS "catalogWord"`,
+        `INSERT INTO search_terms (typed_word, catalog_word) VALUES ($1, $2) RETURNING ${columns}`,
         [body.typedWord, body.catalogWord]);
       const term = saved.rows[0];
       if (!term) throw new Error("Search term insert returned no row");
@@ -51,8 +51,10 @@ export function registerSearchTermRoutes(app: FastifyInstance, { pool, clock, se
     const { id } = request.params as SearchTermParams;
     const body = request.body as SearchTermBody;
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
-      const old = (await client.query<SearchTerm>(`${termSql} WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+      const old = (await client.query<SearchTerm>(`SELECT ${columns} FROM search_terms WHERE id = $1 FOR UPDATE`, [id])).rows[0];
       if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      // Saving with nothing changed records nothing.
+      if (old.typedWord === body.typedWord && old.catalogWord === body.catalogWord) return reply.code(200).send(old);
       await client.query("UPDATE search_terms SET typed_word = $1, catalog_word = $2 WHERE id = $3", [body.typedWord, body.catalogWord, id]);
       await record(client, who.accountId, "search_term.edit", id, `Search term changed: ${pair(old)} to ${pair(body)}`);
       await client.query("COMMIT");
@@ -66,7 +68,7 @@ export function registerSearchTermRoutes(app: FastifyInstance, { pool, clock, se
     if (!who) return reply;
     const { id } = request.params as SearchTermParams;
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
-      const old = (await client.query<SearchTerm>(`DELETE FROM search_terms WHERE id = $1 RETURNING id, typed_word AS "typedWord", catalog_word AS "catalogWord"`, [id])).rows[0];
+      const old = (await client.query<SearchTerm>(`DELETE FROM search_terms WHERE id = $1 RETURNING ${columns}`, [id])).rows[0];
       if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       await record(client, who.accountId, "search_term.delete", id, `Search term removed: ${pair(old)}`);
       await client.query("COMMIT");

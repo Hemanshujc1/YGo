@@ -494,7 +494,7 @@ describe("Admin web", () => {
     const api = {
       listSearchTerms: vi.fn().mockResolvedValue({ ok: true, data: { terms: [] } }),
       createSearchTerm: vi.fn().mockResolvedValueOnce({ ok: false, status: 409, code: "SEARCH_TERM_IN_USE" })
-        .mockResolvedValueOnce({ ok: true, data: kanda }).mockResolvedValueOnce({ ok: true, data: aata }),
+        .mockResolvedValueOnce({ ok: true, data: kanda }).mockResolvedValue({ ok: true, data: aata }),
       editSearchTerm: vi.fn().mockResolvedValue({ ok: true, data: { ...kanda, typedWord: "kaanda" } }),
       removeSearchTerm: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     };
@@ -532,6 +532,21 @@ describe("Admin web", () => {
     expect((await screen.findByRole("status")).textContent).toBe(strings.searchTermRemoved);
     expect(api.removeSearchTerm).toHaveBeenCalledWith(aata.id);
     expect(screen.queryByText("aata")).toBeNull();
+
+    // A term removed elsewhere leaves the list when an edit finds it gone; Cancel clears a form error.
+    api.editSearchTerm.mockResolvedValueOnce({ ok: false, status: 404, code: "NOT_FOUND" });
+    fireEvent.click(screen.getByRole("button", { name: strings.editSearchTerm("kaanda", "onion") }));
+    fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.errors.NOT_FOUND);
+    expect(screen.getByText(strings.noSearchTerms)).toBeTruthy();
+    add("aata", "atta");
+    await screen.findByRole("button", { name: strings.removeSearchTerm("aata", "atta") });
+    api.editSearchTerm.mockResolvedValueOnce({ ok: false, status: 409, code: "SEARCH_TERM_IN_USE" });
+    fireEvent.click(screen.getByRole("button", { name: strings.editSearchTerm("aata", "atta") }));
+    fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    await screen.findByText(strings.errors.SEARCH_TERM_IN_USE);
+    fireEvent.click(screen.getByRole("button", { name: strings.cancel }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("requires a reason to deactivate and updates child availability when the parent changes", async () => {
