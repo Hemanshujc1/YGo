@@ -170,8 +170,8 @@ describe("ShopApplication", () => {
       ownerEmail: "asha@example.com",
       submittedAt: null,
     };
-    expect(MyShopApplicationResponse.parse({ application: draft }).application?.state).toBe("draft");
-    expect(MyShopApplicationResponse.parse({ application: null })).toEqual({ application: null });
+    expect(MyShopApplicationResponse.parse({ application: draft, liveCheck: null }).application?.state).toBe("draft");
+    expect(MyShopApplicationResponse.parse({ application: null, liveCheck: null })).toEqual({ application: null, liveCheck: null });
     const sent = { ...draft, ...complete, state: "submitted", areaName: "Kothrud", submittedAt: "2026-10-25T10:00:00.000Z" };
     expect(ShopApplication.parse(sent)).toEqual(sent);
   });

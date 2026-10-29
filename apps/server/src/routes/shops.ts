@@ -5,6 +5,7 @@ import {
   AssignShopAreaManagerBody,
   CorrectShopApplicationBody,
   ErrorEnvelope,
+  LiveCheck,
   MyShopApplicationResponse,
   SaveShopApplicationBody,
   SendShopApplicationBody,
@@ -18,6 +19,7 @@ import {
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, adminWebSignedIn, withAdminTransaction, withAdminWebTransaction } from "../admin";
 import { withTransaction } from "../db";
+import { liveCheck } from "../live-check";
 import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
@@ -145,7 +147,9 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
   app.get("/v1/me/shop-application", { schema: { response: { 200: MyShopApplicationResponse, ...response } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    return { application: await application(pool, "m.account_id", who.accountId) };
+    const found = await application(pool, "m.account_id", who.accountId);
+    // S14 names what still keeps an Approved shop from Live (#363).
+    return { application: found, liveCheck: found?.state === "approved" ? await liveCheck(pool, found.id, clock.now()) : null };
   });
 
   // Start creates the Draft and makes the account its Owner, in one go (ACC-5).
@@ -293,11 +297,22 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
     });
   });
 
+  // A07 lists what still blocks Live before Admin taps Move to Live (#363); Admin's alone, as the move is.
+  app.get("/v1/admin/shop-applications/:id/live-check", { schema: { params: ShopApplicationParams, response: { 200: LiveCheck, ...response } } }, async (request, reply) => {
+    const who = await adminSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const found = await adminApplication(pool, (request.params as { id: string }).id, null);
+    if (!found) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (found.state !== "approved") return reply.code(409).send({ error: { code: "SHOP_STATE_CHANGE_REFUSED" } });
+    return liveCheck(pool, found.id, clock.now());
+  });
+
   // Admin moves each step by a click, with a fixed reason; opening it moves nothing (Q3 on #40).
   // These stay Admin's: an Area Manager is refused (#299).
   for (const [path, from, to, action, reason] of [
     ["start-review", "submitted", "under_review", "shop.start_review", "Started review"],
     ["approve", "under_review", "approved", "shop.approve", "Approved"],
+    ["go-live", "approved", "live", "shop.go_live", "Moved to Live"],
   ] as const) {
     app.post(`/v1/admin/shop-applications/:id/${path}`, { schema: { params: ShopApplicationParams, response: { 200: AdminShopApplication, ...response } } }, async (request, reply) => {
       const who = await adminSignedIn(request, reply, auth);
@@ -307,6 +322,11 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
         const old = await adminApplication(client, id, null, true);
         if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         if (old.state !== from) return reply.code(409).send({ error: { code: "SHOP_STATE_CHANGE_REFUSED" } });
+        // Checked again under lock, so nothing can change between the check and the move (ONB-2, ADM-12).
+        if (to === "live") {
+          const check = await liveCheck(client, id, clock.now(), true);
+          if (check.blockers.length) return reply.code(409).send({ error: { code: "SHOP_NOT_READY", liveCheck: check } });
+        }
         await client.query("UPDATE shops SET state = $1 WHERE id = $2", [to, id]);
         await client.query(
           "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, $2, $3, 'shop', $4)",

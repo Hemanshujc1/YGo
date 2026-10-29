@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AddressPoint } from "./addresses";
+import { RateCardKey } from "./rate-cards";
 import {
   AdminActionReason,
   CalendarDate,
@@ -22,8 +23,8 @@ import {
  * Decisions: the owner's answers on #40.
  */
 
-/** Live, Suspended and Closed join when a shop can reach them (#46). */
-export const ShopState = z.enum(["draft", "submitted", "under_review", "approved"]);
+/** Admin moves an Approved shop to Live (#363). Suspended and Closed join when a shop can reach them. */
+export const ShopState = z.enum(["draft", "submitted", "under_review", "approved", "live"]);
 export type ShopState = z.infer<typeof ShopState>;
 
 /** The ONB-3 fields; the Owner's phone and email come from the account. */
@@ -120,8 +121,33 @@ export const ShopApplication = z.strictObject({
 });
 export type ShopApplication = z.infer<typeof ShopApplication>;
 
-/** `GET /v1/me/shop-application`: null until the Owner taps Start. */
-export const MyShopApplicationResponse = z.strictObject({ application: ShopApplication.nullable() });
+/**
+ * What keeps an Approved shop from going Live (ONB-2, owner's answers on #46 and #363):
+ * - fssai_expired: the FSSAI expiry is today or earlier, in India
+ * - pincode_not_in_area: no Area holds the shop's pincode any more
+ * - visit: no visit with its shop-front photo on record
+ * - owner_phone, owner_email: not confirmed at a visit, or changed since
+ * - fee: no onboarding fee recorded, paid or waived
+ * - rate_card: the shop's card misses a value; `rateCardMissing` names each
+ * - agreement: the Owner has not accepted the current agreement and rate card
+ * Every other sent field is always set (the `shops_sent_complete` check).
+ */
+export const LiveBlocker = z.enum(["fssai_expired", "pincode_not_in_area", "visit", "owner_phone", "owner_email", "fee", "rate_card", "agreement"]);
+export type LiveBlocker = z.infer<typeof LiveBlocker>;
+
+/**
+ * `GET /v1/admin/shop-applications/:id/live-check`, and the Owner's own while
+ * Approved: what still blocks Live, in the order above. An empty list means
+ * Admin can move the shop to Live.
+ */
+export const LiveCheck = z.strictObject({ blockers: z.array(LiveBlocker), rateCardMissing: z.array(RateCardKey) });
+export type LiveCheck = z.infer<typeof LiveCheck>;
+
+/**
+ * `GET /v1/me/shop-application`: null until the Owner taps Start.
+ * `liveCheck` is set only while the shop is Approved (S14).
+ */
+export const MyShopApplicationResponse = z.strictObject({ application: ShopApplication.nullable(), liveCheck: LiveCheck.nullable() });
 export type MyShopApplicationResponse = z.infer<typeof MyShopApplicationResponse>;
 
 /**
@@ -135,7 +161,7 @@ export const AdminShopApplication = ShopApplication.extend({
 export type AdminShopApplication = z.infer<typeof AdminShopApplication>;
 
 /**
- * `GET /v1/admin/shop-applications`: Submitted, Under Review and Approved, the longest waiting first.
+ * `GET /v1/admin/shop-applications`: every sent shop, Live included, the longest waiting first.
  * An Area Manager gets only the shops assigned to them (#299).
  */
 export const ShopApplicationsResponse = z.strictObject({ applications: z.array(AdminShopApplication) });

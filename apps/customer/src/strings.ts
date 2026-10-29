@@ -227,5 +227,6 @@ export const strings = {
     RATE_CARD_INCOMPLETE: "The rate card isn't complete yet.",
     AGREEMENT_OUTDATED: "The agreement has changed. Read the new one, then accept it.",
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
+    SHOP_NOT_READY: "This shop isn't ready to go Live yet.",
   } satisfies Record<ErrorCode, string>,
 };

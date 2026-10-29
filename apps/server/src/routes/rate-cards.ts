@@ -91,7 +91,7 @@ async function latest(client: Pool | PoolClient, type: StoredCard["scopeType"], 
   return result.rows[0];
 }
 
-async function valuesFor(pool: Pool, version: string): Promise<RateCardValues> {
+async function valuesFor(pool: Pool | PoolClient, version: string): Promise<RateCardValues> {
   const rows = await pool.query<{ field: string; money: string | null; percentage: string | null; integer: number | null; boolean: boolean | null; text: string | null }>(
     `SELECT field, trim_scale(money_value)::text AS money, trim_scale(percentage_value)::text AS percentage, integer_value AS integer,
       boolean_value AS boolean, text_value AS text FROM rate_card_values WHERE version = $1`, [version]);
@@ -102,7 +102,7 @@ async function valuesFor(pool: Pool, version: string): Promise<RateCardValues> {
  * Resolve the effective immutable card used by pricing, agreements and Admin.
  * A draft replaces the card at its own scope as if published right after `version`, and is never saved (#357).
  */
-export async function resolveRateCard(pool: Pool, shopId: string, categoryId?: string, version?: string, usage = { usesPickup: false, usesBargain: false }, draft?: RateCardDraft): Promise<RateCardResponse | undefined> {
+export async function resolveRateCard(pool: Pool | PoolClient, shopId: string, categoryId?: string, version?: string, usage = { usesPickup: false, usesBargain: false }, draft?: RateCardDraft): Promise<RateCardResponse | undefined> {
   const current = await pool.query<{ version: string; next: string }>(
     "SELECT COALESCE(MAX(version), 0) AS version, COALESCE(MAX(version), 0)::numeric + 1 AS next FROM rate_card_versions WHERE $1::bigint IS NULL OR version = $1", [version ?? null]);
   if (version !== undefined && current.rows[0]?.version === "0") return undefined;

@@ -183,6 +183,13 @@
       "when": 1793206043566,
       "tag": "0025_shop_agreements",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793261069678,
+      "tag": "0026_move_to_live",
+      "breakpoints": true
     }
   ]
 }

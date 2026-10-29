@@ -237,6 +237,21 @@ export const strings = {
   },
   shopSetup: {
     title: "Get your shop ready",
+    // S14 (#363): what still keeps an Approved shop from Live, from the same check Admin sees.
+    waiting: {
+      title: "Waiting for",
+      ready: "Everything is in place. YGo makes your shop Live next.",
+      blockers: {
+        fssai_expired: "A valid FSSAI licence. Yours has expired: send the renewed licence to support.",
+        pincode_not_in_area: "YGo to serve your pincode. Write to support.",
+        visit: "YGo's visit to your shop.",
+        owner_phone: "Your phone number, confirmed at YGo's visit.",
+        owner_email: "Your email, confirmed at YGo's visit.",
+        fee: "Your onboarding fee, recorded by YGo.",
+        rate_card: "Your rate card from YGo.",
+        agreement: "Accept the agreement and rate card",
+      } satisfies Record<import("@ygo/contracts").LiveBlocker, string>,
+    },
     listings: "Products and prices",
     stock: "Opening stock",
     chooseProduct: "Choose a product pack",
@@ -316,5 +331,6 @@ export const strings = {
     RATE_CARD_INCOMPLETE: "The rate card isn't complete yet.",
     AGREEMENT_OUTDATED: "The agreement has changed. Read the new one, then accept it.",
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
+    SHOP_NOT_READY: "Your shop isn't ready to go Live yet.",
   } satisfies Record<ErrorCode, string>,
 };

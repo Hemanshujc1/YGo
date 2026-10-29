@@ -18,6 +18,8 @@ interface ApiFailure {
   conflicts?: ErrorEnvelope["error"]["conflicts"];
   /** Commit-time catalog validation problems, using the same rows as preview. */
   rowErrors?: ErrorEnvelope["error"]["rowErrors"];
+  /** With SHOP_NOT_READY: what still blocks Live. */
+  liveCheck?: ErrorEnvelope["error"]["liveCheck"];
 }
 
 export interface Answer {
@@ -88,8 +90,8 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
     if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
-    const { code, fields, conflicts, rowErrors } = envelope.data.error;
-    return { ok: false, status, code, fields, conflicts, rowErrors };
+    const { code, fields, conflicts, rowErrors, liveCheck } = envelope.data.error;
+    return { ok: false, status, code, fields, conflicts, rowErrors, liveCheck };
   }
 
   function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {

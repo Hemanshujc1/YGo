@@ -253,11 +253,11 @@ describe("each call", () => {
     } as const;
     const { client, calls } = setup((call) => {
       if (call.path === "/v1/auth/verify") return answer(200, pair(1));
-      if (call.method === "GET") return answer(200, { application: null });
+      if (call.method === "GET") return answer(200, { application: null, liveCheck: null });
       return answer(call.method === "POST" && call.path.endsWith("/shop-application") ? 201 : 200, draft);
     });
     await client.verifyCode(signIn);
-    expect(await client.shopApplication()).toEqual({ ok: true, data: { application: null } });
+    expect(await client.shopApplication()).toEqual({ ok: true, data: { application: null, liveCheck: null } });
     expect(await client.startShopApplication()).toEqual({ ok: true, data: draft });
     expect(await client.saveShopApplication({ shopName: "Sai General Stores", pan: null })).toEqual({ ok: true, data: draft });
     expect(await client.sendShopApplication(body)).toEqual({ ok: true, data: draft });
