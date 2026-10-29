@@ -25,6 +25,7 @@ export async function liveCheck(client: Pool | PoolClient, shopId: string, now: 
        NOT (a.phone_verified OR a.phone_visit_confirmed_at IS NOT NULL) AS owner_phone,
        a.email_visit_confirmed_at IS NULL AS owner_email,
        NOT EXISTS (SELECT 1 FROM onboarding_fees f WHERE f.shop_id = s.id AND f.status IN ('paid', 'waived')) AS fee,
+       NOT EXISTS (SELECT 1 FROM shop_hours h WHERE h.shop_id = s.id) AS hours,
        NOT EXISTS (SELECT 1 FROM shop_agreement_acceptances c
          WHERE c.shop_id = s.id AND c.agreement_version = $3 AND c.rate_card_version::text = $4) AS agreement
      FROM shops s JOIN shop_members m ON m.shop_id = s.id AND m.role = 'owner' JOIN accounts a ON a.id = m.account_id

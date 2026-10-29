@@ -310,6 +310,7 @@ export const strings = {
     owner_email: "The Owner's email is not confirmed. Confirm it at a visit.",
     fee: "No onboarding fee is recorded, paid or waived.",
     rate_card: "The shop's rate card is missing values:",
+    hours: "The Owner has not set the shop's opening hours.",
     agreement: "The Owner has not accepted the current agreement and rate card.",
   } satisfies Record<import("@ygo/contracts").LiveBlocker, string>,
   adminDecides: "Admin decides this item. You can see it but not act on it.",

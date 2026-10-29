@@ -129,10 +129,11 @@ export type ShopApplication = z.infer<typeof ShopApplication>;
  * - owner_phone, owner_email: not confirmed at a visit, or changed since
  * - fee: no onboarding fee recorded, paid or waived
  * - rate_card: the shop's card misses a value; `rateCardMissing` names each
+ * - hours: the Owner has not set the weekly opening hours (owner's answer 8 on #371)
  * - agreement: the Owner has not accepted the current agreement and rate card
  * Every other sent field is always set (the `shops_sent_complete` check).
  */
-export const LiveBlocker = z.enum(["fssai_expired", "pincode_not_in_area", "visit", "owner_phone", "owner_email", "fee", "rate_card", "agreement"]);
+export const LiveBlocker = z.enum(["fssai_expired", "pincode_not_in_area", "visit", "owner_phone", "owner_email", "fee", "rate_card", "hours", "agreement"]);
 export type LiveBlocker = z.infer<typeof LiveBlocker>;
 
 /**

@@ -205,4 +205,16 @@ export {
   ShopAgreementResponse,
   AcceptShopAgreementBody,
 } from "./shop-agreement";
+export {
+  DayMinute,
+  HOURS_STEP_MINUTES,
+  MAX_RANGES_PER_DAY,
+  MINUTES_PER_DAY,
+  overlappingDays,
+  rangeLength,
+  ShopHours,
+  ShopHoursRange,
+  ShopHoursResponse,
+  Weekday,
+} from "./shop-hours";
 export { FeedQuery, FeedResponse, FeedShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";

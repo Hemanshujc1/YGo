@@ -113,6 +113,11 @@ export default function Home() {
                 <Text className="text-body font-semibold text-on-primary">{strings.shopSetup.listings}</Text>
               </Pressable>
             </Link>
+            <Link href="/hours" asChild>
+              <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+                <Text className="text-body font-semibold text-on-primary">{strings.hours.open}</Text>
+              </Pressable>
+            </Link>
             <Link href="/opening-stock" asChild>
               <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
                 <Text className="text-body font-semibold text-primary">{strings.shopSetup.stock}</Text>
@@ -141,7 +146,7 @@ export default function Home() {
   );
 }
 
-/** S14's "Waiting for" list: YGo's steps as lines, the Owner's acceptance as a button (#363). */
+/** S14's "Waiting for" list: YGo's steps as lines, the Owner's own steps as buttons (#363, #371). */
 function Waiting({ check }: { check: LiveCheck }) {
   const words = strings.shopSetup.waiting;
   const items = waiting(check);
@@ -149,8 +154,8 @@ function Waiting({ check }: { check: LiveCheck }) {
   return (
     <View className="gap-3">
       <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.title}</Text>
-      {items.map((item) => item.own ? (
-        <Link key={item.blocker} href="/agreement" asChild>
+      {items.map((item) => item.href ? (
+        <Link key={item.blocker} href={item.href} asChild>
           <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
             <Text className="text-body font-semibold text-on-primary">{item.line}</Text>
           </Pressable>

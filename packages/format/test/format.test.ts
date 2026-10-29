@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatMoney, formatNumber, formatPhone, formatTime } from "../src/index";
+import { formatDate, formatDateTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -18,6 +18,10 @@ function expectIndianFormats() {
     expect(formatDate(instant)).toBe("14/10/2026");
     expect(formatTime(instant)).toBe("2:05 AM");
     expect(formatDateTime(instant)).toBe("14/10/2026, 2:05 AM");
+  });
+
+  it("shows a minute of the day as a time (#371)", () => {
+    expect([0, 540, 720, 1410].map(formatMinuteOfDay)).toEqual(["12:00 AM", "9:00 AM", "12:00 PM", "11:30 PM"]);
   });
 }
 

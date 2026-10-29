@@ -13,11 +13,10 @@ export function steps(state: ShopState): { step: Step; mark: Mark }[] {
   return STEPS.map((step, index) => ({ step, mark: index < at ? "done" : index === at ? "current" : "later" }));
 }
 
-/**
- * S14's "Waiting for" list on an Approved shop (#363), in the server's order.
- * Accepting the agreement is the one step the Owner takes, so it is `own`
- * and shows as a button; YGo clears the rest.
- */
-export function waiting(check: LiveCheck): { blocker: LiveBlocker; line: string; own: boolean }[] {
-  return check.blockers.map((blocker) => ({ blocker, line: strings.shopSetup.waiting.blockers[blocker], own: blocker === "agreement" }));
+/** The steps the Owner takes on S14, each a button to its screen; YGo clears the rest. */
+const ownSteps: Partial<Record<LiveBlocker, "/agreement" | "/hours">> = { hours: "/hours", agreement: "/agreement" };
+
+/** S14's "Waiting for" list on an Approved shop (#363), in the server's order; `href` is set on the Owner's own steps (#371). */
+export function waiting(check: LiveCheck): { blocker: LiveBlocker; line: string; href: "/agreement" | "/hours" | null }[] {
+  return check.blockers.map((blocker) => ({ blocker, line: strings.shopSetup.waiting.blockers[blocker], href: ownSteps[blocker] ?? null }));
 }
