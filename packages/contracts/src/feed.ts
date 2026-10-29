@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AddressPoint } from "./addresses";
-import { Pincode } from "./fields";
+import { Pincode, ShopPrice } from "./fields";
 
 /** `GET /v1/feed`: the Customer's pincode finds the Area, the pin tests each shop's radius (DSC-1). */
 export const FeedQuery = z.strictObject({
@@ -16,8 +16,8 @@ export const FeedShop = z.strictObject({
   name: z.string(),
   /** Whole minutes, a multiple of 5 (owner's answer 3 on #47). */
   estimatedMinutes: z.number().int().positive(),
-  /** Rupees with two decimals, from the shop's resolved rate card. */
-  deliveryFee: z.string().regex(/^\d+\.\d{2}$/),
+  /** Rupees as the shop's resolved rate card stores them, such as "30" or "25.5". */
+  deliveryFee: ShopPrice,
 });
 export type FeedShop = z.infer<typeof FeedShop>;
 

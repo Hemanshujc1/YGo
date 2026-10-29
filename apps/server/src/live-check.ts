@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { AGREEMENT_VERSION, LiveBlocker, type LiveCheck } from "@ygo/contracts";
+import { AGREEMENT_VERSION, indiaToday, LiveBlocker, type LiveCheck } from "@ygo/contracts";
 import { resolveRateCard } from "./routes/rate-cards";
 import { affectingVersion } from "./routes/shop-agreement";
 
@@ -16,8 +16,6 @@ export async function liveCheck(client: Pool | PoolClient, shopId: string, now: 
     await client.query("LOCK TABLE area_pincodes IN SHARE MODE");
     await client.query("LOCK TABLE rate_card_versions IN SHARE MODE");
   }
-  // The FSSAI expiry must be after today in India, as at Send (Q10 on #40).
-  const indiaToday = new Date(now.getTime() + 330 * 60_000).toISOString().slice(0, 10);
   const version = await affectingVersion(client, shopId);
   const row = await client.query<Record<Exclude<LiveBlocker, "rate_card">, boolean>>(
     `SELECT s.fssai_expiry <= $2::date AS fssai_expired,
@@ -31,7 +29,8 @@ export async function liveCheck(client: Pool | PoolClient, shopId: string, now: 
          WHERE c.shop_id = s.id AND c.agreement_version = $3 AND c.rate_card_version::text = $4) AS agreement
      FROM shops s JOIN shop_members m ON m.shop_id = s.id AND m.role = 'owner' JOIN accounts a ON a.id = m.account_id
      WHERE s.id = $1${lock ? " FOR SHARE OF a" : ""}`,
-    [shopId, indiaToday, AGREEMENT_VERSION, version],
+    // The FSSAI expiry must be after today in India, as at Send (Q10 on #40).
+    [shopId, indiaToday(now), AGREEMENT_VERSION, version],
   );
   const found = row.rows[0];
   if (!found) throw new Error("Shop vanished while checking it for Live");

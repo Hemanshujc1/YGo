@@ -17,13 +17,13 @@ import { strings } from "../strings";
 
 type AreaState =
   | { kind: "checking" }
-  | { kind: "served"; label: string; query: FeedQuery }
+  | { kind: "served"; label: string; query: FeedQuery | null }
   | { kind: "failed"; answer: Extract<AreaAnswer, { kind: "offline" | "error" }> };
 
 /**
  * Where shops deliver, asked again each time Home opens (#216, Q3), and the
- * shops there: C15 when no place is saved, or it has no pin (owner's answer 8
- * on #47), C03 when it isn't served. Leaving Home, or another
+ * shops there: C15 when no place is saved, C03 when it isn't served. A place
+ * with no pin asks for one instead of listing shops (owner's answer 12 on #47). Leaving Home, or another
  * account signing in, drops an answer still on its way.
  */
 function AreaLine() {
@@ -40,11 +40,10 @@ function AreaLine() {
       void (async () => {
         const place = await asks.ask(savedPlace(accountId));
         if (place === stale) return;
-        const query = place && feedQuery(place);
-        if (!place || !query) return router.replace("/location");
+        if (!place) return router.replace("/location");
         const answer = await asks.ask(askArea(api, place.pincode));
         if (answer === stale) return;
-        if (answer.kind === "served") setArea({ kind: "served", label: placeLabel({ ...place, name: answer.areaName }), query });
+        if (answer.kind === "served") setArea({ kind: "served", label: placeLabel({ ...place, name: answer.areaName }), query: feedQuery(place) });
         else if (answer.kind === "not-served") router.replace({ pathname: "/not-serviceable", params: { pincode: place.pincode, name: place.name } });
         else setArea({ kind: "failed", answer });
       })();
@@ -78,7 +77,7 @@ function AreaLine() {
         <Text className="text-body tabular-nums text-text">{words.delivering(area.label)}</Text>
         <Button label={words.change} onPress={() => router.push("/location")} variant="text" />
       </View>
-      <Shops query={area.query} />
+      {area.query ? <Shops query={area.query} /> : <Text className="mt-4 text-body text-muted">{strings.feed.noPin}</Text>}
     </>
   );
 }

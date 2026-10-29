@@ -182,9 +182,9 @@ export const CalendarDate = z.iso.date();
 /** Private shop-front JPEG limit: 10 MB (owner decision on #42). */
 export const VISIT_PHOTO_MAX_BYTES = 10_000_000;
 
-/** India's calendar date; shared by date rules, not a display formatter. */
-export function indiaToday(): string {
-  return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+/** India's calendar date at `now`; shared by date rules, not a display formatter. */
+export function indiaToday(now = new Date()): string {
+  return new Date(now.getTime() + 330 * 60_000).toISOString().slice(0, 10);
 }
 
 /** Editable visit date, no later than today in India (owner decision on #42). */

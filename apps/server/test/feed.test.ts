@@ -22,6 +22,7 @@ let app: ReturnType<typeof buildApp>;
 let admin: { authorization: string };
 let customer: { authorization: string };
 let areaId: string;
+let shopAreaId: string;
 
 const codeFor = (email: string) => mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1];
 
@@ -52,6 +53,9 @@ beforeEach(async () => {
   const area = await database.pool.query<{ id: string }>("INSERT INTO areas (name) VALUES ('Kothrud') RETURNING id");
   areaId = area.rows[0]?.id ?? "";
   await database.pool.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411038', $1)", [areaId]);
+  const shopArea = await database.pool.query<{ id: string }>("INSERT INTO areas (name) VALUES ('Paud Road') RETURNING id");
+  shopAreaId = shopArea.rows[0]?.id ?? "";
+  await database.pool.query("INSERT INTO area_pincodes (pincode, area_id) VALUES ('411045', $1)", [shopAreaId]);
 });
 
 afterEach(async () => {
@@ -61,7 +65,7 @@ afterEach(async () => {
   try { await root.connect(); await root.query(`DROP DATABASE ${name} WITH (FORCE)`); } finally { await root.end(); }
 });
 
-/** A shop `northMetres` north of the Customer, in pincode 411045 (another Area's, or none: DSC-1 doesn't need the same Area). */
+/** A shop `northMetres` north of the Customer, in pincode 411045 (another Area: DSC-1 doesn't need the Customer's). */
 async function shop(shopName: string, northMetres: number, options: { state?: string; radius?: number; fssaiExpiry?: string } = {}) {
   const id = randomUUID();
   await database.pool.query(
@@ -104,8 +108,8 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     await publish({ type: "global" }, card);
     await publish({ type: "shop", id: near }, { deliveryFee: { amount: "25.5", split: { platformPercentage: "20", shopPercentage: "80" } } });
     expect((await feed()).json()).toEqual({ shops: [
-      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.50" },
-      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30.00" },
+      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5" },
+      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30" },
     ] });
 
     // The shop's own radius decides, up to 5 km; an FSSAI expiring tomorrow still lists.
@@ -125,6 +129,13 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     await database.pool.query("UPDATE areas SET paused = false WHERE id = $1", [areaId]);
     expect((await feed("pincode=411001&latitude=18.5&longitude=73.8")).json()).toEqual({ shops: [] });
     expect(await names()).toHaveLength(4);
+
+    // The shop's own Area paused, or its pincode in no Area, takes it out too (owner's answer 13 on #47).
+    await database.pool.query("UPDATE areas SET paused = true WHERE id = $1", [shopAreaId]);
+    expect(await names()).toEqual([]);
+    await database.pool.query("UPDATE areas SET paused = false WHERE id = $1", [shopAreaId]);
+    await database.pool.query("DELETE FROM area_pincodes WHERE pincode = '411045'");
+    expect(await names()).toEqual([]);
   });
 
   it("refuses a bad query, the admin web and no sign-in", async () => {

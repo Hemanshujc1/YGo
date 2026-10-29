@@ -172,6 +172,7 @@ export const strings = {
     loading: "Finding shops near you…",
     failed: "Couldn't load shops",
     none: "No shop delivers here yet. Shops on YGo each choose how far they deliver.",
+    noPin: "Choose your place on the map to see shops that deliver to you.",
     card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
   },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client

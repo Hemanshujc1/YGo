@@ -7,7 +7,7 @@ describe("feedQuery (#369)", () => {
       .toEqual({ pincode: "411038", latitude: 18.5, longitude: 73.8 });
   });
 
-  it("has no query for a place kept without a pin, so C15 asks again", () => {
+  it("has no query for a place kept without a pin, so Home asks for one", () => {
     expect(feedQuery({ pincode: "411045", name: "Baner" })).toBeNull();
   });
 });
