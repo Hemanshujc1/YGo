@@ -125,6 +125,7 @@ export {
 } from "./areas";
 export {
   AddressLabel,
+  AddressPinBody,
   AddressPoint,
   SaveAddressBody,
   SavedAddress,

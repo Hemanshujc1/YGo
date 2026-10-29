@@ -130,7 +130,9 @@ export default function SetLocation() {
   const pincodeOnly = Platform.OS === "android" && locationOff;
 
   /** Opens Confirm location over C15, so Back returns to the results (#242, Q5). */
-  function openConfirm(params: { latitude: string; longitude: string } | { pincode: string }) {
+  function openConfirm(
+    params: { latitude: string; longitude: string } | { pincode: string; addressId?: string; flat?: string; label?: AddressLabel },
+  ) {
     if (leaving.current) return;
     leaving.current = true;
     router.push({ pathname: "/confirm-location", params });
@@ -195,7 +197,7 @@ export default function SetLocation() {
     confirmAt(found);
   }
 
-  /** A saved row becomes the chosen place and Home checks it, with no Confirm (#243, Q3). */
+  /** A saved row becomes the chosen place and Home checks it, with no Confirm (#243, Q3); one with no pin first gets one on Confirm (#373). */
   async function choose(address: SavedAddress) {
     if (leaving.current || state.status !== "signed-in") return;
     const accountId = state.account.id;
@@ -204,6 +206,7 @@ export default function SetLocation() {
     const done = await chooseAddress((place) => savePlace(accountId, place), address);
     if (done === "done") return goHome(navigation);
     leaving.current = false;
+    if (done === "needs-pin") return openConfirm({ pincode: address.pincode, addressId: address.id, flat: address.flat, label: address.label });
     setNotChosen(true);
   }
 

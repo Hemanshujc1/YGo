@@ -8,6 +8,7 @@ import {
   type Geocoder,
   newSession,
   pickPlace,
+  pincodePoint,
   type PinView,
   pinSpot,
   placeSessions,
@@ -131,6 +132,25 @@ describe("pickPlace", () => {
     expect(await pickPlace(places(null, new Error("offline")), baner.id, session)).toBe("offline");
     expect(await pickPlace(places(null, failed("TOO_MANY_REQUESTS")), baner.id, session)).toBe("too-many");
     expect(await pickPlace(places(null, failed("UNAVAILABLE")), baner.id, session)).toBe("unavailable");
+  });
+});
+
+describe("pincodePoint (#373)", () => {
+  it("opens at the first match for the pincode, picked in the search's own session", async () => {
+    const server = places({ ok: true, data: { matches: [baner, { ...baner, id: "ChIJ-other" }] } });
+    expect(await pincodePoint(server, "411045", session)).toEqual(point);
+    expect(server.calls).toEqual([`search 411045 ${session}`, `point ${baner.id} ${session}`]);
+  });
+
+  it("is not-found when Google has no place for it or the match is gone", async () => {
+    expect(await pincodePoint(places({ ok: true, data: { matches: [] } }), "411045", session)).toBe("not-found");
+    expect(await pincodePoint(places({ ok: true, data: { matches: [baner] } }, failed("NOT_FOUND")), "411045", session)).toBe("not-found");
+  });
+
+  it("names why it can't look: no answer, the hourly limit, or the search down", async () => {
+    expect(await pincodePoint(places(new Error("offline")), "411045", session)).toBe("offline");
+    expect(await pincodePoint(places(failed("TOO_MANY_REQUESTS")), "411045", session)).toBe("too-many");
+    expect(await pincodePoint(places({ ok: true, data: { matches: [baner] } }, failed("UNAVAILABLE")), "411045", session)).toBe("unavailable");
   });
 });
 

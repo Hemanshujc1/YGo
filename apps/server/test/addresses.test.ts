@@ -85,6 +85,7 @@ describe("saved addresses", () => {
       { method: "GET" as const, url: "/v1/me/addresses" },
       { method: "POST" as const, url: "/v1/me/addresses", payload: home },
       { method: "DELETE" as const, url: `/v1/me/addresses/${id}` },
+      { method: "PUT" as const, url: `/v1/me/addresses/${id}/point`, payload: { point: home.point } },
     ]) expect((await app.inject(request)).statusCode).toBe(401);
   });
 
@@ -101,6 +102,23 @@ describe("saved addresses", () => {
     expect((await remove(headers, first.json().id)).statusCode).toBe(204);
     expect(await list(headers)).toEqual([pinless.json()]);
     expect((await remove(headers, first.json().id)).json()).toEqual({ error: { code: "NOT_FOUND" } });
+  });
+
+  it("puts a pin on a saved address with none, keeping the rest, and only the account's own (#373)", async () => {
+    const asha = await customer("asha@example.com");
+    const ravi = await customer("ravi@example.com");
+    const pinless = (await save(asha.headers, { ...home, areaLine: null, point: null })).json();
+    const pin = (headers: Record<string, string>, id: string, point: unknown) =>
+      app.inject({ method: "PUT", url: `/v1/me/addresses/${id}/point`, headers, payload: { point } });
+
+    expect((await pin(ravi.headers, pinless.id, home.point)).json()).toEqual({ error: { code: "NOT_FOUND" } });
+    expect((await pin(asha.headers, pinless.id, { latitude: 0, longitude: 0 })).statusCode).toBe(400);
+    const pinned = await pin(asha.headers, pinless.id, home.point);
+    expect(pinned.statusCode).toBe(200);
+    expect(pinned.json()).toEqual({ ...pinless, point: home.point });
+    // Sent again, as a retry would, it answers the same address.
+    expect((await pin(asha.headers, pinless.id, home.point)).json()).toEqual(pinned.json());
+    expect(await list(asha.headers)).toEqual([pinned.json()]);
   });
 
   it("refuses a pin outside India, a missing flat and a bad pincode", async () => {

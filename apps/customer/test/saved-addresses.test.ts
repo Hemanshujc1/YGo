@@ -60,17 +60,17 @@ describe("chooseAddress", () => {
     expect(kept).toEqual([{ pincode: "411005", areaLine: "Prabhat Road, Shivaji Nagar, Pune", point: home.point }]);
   });
 
-  it("keeps the pincode alone for a place saved without a pin", async () => {
+  it("asks for a pin, keeping nothing, for a place saved without one or with one that breaks today's rules (#373)", async () => {
     const kept: Place[] = [];
-    expect(await chooseAddress(async (place) => void kept.push(place), typed)).toBe("done");
-    expect(kept).toEqual([{ pincode: "411005" }]);
+    expect(await chooseAddress(async (place) => void kept.push(place), typed)).toBe("needs-pin");
+    expect(await chooseAddress(async (place) => void kept.push(place), { ...home, point: { latitude: 51.5, longitude: -0.12 } })).toBe("needs-pin");
+    expect(kept).toEqual([]);
   });
 
-  it("leaves out a pin or area line that breaks today's rules", async () => {
+  it("leaves out an area line that breaks today's rules", async () => {
     const kept: Place[] = [];
-    const old = { ...home, areaLine: "   ", point: { latitude: 51.5, longitude: -0.12 } };
-    expect(await chooseAddress(async (place) => void kept.push(place), old)).toBe("done");
-    expect(kept).toEqual([{ pincode: "411005" }]);
+    expect(await chooseAddress(async (place) => void kept.push(place), { ...home, areaLine: "   " })).toBe("done");
+    expect(kept).toEqual([{ pincode: "411005", point: home.point }]);
   });
 
   it("is not-saved when the phone can't keep it, or the pincode breaks the rule", async () => {

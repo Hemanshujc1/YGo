@@ -168,6 +168,19 @@ export async function pickPlace(places: Places, id: string, session: string): Pr
   return answer.code === "NOT_FOUND" ? "gone" : trouble(answer.code);
 }
 
+/**
+ * Where the map opens for a typed pincode (#373, owner's answers 1 and 5): the
+ * first match of a place search for it, in one Google session that its pick
+ * ends. "not-found" when Google has no place for it.
+ */
+export async function pincodePoint(places: Places, pincode: string, session: string): Promise<AddressPoint | PlaceTrouble | "not-found"> {
+  const found = await searchPlaces(places, pincode, session);
+  if (typeof found === "string") return found === "bad-text" ? "not-found" : found;
+  if (!found[0]) return "not-found";
+  const point = await pickPlace(places, found[0].id, session);
+  return point === "gone" ? "not-found" : point;
+}
+
 /** Confirm's body for the server, or null when "Flat, house or floor" breaks the server's rule (#217, answer 7). */
 export function addressBody(place: Place, label: AddressLabel, flat: string): SaveAddressBody | null {
   const parsed = SaveAddressBody.safeParse({

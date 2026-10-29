@@ -29,20 +29,19 @@ export async function loadAddresses(api: { savedAddresses(): Promise<ApiResult<S
 /**
  * Tapping a saved row (#243, Q3): it becomes the chosen place on the phone,
  * with its pin and area line, and Home then checks its area. Nothing goes to
- * the server. "not-saved" when the phone can't keep it. A pin or area line
- * stored before today's rules is left out, as the phone would drop it on reading.
+ * the server. "not-saved" when the phone can't keep it. An area line stored
+ * before today's rules is left out, as the phone would drop it on reading.
+ * A row with no pin, or one that breaks today's rules, is kept nowhere:
+ * "needs-pin" sends it to Confirm to place one first (#373, owner's answer 6).
  */
-export async function chooseAddress(keep: (place: Place) => Promise<void>, address: SavedAddress): Promise<"done" | "not-saved"> {
+export async function chooseAddress(keep: (place: Place) => Promise<void>, address: SavedAddress): Promise<"done" | "not-saved" | "needs-pin"> {
   const place = typedPlace(address.pincode);
   if (!place) return "not-saved";
-  const areaLine = AddressAreaLine.safeParse(address.areaLine);
   const point = AddressPoint.safeParse(address.point);
+  if (!point.success) return "needs-pin";
+  const areaLine = AddressAreaLine.safeParse(address.areaLine);
   try {
-    await keep({
-      ...place,
-      ...(areaLine.success && { areaLine: areaLine.data }),
-      ...(point.success && { point: point.data }),
-    });
+    await keep({ ...place, ...(areaLine.success && { areaLine: areaLine.data }), point: point.data });
   } catch {
     return "not-saved";
   }
