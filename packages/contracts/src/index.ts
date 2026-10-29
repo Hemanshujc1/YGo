@@ -231,4 +231,4 @@ export {
   ShopOpenStatus,
   Weekday,
 } from "./shop-hours";
-export { FeedQuery, FeedResponse, FeedShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
+export { FeedQuery, FeedResponse, FeedShop, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";

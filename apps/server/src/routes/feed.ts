@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import {
-  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type RateCardValues, type ShopHoursRange,
+  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type FeedShop, type RateCardValues, type ShopHoursRange,
   ShopPageParams, ShopPageResponse, type ShopPagePack, type ShopPageProduct,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -16,14 +16,14 @@ export function estimatedMinutes(metres: number): number {
   return Math.ceil((10 + (4 * metres) / 1000) / 5) * 5;
 }
 
-type ServingShop = ShopPageResponse["shop"];
+export type ServingShop = ShopPageResponse["shop"];
 
 /**
  * The shops that can take this place's orders today: every rule of C04 (owner's answers 6 and 13 on #47).
  * Open shops come first, then closed ones, nearest first in each (owner's answer 9 on #371).
  * C05 asks for one shop by `shopId`, so a shop page follows the feed's rules exactly (owner's answer 10 on #47).
  */
-async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitude }: FeedQuery, shopId: string | null = null): Promise<ServingShop[]> {
+export async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitude }: FeedQuery, shopId: string | null = null): Promise<ServingShop[]> {
   const rows = await pool.query<{ id: string; name: string; metres: number; fssaiNumber: string; open_override: boolean | null; open_override_until: Date | null }>(
     `WITH here AS (SELECT ${pointFrom("$2", "$3")} AS point)
      SELECT s.id, s.shop_name AS name, ST_Distance(s.location, here.point) AS metres, s.fssai_number AS "fssaiNumber",
@@ -62,6 +62,10 @@ async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitud
   return shops.filter((shop) => shop !== undefined).sort((a, b) => Number(b.open) - Number(a.open));
 }
 
+/** The C04 card's part of a serving shop; C16 search shows the same card (#398). */
+export const feedCard = ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday }: ServingShop): FeedShop =>
+  ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday });
+
 type ListingRow = Omit<ShopPageProduct, "packs"> & ShopPagePack & { category: string };
 
 export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
@@ -72,7 +76,7 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
   app.get("/v1/feed", { schema: { querystring: FeedQuery, response: { 200: FeedResponse, ...errors } } }, async (request, reply) => {
     if (!await mobileSignedIn(request, reply, auth)) return reply;
     const shops = await servingShops(pool, clock.now(), request.query as FeedQuery);
-    return { shops: shops.map(({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday }) => ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday })) };
+    return { shops: shops.map(feedCard) };
   });
 
   // C05 Shop page (#370): 404 for a shop this place can't order from, as for one that doesn't exist.

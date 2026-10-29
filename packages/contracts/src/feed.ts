@@ -76,3 +76,19 @@ export const ShopPageResponse = z.strictObject({
   groups: z.array(z.strictObject({ category: z.string(), products: z.array(ShopPageProduct) })),
 });
 export type ShopPageResponse = z.infer<typeof ShopPageResponse>;
+
+/** `GET /v1/search` (#398, DSC-3): the feed's query and the typed text, which needs 2 characters. */
+export const SearchQuery = FeedQuery.extend({ q: z.string().trim().min(2).max(60) });
+export type SearchQuery = z.infer<typeof SearchQuery>;
+
+/** A matching product, in stock when any pack the shop lists has stock (owner's answer 3 on #398); no prices. */
+export const SearchProduct = z.strictObject({ id: z.uuid(), name: z.string(), brand: z.string().nullable(), inStock: z.boolean() });
+export type SearchProduct = z.infer<typeof SearchProduct>;
+
+/** A C04 card with up to 5 matching products A to Z and how many more match (owner's answer 2 on #398); none when only the shop's name matched. */
+export const SearchShop = FeedShop.extend({ products: z.array(SearchProduct).max(5), moreProducts: z.number().int().min(0) });
+export type SearchShop = z.infer<typeof SearchShop>;
+
+/** The feed's shops in the feed's order, leaving out each one with no match. */
+export const SearchResponse = z.strictObject({ shops: z.array(SearchShop) });
+export type SearchResponse = z.infer<typeof SearchResponse>;

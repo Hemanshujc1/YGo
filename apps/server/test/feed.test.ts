@@ -156,10 +156,10 @@ async function category(categoryName: string, parentId: string | null = null) {
 
 /** A published product with one listed pack per entry; `stock` records an opening stock in base units. */
 async function product(shopId: string, categoryId: string, productName: string, baseUnit: "each" | "kg",
-  packs: Array<{ quantity: string; price: string; mrp: string; stock?: string; available?: boolean }>) {
+  packs: Array<{ quantity: string; price: string; mrp: string; stock?: string; available?: boolean }>, brand: string | null = null) {
   const row = await database.pool.query<{ id: string }>(
-    `INSERT INTO master_products (name, category_id, base_unit, classification, published, image_256_key, image_512_key, image_1024_key)
-     VALUES ($1, $2, $3, $4, true, 'p/256.webp', 'p/512.webp', 'p/1024.webp') RETURNING id`, [productName, categoryId, baseUnit, baseUnit === "each" ? "counted" : "measured"]);
+    `INSERT INTO master_products (name, brand, category_id, base_unit, classification, published, image_256_key, image_512_key, image_1024_key)
+     VALUES ($1, $5, $2, $3, $4, true, 'p/256.webp', 'p/512.webp', 'p/1024.webp') RETURNING id`, [productName, categoryId, baseUnit, baseUnit === "each" ? "counted" : "measured", brand]);
   const productId = row.rows[0]?.id ?? "";
   const listings: string[] = [];
   for (const pack of packs) {
@@ -335,5 +335,88 @@ describe("Open or closed for Customers (#381)", () => {
     // Friday 11 Jan, after closing: closed for the night, not a holiday, and Saturday's holiday is in the week.
     await at("2030-01-11T22:00:00");
     expect((await page(id)).json().shop).toMatchObject({ open: false, holiday: false, opensAt: iso("2030-01-13T09:00:00"), holidays: [6] });
+  });
+});
+
+const search = (q: string, headers: Record<string, string> = customer) =>
+  app.inject({ method: "GET", url: `/v1/search?pincode=411038&latitude=18.5&longitude=73.8&q=${encodeURIComponent(q)}`, headers });
+/** Each matching shop's name with its products as "name in|out", and how many more match. */
+const found = async (q: string) => ((await search(q)).json().shops as Array<{ name: string; products: Array<{ name: string; inStock: boolean }>; moreProducts: number }>)
+  .map(({ name, products, moreProducts }) => [name, products.map((item) => `${item.name} ${item.inStock ? "in" : "out"}`), moreProducts]);
+
+describe("Customer search (#398, DSC-3)", () => {
+  it("matches every typed word in a product's name, its brand or the shop's name, at word starts, through search terms and near spellings", async () => {
+    const dairy = await shop("Near Dairy", 300);
+    const kirana = await shop("Shree Kirana", 800);
+    await shop("Edge Stores", 2500); // beyond its radius
+    await publish({ type: "global" }, card);
+    const groceries = await category("Groceries");
+    await product(dairy, groceries, "Toned Milk", "each", [{ quantity: "1", price: "30", mrp: "30", stock: "5" }], "Amul");
+    await product(dairy, groceries, "Toor Dal", "kg", [{ quantity: "1", price: "135", mrp: "150", stock: "0" }, { quantity: "0.5", price: "70", mrp: "70" }]);
+    await product(kirana, groceries, "Toor Dal", "kg", [{ quantity: "0.5", price: "70", mrp: "70", stock: "0" }, { quantity: "1", price: "130", mrp: "150", stock: "2" }], "Tata");
+    await product(kirana, groceries, "Onion", "kg", [{ quantity: "1", price: "40", mrp: "40", stock: "9" }]);
+    await product(kirana, groceries, "Sandal Soap", "each", [{ quantity: "1", price: "40", mrp: "40", stock: "9" }]);
+    await product(kirana, groceries, "Tomato", "kg", [{ quantity: "1", price: "30", mrp: "30", stock: "9" }]);
+    await product(kirana, groceries, "Crème Fraîche", "each", [{ quantity: "1", price: "90", mrp: "90", stock: "1" }]);
+    await product(kirana, groceries, "Hidden Onion", "kg", [{ quantity: "1", price: "40", mrp: "40", stock: "9", available: false }]);
+
+    // Word starts only: "dal" finds Toor Dal, not Sandal; a product is in stock when any pack is (owner's answers 1 and 3 on #398).
+    expect(await found("dal")).toEqual([["Near Dairy", ["Toor Dal out"], 0], ["Shree Kirana", ["Toor Dal in"], 0]]);
+    expect(await found("ON")).toEqual([["Shree Kirana", ["Onion in"], 0]]);
+    // Brand, accents, a near spelling from 4 letters, and words split across the shop's name and a product.
+    expect(await found("amul")).toEqual([["Near Dairy", ["Toned Milk in"], 0]]);
+    expect(await found("creme")).toEqual([["Shree Kirana", ["Crème Fraîche in"], 0]]);
+    expect(await found("tomatoe")).toEqual([["Shree Kirana", ["Tomato in"], 0]]);
+    expect(await found("potato")).toEqual([]);
+    expect(await found("onn")).toEqual([]); // under 4 letters a word must match as typed
+    expect(await found("kirana dal")).toEqual([["Shree Kirana", ["Toor Dal in"], 0]]);
+    expect(await found("milk dal")).toEqual([]);
+    // A shop matched by its name alone shows just its card, and a name that only starts like the search doesn't hide its products.
+    expect(await found("near dairy")).toEqual([["Near Dairy", [], 0]]);
+    const milkman = await shop("Milkman Stores", 500);
+    await product(milkman, groceries, "Toned Milk", "each", [{ quantity: "1", price: "30", mrp: "30", stock: "5" }], "Gokul");
+    expect(await found("milk")).toEqual([["Near Dairy", ["Toned Milk in"], 0], ["Milkman Stores", ["Toned Milk in"], 0]]);
+    expect(await found("milkman")).toEqual([["Milkman Stores", [], 0]]);
+
+    // Search terms: one word, and a phrase only when all its words are typed (owner's answer 4 on #398).
+    await database.pool.query("INSERT INTO search_terms (typed_word, catalog_word) VALUES ('kanda', 'onion'), ('arhar dal', 'toor dal')");
+    expect(await found("Kanda")).toEqual([["Shree Kirana", ["Onion in"], 0]]);
+    expect(await found("arhar dal")).toEqual([["Near Dairy", ["Toor Dal out"], 0], ["Shree Kirana", ["Toor Dal in"], 0]]);
+    expect(await found("arhar")).toEqual([]);
+    expect(await found("!!")).toEqual([]);
+  });
+
+  it("puts open shops first, shows up to 5 products A to Z with how many more, and follows the feed's rules", async () => {
+    const closed = await shop("Near Dairy", 300);
+    const open = await shop("Far Kirana", 1500);
+    await publish({ type: "global" }, card);
+    await setHours(closed, [[3, h(9), h(21)]]);
+    const groceries = await category("Groceries");
+    for (const [id, brand] of [[closed, "Daawat"], [open, "India Gate"]] as const) await product(id, groceries, "Rice", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3" }], brand);
+    for (const grain of ["Basmati", "Brown", "Jeera", "Kolam", "Sona", "Red"]) {
+      await product(open, groceries, `${grain} Rice`, "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3" }]);
+    }
+    await at("2030-01-01T10:00:00");
+    const response = await search("rice");
+    expect(response.statusCode).toBe(200);
+    const shops = response.json().shops as Array<Record<string, unknown>>;
+    expect(shops[0]).toMatchObject({ id: open, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null, holiday: false, moreProducts: 2 });
+    expect(await found("rice")).toEqual([
+      ["Far Kirana", ["Basmati Rice in", "Brown Rice in", "Jeera Rice in", "Kolam Rice in", "Red Rice in"], 2],
+      ["Near Dairy", ["Rice in"], 0],
+    ]);
+    expect(shops[1]).toMatchObject({ open: false, opensAt: iso("2030-01-02T09:00:00") });
+
+    await database.pool.query("UPDATE areas SET paused = true WHERE id = $1", [shopAreaId]);
+    expect(await found("rice")).toEqual([]);
+  });
+
+  it("refuses a search shorter than 2 or longer than 60 characters, the admin web and no sign-in", async () => {
+    expect((await search(" a ")).statusCode).toBe(400);
+    expect((await search("a".repeat(61))).statusCode).toBe(400);
+    expect((await search("a".repeat(60))).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/search?pincode=411038&latitude=18.5&longitude=73.8", headers: customer })).statusCode).toBe(400);
+    expect((await search("rice", admin)).statusCode).toBe(403);
+    expect((await search("rice", {})).statusCode).toBe(401);
   });
 });
