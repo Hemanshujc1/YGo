@@ -128,7 +128,11 @@ describe("Admin web", () => {
     fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
     fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewCategory }), { target: { value: stationery.id } });
     await waitFor(() => expect(api.getEffectiveRateCard).toHaveBeenCalledWith({ shopId: shop.id, categoryId: stationery.id, usesPickup: false, usesBargain: false }));
-    await waitFor(() => expect(screen.getAllByText(strings.rateCardSources.global).length).toBeGreaterThan(1));
+    const row = await screen.findByRole("row", { name: /Minimum cart/ });
+    await waitFor(() => expect(within(row).getByText(strings.rateCardSources.global)).toBeTruthy());
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[1]?.textContent).toBe(strings.rateCardSources.global);
+    expect(cells[2]?.textContent).toBe('"0"');
     fireEvent.click(screen.getByRole("button", { name: strings.rateCardPublish }));
     expect(api.publishRateCard).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Update global minimum" } });
@@ -214,7 +218,7 @@ describe("Admin web", () => {
     expect(await screen.findByText(strings.rateCardDraftMasked(strings.rateCardSources.shop))).toBeTruthy();
   });
 
-  it("shows the broader value and source after clearing a shop override", async () => {
+  it("shows the broader draft value without a source badge after clearing a shop override", async () => {
     const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
     setup("/rate-cards", {
       listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
@@ -234,7 +238,8 @@ describe("Admin web", () => {
     const draftCell = within(row).getAllByRole("cell")[2];
     if (!draftCell) throw new Error("Draft cell is missing");
     await waitFor(() => expect(draftCell.textContent).toContain('"20"'));
-    expect(within(draftCell).getByText(strings.rateCardSources.category)).toBeTruthy();
+    expect(draftCell.textContent).toBe('"20"');
+    expect(within(row).getAllByRole("cell")[1]?.textContent).toBe(strings.rateCardSources.shop);
   });
 
   it("redirects an unauthenticated import-page visit to sign-in", async () => {
