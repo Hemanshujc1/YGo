@@ -211,6 +211,13 @@
       "when": 1793280272925,
       "tag": "0029_shop_holidays",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793284049039,
+      "tag": "0030_search_terms",
+      "breakpoints": true
     }
   ]
 }

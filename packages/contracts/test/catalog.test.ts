@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreateCategoryBody, CreateMasterProductBody, EditCategoryBody, EditMasterProductBody, ErrorEnvelope, invalidFields } from "../src/index";
+import { CreateCategoryBody, CreateMasterProductBody, EditCategoryBody, EditMasterProductBody, ErrorEnvelope, invalidFields, SearchTermBody } from "../src/index";
 
 const body = {
   name: "Apples",
@@ -44,5 +44,17 @@ describe("master product contracts", () => {
   it("carries a draft ID with an unavailable response for image retries", () => {
     const error = { error: { code: "UNAVAILABLE", draftId: "00000000-0000-4000-8000-000000000203" } };
     expect(ErrorEnvelope.parse(error)).toEqual(error);
+  });
+});
+
+describe("search term contracts (#397)", () => {
+  it("keeps English letters and spaces, trimmed, collapsed and lower case", () => {
+    expect(SearchTermBody.parse({ typedWord: "  Kanda ", catalogWord: "Toor   DAL" })).toEqual({ typedWord: "kanda", catalogWord: "toor dal" });
+  });
+
+  it.each(["k", "a".repeat(41), "kanda2", "कांदा", "kanda-bhaji", "   "])("refuses %j", (word) => {
+    const result = SearchTermBody.safeParse({ typedWord: word, catalogWord: word });
+    if (result.success) throw new Error("expected the word to be refused");
+    expect(invalidFields(result.error)).toEqual(["typedWord", "catalogWord"]);
   });
 });

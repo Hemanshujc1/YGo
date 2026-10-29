@@ -347,6 +347,43 @@ describe("Admin routes and browser sessions", () => {
     expect(audit.rows.every((row) => row.target_type === "category")).toBe(true);
   });
 
+  it("adds, edits and removes search terms with a record of each (#397)", async () => {
+    const token = (await signIn("/v1/admin/auth")).json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const list = async () => (await app.inject({ method: "GET", url: "/v1/admin/search-terms", headers })).json().terms;
+    const add = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/search-terms", headers, payload });
+    expect(await list()).toEqual([]);
+    const kanda = await add({ typedWord: " Kanda ", catalogWord: "ONION" });
+    expect(kanda.statusCode).toBe(201);
+    const id = kanda.json().id as string;
+    expect(kanda.json()).toEqual({ id, typedWord: "kanda", catalogWord: "onion" });
+    expect((await add({ typedWord: "kanda", catalogWord: "onion" })).json()).toEqual({ error: { code: "SEARCH_TERM_IN_USE" } });
+    // One typed word may mean several catalog words (owner's answer 3 on #49).
+    expect((await add({ typedWord: "dal", catalogWord: "toor dal" })).statusCode).toBe(201);
+    const moong = (await add({ typedWord: "dal", catalogWord: "moong dal" })).json().id as string;
+    expect((await add({ typedWord: "kanda2", catalogWord: "onion" })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["typedWord"] } });
+
+    const edit = (termId: string, payload: object) => app.inject({ method: "PUT", url: `/v1/admin/search-terms/${termId}`, headers, payload });
+    expect((await edit(id, { typedWord: "kaanda", catalogWord: "onion" })).json()).toEqual({ id, typedWord: "kaanda", catalogWord: "onion" });
+    expect((await edit(moong, { typedWord: "dal", catalogWord: "toor dal" })).statusCode).toBe(409);
+    expect((await edit(randomUUID(), { typedWord: "dal", catalogWord: "urad dal" })).statusCode).toBe(404);
+    // Saving unchanged words records nothing (the five rows below).
+    expect((await edit(id, { typedWord: "kaanda", catalogWord: "onion" })).statusCode).toBe(200);
+
+    const remove = (termId: string) => app.inject({ method: "DELETE", url: `/v1/admin/search-terms/${termId}`, headers });
+    expect((await remove(moong)).statusCode).toBe(204);
+    expect((await remove(moong)).statusCode).toBe(404);
+    expect((await list()).map((term: { typedWord: string; catalogWord: string }) => `${term.typedWord}:${term.catalogWord}`)).toEqual(["dal:toor dal", "kaanda:onion"]);
+
+    const audit = await database.pool.query("SELECT action, reason FROM admin_actions WHERE target_type = 'search_term' ORDER BY created_at, action");
+    expect(audit.rows).toEqual(expect.arrayContaining([
+      { action: "search_term.create", reason: "Search term added: kanda → onion" },
+      { action: "search_term.edit", reason: "Search term changed: kanda → onion to kaanda → onion" },
+      { action: "search_term.delete", reason: "Search term removed: dal → moong dal" },
+    ]));
+    expect(audit.rows).toHaveLength(5);
+  });
+
   it("lists and creates only for Admin web sessions, with an atomic action", async () => {
     const signed = await signIn("/v1/admin/auth");
     const token = signed.json().accessToken as string;
@@ -417,6 +454,10 @@ describe("Admin routes and browser sessions", () => {
       { method: "POST", url: "/v1/admin/areas", payload: { name: "Baner", pincodes: ["411045"], reason: "New Area" } },
       { method: "GET", url: "/v1/admin/categories" },
       { method: "POST", url: "/v1/admin/categories", payload: { name: "Snacks" } },
+      { method: "GET", url: "/v1/admin/search-terms" },
+      { method: "POST", url: "/v1/admin/search-terms", payload: { typedWord: "kanda", catalogWord: "onion" } },
+      { method: "PUT", url: `/v1/admin/search-terms/${id}`, payload: { typedWord: "kanda", catalogWord: "onion" } },
+      { method: "DELETE", url: `/v1/admin/search-terms/${id}` },
       { method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${id}` },
       { method: "POST", url: "/v1/admin/rate-cards/publish", payload: { scope: { type: "global" }, values: {}, reason: "No access" } },
       { method: "POST", url: "/v1/admin/price-simulator", payload: { shopId: id, lines: [{ listingId: id, count: 1 }] } },

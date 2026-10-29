@@ -97,6 +97,16 @@ export const AddressAreaLine = z.string().trim().min(1).max(200);
 /** C15's place search text, trimmed, 1 to 100 characters, with no control characters such as NUL (#257, as #269). */
 export const PlaceSearchText = z.string().trim().min(1).max(100).refine((value) => !/\p{Cc}/u.test(value));
 
+/**
+ * One side of a search term (DSC-3): English letters and spaces, 2 to 40
+ * characters once trimmed and inner spaces are collapsed, kept in lower case
+ * (owner's answer 3 on #49).
+ */
+export const SearchWord = z
+  .string()
+  .overwrite((value) => value.trim().replace(/\s+/g, " ").toLowerCase())
+  .regex(/^[a-z ]{2,40}$/);
+
 /** Master product name, trimmed, 1 to 200 characters (#203); no PostgreSQL-unrepresentable NUL (#269). */
 export const ProductName = z.string().trim().min(1).max(200).refine((value) => !value.includes("\0"));
 

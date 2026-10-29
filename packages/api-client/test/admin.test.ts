@@ -227,6 +227,26 @@ describe("Admin browser API client", () => {
     expect(calls.slice(1).every(({ headers }) => headers.get("authorization") === "Bearer access-1")).toBe(true);
   });
 
+  it("lists, adds, edits and removes search terms with the Admin session (#397)", async () => {
+    const term = { id: "00000000-0000-4000-8000-000000000397", typedWord: "kanda", catalogWord: "onion" };
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });
+      if (method === "GET") return answer(200, { terms: [term] });
+      if (method === "DELETE") return new Response(null, { status: 204 });
+      return answer(method === "POST" ? 201 : 200, term);
+    });
+    expect(await client.listSearchTerms()).toEqual({ ok: true, data: { terms: [term] } });
+    expect(await client.createSearchTerm({ typedWord: "kanda", catalogWord: "onion" })).toEqual({ ok: true, data: term });
+    expect(await client.editSearchTerm(term.id, { typedWord: "kanda", catalogWord: "onion" })).toEqual({ ok: true, data: term });
+    expect(await client.removeSearchTerm(term.id)).toEqual({ ok: true, data: undefined });
+    expect(calls.slice(1).map(({ path, method }) => [path, method])).toEqual([
+      ["/v1/admin/search-terms", "GET"],
+      ["/v1/admin/search-terms", "POST"],
+      [`/v1/admin/search-terms/${term.id}`, "PUT"],
+      [`/v1/admin/search-terms/${term.id}`, "DELETE"],
+    ]);
+  });
+
   it("lists, creates and edits master products with the Admin session", async () => {
     const { client, calls } = setup(({ path, method }) => {
       if (path.endsWith("/refresh")) return answer(200, { accessToken: "access-1", account });

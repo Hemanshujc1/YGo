@@ -401,5 +401,6 @@ export const strings = {
     SHOP_NOT_LIVE: "The open/closed switch works once your shop is Live.",
     HOLIDAY_OVERLAP: "These dates overlap another holiday. Change that one instead.",
     TOO_MANY_HOLIDAYS: "You can have up to 20 holidays coming up. Remove one to add another.",
+    SEARCH_TERM_IN_USE: "This search term already exists.",
   } satisfies Record<ErrorCode, string>,
 };
