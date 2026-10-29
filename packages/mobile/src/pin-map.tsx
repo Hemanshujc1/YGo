@@ -65,8 +65,9 @@ export function PinMap({
   const last = useRef(start);
   const map = useRef<MapView>(null);
   useImperativeHandle(ref, () => ({ spot: () => spotNow(map.current, last.current) }), []);
+  // Keep the map in one native parent when locking changes pointer events (#387).
   return (
-    <View className={className} pointerEvents={locked ? "none" : "auto"}>
+    <View collapsable={false} className={className} pointerEvents={locked ? "none" : "auto"}>
       <MapView
         ref={map}
         className="flex-1"
