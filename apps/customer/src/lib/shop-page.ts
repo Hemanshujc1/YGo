@@ -23,15 +23,21 @@ export function shopSections(groups: ShopPageResponse["groups"]): Array<{ key: s
 
 const hoursWords = strings.shop.hours;
 
-/** "9:00 AM – 1:00 PM, 4:00 PM – 9:00 PM", or "Open 24 hours"; a close at or before the open ends the next day (#371). */
+/**
+ * "9:00 AM – 1:00 PM, 4:00 PM – 9:00 PM"; a close at or before the open ends the next day (#371).
+ * A 24-hour range reads "All day" from 12:00 AM, else "24 hours from 9:00 AM".
+ */
 function rangesText(ranges: readonly ShopHoursRange[]): string {
-  return ranges.map(({ opens, closes }) => opens === closes ? hoursWords.allDay : `${formatMinuteOfDay(opens)} – ${formatMinuteOfDay(closes)}`).join(", ");
+  return ranges.map(({ opens, closes }) => opens !== closes
+    ? `${formatMinuteOfDay(opens)} – ${formatMinuteOfDay(closes)}`
+    : opens === 0 ? hoursWords.wholeDay : hoursWords.dayFrom(formatMinuteOfDay(opens))).join(", ");
 }
 
 /**
  * C05's hours line from what the server decided (owner's answers 10 on #371 and 1–2 on #381):
- * "Open today, …" inside one of today's ranges, "Open now · until …" when open otherwise,
- * "Open 24 hours" for a shop that never closes, and "Closed now · opens …".
+ * "Open today, …" inside one of today's ranges ("Open all day today" for a whole day),
+ * "Open now · until …" when open otherwise, "Open 24 hours" only for a shop that never
+ * closes all week, and "Closed now · opens …".
  */
 export function hoursLine(shop: ShopPageResponse["shop"], now: number): string {
   const when = (at: string) => formatDayTime(at, now, strings.feed.tomorrow);
@@ -41,7 +47,10 @@ export function hoursLine(shop: ShopPageResponse["shop"], now: number): string {
   // Minutes past midnight in India; a range running past midnight covers the rest of today.
   const minute = (Math.floor(now / 60_000) + 330) % 1440;
   const inToday = today.some(({ opens, closes }) => closes > opens ? minute >= opens && minute < closes : minute >= opens);
-  return inToday ? hoursWords.openToday(rangesText(today)) : hoursWords.openUntil(when(shop.closesAt));
+  if (!inToday) return hoursWords.openUntil(when(shop.closesAt));
+  // "Open 24 hours" is kept for a shop that never closes; one whole day reads on its own.
+  const [only] = today;
+  return today.length === 1 && only?.opens === 0 && only.closes === 0 ? hoursWords.allDayToday : hoursWords.openToday(rangesText(today));
 }
 
 /** The week behind the line, Monday first: each day's ranges or "Closed", today marked (owner's answer 3 on #381). */

@@ -198,7 +198,12 @@ export const strings = {
       openToday: (ranges: string) => `Open today, ${ranges}`,
       openUntil: (when: string) => `Open now · until ${when}`,
       closedNow: (when: string) => `Closed now · opens ${when}`,
+      // Only for a shop that never closes all week.
       allDay: "Open 24 hours",
+      // A day open from 12:00 AM to the next 12:00 AM, in a week that has closed time.
+      allDayToday: "Open all day today",
+      wholeDay: "All day",
+      dayFrom: (time: string) => `24 hours from ${time}`,
       closed: "Closed",
       days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
       week: "Opening hours for the week",

@@ -56,11 +56,21 @@ describe("opening hours on C04 and C05 (#381)", () => {
     expect(hoursLine({ ...shop, open: false, closesAt: null, opensAt: iso("2030-01-01T16:00:00") }, ist("2030-01-01T14:00:00"))).toBe("Closed now · opens 4:00 PM");
   });
 
+  it("reads a 24-hour day naturally in a week that closes, keeping \"Open 24 hours\" for a shop that never does", () => {
+    // Wednesday runs 12:00 AM – 12:00 AM, but the shop closes on Thursday, so it has a closing time.
+    const wednesday = { ...shop, today: 3, closesAt: iso("2030-01-03T00:00:00") };
+    expect(hoursLine(wednesday, ist("2030-01-02T10:00:00"))).toBe("Open all day today");
+    const fromNine = { ...shop, today: 4, closesAt: iso("2030-01-04T09:00:00"), hours: [{ weekday: 4, opens: h(9), closes: h(9) }] };
+    expect(hoursLine(fromNine, ist("2030-01-03T10:00:00"))).toBe("Open today, 24 hours from 9:00 AM");
+    expect(weekRows(fromNine.hours, 4)[3]).toEqual({ day: "Thursday", text: "24 hours from 9:00 AM", today: true });
+    expect(hoursLine({ ...wednesday, closesAt: null }, ist("2030-01-02T10:00:00"))).toBe("Open 24 hours");
+  });
+
   it("lists the week Monday first with today marked, closed days and 24-hour days", () => {
     expect(weekRows(shop.hours, 2).slice(0, 4)).toEqual([
       { day: "Monday", text: "10:00 PM – 2:00 AM", today: false },
       { day: "Tuesday", text: "9:00 AM – 1:00 PM, 4:00 PM – 9:00 PM", today: true },
-      { day: "Wednesday", text: "Open 24 hours", today: false },
+      { day: "Wednesday", text: "All day", today: false },
       { day: "Thursday", text: "Closed", today: false },
     ]);
   });
