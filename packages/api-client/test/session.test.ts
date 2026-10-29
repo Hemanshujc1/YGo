@@ -340,7 +340,7 @@ describe("each call", () => {
   });
 
   it("asks the feed with the pincode and the pin (#369)", async () => {
-    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00", open: false, opensAt: "2030-01-02T03:30:00.000Z" };
+    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00", open: false, opensAt: "2030-01-02T03:30:00.000Z", holiday: false };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
     await client.verifyCode(signIn);
     expect(await client.feed({ pincode: "411038", latitude: 18.5, longitude: 73.8 })).toEqual({ ok: true, data: { shops: [shop] } });
@@ -351,8 +351,8 @@ describe("each call", () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
     const page = {
       shop: {
-        id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, minimumOrder: "100",
-        fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2,
+        id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, holiday: false, minimumOrder: "100",
+        fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2, holidays: [],
       },
       groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
         { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
@@ -386,6 +386,22 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/shop-open" });
     expect(await client.setShopOpen({ open: false })).toEqual({ ok: true, data: status });
     expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-open", body: { open: false } });
+  });
+
+  it("reads, adds, edits and removes the Owner's holidays (#382)", async () => {
+    const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
+    const list = { upcoming: [{ id, starts: "2030-01-05", ends: "2030-01-06" }], past: [] };
+    const dates = { starts: "2030-01-05", ends: "2030-01-06" };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, list));
+    await client.verifyCode(signIn);
+    expect(await client.shopHolidays()).toEqual({ ok: true, data: list });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/shop-holidays" });
+    expect(await client.saveShopHoliday(dates)).toEqual({ ok: true, data: list });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-holidays", body: dates });
+    await client.saveShopHoliday(dates, id);
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: `/v1/me/shop-holidays/${id}`, body: dates });
+    expect(await client.removeShopHoliday(id)).toEqual({ ok: true, data: list });
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: `/v1/me/shop-holidays/${id}` });
   });
 
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {

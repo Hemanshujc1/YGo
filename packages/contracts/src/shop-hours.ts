@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CalendarDate } from "./fields";
 
 // Weekly opening hours (S32's hours, #371). Owner's answers 3, 4 and 20 on #371 (2026-10-29).
 
@@ -78,3 +79,38 @@ export const ShopOpenStatus = z.strictObject({
   nextOpening: z.iso.datetime().nullable(),
 });
 export type ShopOpenStatus = z.infer<typeof ShopOpenStatus>;
+
+// Holidays (S32's hours screen, #382). Owner's answers 1–12 on #382 and 1–4 of the second round (2026-10-29).
+
+/** A holiday may end at most this many days after today in India. */
+export const HOLIDAY_DAYS_AHEAD = 180;
+/** Holidays that have not ended yet, at most. */
+export const MAX_UPCOMING_HOLIDAYS = 20;
+
+/** The date `days` after an India calendar date such as "2030-01-01". */
+export function addDays(date: string, days: number): string {
+  return new Date(Date.parse(date) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * `POST /v1/me/shop-holidays` and `PUT /v1/me/shop-holidays/:id`: whole India
+ * calendar days, 12:00 AM to 12:00 AM, from `starts` through `ends`. A single
+ * day has both the same. The server also checks the dates sit between today
+ * and HOLIDAY_DAYS_AHEAD and overlap no other holiday of the shop.
+ */
+export const ShopHoliday = z.strictObject({ starts: CalendarDate, ends: CalendarDate })
+  .refine(({ starts, ends }) => ends >= starts, { path: ["ends"] });
+export type ShopHoliday = z.infer<typeof ShopHoliday>;
+
+export const ShopHolidayParams = z.strictObject({ id: z.uuid() });
+export type ShopHolidayParams = z.infer<typeof ShopHolidayParams>;
+
+const SavedHoliday = z.strictObject({ id: z.uuid(), starts: CalendarDate, ends: CalendarDate });
+
+/**
+ * Every call on `/v1/me/shop-holidays` answers the whole list: holidays not
+ * ended yet, soonest first, and ended ones, latest first. Ended ones are a
+ * read-only record.
+ */
+export const ShopHolidaysResponse = z.strictObject({ upcoming: z.array(SavedHoliday), past: z.array(SavedHoliday) });
+export type ShopHolidaysResponse = z.infer<typeof ShopHolidaysResponse>;

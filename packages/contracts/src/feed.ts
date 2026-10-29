@@ -24,6 +24,8 @@ export const FeedShop = z.strictObject({
   open: z.boolean(),
   /** When a closed shop opens next; null while open. */
   opensAt: z.iso.datetime().nullable(),
+  /** Closed because today in India is one of the shop's holidays (#382). */
+  holiday: z.boolean(),
 });
 export type FeedShop = z.infer<typeof FeedShop>;
 
@@ -68,6 +70,8 @@ export const ShopPageResponse = z.strictObject({
     /** The weekly hours by day and opening time, and today's weekday in India, for C05's hours line (#381). */
     hours: z.array(ShopHoursRange),
     today: Weekday,
+    /** The weekdays of today and the next 6 days that are holidays (#382). */
+    holidays: z.array(Weekday),
   }),
   groups: z.array(z.strictObject({ category: z.string(), products: z.array(ShopPageProduct) })),
 });

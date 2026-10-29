@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overlappingDays, rangeLength, ShopHours, type ShopHoursRange } from "../src/index";
+import { addDays, overlappingDays, rangeLength, ShopHoliday, ShopHours, type ShopHoursRange } from "../src/index";
 
 const range = (weekday: number, opens: number, closes: number): ShopHoursRange => ({ weekday, opens, closes });
 const h = (hours: number) => hours * 60;
@@ -31,5 +31,20 @@ describe("shop hours (#371)", () => {
     expect(ShopHours.safeParse({ ranges: [range(8, h(9), h(12))] }).success).toBe(false);
     expect(ShopHours.safeParse({ ranges: [range(1, h(9), h(13)), range(1, h(12), h(17))] }).success).toBe(false);
     expect(ShopHours.safeParse({ ranges: [] }).success).toBe(false);
+  });
+});
+
+describe("shop holidays (#382)", () => {
+  it("takes whole days, a single day or a range, and refuses an end before the start", () => {
+    expect(ShopHoliday.safeParse({ starts: "2030-01-01", ends: "2030-01-01" }).success).toBe(true);
+    expect(ShopHoliday.safeParse({ starts: "2030-01-01", ends: "2030-01-03" }).success).toBe(true);
+    expect(ShopHoliday.safeParse({ starts: "2030-01-03", ends: "2030-01-01" }).success).toBe(false);
+    expect(ShopHoliday.safeParse({ starts: "2030-02-30", ends: "2030-03-01" }).success).toBe(false);
+  });
+
+  it("counts days across months and years", () => {
+    expect(addDays("2030-12-31", 1)).toBe("2031-01-01");
+    expect(addDays("2030-03-01", -1)).toBe("2030-02-28");
+    expect(addDays("2030-01-01", 180)).toBe("2030-06-30");
   });
 });

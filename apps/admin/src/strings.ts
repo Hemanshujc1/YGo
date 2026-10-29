@@ -534,5 +534,7 @@ export const strings = {
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
     SHOP_NOT_READY: "This shop isn't ready to go Live yet. See what it still needs.",
     SHOP_NOT_LIVE: "This works once the shop is Live.",
+    HOLIDAY_OVERLAP: "These dates overlap another holiday.",
+    TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -7,7 +7,7 @@ import {
 import type { Clock } from "../adapters/clock";
 import { visibleListings } from "../listings";
 import { pointFrom } from "../points";
-import { indiaWeekday, openStatus, overrideOf } from "../shop-open";
+import { holidaysNear, holidaysOf, indiaWeekday, openStatus, overrideOf } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
 
@@ -40,6 +40,7 @@ async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitud
   const hours = (await pool.query<ShopHoursRange & { shopId: string }>(
     `SELECT shop_id AS "shopId", weekday, opens, closes FROM shop_hours WHERE shop_id = ANY($1::uuid[]) ORDER BY weekday, opens`,
     [rows.rows.map((row) => row.id)])).rows;
+  const holidays = await holidaysOf(pool, rows.rows.map((row) => row.id), now);
   const shops = await Promise.all(rows.rows.map(async (row): Promise<ServingShop | undefined> => {
     // A Live shop whose card has become incomplete stays out (ONB-4).
     const card = await resolveRateCard(pool, row.id);
@@ -47,12 +48,14 @@ async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitud
     const minimum = card?.values.minimumCart?.value as RateCardValues["minimumCart"];
     if (!fee || minimum === undefined) return undefined;
     const week = hours.filter((range) => range.shopId === row.id).map(({ weekday, opens, closes }) => ({ weekday, opens, closes }));
-    const status = openStatus(week, overrideOf(row), now);
+    const off = holidays.filter((holiday) => holiday.shopId === row.id);
+    const status = openStatus(week, off, overrideOf(row), now);
+    const near = holidaysNear(off, now);
     return {
       id: row.id, name: row.name, estimatedMinutes: estimatedMinutes(row.metres),
-      deliveryFee: fee.amount, open: status.open, opensAt: status.open ? null : status.until,
+      deliveryFee: fee.amount, open: status.open, opensAt: status.open ? null : status.until, holiday: !status.open && near.today,
       minimumOrder: minimum, fssaiNumber: row.fssaiNumber, closesAt: status.open ? status.until : null,
-      hours: week, today: indiaWeekday(now),
+      hours: week, today: indiaWeekday(now), holidays: near.week,
     };
   }));
   // A stable sort keeps the nearest-first order within the open and the closed group.
@@ -69,7 +72,7 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
   app.get("/v1/feed", { schema: { querystring: FeedQuery, response: { 200: FeedResponse, ...errors } } }, async (request, reply) => {
     if (!await mobileSignedIn(request, reply, auth)) return reply;
     const shops = await servingShops(pool, clock.now(), request.query as FeedQuery);
-    return { shops: shops.map(({ id, name, estimatedMinutes, deliveryFee, open, opensAt }) => ({ id, name, estimatedMinutes, deliveryFee, open, opensAt })) };
+    return { shops: shops.map(({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday }) => ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday })) };
   });
 
   // C05 Shop page (#370): 404 for a shop this place can't order from, as for one that doesn't exist.

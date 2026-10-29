@@ -61,6 +61,10 @@ import { LiveCheck } from "./shops";
  * - SHOP_STATE_CHANGE_REFUSED (409) also answers Move to Live on anything but Approved.
  * Open/closed switch (#380):
  * - SHOP_NOT_LIVE (409): the switch works only once the shop is Live.
+ * Holidays (#382):
+ * - HOLIDAY_OVERLAP (409): the dates overlap another of the shop's holidays.
+ * - TOO_MANY_HOLIDAYS (409): the shop already has MAX_UPCOMING_HOLIDAYS not ended yet.
+ * - Dates outside today to HOLIDAY_DAYS_AHEAD, or moving the start of a holiday already under way, use VALIDATION_FAILED.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -98,6 +102,8 @@ export const ErrorCode = z.enum([
   "RATE_CARD_CHANGED",
   "SHOP_NOT_READY",
   "SHOP_NOT_LIVE",
+  "HOLIDAY_OVERLAP",
+  "TOO_MANY_HOLIDAYS",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -35,6 +35,11 @@ function expectIndianFormats() {
     expect(formatDayTime(ist("2030-01-01T23:30:00"), now, "tomorrow")).toBe("11:30 PM");
     expect(formatDayTime(new Date(ist("2030-01-02T09:00:00")).toISOString(), now, "tomorrow")).toBe("tomorrow 9:00 AM");
     expect(formatDayTime(ist("2030-01-03T09:00:00"), now, "tomorrow")).toBe("Thu 9:00 AM");
+    expect(formatDayTime(ist("2030-01-07T09:00:00"), now, "tomorrow")).toBe("Mon 9:00 AM");
+    // 7 or more days on, the date: a weekday alone would name the wrong week (#382).
+    expect(formatDayTime(ist("2030-01-08T09:00:00"), now, "tomorrow")).toBe("8 Jan 9:00 AM");
+    expect(formatDayMonth(ist("2030-11-12T09:00:00"))).toBe("12 Nov");
+    expect(formatDayMonthYear(ist("2029-11-12T09:00:00"))).toBe("12 Nov 2029");
   });
 }
 

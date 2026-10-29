@@ -281,6 +281,18 @@ export const shopHours = pgTable("shop_hours", {
   check("shop_hours_times_valid", sql`${table.opens} BETWEEN 0 AND 1410 AND ${table.opens} % 30 = 0 AND ${table.closes} BETWEEN 0 AND 1410 AND ${table.closes} % 30 = 0`),
 ]);
 
+// Holidays (#382): whole India calendar days, `starts` through `ends`. Ended ones stay as a record.
+// The routes keep one shop's holidays apart under the shop's row lock.
+export const shopHolidays = pgTable("shop_holidays", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  starts: date("starts").notNull(),
+  ends: date("ends").notNull(),
+}, (table) => [
+  index("shop_holidays_shop_id_ends_idx").on(table.shopId, table.ends),
+  check("shop_holidays_dates_valid", sql`${table.ends} >= ${table.starts}`),
+]);
+
 // Shop-owned pack settings and base-unit inventory (#43, CAT-1, CAT-2, CAT-4).
 export const shopListings = pgTable("shop_listings", {
   id: uuid("id").primaryKey().defaultRandom(),

@@ -44,15 +44,28 @@ const indianWeekday = new Intl.DateTimeFormat(locale, { timeZone, weekday: "shor
 // The short weekday in India: "Tue".
 export const formatWeekday = (value: Date | string | number) => indianWeekday.format(new Date(value));
 
+const indianDayMonth = new Intl.DateTimeFormat(locale, { timeZone, day: "numeric", month: "short" });
+
+// The day and short month in India: "12 Nov" (#382).
+export const formatDayMonth = (value: Date | string | number) => indianDayMonth.format(new Date(value));
+
+const indianDayMonthYear = new Intl.DateTimeFormat(locale, { timeZone, day: "numeric", month: "short", year: "numeric" });
+
+// With the year, for a record that can reach back past this year: "12 Nov 2029" (#382).
+export const formatDayMonthYear = (value: Date | string | number) => indianDayMonthYear.format(new Date(value));
+
 const DAY = 24 * 60 * 60_000;
 const indiaDay = (at: number) => Math.floor((at + 330 * 60_000) / DAY);
 
-// When something happens, from `now`, in India: "9:00 PM" today, "tomorrow 9:00 AM", or "Tue 9:00 AM"
-// further on (#380, #381). The app passes its own word for tomorrow.
+// When something happens, from `now`, in India: "9:00 PM" today, "tomorrow 9:00 AM", "Tue 9:00 AM"
+// within the week (#380, #381), or "12 Nov 9:00 AM" 7 or more days on, where a weekday would
+// name the wrong week (#382). The app passes its own word for tomorrow.
 export const formatDayTime = (value: Date | string | number, now: number, tomorrow: string) => {
   const days = indiaDay(new Date(value).getTime()) - indiaDay(now);
   const time = formatTime(value);
-  return days === 0 ? time : days === 1 ? `${tomorrow} ${time}` : `${formatWeekday(value)} ${time}`;
+  if (days === 0) return time;
+  if (days === 1) return `${tomorrow} ${time}`;
+  return `${days < 7 ? formatWeekday(value) : formatDayMonth(value)} ${time}`;
 };
 
 export const formatDateTime = (value: Date | string | number) =>

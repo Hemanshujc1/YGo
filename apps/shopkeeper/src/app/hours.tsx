@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
+import { Holidays } from "../components/holidays";
 import { TimeSheet } from "../components/time-sheet";
 import { canAdd, copyToAll, nextOpening, TIMES, toRanges, toWeek, type Opening, type Week } from "../lib/hours";
 import { strings } from "../strings";
@@ -19,6 +20,7 @@ type Picking = { day: number; index: number; end: keyof Opening };
 /**
  * Opening hours (#371): the Owner's weekly hours, up to 3 openings a day in
  * 30-minute steps, saved as a whole week. Owner's answers 3–6 and 20 on #371.
+ * Holidays sit below, saved one at a time (#382).
  */
 export default function HoursScreen() {
   const insets = useSafeAreaInsets();
@@ -100,6 +102,7 @@ export default function HoursScreen() {
           ))}
           {message && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message.failed ? "text-danger" : "text-success"}`}>{message.text}</Text>}
           <Button label={words.save} onPress={() => void save()} busy={saving} />
+          <Holidays />
         </>}
       </ScrollView>
       {picking && (

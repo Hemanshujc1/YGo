@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { ErrorEnvelope, HOURS_STEP_MINUTES, ShopOpenChange, ShopOpenStatus, type ShopHoursRange } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
-import { openStatus, overrideOf, schedule } from "../shop-open";
+import { holidaysOf, openStatus, overrideOf, schedule } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
 const DAY = 24 * 60 * 60_000;
@@ -41,7 +41,8 @@ export function registerShopOpenRoutes(app: FastifyInstance, { pool, clock, secr
     if (!who) return reply;
     const shop = await liveShop(pool, who.accountId, reply);
     if (!shop) return reply;
-    return openStatus(await hours(pool, shop.id), overrideOf(shop), clock.now());
+    const now = clock.now();
+    return openStatus(await hours(pool, shop.id), await holidaysOf(pool, [shop.id], now), overrideOf(shop), now);
   });
 
   app.put("/v1/me/shop-open", { schema: { body: ShopOpenChange, response } }, async (request, reply) => {
@@ -53,7 +54,9 @@ export function registerShopOpenRoutes(app: FastifyInstance, { pool, clock, secr
       if (!shop) return reply;
       const now = clock.now();
       const ranges = await hours(client, shop.id);
-      const planned = schedule(ranges, now);
+      const holidays = await holidaysOf(client, [shop.id], now);
+      // On a holiday the hours are closed, so opening needs an end, as outside hours (owner's answer 9 on #382).
+      const planned = schedule(ranges, holidays, now);
       let next: { open: boolean; until: Date } | null = null;
       if (change.open !== planned.open) {
         if (!change.open) next = { open: false, until: planned.nextOpening ?? new Date(now.getTime() + DAY) };
@@ -68,7 +71,7 @@ export function registerShopOpenRoutes(app: FastifyInstance, { pool, clock, secr
       }
       await client.query("UPDATE shops SET open_override = $2, open_override_until = $3 WHERE id = $1", [shop.id, next?.open ?? null, next?.until ?? null]);
       await client.query("COMMIT");
-      return reply.code(200).send(openStatus(ranges, next, now));
+      return reply.code(200).send(openStatus(ranges, holidays, next, now));
     });
   });
 }
