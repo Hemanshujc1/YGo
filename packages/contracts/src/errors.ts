@@ -61,6 +61,8 @@ import { LiveCheck } from "./shops";
  * - SHOP_STATE_CHANGE_REFUSED (409) also answers Move to Live on anything but Approved.
  * Open/closed switch (#380):
  * - SHOP_NOT_LIVE (409): the switch works only once the shop is Live.
+ * Search terms (#397):
+ * - SEARCH_TERM_IN_USE (409): the list already pairs this typed word with this catalog word.
  * Holidays (#382):
  * - HOLIDAY_OVERLAP (409): the dates overlap another of the shop's holidays.
  * - TOO_MANY_HOLIDAYS (409): the shop already has MAX_UPCOMING_HOLIDAYS not ended yet.
@@ -104,6 +106,7 @@ export const ErrorCode = z.enum([
   "SHOP_NOT_LIVE",
   "HOLIDAY_OVERLAP",
   "TOO_MANY_HOLIDAYS",
+  "SEARCH_TERM_IN_USE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

@@ -30,6 +30,7 @@ import { registerMasterProductRoutes } from "./routes/master-products";
 import { registerCatalogImportRoutes } from "./routes/catalog-import";
 import { registerPackRoutes } from "./routes/packs";
 import { registerPlaceRoutes } from "./routes/places";
+import { registerSearchTermRoutes } from "./routes/search-terms";
 import { registerProfileRoutes } from "./routes/profile";
 import { registerShopRoutes } from "./routes/shops";
 import { registerShopAgreementRoutes } from "./routes/shop-agreement";
@@ -121,6 +122,7 @@ export function buildApp({
     registerMasterProductRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerCatalogImportRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerPackRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerSearchTermRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

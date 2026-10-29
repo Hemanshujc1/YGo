@@ -76,6 +76,10 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     editPack: vi.fn(),
     createCategory: vi.fn(),
     editCategory: vi.fn(),
+    listSearchTerms: vi.fn().mockResolvedValue({ ok: true, data: { terms: [] } }),
+    createSearchTerm: vi.fn(),
+    editSearchTerm: vi.fn(),
+    removeSearchTerm: vi.fn(),
     listAreas: vi.fn(),
     listWaitlist: vi.fn().mockResolvedValue({ ok: true, data: { entries: [] } }),
     createArea: vi.fn(),
@@ -482,6 +486,52 @@ describe("Admin web", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.saveCategory }));
     expect(await screen.findByText("Tools")).toBeTruthy();
     expect(api.editCategory).toHaveBeenCalledWith(made.id, { name: "Tools", parentId: stationery.id });
+  });
+
+  it("adds, edits and removes search terms (#397)", async () => {
+    const kanda = { id: "00000000-0000-4000-8000-000000000397", typedWord: "kanda", catalogWord: "onion" };
+    const aata = { id: "00000000-0000-4000-8000-000000000398", typedWord: "aata", catalogWord: "atta" };
+    const api = {
+      listSearchTerms: vi.fn().mockResolvedValue({ ok: true, data: { terms: [] } }),
+      createSearchTerm: vi.fn().mockResolvedValueOnce({ ok: false, status: 409, code: "SEARCH_TERM_IN_USE" })
+        .mockResolvedValueOnce({ ok: true, data: kanda }).mockResolvedValueOnce({ ok: true, data: aata }),
+      editSearchTerm: vi.fn().mockResolvedValue({ ok: true, data: { ...kanda, typedWord: "kaanda" } }),
+      removeSearchTerm: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+    };
+    setup("/search-terms", api);
+    await screen.findByRole("heading", { name: strings.searchTerms });
+    expect(screen.getByText(strings.noSearchTerms)).toBeTruthy();
+    const add = (typed: string, catalog: string) => {
+      fireEvent.click(screen.getByRole("button", { name: strings.newSearchTerm }));
+      fireEvent.change(screen.getByRole("textbox", { name: strings.typedWord }), { target: { value: typed } });
+      fireEvent.change(screen.getByRole("textbox", { name: strings.catalogWord }), { target: { value: catalog } });
+      fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    };
+    add("kanda2", "onion");
+    expect(await screen.findByText(strings.searchTermInvalidFields.typedWord)).toBeTruthy();
+    expect(api.createSearchTerm).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: strings.typedWord }), { target: { value: " Kanda " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    expect(await screen.findByText(strings.errors.SEARCH_TERM_IN_USE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.searchTermAdded);
+    expect(api.createSearchTerm).toHaveBeenLastCalledWith({ typedWord: "kanda", catalogWord: "onion" });
+    add("aata", "atta");
+    await screen.findByRole("button", { name: strings.removeSearchTerm("aata", "atta") });
+    // Sorted by the typed word.
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent?.slice(0, 4))).toEqual(["aata", "kand"]);
+
+    fireEvent.click(screen.getByRole("button", { name: strings.editSearchTerm("kanda", "onion") }));
+    expect((screen.getByRole("textbox", { name: strings.typedWord }) as HTMLInputElement).value).toBe("kanda");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.typedWord }), { target: { value: "kaanda" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveSearchTerm }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.searchTermSaved);
+    expect(api.editSearchTerm).toHaveBeenCalledWith(kanda.id, { typedWord: "kaanda", catalogWord: "onion" });
+
+    fireEvent.click(screen.getByRole("button", { name: strings.removeSearchTerm("aata", "atta") }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.searchTermRemoved);
+    expect(api.removeSearchTerm).toHaveBeenCalledWith(aata.id);
+    expect(screen.queryByText("aata")).toBeNull();
   });
 
   it("requires a reason to deactivate and updates child availability when the parent changes", async () => {
@@ -1151,7 +1201,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(8);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(9);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

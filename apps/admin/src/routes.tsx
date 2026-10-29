@@ -16,6 +16,7 @@ import {
 import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
+import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
@@ -54,6 +55,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/rate-cards", label: strings.rateCards },
     { path: "/price-simulator", label: strings.priceSimulator },
     { path: "/products", label: strings.products },
+    { path: "/search-terms", label: strings.searchTerms },
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
     { path: "/waitlist", label: strings.waitlist },
@@ -411,6 +413,13 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       },
       element: <Page protectedArea api={api}><Products api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.productsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/search-terms",
+      loader: listLoader(() => api.listSearchTerms(), (data) => data.terms),
+      element: <Page protectedArea api={api}><SearchTerms api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.searchTermsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

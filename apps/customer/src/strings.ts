@@ -261,5 +261,6 @@ export const strings = {
     SHOP_NOT_LIVE: "This works once the shop is Live.",
     HOLIDAY_OVERLAP: "These dates overlap another holiday.",
     TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
+    SEARCH_TERM_IN_USE: "This search term already exists.",
   } satisfies Record<ErrorCode, string>,
 };

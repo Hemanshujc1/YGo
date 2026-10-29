@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, PRODUCT_IMAGE_MAX_BYTES, ProductBrand, ProductImage, ProductName } from "./fields";
+import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, PRODUCT_IMAGE_MAX_BYTES, ProductBrand, ProductImage, ProductName, SearchWord } from "./fields";
 
 /** Multipart fields; file-level VALIDATION_FAILED responses put these names in `fields`. */
 export const CATALOG_IMPORT_FILE_FIELDS = ["catalogCsv", "imagesZip"] as const;
@@ -36,6 +36,16 @@ export const EditCategoryBody = z.strictObject({
   reason: AdminActionReason.optional(),
 }).refine((body) => body.name !== undefined || body.parentId !== undefined || body.active !== undefined);
 export type EditCategoryBody = z.infer<typeof EditCategoryBody>;
+
+/** A search term (#397, DSC-3): customer search for `typedWord` also looks for `catalogWord` ("kanda" finds onion). */
+export const SearchTerm = z.strictObject({ id: z.uuid(), typedWord: z.string(), catalogWord: z.string() });
+export type SearchTerm = z.infer<typeof SearchTerm>;
+export const SearchTermsResponse = z.strictObject({ terms: z.array(SearchTerm) });
+export type SearchTermsResponse = z.infer<typeof SearchTermsResponse>;
+export const SearchTermParams = z.strictObject({ id: z.uuid() });
+export type SearchTermParams = z.infer<typeof SearchTermParams>;
+export const SearchTermBody = z.strictObject({ typedWord: SearchWord, catalogWord: SearchWord });
+export type SearchTermBody = z.infer<typeof SearchTermBody>;
 
 /** The canonical unit is `each` for counted products, or kg/l for measured products. */
 export const ProductBaseUnit = z.enum(["each", "kg", "l"]);

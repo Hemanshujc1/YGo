@@ -37,6 +37,7 @@ export {
   Phone,
   Pincode,
   PlaceSearchText,
+  SearchWord,
   PackBarcode,
   PackQuantity,
   CountedPackQuantity,
@@ -110,6 +111,10 @@ export {
   CatalogImportRowErrors,
   CatalogImportPreviewResponse,
   CatalogImportResponse,
+  SearchTerm,
+  SearchTermsResponse,
+  SearchTermParams,
+  SearchTermBody,
 } from "./catalog";
 export {
   Area,

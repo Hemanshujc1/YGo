@@ -87,6 +87,16 @@ export const categories = pgTable("categories", {
   uniqueIndex("categories_child_name_idx").on(table.parentId, sql`lower(${table.name})`).where(sql`${table.parentId} IS NOT NULL`),
 ]);
 
+// The platform's one list of search terms (#397, DSC-3): search for the typed word also looks for the catalog word.
+export const searchTerms = pgTable("search_terms", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  typedWord: text("typed_word").notNull(),
+  catalogWord: text("catalog_word").notNull(),
+}, (table) => [
+  uniqueIndex("search_terms_pair_idx").on(table.typedWord, table.catalogWord),
+  check("search_terms_words_valid", sql`${table.typedWord} ~ '^[a-z ]{2,40}$' AND ${table.catalogWord} ~ '^[a-z ]{2,40}$'`),
+]);
+
 export const masterProducts = pgTable("master_products", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
