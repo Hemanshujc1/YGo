@@ -1,0 +1,134 @@
+import type { FastifyInstance } from "fastify";
+import type { Pool, PoolClient } from "pg";
+import { CartParams, CartResponse, type CartLine, type CartReason, ErrorEnvelope, FeedQuery, SaveCartBody } from "@ygo/contracts";
+import type { Clock } from "../adapters/clock";
+import { withTransaction } from "../db";
+import { visibleListings } from "../listings";
+import { deriveKeys, mobileSignedIn } from "../tokens";
+import { servingShops, type ServingShop } from "./feed";
+import { deliveredQuote, latestRateCardVersion } from "./price-simulator";
+
+type Line = { listingId: string; count: number };
+type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & { categoryId: string; onSale: boolean; packsLeft: number };
+
+/** Each line's pack as it is now, or undefined for one this shop doesn't list; prices and stock are read, never sent. */
+async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[]): Promise<Array<Pack | undefined>> {
+  const { rows } = await client.query<Pack & { position: number }>(
+    `SELECT entry.position::int AS position, l.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
+        trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
+        EXISTS (SELECT 1 FROM ${visibleListings} AND listing.id = l.id) AS "onSale",
+        -- Stock is held in base units (CAT-4), so a pack needs its whole quantity; counts stop at 999.
+        LEAST(GREATEST(floor(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = l.id), 0)
+          / pack.quantity), 0), 999)::int AS "packsLeft"
+      FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)
+      JOIN shop_listings l ON l.id = (entry.line->>'listingId')::uuid AND l.shop_id = $1
+      JOIN packs pack ON pack.id = l.pack_id
+      JOIN master_products product ON product.id = pack.product_id`, [shopId, JSON.stringify(lines)]);
+  return lines.map((_, index) => rows.find((row) => row.position === index + 1));
+}
+
+async function savedCart(client: Pool | PoolClient, accountId: string, shopId: string, lock: boolean) {
+  const { rows: [cart] } = await client.query<{ id: string; revision: number }>(
+    `SELECT id, revision FROM carts WHERE account_id = $1 AND shop_id = $2${lock ? " FOR UPDATE" : ""}`, [accountId, shopId]);
+  if (!cart) return undefined;
+  const { rows } = await client.query<Line>(`SELECT listing_id AS "listingId", count FROM cart_lines WHERE cart_id = $1 ORDER BY position`, [cart.id]);
+  return { ...cart, lines: rows };
+}
+
+/** The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4). */
+async function cartView(client: Pool, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[]): Promise<CartResponse> {
+  const packs = await packsOf(client, shopId, saved);
+  const lines: CartLine[] = saved.map((line, index) => {
+    const pack = packs[index];
+    if (!pack) throw new Error("A saved cart line lost its listing");
+    const { onSale, packsLeft } = pack;
+    const shown = { listingId: pack.listingId, name: pack.name, brand: pack.brand, baseUnit: pack.baseUnit, quantity: pack.quantity, price: pack.price };
+    if (!onSale) return { ...shown, count: line.count, state: "unavailable", left: null, lineTotal: null };
+    if (packsLeft === 0) return { ...shown, count: line.count, state: "outOfStock", left: null, lineTotal: null };
+    const count = Math.min(line.count, packsLeft);
+    return { ...shown, count, state: "orderable", left: count === packsLeft ? packsLeft : null, lineTotal: null };
+  });
+  const orderable = lines.flatMap((line, index) => line.state === "orderable" ? [{ line, categoryId: packs[index]?.categoryId ?? "" }] : []);
+
+  let delivering = Boolean(serving);
+  let quote: CartResponse["quote"] = null;
+  const priceReasons: CartReason[] = [];
+  if (serving && orderable.length) {
+    const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
+      listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.price, count: line.count,
+    })), await latestRateCardVersion(client));
+    // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
+    if (priced.status === "incomplete") delivering = false;
+    else {
+      orderable.forEach(({ line }, index) => { line.lineTotal = priced.lines[index]?.lineTotal ?? null; });
+      quote = { productValue: priced.productValue, deliveryFee: priced.deliveryFee.amount, smallCartFee: priced.smallCartFee?.amount ?? null, total: priced.customerTotal };
+      // The floor's shortfall is the platform's earnings, which the Customer never sees (owner's clarification 2 on #50).
+      for (const reason of priced.reasons) priceReasons.push(reason.code === "BELOW_MINIMUM_CART" ? reason : { code: "BELOW_CONTRIBUTION_FLOOR" });
+    }
+  }
+  const reasons: CartReason[] = [];
+  if (!delivering) reasons.push({ code: "NOT_DELIVERING" });
+  else if (serving && !serving.open) reasons.push({ code: "SHOP_CLOSED", opensAt: serving.opensAt });
+  if (orderable.length < lines.length) reasons.push({ code: "LINE_UNAVAILABLE" });
+  if (delivering) reasons.push(...priceReasons);
+  else quote = null;
+
+  const name = serving?.name ?? (await client.query<{ name: string }>("SELECT shop_name AS name FROM shops WHERE id = $1", [shopId])).rows[0]?.name ?? "";
+  return { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons };
+}
+
+export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+  const auth = { pool, clock, keys: deriveKeys(secret) };
+  const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
+
+  // C07 (#405): the Customer's cart at one shop, priced for this place. 404 when there is no cart and the shop can't deliver here.
+  app.get("/v1/carts/:shopId", { schema: { params: CartParams, querystring: FeedQuery, response: { 200: CartResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { shopId } = request.params as CartParams;
+    const [serving] = await servingShops(pool, clock.now(), request.query as FeedQuery, shopId);
+    const cart = await savedCart(pool, who.accountId, shopId, false);
+    if (!serving && !cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    return cartView(pool, shopId, serving, cart?.revision ?? 0, cart?.lines ?? []);
+  });
+
+  // Saves the whole cart and answers with its new quote (CRT-2). Saves of one cart run one at a time,
+  // and one based on an older revision is refused, so an older request never overwrites a newer one.
+  app.put("/v1/carts/:shopId", { schema: { params: CartParams, querystring: FeedQuery, body: SaveCartBody, response: { 200: CartResponse, ...errors, 409: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { shopId } = request.params as CartParams;
+    const { revision, lines } = request.body as SaveCartBody;
+    const [serving] = await servingShops(pool, clock.now(), request.query as FeedQuery, shopId);
+    const saved = await withTransaction(pool, async (client) => {
+      // Only a shop that can deliver here starts a cart; one already started can still be emptied.
+      if (serving) {
+        await client.query("INSERT INTO carts (account_id, shop_id, updated_at) VALUES ($1, $2, $3) ON CONFLICT (account_id, shop_id) DO NOTHING",
+          [who.accountId, shopId, clock.now()]);
+      }
+      const cart = await savedCart(client, who.accountId, shopId, true);
+      if (!cart) return "NOT_FOUND";
+      if (cart.revision !== revision) return "CART_CHANGED";
+      const packs = await packsOf(client, shopId, lines);
+      const had = new Set(cart.lines.map((line) => line.listingId));
+      // Every line is a pack of this shop; one not yet in the cart must be on sale at a shop that can deliver here.
+      if (packs.some((pack) => !pack || (!had.has(pack.listingId) && !(pack.onSale && serving)))) return "NOT_FOUND";
+      // A count is held at stock (owner's answer 9 on #50); a line with none left keeps its count until removed. Nothing is reserved.
+      const held = lines.map((line, index) => {
+        const pack = packs[index];
+        return { listingId: line.listingId, count: pack?.onSale && pack.packsLeft > 0 ? Math.min(line.count, pack.packsLeft) : line.count };
+      });
+      await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [cart.id]);
+      await client.query(
+        `INSERT INTO cart_lines (cart_id, listing_id, position, count)
+         SELECT $1, (entry.line->>'listingId')::uuid, entry.position, (entry.line->>'count')::int
+         FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`, [cart.id, JSON.stringify(held)]);
+      await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [cart.id, clock.now()]);
+      await client.query("COMMIT");
+      return held;
+    });
+    if (typeof saved === "string") return reply.code(saved === "NOT_FOUND" ? 404 : 409).send({ error: { code: saved } });
+    // Priced after the commit: the quote reads in parallel, which one transaction's connection can't.
+    return cartView(pool, shopId, serving, revision + 1, saved);
+  });
+}

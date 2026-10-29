@@ -2,7 +2,7 @@ import { z } from "zod";
 import { RateCardKey, RateCardScope, RateCardSource, RateCardValues } from "./rate-cards";
 import { PackQuantity, RateCardVersion, ShopPrice } from "./fields";
 
-const LineCount = z.number().int().min(1).max(999);
+export const LineCount = z.number().int().min(1).max(999);
 
 /** A pack at its online price, or one of the shop's quantity-price options, bought `count` times (CAT-2). */
 export const QuoteLine = z.union([
@@ -23,7 +23,7 @@ export const PriceSimulatorBody = z.strictObject({
 export type PriceSimulatorBody = z.infer<typeof PriceSimulatorBody>;
 
 /** Rupees with exactly two decimals, as the SQL engine writes them; what the shop keeps can go below zero. */
-const Amount = z.string().regex(/^-?\d+\.\d{2}$/);
+export const Amount = z.string().regex(/^-?\d+\.\d{2}$/);
 const SplitFee = z.strictObject({ amount: Amount, platformShare: Amount, shopShare: Amount });
 
 export const QuoteReasonCode = z.enum(["BELOW_MINIMUM_CART", "BELOW_CONTRIBUTION_FLOOR"]);

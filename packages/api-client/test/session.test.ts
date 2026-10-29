@@ -378,6 +378,26 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/search?pincode=411038&latitude=18.5&longitude=73.8&q=arhar+dal" });
   });
 
+  it("reads and saves a cart with the place, and passes on an old revision (#405)", async () => {
+    const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
+    const cart = {
+      shop: { id, name: "Sai General Stores" }, revision: 1,
+      lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count: 2, state: "orderable", left: null, lineTotal: "270.00" }],
+      quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
+    };
+    let changed = false;
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : changed ? answer(409, { error: { code: "CART_CHANGED" } }) : answer(200, cart));
+    await client.verifyCode(signIn);
+    const here = { pincode: "411038", latitude: 18.5, longitude: 73.8 };
+    expect(await client.cart(id, here)).toEqual({ ok: true, data: cart });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: `/v1/carts/${id}?pincode=411038&latitude=18.5&longitude=73.8` });
+    const body = { revision: 0, lines: [{ listingId: id, count: 2 }] };
+    expect(await client.saveCart(id, here, body)).toEqual({ ok: true, data: cart });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: `/v1/carts/${id}?pincode=411038&latitude=18.5&longitude=73.8`, body });
+    changed = true;
+    expect(await client.saveCart(id, here, body)).toEqual({ ok: false, status: 409, code: "CART_CHANGED" });
+  });
+
   it("reads and saves the Owner's opening hours (#371)", async () => {
     const ranges = [{ weekday: 1, opens: 540, closes: 1260 }];
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { ranges }));

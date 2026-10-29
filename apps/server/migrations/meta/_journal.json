@@ -225,6 +225,13 @@
       "when": 1793295116997,
       "tag": "0031_search_extensions",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793298760362,
+      "tag": "0032_carts",
+      "breakpoints": true
     }
   ]
 }
