@@ -14,6 +14,15 @@ type BasketLine = { listingId: string; quantityOptionId: string | null; category
 const ORDER_KEYS: RateCardKey[] = ["deliveryFee", "smallCartFee", "deliveredContributionFloor", "minimumCart"];
 
 /**
+ * The latest published rate-card version, so every card a quote reads comes from the same one.
+ * Before any card exists there is nothing to pin, and the reads may see a first card published meanwhile.
+ */
+export async function latestRateCardVersion(pool: Pool): Promise<string | undefined> {
+  const { rows: [latest] } = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions");
+  return latest?.version === "0" ? undefined : latest?.version;
+}
+
+/**
  * The delivered quote the cart will also use (MNY-10, MNY-15). TypeScript only picks the rules;
  * every amount comes from `pricing_delivered_quote` in PostgreSQL.
  */
@@ -90,10 +99,8 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
       return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     }
     const basket = rows.map((row, index) => ({ ...row, count: lines[index]?.count ?? 0 }));
-    // Pin the latest published version so both quotes and every category read the same cards.
-    // Before any card exists there is nothing to pin, and the reads may see a first card published meanwhile.
-    const { rows: [latest] } = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions");
-    const pinned = latest?.version === "0" ? undefined : latest?.version;
+    // Both quotes read the same cards.
+    const pinned = await latestRateCardVersion(pool);
     const [now, tried] = await Promise.all([deliveredQuote(pool, shopId, basket, pinned), draft && deliveredQuote(pool, shopId, basket, pinned, draft)]);
     return { now, draft: tried ?? null };
   });

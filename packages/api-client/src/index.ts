@@ -16,6 +16,8 @@ import {
   FeedResponse,
   SearchResponse,
   ShopPageResponse,
+  CartResponse,
+  type SaveCartBody,
   type FeedQuery,
   type SearchQuery,
   Session,
@@ -358,6 +360,18 @@ export function createApiClient({
     async shopPage(id: string, { pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<ShopPageResponse>> {
       const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
       return result(await signedIn("GET", `/v1/shops/${encodeURIComponent(id)}?${query}`), ShopPageResponse);
+    },
+
+    /** `GET /v1/carts/:shopId`: C07, the Customer's cart at one shop priced for this place (#405); 404 when there's none and the shop can't serve. */
+    async cart(shopId: string, { pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<CartResponse>> {
+      const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
+      return result(await signedIn("GET", `/v1/carts/${encodeURIComponent(shopId)}?${query}`), CartResponse);
+    },
+
+    /** `PUT /v1/carts/:shopId`: saves the whole cart and answers with its new quote; CART_CHANGED when `revision` is old (#405). */
+    async saveCart(shopId: string, { pincode, latitude, longitude }: FeedQuery, body: SaveCartBody): Promise<ApiResult<CartResponse>> {
+      const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
+      return result(await signedIn("PUT", `/v1/carts/${encodeURIComponent(shopId)}?${query}`, body), CartResponse);
     },
 
     /** `GET /v1/search`: C16, the shops that can serve this place matching the typed text, each with up to 5 matching products (DSC-3). */

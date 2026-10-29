@@ -492,3 +492,25 @@ export const emailCodeSends = pgTable(
     index("email_code_sends_address_sent_at_idx").on(table.address, table.sentAt),
   ],
 );
+
+// A Customer's cart at one shop (#405, CRT-1): one per account and shop. Each save raises
+// `revision`, so a save based on an older one is refused (owner's clarification 1 on #50).
+// It reserves no stock (CONTEXT.md, stock is reserved at acceptance).
+export const carts = pgTable("carts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  revision: integer("revision").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [uniqueIndex("carts_account_shop_idx").on(table.accountId, table.shopId)]);
+
+// A pack in a cart, by count; prices are read when the cart is quoted, never stored.
+export const cartLines = pgTable("cart_lines", {
+  cartId: uuid("cart_id").notNull().references(() => carts.id, { onDelete: "cascade" }),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  position: integer("position").notNull(),
+  count: integer("count").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.cartId, table.listingId] }),
+  check("cart_lines_count_valid", sql`${table.count} BETWEEN 1 AND 999`),
+]);

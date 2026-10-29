@@ -107,6 +107,7 @@ export const ErrorCode = z.enum([
   "HOLIDAY_OVERLAP",
   "TOO_MANY_HOLIDAYS",
   "SEARCH_TERM_IN_USE",
+  "CART_CHANGED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

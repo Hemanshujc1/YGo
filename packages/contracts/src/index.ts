@@ -232,3 +232,4 @@ export {
   Weekday,
 } from "./shop-hours";
 export { FeedQuery, FeedResponse, FeedShop, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
+export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
