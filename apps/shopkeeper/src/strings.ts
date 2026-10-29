@@ -187,7 +187,7 @@ export const strings = {
       },
       {
         title: "Paying back a customer",
-        body: "When YGo upholds a customer's complaint and records an amount owed, your shop pays that customer directly within seven calendar days of the day YGo records it. The app shows you the amount and the due date. YGo never holds or passes on this money.",
+        body: "When YGo upholds a customer's complaint and records an amount owed, your shop pays that customer directly by the end of the seventh calendar day after the day YGo records it. The app shows you the amount and the due date. YGo never holds or passes on this money.",
       },
       {
         title: "Tax",

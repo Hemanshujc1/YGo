@@ -88,7 +88,7 @@ Tabs: Home, Search, Cart, Orders, Account.
 | Screen | Purpose and behaviour | States | PRD | Ticket |
 |---|---|---|---|---|
 | **C20 Rate and complaint** | Opens after delivery or pickup. A rating is 1 to 5 stars, with no written comment. A complaint can be raised until the end of the third calendar day: seven categories, an optional photo, and an acknowledgement at once. After that window the screen points to the support email | rate, rated, complaint form, sending, send failed, complaint received, window closed | TRU-1, TRU-2 | [#82](https://github.com/Hemanshujc1/YGo/issues/82), [#87](https://github.com/Hemanshujc1/YGo/issues/87) |
-| **C21 Repayment owed** | After an upheld complaint, the shop pays the customer directly within 7 calendar days. Both sides see the amount, the due date and the status. YGo never holds the money. If disputed, Admin settles it as paid or still owed, and the customer sees Admin's reason (D-19) | owed, shop marked paid, confirmed, disputed, past due date, loading | TRU-3, TRU-4 | [#90](https://github.com/Hemanshujc1/YGo/issues/90) |
+| **C21 Repayment owed** | After an upheld complaint, the shop pays the customer directly by the end of the 7th calendar day after Admin records the amount (that day is day zero). Both sides see the amount, the due date and the status. YGo never holds the money. If disputed, Admin settles it as paid or still owed, and the customer sees Admin's reason (D-19) | owed, shop marked paid, confirmed, disputed, past due date, loading | TRU-3, TRU-4 | [#90](https://github.com/Hemanshujc1/YGo/issues/90) |
 
 ### Account
 
