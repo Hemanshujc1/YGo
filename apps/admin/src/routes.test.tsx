@@ -132,13 +132,122 @@ describe("Admin web", () => {
     await waitFor(() => expect(within(row).getByText(strings.rateCardSources.global)).toBeTruthy());
     const cells = within(row).getAllByRole("cell");
     expect(cells[1]?.textContent).toBe(strings.rateCardSources.global);
-    expect(cells[2]?.textContent).toBe('"0"');
+    expect(cells[2]?.textContent).toBe("₹0.00");
     fireEvent.click(screen.getByRole("button", { name: strings.rateCardPublish }));
     expect(api.publishRateCard).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Update global minimum" } });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.rateCardPublish }));
     await waitFor(() => expect(api.publishRateCard).toHaveBeenCalledWith({ scope: { type: "global" }, values: { minimumCart: "0" }, reason: "Update global minimum" }));
     expect(await screen.findByText(strings.rateCardPublished("8"))).toBeTruthy();
+  });
+
+  it("formats structured current and draft rate-card values without exposing storage syntax", async () => {
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    const draft = {
+      commission: { formula: "percentage", fixedAmount: null, percentage: "12.5", minimum: "3", maximum: null, base: "after_shop_discount" },
+      deliveryFee: { amount: "20", split: { platformPercentage: "100", shopPercentage: "0" } },
+      smallCartFee: { enabled: true, threshold: "200", amount: "15", cap: "30", split: { platformPercentage: "25", shopPercentage: "75" } },
+      pickup: { enabled: false, customerFee: "0", shopFee: null, cap: null, contributionFloor: null },
+      counterBillCharge: { enabled: false, amount: "0" },
+      statementGraceDays: 8,
+      bargainMinimumCommission: "13",
+      maximumShopDiscountPercentage: "15",
+    };
+    const current = {
+      commission: { formula: "higher_of", fixedAmount: "5", percentage: "10", minimum: "2", maximum: "50.5", base: "before_shop_discount" },
+      deliveryFee: { amount: "30", split: { platformPercentage: "20", shopPercentage: "80" } },
+      smallCartFee: { enabled: false, threshold: "100", amount: "10", cap: null, split: { platformPercentage: "20", shopPercentage: "80" } },
+      pickup: { enabled: true, customerFee: "5", shopFee: "2", cap: "8", contributionFloor: "3" },
+      counterBillCharge: { enabled: false, amount: "5" },
+      statementGraceDays: 7,
+      balanceLimit: { unexpected: true },
+      bargainMinimumCommission: "12.25",
+      maximumShopDiscountPercentage: "12.5",
+    };
+    const source = { type: "global", id: null, version: "7" };
+    setup("/rate-cards", {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string }) => ({ ok: true, data: { version: "7", values: scope.type === "global" ? draft : {} } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({
+        ok: true, data: { version: "7", values: Object.fromEntries(Object.entries(current).map(([key, value]) => [key, { value, source }])), missing: [], complete: true },
+      }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+
+    const commission = await screen.findByRole("row", { name: /Commission/ });
+    const commissionCells = within(commission).getAllByRole("cell");
+    expect(commissionCells[0]?.textContent).toBe("Higher of ₹5.00 or 10% · Before shop discount · Minimum ₹2.00 · Maximum ₹50.50");
+    expect(commissionCells[2]?.textContent).toBe("12.5% · After shop discount · Minimum ₹3.00");
+
+    const delivery = screen.getByRole("row", { name: /^Delivery fee/ });
+    expect(within(delivery).getAllByRole("cell")[0]?.textContent).toBe("Fee ₹30.00 · Platform share 20% · Shop share 80%");
+    expect(within(delivery).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹20.00 · Platform share 100% · Shop share 0%");
+
+    const smallCart = screen.getByRole("row", { name: /Small-cart fee/ });
+    expect(within(smallCart).getAllByRole("cell")[0]?.textContent).toBe("Off");
+    expect(within(smallCart).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹15.00 · Below ₹200.00 · Cap ₹30.00 · Platform share 25% · Shop share 75%");
+
+    const pickup = screen.getByRole("row", { name: /^Pickup/ });
+    expect(within(pickup).getAllByRole("cell")[0]?.textContent).toBe("Customer fee ₹5.00 · Shop fee ₹2.00 · Cap ₹8.00 · Contribution floor ₹3.00");
+    expect(within(pickup).getAllByRole("cell")[2]?.textContent).toBe("Off");
+
+    const counter = screen.getByRole("row", { name: /Counter-bill charge/ });
+    expect(within(counter).getAllByRole("cell")[0]?.textContent).toBe("Off");
+    expect(within(counter).getAllByRole("cell")[2]?.textContent).toBe("Off");
+
+    const grace = screen.getByRole("row", { name: /Statement grace days/ });
+    expect(within(grace).getAllByRole("cell")[0]?.textContent).toBe("7 days");
+    expect(within(grace).getAllByRole("cell")[2]?.textContent).toBe("8 days");
+
+    const balance = screen.getByRole("row", { name: /Balance limit/ });
+    expect(within(balance).getAllByRole("cell")[0]?.textContent).toBe(strings.rateCardInvalid);
+
+    const bargain = screen.getByRole("row", { name: /Bargain minimum commission/ });
+    expect(within(bargain).getAllByRole("cell")[0]?.textContent).toBe("₹12.25");
+    expect(within(bargain).getAllByRole("cell")[2]?.textContent).toBe("₹13.00");
+
+    const discount = screen.getByRole("row", { name: /Maximum shop discount percentage/ });
+    expect(within(discount).getAllByRole("cell")[0]?.textContent).toBe("12.5%");
+    expect(within(discount).getAllByRole("cell")[2]?.textContent).toBe("15%");
+
+    const preview = screen.getByRole("table");
+    expect(preview.textContent).not.toMatch(/[{}]/);
+    expect(preview.textContent).not.toContain("null");
+    expect(preview.textContent).not.toContain("after_shop_discount");
+  });
+
+  it.each([
+    {
+      name: "fixed",
+      value: { formula: "fixed", fixedAmount: "4", percentage: null, minimum: null, maximum: null, base: "after_shop_discount" },
+      expected: "Fixed ₹4.00",
+    },
+    {
+      name: "fixed plus percentage",
+      value: { formula: "fixed_plus_percentage", fixedAmount: "1", percentage: "2.5", minimum: null, maximum: null, base: "after_shop_discount" },
+      expected: "₹1.00 + 2.5% · After shop discount",
+    },
+    {
+      name: "lower of",
+      value: { formula: "lower_of", fixedAmount: "6", percentage: "9", minimum: null, maximum: "40", base: "before_shop_discount" },
+      expected: "Lower of ₹6.00 or 9% · Before shop discount · Maximum ₹40.00",
+    },
+  ])("formats the $name commission formula in current and draft values", async ({ value, expected }) => {
+    const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+    const source = { type: "global", id: null, version: "7" };
+    setup("/rate-cards", {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shop] } }),
+      getRateCardScope: vi.fn(async (scope: { type: string }) => ({ ok: true, data: { version: "7", values: scope.type === "global" ? { commission: value } : {} } })),
+      getEffectiveRateCard: vi.fn().mockResolvedValue({
+        ok: true, data: { version: "7", values: { commission: { value, source } }, missing: [], complete: true },
+      }),
+    });
+    await screen.findByRole("heading", { name: strings.rateCards });
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rateCardPreviewShop }), { target: { value: shop.id } });
+    const cells = within(await screen.findByRole("row", { name: /Commission/ })).getAllByRole("cell");
+    expect(cells[0]?.textContent).toBe(expected);
+    expect(cells[2]?.textContent).toBe(expected);
   });
 
   it("keeps retried scope values from replacing the newly selected scope", async () => {
@@ -237,8 +346,8 @@ describe("Admin web", () => {
     const row = screen.getByRole("row", { name: /Minimum cart/ });
     const draftCell = within(row).getAllByRole("cell")[2];
     if (!draftCell) throw new Error("Draft cell is missing");
-    await waitFor(() => expect(draftCell.textContent).toContain('"20"'));
-    expect(draftCell.textContent).toBe('"20"');
+    await waitFor(() => expect(draftCell.textContent).toContain("₹20.00"));
+    expect(draftCell.textContent).toBe("₹20.00");
     expect(within(row).getAllByRole("cell")[1]?.textContent).toBe(strings.rateCardSources.shop);
   });
 
