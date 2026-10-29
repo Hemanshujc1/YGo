@@ -167,29 +167,13 @@ export const strings = {
     notCleared:
       "You are signed out. This phone could not clear its saved sign-in, so it will try again the next time the app opens.",
   },
-  // The Inter review (design system, section 10), until real screens replace it.
-  review: {
-    sizes: "Type sizes",
-    display: "Display 28",
-    titleLarge: "Title large 24",
-    titleText: "Title 20",
-    headline: "Headline 18",
-    body: "Body 16",
-    label: "Label 16",
-    secondary: "Secondary 14",
-    smallLabel: "Small label 13",
-    caption: "Caption 12",
-    weights: "Weights",
-    regular: "Inter 400 Regular ₹",
-    medium: "Inter 500 Medium ₹",
-    semibold: "Inter 600 SemiBold ₹",
-    formats: "Formats",
-    prices: "Price column",
-    countdown: "Countdown",
-    tabs: "Tab labels",
-    tabLabels: ["Orders", "Bill", "Stock", "Deliveries", "More"],
-    hindi: "Hindi line height",
-    hindiSample: "आपका ऑर्डर तैयार है, कृपया दुकान पर आएँ।",
+  // C04 Home's shop list (#369, DSC-2).
+  feed: {
+    loading: "Finding shops near you…",
+    failed: "Couldn't load shops",
+    none: "No shop delivers here yet. Shops on YGo each choose how far they deliver.",
+    noPin: "Choose your place on the map to see shops that deliver to you.",
+    card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
   },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.

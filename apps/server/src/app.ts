@@ -17,6 +17,7 @@ import type { PlaceFinder } from "./adapters/place-finder";
 import type { Clock } from "./adapters/clock";
 import type { VisitPhotoStorage } from "./adapters/visit-photos";
 import { registerShopVisitRoutes } from "./routes/shop-visits";
+import { registerFeedRoutes } from "./routes/feed";
 import { registerPriceSimulatorRoutes } from "./routes/price-simulator";
 import { registerRateCardRoutes } from "./routes/rate-cards";
 import type { ProductImageStorage } from "./adapters/product-images";
@@ -125,6 +126,7 @@ export function buildApp({
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
+    registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
   }

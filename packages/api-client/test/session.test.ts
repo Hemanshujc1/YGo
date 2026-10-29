@@ -339,6 +339,14 @@ describe("each call", () => {
     expect(await client.checkServiceability("411038")).toEqual({ ok: true, data: { serviceable: true, areaName: "Kothrud" } });
   });
 
+  it("asks the feed with the pincode and the pin (#369)", async () => {
+    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00" };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
+    await client.verifyCode(signIn);
+    expect(await client.feed({ pincode: "411038", latitude: 18.5, longitude: 73.8 })).toEqual({ ok: true, data: { shops: [shop] } });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/feed?pincode=411038&latitude=18.5&longitude=73.8" });
+  });
+
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {
     const { client, stored } = setup(() => answer(200, { accessToken: "a1", account }));
     expect(await client.verifyCode({ email: "asha@example.com", code: "123456" })).toEqual({

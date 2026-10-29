@@ -13,6 +13,8 @@ import {
   SavedAddress,
   SavedAddressesResponse,
   Serviceability,
+  FeedResponse,
+  type FeedQuery,
   Session,
   ShopApplication,
   ShopListingsResponse,
@@ -334,6 +336,12 @@ export function createApiClient({
     /** `GET /v1/serviceability?pincode=`: whether the pincode is in an active Area (C15). */
     async checkServiceability(pincode: string): Promise<ApiResult<Serviceability>> {
       return result(await signedIn("GET", `/v1/serviceability?pincode=${encodeURIComponent(pincode)}`), Serviceability);
+    },
+
+    /** `GET /v1/feed`: the shops that can serve this place, nearest first (C04, DSC-1). */
+    async feed({ pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<FeedResponse>> {
+      const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
+      return result(await signedIn("GET", `/v1/feed?${query}`), FeedResponse);
     },
 
     /** `POST /v1/waitlist`: "Leave my number" on C03. */
