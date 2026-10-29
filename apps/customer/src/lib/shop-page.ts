@@ -1,4 +1,4 @@
-import type { ShopPagePack, ShopPageProduct } from "@ygo/contracts";
+import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
 import { formatNumber } from "@ygo/format";
 import { strings } from "../strings";
 
@@ -14,4 +14,9 @@ export function packLabel(quantity: string, baseUnit: ShopPageProduct["baseUnit"
 /** "10% off" for a whole percent of at least 1; a smaller cut shows only the struck MRP (owner's answer 3 on #370). */
 export function offLabel(pack: Pick<ShopPagePack, "discountPercent">): string | null {
   return pack.discountPercent ? strings.shop.off(pack.discountPercent) : null;
+}
+
+/** C05's SectionList sections: one per top category, its products as the rows, both in the server's order (#370). */
+export function shopSections(groups: ShopPageResponse["groups"]): Array<{ key: string; title: string; data: ShopPageProduct[] }> {
+  return groups.map((group) => ({ key: group.category, title: group.category, data: group.products }));
 }
