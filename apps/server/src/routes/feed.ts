@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import {
-  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type RateCardValues,
+  ErrorEnvelope, FeedQuery, indiaToday, FeedResponse, type RateCardValues, type ShopHoursRange,
   ShopPageParams, ShopPageResponse, type ShopPagePack, type ShopPageProduct,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { visibleListings } from "../listings";
 import { pointFrom } from "../points";
+import { indiaWeekday, openStatus, overrideOf } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
 
@@ -18,13 +19,15 @@ export function estimatedMinutes(metres: number): number {
 type ServingShop = ShopPageResponse["shop"];
 
 /**
- * The shops that can take this place's orders today, nearest first: every rule of C04 (owner's answers 6 and 13 on #47).
+ * The shops that can take this place's orders today: every rule of C04 (owner's answers 6 and 13 on #47).
+ * Open shops come first, then closed ones, nearest first in each (owner's answer 9 on #371).
  * C05 asks for one shop by `shopId`, so a shop page follows the feed's rules exactly (owner's answer 10 on #47).
  */
 async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitude }: FeedQuery, shopId: string | null = null): Promise<ServingShop[]> {
-  const rows = await pool.query<{ id: string; name: string; metres: number; fssaiNumber: string }>(
+  const rows = await pool.query<{ id: string; name: string; metres: number; fssaiNumber: string; open_override: boolean | null; open_override_until: Date | null }>(
     `WITH here AS (SELECT ${pointFrom("$2", "$3")} AS point)
-     SELECT s.id, s.shop_name AS name, ST_Distance(s.location, here.point) AS metres, s.fssai_number AS "fssaiNumber"
+     SELECT s.id, s.shop_name AS name, ST_Distance(s.location, here.point) AS metres, s.fssai_number AS "fssaiNumber",
+       s.open_override, s.open_override_until
      FROM shops s, here
      WHERE s.state = 'live' AND s.fssai_expiry > $4::date AND ($5::uuid IS NULL OR s.id = $5)
        AND ST_DWithin(s.location, here.point, s.service_radius_metres)
@@ -34,18 +37,26 @@ async function servingShops(pool: Pool, now: Date, { pincode, latitude, longitud
      ORDER BY metres, s.id`,
     [pincode, latitude, longitude, indiaToday(now), shopId],
   );
+  const hours = (await pool.query<ShopHoursRange & { shopId: string }>(
+    `SELECT shop_id AS "shopId", weekday, opens, closes FROM shop_hours WHERE shop_id = ANY($1::uuid[]) ORDER BY weekday, opens`,
+    [rows.rows.map((row) => row.id)])).rows;
   const shops = await Promise.all(rows.rows.map(async (row): Promise<ServingShop | undefined> => {
     // A Live shop whose card has become incomplete stays out (ONB-4).
     const card = await resolveRateCard(pool, row.id);
     const fee = card?.complete && (card.values.deliveryFee?.value as RateCardValues["deliveryFee"]);
     const minimum = card?.values.minimumCart?.value as RateCardValues["minimumCart"];
     if (!fee || minimum === undefined) return undefined;
+    const week = hours.filter((range) => range.shopId === row.id).map(({ weekday, opens, closes }) => ({ weekday, opens, closes }));
+    const status = openStatus(week, overrideOf(row), now);
     return {
       id: row.id, name: row.name, estimatedMinutes: estimatedMinutes(row.metres),
-      deliveryFee: fee.amount, minimumOrder: minimum, fssaiNumber: row.fssaiNumber,
+      deliveryFee: fee.amount, open: status.open, opensAt: status.open ? null : status.until,
+      minimumOrder: minimum, fssaiNumber: row.fssaiNumber, closesAt: status.open ? status.until : null,
+      hours: week, today: indiaWeekday(now),
     };
   }));
-  return shops.filter((shop) => shop !== undefined);
+  // A stable sort keeps the nearest-first order within the open and the closed group.
+  return shops.filter((shop) => shop !== undefined).sort((a, b) => Number(b.open) - Number(a.open));
 }
 
 type ListingRow = Omit<ShopPageProduct, "packs"> & ShopPagePack & { category: string };
@@ -58,7 +69,7 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
   app.get("/v1/feed", { schema: { querystring: FeedQuery, response: { 200: FeedResponse, ...errors } } }, async (request, reply) => {
     if (!await mobileSignedIn(request, reply, auth)) return reply;
     const shops = await servingShops(pool, clock.now(), request.query as FeedQuery);
-    return { shops: shops.map(({ id, name, estimatedMinutes, deliveryFee }) => ({ id, name, estimatedMinutes, deliveryFee })) };
+    return { shops: shops.map(({ id, name, estimatedMinutes, deliveryFee, open, opensAt }) => ({ id, name, estimatedMinutes, deliveryFee, open, opensAt })) };
   });
 
   // C05 Shop page (#370): 404 for a shop this place can't order from, as for one that doesn't exist.

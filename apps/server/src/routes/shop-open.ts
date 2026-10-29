@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { ErrorEnvelope, HOURS_STEP_MINUTES, ShopOpenChange, ShopOpenStatus, type ShopHoursRange } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
-import { openStatus, schedule } from "../shop-open";
+import { openStatus, overrideOf, schedule } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
 const DAY = 24 * 60 * 60_000;
@@ -26,8 +26,6 @@ async function hours(client: Pool | PoolClient, shopId: string) {
   return (await client.query<ShopHoursRange>("SELECT weekday, opens, closes FROM shop_hours WHERE shop_id = $1", [shopId])).rows;
 }
 
-const override = (shop: Shop) => shop.open_override === null || !shop.open_override_until ? null : { open: shop.open_override, until: shop.open_override_until };
-
 /**
  * The Owner's open/closed switch (#380), for a Live shop. Owner's answers
  * 14–16 and 22 on #371 and 1–8 on #380: closing lasts until the next opening,
@@ -43,7 +41,7 @@ export function registerShopOpenRoutes(app: FastifyInstance, { pool, clock, secr
     if (!who) return reply;
     const shop = await liveShop(pool, who.accountId, reply);
     if (!shop) return reply;
-    return openStatus(await hours(pool, shop.id), override(shop), clock.now());
+    return openStatus(await hours(pool, shop.id), overrideOf(shop), clock.now());
   });
 
   app.put("/v1/me/shop-open", { schema: { body: ShopOpenChange, response } }, async (request, reply) => {

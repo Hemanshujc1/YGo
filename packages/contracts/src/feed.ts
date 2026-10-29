@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AddressPoint } from "./addresses";
 import { ProductBaseUnit } from "./catalog";
 import { Pincode, ShopPrice } from "./fields";
+import { ShopHoursRange, Weekday } from "./shop-hours";
 
 /** `GET /v1/feed`: the Customer's pincode finds the Area, the pin tests each shop's radius (DSC-1). */
 export const FeedQuery = z.strictObject({
@@ -11,7 +12,7 @@ export const FeedQuery = z.strictObject({
 });
 export type FeedQuery = z.infer<typeof FeedQuery>;
 
-/** A C04 card (DSC-2). The rating joins with #82, and opening hours with #371. */
+/** A C04 card (DSC-2). The rating joins with #82. */
 export const FeedShop = z.strictObject({
   id: z.uuid(),
   name: z.string(),
@@ -19,10 +20,14 @@ export const FeedShop = z.strictObject({
   estimatedMinutes: z.number().int().positive(),
   /** Rupees as the shop's resolved rate card stores them, such as "30" or "25.5". */
   deliveryFee: ShopPrice,
+  /** From the weekly hours and the Owner's switch, in India time (#381); a shop with no hours is open. */
+  open: z.boolean(),
+  /** When a closed shop opens next; null while open. */
+  opensAt: z.iso.datetime().nullable(),
 });
 export type FeedShop = z.infer<typeof FeedShop>;
 
-/** Nearest first; empty when the pincode is in no active Area. */
+/** Open shops first, then closed ones, nearest first in each (owner's answer 9 on #371); empty when the pincode is in no active Area. */
 export const FeedResponse = z.strictObject({ shops: z.array(FeedShop) });
 export type FeedResponse = z.infer<typeof FeedResponse>;
 
@@ -55,7 +60,15 @@ export type ShopPageProduct = z.infer<typeof ShopPageProduct>;
 
 /** C05 Shop page (#370): the card's terms, the minimum order and FSSAI number (DSC-2), then products under their top category, A to Z. */
 export const ShopPageResponse = z.strictObject({
-  shop: FeedShop.extend({ minimumOrder: ShopPrice, fssaiNumber: z.string() }),
+  shop: FeedShop.extend({
+    minimumOrder: ShopPrice,
+    fssaiNumber: z.string(),
+    /** When an open shop closes next; null while closed, or for a shop that never closes. */
+    closesAt: z.iso.datetime().nullable(),
+    /** The weekly hours by day and opening time, and today's weekday in India, for C05's hours line (#381). */
+    hours: z.array(ShopHoursRange),
+    today: Weekday,
+  }),
   groups: z.array(z.strictObject({ category: z.string(), products: z.array(ShopPageProduct) })),
 });
 export type ShopPageResponse = z.infer<typeof ShopPageResponse>;

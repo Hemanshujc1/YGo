@@ -3,16 +3,16 @@ import { formatMoney } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { memo, useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, SectionList, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, SectionList, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
 import { TopBar } from "../../components/top-bar";
 import { goHome } from "../../lib/go-home";
-import { offLabel, packLabel, shopSections } from "../../lib/shop-page";
+import { hoursLine, offLabel, packLabel, shopSections, weekRows } from "../../lib/shop-page";
 import { strings } from "../../strings";
 
 // C05 Shop page (#370): the shop's terms (DSC-2), then its products under their top category.
-// Choosing a pack and the cart are C17 (#50); opening hours join with #371.
+// Choosing a pack and the cart are C17 (#50). The hours line opens the week (#381).
 
 type PageState =
   | { kind: "loading" }
@@ -65,11 +65,31 @@ function Product({ product }: { product: ShopPageProduct }) {
   );
 }
 
-/** The terms card above the list (DSC-2). */
+/** The terms card above the list (DSC-2), with the hours line that opens the week (#381). */
 function Terms({ shop }: { shop: ShopPageResponse["shop"] }) {
+  const [week, setWeek] = useState(false);
   return (
     <View className="rounded-card border border-border bg-surface p-4">
       <Text className="text-body tabular-nums text-text">{strings.feed.card(shop.estimatedMinutes, money(shop.deliveryFee))}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint={words.hours.week}
+        accessibilityState={{ expanded: week }}
+        onPress={() => setWeek((open) => !open)}
+        className="mt-1 min-h-12 justify-center"
+      >
+        <Text className={`text-body tabular-nums ${shop.open ? "text-success" : "text-muted"}`}>{hoursLine(shop, Date.now())}</Text>
+      </Pressable>
+      {week && (
+        <View className="gap-1 pb-1">
+          {weekRows(shop.hours, shop.today).map((row) => (
+            <View key={row.day} className="flex-row gap-3">
+              <Text className={`w-28 text-secondary ${row.today ? "font-semibold text-text" : "text-muted"}`}>{row.day}</Text>
+              <Text className={`flex-1 text-secondary tabular-nums ${row.today ? "font-semibold text-text" : "text-muted"}`}>{row.text}</Text>
+            </View>
+          ))}
+        </View>
+      )}
       <View className="mt-3 gap-1 border-t border-border pt-3">
         <Text className="text-body tabular-nums text-text">{words.minimumOrder(money(shop.minimumOrder))}</Text>
         <Text className="text-secondary tabular-nums text-muted">{words.fssai(shop.fssaiNumber)}</Text>

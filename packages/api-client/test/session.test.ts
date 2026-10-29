@@ -340,7 +340,7 @@ describe("each call", () => {
   });
 
   it("asks the feed with the pincode and the pin (#369)", async () => {
-    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00" };
+    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00", open: false, opensAt: "2030-01-02T03:30:00.000Z" };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
     await client.verifyCode(signIn);
     expect(await client.feed({ pincode: "411038", latitude: 18.5, longitude: 73.8 })).toEqual({ ok: true, data: { shops: [shop] } });
@@ -350,7 +350,10 @@ describe("each call", () => {
   it("asks for a shop page with the same query and passes on a shop that can't serve (#370)", async () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
     const page = {
-      shop: { id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "100", fssaiNumber: "11223344556677" },
+      shop: {
+        id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, minimumOrder: "100",
+        fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2,
+      },
       groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
         { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
       ] }] }],

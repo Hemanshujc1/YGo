@@ -46,6 +46,7 @@ beforeEach(async () => {
   } finally { await client.end(); }
   database = connectDatabase(url.href);
   await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
+  clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
   app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
   admin = await signIn("/v1/admin/auth", adminEmail);
@@ -108,8 +109,8 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     await publish({ type: "global" }, card);
     await publish({ type: "shop", id: near }, { deliveryFee: { amount: "25.5", split: { platformPercentage: "20", shopPercentage: "80" } } });
     expect((await feed()).json()).toEqual({ shops: [
-      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5" },
-      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30" },
+      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5", open: true, opensAt: null },
+      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null },
     ] });
 
     // The shop's own radius decides, up to 5 km; an FSSAI expiring tomorrow still lists.
@@ -204,7 +205,11 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
     const response = await page(id);
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      shop: { id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "150.5", fssaiNumber: "11223344556677" },
+      // No hours yet counts as open (owner's answer 8 on #371); 1 Jan 2030 is a Tuesday.
+      shop: {
+        id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null,
+        minimumOrder: "150.5", fssaiNumber: "11223344556677", closesAt: null, hours: [], today: 2,
+      },
       groups: [
         { category: "Groceries", products: [
           { id: atta.productId, name: "atta", brand: null, baseUnit: "kg", packs: [
@@ -243,5 +248,77 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
     expect((await page(id, "pincode=411038")).statusCode).toBe(400);
     expect((await page(id, undefined, admin)).statusCode).toBe(403);
     expect((await page(id, undefined, {})).statusCode).toBe(401);
+  });
+});
+
+/** A time in India. 1 Jan 2030 is a Tuesday. */
+const ist = (local: string) => new Date(`${local}+05:30`);
+const iso = (local: string) => ist(local).toISOString();
+const h = (hours: number) => hours * 60;
+
+/** Moves the clock to a time in India and signs the Customer in again, as tokens last 15 minutes. */
+async function at(local: string) {
+  clock.set(ist(local));
+  customer = await signIn("/v1/auth", "customer@example.com");
+}
+
+async function setHours(shopId: string, ranges: Array<[weekday: number, opens: number, closes: number]>) {
+  for (const [weekday, opens, closes] of ranges) {
+    await database.pool.query("INSERT INTO shop_hours (shop_id, weekday, opens, closes) VALUES ($1, $2, $3, $4)", [shopId, weekday, opens, closes]);
+  }
+}
+
+describe("Open or closed for Customers (#381)", () => {
+  it("lists open shops first, then closed ones with their next opening, nearest first in each", async () => {
+    const tonight = await shop("Tonight Stores", 300);
+    const pastMidnight = await shop("Late Kirana", 800);
+    const friday = await shop("Friday Mart", 1000);
+    const open = await shop("Day Dairy", 1500);
+    await shop("New Stores", 1800);
+    await publish({ type: "global" }, card);
+    await setHours(tonight, [[2, h(18), h(22)]]);
+    await setHours(pastMidnight, [[1, h(22), h(2)], [3, h(9), h(21)]]);
+    await setHours(friday, [[5, h(9), h(21)]]);
+    await setHours(open, [[2, h(9), h(21)]]);
+
+    const listed = async () => ((await feed()).json().shops as Array<{ name: string; open: boolean; opensAt: string | null }>)
+      .map(({ name, open, opensAt }) => [name, open, opensAt]);
+    await at("2030-01-01T10:00:00");
+    expect(await listed()).toEqual([
+      ["Day Dairy", true, null],
+      ["New Stores", true, null],
+      ["Tonight Stores", false, iso("2030-01-01T18:00:00")],
+      ["Late Kirana", false, iso("2030-01-02T09:00:00")],
+      ["Friday Mart", false, iso("2030-01-04T09:00:00")],
+    ]);
+
+    // The Owner's switch overrides the hours both ways (#380).
+    await database.pool.query("UPDATE shops SET open_override = false, open_override_until = $2 WHERE id = $1", [open, ist("2030-01-02T09:00:00")]);
+    await database.pool.query("UPDATE shops SET open_override = true, open_override_until = $2 WHERE id = $1", [tonight, ist("2030-01-01T12:00:00")]);
+    await at("2030-01-01T10:30:00");
+    expect((await listed()).map(([name, isOpen, opensAt]) => `${String(name)} ${String(isOpen)} ${String(opensAt)}`)).toEqual([
+      "Tonight Stores true null",
+      "New Stores true null",
+      "Late Kirana false " + iso("2030-01-02T09:00:00"),
+      "Friday Mart false " + iso("2030-01-04T09:00:00"),
+      "Day Dairy false " + iso("2030-01-02T09:00:00"),
+    ]);
+
+    // A week on, both switches have ended; Monday's 10:00 PM – 2:00 AM is still open at 1:00 AM on Tuesday.
+    await at("2030-01-08T01:00:00");
+    expect((await listed()).slice(0, 3)).toEqual([["Late Kirana", true, null], ["New Stores", true, null], ["Tonight Stores", false, iso("2030-01-08T18:00:00")]]);
+  });
+
+  it("gives the shop page the week's hours, today and when it next closes or opens", async () => {
+    const id = await shop("Day Dairy", 300);
+    await publish({ type: "global" }, card);
+    await setHours(id, [[2, h(13), h(17)], [2, h(9), h(13)], [7, h(22), h(2)]]);
+    await at("2030-01-01T10:00:00");
+    expect((await page(id)).json().shop).toMatchObject({
+      open: true, opensAt: null, closesAt: iso("2030-01-01T17:00:00"), today: 2,
+      hours: [{ weekday: 2, opens: h(9), closes: h(13) }, { weekday: 2, opens: h(13), closes: h(17) }, { weekday: 7, opens: h(22), closes: h(2) }],
+    });
+    await at("2030-01-01T18:00:00");
+    expect((await page(id)).json().shop).toMatchObject({ open: false, opensAt: iso("2030-01-06T22:00:00"), closesAt: null });
   });
 });
