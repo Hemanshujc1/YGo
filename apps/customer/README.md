@@ -62,6 +62,25 @@ ANDROID_SERIAL=<device> python3 apps/customer/test/device/confirm-location.py --
 
 This checks airport search, map Back/reopen and confirming an Other address outside the service radius (#387). It saves an Other address on the test account. Without `--search`, it opens the airport coordinates directly to isolate map locking on save. This needs a real native map; the Vitest map mock cannot reproduce Android view parenting.
 
+## Native cold-launch regression
+
+The Android screens dependency has a [temporary upstream patch](../../patches/README.md)
+for #402. Rebuild the APK after installing dependencies; Metro alone cannot apply it.
+With the same signed-in native development app and services as the airport check:
+
+```sh
+ANDROID_SERIAL=<device> python3 apps/customer/test/device/cold-start.py --launches 20
+```
+
+Each attempt force-stops Customer, opens Confirm location and inspects the native
+UI for at least 15 seconds, allowing up to 60 seconds for the map to render.
+A pass requires the same process to survive throughout and the native map to render. Run against the unpatched APK until it fails, then repeat at least that
+many launches against the patched APK. On process death the script saves
+`adb logcat -b crash` to `/tmp/ygo-cold-start-crash.log` (override with `--crash-log`)
+and identifies the matching process's MountingCoordinator SIGSEGV. It does not
+clear app data. Follow this with the airport `--search` check above and verify the
+rebuilt Shopkeeper starts too.
+
 ## Styling
 
 NativeWind classes over `@ygo/tokens` roles only, such as `bg-surface` and `text-muted`. `tailwind.config.js` loads the same `@ygo/tokens/tailwind` plugin as the web apps, which replaces Tailwind's palette and switches to the dark values with the theme in use. `metro.config.js` sets 1rem to 16, as on the web, so the spacing scale matches the design system. Inline `style` is only for values known at runtime, such as safe-area insets.
