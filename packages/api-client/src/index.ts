@@ -23,7 +23,9 @@ import {
   ShopAgreementResponse,
   type AcceptShopAgreementBody,
   ShopHoursResponse,
+  ShopHolidaysResponse,
   ShopOpenStatus,
+  type ShopHoliday,
   type ShopOpenChange,
   type ShopHours,
   type ShopListingCatalogItem,
@@ -440,6 +442,23 @@ export function createApiClient({
     /** `PUT /v1/me/shop-hours`: replaces the whole week. */
     async saveShopHours(body: ShopHours): Promise<ApiResult<ShopHoursResponse>> {
       return result(await signedIn("PUT", "/v1/me/shop-hours", body), ShopHoursResponse);
+    },
+
+    /** `GET /v1/me/shop-holidays`: the Owner's holidays, upcoming and ended (#382). */
+    async shopHolidays(): Promise<ApiResult<ShopHolidaysResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-holidays"), ShopHolidaysResponse);
+    },
+
+    /** `POST /v1/me/shop-holidays`, or `PUT .../:id` with an `id`: saves one holiday and answers the whole list. */
+    async saveShopHoliday(body: ShopHoliday, id?: string): Promise<ApiResult<ShopHolidaysResponse>> {
+      return result(await (id
+        ? signedIn("PUT", `/v1/me/shop-holidays/${encodeURIComponent(id)}`, body)
+        : signedIn("POST", "/v1/me/shop-holidays", body)), ShopHolidaysResponse);
+    },
+
+    /** `DELETE /v1/me/shop-holidays/:id`: removes a holiday, or ends one under way yesterday. */
+    async removeShopHoliday(id: string): Promise<ApiResult<ShopHolidaysResponse>> {
+      return result(await signedIn("DELETE", `/v1/me/shop-holidays/${encodeURIComponent(id)}`), ShopHolidaysResponse);
     },
 
     /** `GET /v1/me/shop-open`: whether the Owner's Live shop is open now, and until when (#380). */

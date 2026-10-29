@@ -8,7 +8,12 @@ export function feedQuery(place: Place): FeedQuery | null {
   return place.point ? { pincode: place.pincode, ...place.point } : null;
 }
 
-/** A closed shop's card line, "Closed · opens tomorrow 9:00 AM"; none while open (owner's answer 9 on #371). */
-export function closedLine(shop: Pick<FeedShop, "open" | "opensAt">, now: number): string | null {
-  return shop.open || !shop.opensAt ? null : strings.feed.closed(formatDayTime(shop.opensAt, now, strings.feed.tomorrow));
+/**
+ * A closed shop's card line, "Closed · opens tomorrow 9:00 AM", or
+ * "Holiday · opens …" on one of its holidays; none while open (owner's answer
+ * 9 on #371, 10 on #382).
+ */
+export function closedLine(shop: Pick<FeedShop, "open" | "opensAt" | "holiday">, now: number): string | null {
+  if (shop.open || !shop.opensAt) return null;
+  return (shop.holiday ? strings.feed.holiday : strings.feed.closed)(formatDayTime(shop.opensAt, now, strings.feed.tomorrow));
 }

@@ -204,6 +204,13 @@
       "when": 1793274503551,
       "tag": "0028_shop_open_override",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793280272925,
+      "tag": "0029_shop_holidays",
+      "breakpoints": true
     }
   ]
 }

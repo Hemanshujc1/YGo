@@ -41,9 +41,10 @@ function rangesText(ranges: readonly ShopHoursRange[]): string {
  */
 export function hoursLine(shop: ShopPageResponse["shop"], now: number): string {
   const when = (at: string) => formatDayTime(at, now, strings.feed.tomorrow);
-  if (!shop.open) return shop.opensAt ? hoursWords.closedNow(when(shop.opensAt)) : hoursWords.closed;
+  if (!shop.open) return shop.opensAt ? (shop.holiday ? hoursWords.closedHoliday : hoursWords.closedNow)(when(shop.opensAt)) : hoursWords.closed;
   if (!shop.closesAt) return hoursWords.allDay;
-  const today = shop.hours.filter((range) => range.weekday === shop.today);
+  // Open on a holiday is the Owner's switch, so today's hours don't apply (#382).
+  const today = shop.holidays.includes(shop.today) ? [] : shop.hours.filter((range) => range.weekday === shop.today);
   // Minutes past midnight in India; a range running past midnight covers the rest of today.
   const minute = (Math.floor(now / 60_000) + 330) % 1440;
   const inToday = today.some(({ opens, closes }) => closes > opens ? minute >= opens && minute < closes : minute >= opens);
@@ -53,10 +54,15 @@ export function hoursLine(shop: ShopPageResponse["shop"], now: number): string {
   return today.length === 1 && only?.opens === 0 && only.closes === 0 ? hoursWords.allDayToday : hoursWords.openToday(rangesText(today));
 }
 
-/** The week behind the line, Monday first: each day's ranges or "Closed", today marked (owner's answer 3 on #381). */
-export function weekRows(hours: readonly ShopHoursRange[], today: number): Array<{ day: string; text: string; today: boolean }> {
+/**
+ * The week behind the line, Monday first: each day's ranges or "Closed",
+ * today marked (owner's answer 3 on #381). A day of the coming 7 that is a
+ * holiday reads "Holiday" (owner's answer 11 on #382).
+ */
+export function weekRows(hours: readonly ShopHoursRange[], today: number, holidays: readonly number[]): Array<{ day: string; text: string; today: boolean }> {
   return hoursWords.days.map((day, index) => {
     const ranges = hours.filter((range) => range.weekday === index + 1);
-    return { day, text: ranges.length ? rangesText(ranges) : hoursWords.closed, today: index + 1 === today };
+    const text = holidays.includes(index + 1) ? hoursWords.holiday : ranges.length ? rangesText(ranges) : hoursWords.closed;
+    return { day, text, today: index + 1 === today };
   });
 }

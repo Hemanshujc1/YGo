@@ -6,7 +6,8 @@ const ROW = 48;
 
 /**
  * A list of times in a bottom sheet, opened on the current choice: the
- * opening hours' half hours (#371) and the switch's "Open until" (#380).
+ * opening hours' half hours (#371), the switch's "Open until" (#380) and
+ * holiday dates (#382).
  */
 export function TimeSheet({ title, times, selected, label, cancel, onPick, onCancel }: {
   title: string;

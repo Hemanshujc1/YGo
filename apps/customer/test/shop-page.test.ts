@@ -35,16 +35,16 @@ describe("opening hours on C04 and C05 (#381)", () => {
   const h = (hours: number) => hours * 60;
   const shop = {
     id: "8a0e4f8e-1c55-4d3c-9b8e-6b6f1f7f2a10", name: "Day Dairy", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "100", fssaiNumber: "11223344556677",
-    open: true, opensAt: null, closesAt: iso("2030-01-01T21:00:00"), today: 2,
+    open: true, opensAt: null, closesAt: iso("2030-01-01T21:00:00"), today: 2, holiday: false, holidays: [] as number[],
     hours: [{ weekday: 1, opens: h(22), closes: h(2) }, { weekday: 2, opens: h(9), closes: h(13) }, { weekday: 2, opens: h(16), closes: h(21) }, { weekday: 3, opens: 0, closes: 0 }],
   };
 
   it("says closed with the next opening on a C04 card, and nothing while open", () => {
     const now = ist("2030-01-01T14:00:00");
-    expect(closedLine({ open: false, opensAt: iso("2030-01-01T16:00:00") }, now)).toBe("Closed · opens 4:00 PM");
-    expect(closedLine({ open: false, opensAt: iso("2030-01-02T09:00:00") }, now)).toBe("Closed · opens tomorrow 9:00 AM");
-    expect(closedLine({ open: false, opensAt: iso("2030-01-07T09:00:00") }, now)).toBe("Closed · opens Mon 9:00 AM");
-    expect(closedLine({ open: true, opensAt: null }, now)).toBeNull();
+    expect(closedLine({ open: false, opensAt: iso("2030-01-01T16:00:00"), holiday: false }, now)).toBe("Closed · opens 4:00 PM");
+    expect(closedLine({ open: false, opensAt: iso("2030-01-02T09:00:00"), holiday: false }, now)).toBe("Closed · opens tomorrow 9:00 AM");
+    expect(closedLine({ open: false, opensAt: iso("2030-01-07T09:00:00"), holiday: false }, now)).toBe("Closed · opens Mon 9:00 AM");
+    expect(closedLine({ open: true, opensAt: null, holiday: false }, now)).toBeNull();
   });
 
   it("gives C05 one line: open today, open until, open 24 hours or closed now", () => {
@@ -62,16 +62,27 @@ describe("opening hours on C04 and C05 (#381)", () => {
     expect(hoursLine(wednesday, ist("2030-01-02T10:00:00"))).toBe("Open all day today");
     const fromNine = { ...shop, today: 4, closesAt: iso("2030-01-04T09:00:00"), hours: [{ weekday: 4, opens: h(9), closes: h(9) }] };
     expect(hoursLine(fromNine, ist("2030-01-03T10:00:00"))).toBe("Open today, 24 hours from 9:00 AM");
-    expect(weekRows(fromNine.hours, 4)[3]).toEqual({ day: "Thursday", text: "24 hours from 9:00 AM", today: true });
+    expect(weekRows(fromNine.hours, 4, [])[3]).toEqual({ day: "Thursday", text: "24 hours from 9:00 AM", today: true });
     expect(hoursLine({ ...wednesday, closesAt: null }, ist("2030-01-02T10:00:00"))).toBe("Open 24 hours");
   });
 
   it("lists the week Monday first with today marked, closed days and 24-hour days", () => {
-    expect(weekRows(shop.hours, 2).slice(0, 4)).toEqual([
+    expect(weekRows(shop.hours, 2, []).slice(0, 4)).toEqual([
       { day: "Monday", text: "10:00 PM – 2:00 AM", today: false },
       { day: "Tuesday", text: "9:00 AM – 1:00 PM, 4:00 PM – 9:00 PM", today: true },
       { day: "Wednesday", text: "All day", today: false },
       { day: "Thursday", text: "Closed", today: false },
     ]);
+  });
+
+  it("says a shop is closed for a holiday on C04 and C05, dates the opening a week or more away, and marks holidays in the week (#382)", () => {
+    const now = ist("2030-01-01T10:00:00");
+    expect(closedLine({ open: false, opensAt: iso("2030-01-03T09:00:00"), holiday: true }, now)).toBe("Holiday · opens Thu 9:00 AM");
+    expect(closedLine({ open: false, opensAt: iso("2030-01-11T09:00:00"), holiday: true }, now)).toBe("Holiday · opens 11 Jan 9:00 AM");
+    const away = { ...shop, open: false, closesAt: null, opensAt: iso("2030-01-11T09:00:00"), holiday: true, holidays: [1, 2, 3, 4, 5, 6, 7] };
+    expect(hoursLine(away, now)).toBe("Closed for a holiday · opens 11 Jan 9:00 AM");
+    // Opened by the Owner on a holiday: today's hours don't apply, so the line gives the switch's end.
+    expect(hoursLine({ ...shop, closesAt: iso("2030-01-01T12:00:00"), holidays: [2] }, now)).toBe("Open now · until 12:00 PM");
+    expect(weekRows(shop.hours, 2, [2, 4]).slice(0, 4).map((row) => row.text)).toEqual(["10:00 PM – 2:00 AM", "Holiday", "All day", "Holiday"]);
   });
 });

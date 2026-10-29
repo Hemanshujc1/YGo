@@ -109,8 +109,8 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     await publish({ type: "global" }, card);
     await publish({ type: "shop", id: near }, { deliveryFee: { amount: "25.5", split: { platformPercentage: "20", shopPercentage: "80" } } });
     expect((await feed()).json()).toEqual({ shops: [
-      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5", open: true, opensAt: null },
-      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null },
+      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5", open: true, opensAt: null, holiday: false },
+      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null, holiday: false },
     ] });
 
     // The shop's own radius decides, up to 5 km; an FSSAI expiring tomorrow still lists.
@@ -207,8 +207,8 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
     expect(response.json()).toEqual({
       // No hours yet counts as open (owner's answer 8 on #371); 1 Jan 2030 is a Tuesday.
       shop: {
-        id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null,
-        minimumOrder: "150.5", fssaiNumber: "11223344556677", closesAt: null, hours: [], today: 2,
+        id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, holiday: false,
+        minimumOrder: "150.5", fssaiNumber: "11223344556677", closesAt: null, hours: [], today: 2, holidays: [],
       },
       groups: [
         { category: "Groceries", products: [
@@ -320,5 +320,20 @@ describe("Open or closed for Customers (#381)", () => {
     });
     await at("2030-01-01T18:00:00");
     expect((await page(id)).json().shop).toMatchObject({ open: false, opensAt: iso("2030-01-06T22:00:00"), closesAt: null });
+  });
+
+  it("marks a shop closed for a holiday on C04 and C05, with the opening after it even beyond a week (#382)", async () => {
+    const id = await shop("Day Dairy", 300);
+    await publish({ type: "global" }, card);
+    await setHours(id, [1, 2, 3, 4, 5, 6, 7].map((weekday): [number, number, number] => [weekday, h(9), h(21)]));
+    // Tuesday 1 Jan to Thursday 10 Jan, then Saturday 12 Jan; 6 Jan is the Sunday of the coming week.
+    await database.pool.query(
+      "INSERT INTO shop_holidays (shop_id, starts, ends) VALUES ($1, '2030-01-01', '2030-01-10'), ($1, '2030-01-12', '2030-01-12')", [id]);
+    await at("2030-01-01T10:00:00");
+    expect((await feed()).json().shops).toEqual([expect.objectContaining({ open: false, holiday: true, opensAt: iso("2030-01-11T09:00:00") })]);
+    expect((await page(id)).json().shop).toMatchObject({ open: false, holiday: true, opensAt: iso("2030-01-11T09:00:00"), holidays: [1, 2, 3, 4, 5, 6, 7] });
+    // Friday 11 Jan, after closing: closed for the night, not a holiday, and Saturday's holiday is in the week.
+    await at("2030-01-11T22:00:00");
+    expect((await page(id)).json().shop).toMatchObject({ open: false, holiday: false, opensAt: iso("2030-01-13T09:00:00"), holidays: [6] });
   });
 });

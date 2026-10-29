@@ -206,12 +206,18 @@ export {
   AcceptShopAgreementBody,
 } from "./shop-agreement";
 export {
+  addDays,
   DayMinute,
+  HOLIDAY_DAYS_AHEAD,
   HOURS_STEP_MINUTES,
   MAX_RANGES_PER_DAY,
+  MAX_UPCOMING_HOLIDAYS,
   MINUTES_PER_DAY,
   overlappingDays,
   rangeLength,
+  ShopHoliday,
+  ShopHolidayParams,
+  ShopHolidaysResponse,
   ShopHours,
   ShopHoursRange,
   ShopHoursResponse,

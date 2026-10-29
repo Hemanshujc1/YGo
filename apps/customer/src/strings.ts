@@ -176,6 +176,8 @@ export const strings = {
     card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
     // A closed shop's card (owner's answer 9 on #371).
     closed: (when: string) => `Closed · opens ${when}`,
+    // Closed for one of the shop's holidays today (owner's answer 10 on #382).
+    holiday: (when: string) => `Holiday · opens ${when}`,
     tomorrow: "tomorrow",
   },
   // C05 Shop page (#370).
@@ -198,6 +200,9 @@ export const strings = {
       openToday: (ranges: string) => `Open today, ${ranges}`,
       openUntil: (when: string) => `Open now · until ${when}`,
       closedNow: (when: string) => `Closed now · opens ${when}`,
+      // Owner's answer 11 on #382.
+      closedHoliday: (when: string) => `Closed for a holiday · opens ${when}`,
+      holiday: "Holiday",
       // Only for a shop that never closes all week.
       allDay: "Open 24 hours",
       // A day open from 12:00 AM to the next 12:00 AM, in a week that has closed time.
@@ -247,5 +252,7 @@ export const strings = {
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
     SHOP_NOT_READY: "This shop isn't ready to go Live yet.",
     SHOP_NOT_LIVE: "This works once the shop is Live.",
+    HOLIDAY_OVERLAP: "These dates overlap another holiday.",
+    TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
   } satisfies Record<ErrorCode, string>,
 };

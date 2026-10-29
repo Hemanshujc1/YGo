@@ -82,7 +82,7 @@ function Terms({ shop }: { shop: ShopPageResponse["shop"] }) {
       </Pressable>
       {week && (
         <View className="gap-1 pb-1">
-          {weekRows(shop.hours, shop.today).map((row) => (
+          {weekRows(shop.hours, shop.today, shop.holidays).map((row) => (
             <View key={row.day} className="flex-row gap-3">
               <Text className={`w-28 text-secondary ${row.today ? "font-semibold text-text" : "text-muted"}`}>{row.day}</Text>
               <Text className={`flex-1 text-secondary tabular-nums ${row.today ? "font-semibold text-text" : "text-muted"}`}>{row.text}</Text>
