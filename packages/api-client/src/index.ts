@@ -35,6 +35,7 @@ import {
   type ChangeNameBody,
   type RequestCodeBody,
   type SaveAddressBody,
+  type AddressPinBody,
   type SaveShopApplicationBody,
   type SendShopApplicationBody,
   type SetProfileBody,
@@ -370,6 +371,11 @@ export function createApiClient({
     /** `POST /v1/me/addresses`: saves a confirmed place. A new Home or Work replaces the old one. */
     async saveAddress(body: SaveAddressBody): Promise<ApiResult<SavedAddress>> {
       return result(await signedIn("POST", "/v1/me/addresses", body), SavedAddress);
+    },
+
+    /** `PUT /v1/me/addresses/:id/point`: puts the pin on a saved address that has none (#373). */
+    async pinAddress(id: string, body: AddressPinBody): Promise<ApiResult<SavedAddress>> {
+      return result(await signedIn("PUT", `/v1/me/addresses/${encodeURIComponent(id)}/point`, body), SavedAddress);
     },
 
     /** `DELETE /v1/me/addresses/:id` */

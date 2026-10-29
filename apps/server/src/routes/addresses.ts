@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 import {
+  AddressPinBody,
   ErrorEnvelope,
   SaveAddressBody,
   SavedAddress,
@@ -70,6 +71,22 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
       await client.query("COMMIT");
       return reply.code(201).send(saved.rows[0]);
     });
+  });
+
+  // The phone can't read a place with location refused, so the typed pincode stays (#373, owner's answer 2).
+  app.put("/v1/me/addresses/:id/point", { schema: { params: SavedAddressParams, body: AddressPinBody, response: { 200: SavedAddress, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as { id: string };
+    const { point } = request.body as AddressPinBody;
+    const pinned = await pool.query<SavedAddress>(
+      `UPDATE saved_addresses SET point = ${pointFrom("$3", "$4")} WHERE id = $1 AND account_id = $2
+       RETURNING id, label, flat, area_line AS "areaLine", pincode, ${pointJson("point")} AS point`,
+      [id, who.accountId, point.latitude, point.longitude],
+    );
+    // Another account's address answers the same as a missing one.
+    if (!pinned.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    return pinned.rows[0];
   });
 
   app.delete("/v1/me/addresses/:id", { schema: { params: SavedAddressParams, response: { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } } }, async (request, reply) => {

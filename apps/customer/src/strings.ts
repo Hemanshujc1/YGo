@@ -134,6 +134,13 @@ export const strings = {
     saving: "Saving…",
     offline: "Could not save this address. Check your connection, then try again.",
     notSaved: "This phone could not save your location. Try again.",
+    // A typed pincode's map (#373).
+    findingPincode: "Finding your pincode on the map…",
+    moveHint: "Move the map so the pin sits on your place.",
+    pincodeNotFound: "Couldn't find this pincode on the map. Go back and check it.",
+    mapOffline: "Couldn't open the map. Check your connection, then try again.",
+    mapDown: "The map isn't working right now. Try again later.",
+    retry: "Try again",
   },
   // The test home's location line (#216), until C04 Home replaces it.
   area: {

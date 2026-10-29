@@ -57,3 +57,11 @@ export type SavedAddressesResponse = z.infer<typeof SavedAddressesResponse>;
 
 /** `DELETE /v1/me/addresses/:id` */
 export const SavedAddressParams = z.strictObject({ id: z.uuid() });
+
+/**
+ * `PUT /v1/me/addresses/:id/point`: puts the pin on a saved address that has
+ * none, keeping its pincode, flat and label (#373, owner's answer 6). Sending
+ * it again answers the same address.
+ */
+export const AddressPinBody = z.strictObject({ point: AddressPoint });
+export type AddressPinBody = z.infer<typeof AddressPinBody>;
