@@ -205,3 +205,4 @@ export {
   ShopAgreementResponse,
   AcceptShopAgreementBody,
 } from "./shop-agreement";
+export { FeedQuery, FeedResponse, FeedShop } from "./feed";
