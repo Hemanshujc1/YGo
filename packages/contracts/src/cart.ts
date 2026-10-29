@@ -30,7 +30,7 @@ export const CartLine = z.strictObject({
   count: LineCount,
   /** `unavailable`: the shop no longer sells it; `outOfStock`: not one pack left. */
   state: z.enum(["orderable", "outOfStock", "unavailable"]),
-  /** Packs left when the count is held at stock; null otherwise. */
+  /** Packs left when the count has reached stock, so no more can be added; null otherwise. */
   left: z.number().int().positive().nullable(),
   /** From the pricing engine; null for a line that isn't priced. */
   lineTotal: Amount.nullable(),

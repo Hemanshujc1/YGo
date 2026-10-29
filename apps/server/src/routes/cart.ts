@@ -17,9 +17,10 @@ async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[])
     `SELECT entry.position::int AS position, l.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
         trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
         EXISTS (SELECT 1 FROM ${visibleListings} AND listing.id = l.id) AS "onSale",
-        -- Stock is held in base units (CAT-4), so a pack needs its whole quantity; counts stop at 999.
+        -- Stock is held in base units (CAT-4), so a pack needs its whole quantity. Capped at 1000, one above
+        -- the largest count, so a count of 999 is never shown as the last packs left.
         LEAST(GREATEST(floor(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = l.id), 0)
-          / pack.quantity), 0), 999)::int AS "packsLeft"
+          / pack.quantity), 0), 1000)::int AS "packsLeft"
       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)
       JOIN shop_listings l ON l.id = (entry.line->>'listingId')::uuid AND l.shop_id = $1
       JOIN packs pack ON pack.id = l.pack_id
@@ -36,8 +37,10 @@ async function savedCart(client: Pool | PoolClient, accountId: string, shopId: s
 }
 
 /** The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4). */
-async function cartView(client: Pool, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[]): Promise<CartResponse> {
-  const packs = await packsOf(client, shopId, saved);
+async function cartView(
+  client: Pool, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], read?: Array<Pack | undefined>,
+): Promise<CartResponse> {
+  const packs = read ?? await packsOf(client, shopId, saved);
   const lines: CartLine[] = saved.map((line, index) => {
     const pack = packs[index];
     if (!pack) throw new Error("A saved cart line lost its listing");
@@ -86,8 +89,8 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { shopId } = request.params as CartParams;
-    const [serving] = await servingShops(pool, clock.now(), request.query as FeedQuery, shopId);
-    const cart = await savedCart(pool, who.accountId, shopId, false);
+    const [[serving], cart] = await Promise.all([
+      servingShops(pool, clock.now(), request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false)]);
     if (!serving && !cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     return cartView(pool, shopId, serving, cart?.revision ?? 0, cart?.lines ?? []);
   });
@@ -111,8 +114,8 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
       if (cart.revision !== revision) return "CART_CHANGED";
       const packs = await packsOf(client, shopId, lines);
       const had = new Set(cart.lines.map((line) => line.listingId));
-      // Every line is a pack of this shop; one not yet in the cart must be on sale at a shop that can deliver here.
-      if (packs.some((pack) => !pack || (!had.has(pack.listingId) && !(pack.onSale && serving)))) return "NOT_FOUND";
+      // Every line is a pack of this shop; one not yet in the cart must be on sale, in stock, at a shop that can deliver here (C17).
+      if (packs.some((pack) => !pack || (!had.has(pack.listingId) && !(pack.onSale && pack.packsLeft > 0 && serving)))) return "NOT_FOUND";
       // A count is held at stock (owner's answer 9 on #50); a line with none left keeps its count until removed. Nothing is reserved.
       const held = lines.map((line, index) => {
         const pack = packs[index];
@@ -125,10 +128,10 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
          FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`, [cart.id, JSON.stringify(held)]);
       await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [cart.id, clock.now()]);
       await client.query("COMMIT");
-      return held;
+      return { held, packs };
     });
     if (typeof saved === "string") return reply.code(saved === "NOT_FOUND" ? 404 : 409).send({ error: { code: saved } });
-    // Priced after the commit: the quote reads in parallel, which one transaction's connection can't.
-    return cartView(pool, shopId, serving, revision + 1, saved);
+    // Priced after the commit, from the packs the save checked: the quote reads in parallel, which one transaction's connection can't.
+    return cartView(pool, shopId, serving, revision + 1, saved.held, saved.packs);
   });
 }

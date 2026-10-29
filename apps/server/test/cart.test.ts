@@ -212,6 +212,8 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
       revision: 1, lines: [{ count: 1, state: "orderable" }, { count: 4, state: "outOfStock", left: null, lineTotal: null }],
       quote: { productValue: "135.00" }, placeable: false, reasons: [{ code: "LINE_UNAVAILABLE" }],
     });
+    // A cart that has none can't newly add it (C17).
+    expect((await save(shopId, 0, [{ listingId: atta, count: 1 }], await signIn("/v1/auth", "fourth@example.com"))).statusCode).toBe(404);
     // A pack the shop stops selling is marked the same way, and can be kept or removed but not newly added.
     await database.pool.query("UPDATE shop_listings SET available = false WHERE id = $1", [dal]);
     expect((await read(shopId)).json()).toMatchObject({
@@ -220,6 +222,10 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     expect((await save(shopId, 1, [{ listingId: dal, count: 2 }])).statusCode).toBe(200);
     expect((await save(shopId, 0, [{ listingId: dal, count: 1 }], await signIn("/v1/auth", "third@example.com"))).statusCode).toBe(404);
     expect((await save(shopId, 2, [])).json()).toMatchObject({ lines: [], reasons: [] });
+
+    // 999 packs from thousands in stock: not the last ones left.
+    const salt = (await product(shopId, await category("Salt"), "Salt", "each", [{ quantity: "1", price: "1", mrp: "1", stock: "5000" }])).listings[0];
+    expect((await save(shopId, 3, [{ listingId: salt, count: 999 }])).json()).toMatchObject({ lines: [{ count: 999, left: null }] });
   });
 
   it("takes only this shop's packs, and each Customer sees only their own cart", async () => {

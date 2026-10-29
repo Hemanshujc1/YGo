@@ -274,6 +274,6 @@ export const strings = {
     HOLIDAY_OVERLAP: "These dates overlap another holiday.",
     TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
     SEARCH_TERM_IN_USE: "This search term already exists.",
-    CART_CHANGED: "Your cart changed on another phone. It has been reloaded.",
+    CART_CHANGED: "Your cart was changed. Check it and try again.",
   } satisfies Record<ErrorCode, string>,
 };
