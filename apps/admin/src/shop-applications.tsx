@@ -1,6 +1,6 @@
-import { AssignShopAreaManagerBody, CorrectShopApplicationBody, type AdminAccount, type AdminShopApplication } from "@ygo/contracts";
+import { AssignShopAreaManagerBody, CorrectShopApplicationBody, type AdminAccount, type AdminShopApplication, type LiveCheck } from "@ygo/contracts";
 import { formatDate, formatDateTime, formatNumber, formatPhone } from "@ygo/format";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLoaderData } from "react-router";
 import { createAdminApiClient } from "@ygo/api-client";
 import { ReasonDialog } from "./components/reason-dialog";
@@ -155,14 +155,45 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
     finally { setBusy(false); }
   }
 
+  // A07 Move to Live (#363): the server names what still blocks it, and checks again on the move.
+  const [check, setCheck] = useState<LiveCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const approved = admin && application.state === "approved";
+
+  async function loadCheck() {
+    setChecking(true); setError("");
+    try {
+      const result = await api.shopLiveCheck(application.id);
+      if (result.ok) setCheck(result.data);
+      else setError(strings.errors[result.code]);
+    } catch { setError(strings.failed); }
+    finally { setChecking(false); }
+  }
+
+  useEffect(() => {
+    if (approved) void loadCheck();
+  }, [approved, application.id]);
+
+  async function moveToLive() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await api.moveShopToLive(application.id);
+      if (result.ok) { setApplication(result.data); setCheck(null); setNotice(strings.movedToLive); }
+      else { if (result.liveCheck) setCheck(result.liveCheck); setError(strings.errors[result.code]); }
+    } catch { setError(strings.failed); }
+    finally { setBusy(false); setConfirming(false); }
+  }
+
   const location = application.location;
   return <>
     <div className="mb-8 flex items-start justify-between gap-4"><div>
       <Link to="/applications" className="text-primary underline">{strings.backToApplications}</Link>
       <h1 className="mt-3 text-title-large font-semibold">{application.shopName}</h1>
       <p className="mt-2 text-muted">{strings.applicationState[application.state]}</p>
-    </div>{!admin ? application.state !== "approved" && <p className="max-w-sm rounded-lg bg-info-subtle p-3 text-on-info-subtle">{strings.adminDecides}</p> : <div className="flex gap-2">{application.state === "submitted" && <button disabled={busy} onClick={() => void transition("startShopApplicationReview")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.startReview}</button>}
-      {application.state === "under_review" && <button disabled={busy} onClick={() => void transition("approveShopApplication")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.approveApplication}</button>}</div>}</div>
+    </div>{!admin ? application.state !== "live" && <p className="max-w-sm rounded-lg bg-info-subtle p-3 text-on-info-subtle">{strings.adminDecides}</p> : <div className="flex gap-2">{application.state === "submitted" && <button disabled={busy} onClick={() => void transition("startShopApplicationReview")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.startReview}</button>}
+      {application.state === "under_review" && <button disabled={busy} onClick={() => void transition("approveShopApplication")} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.approveApplication}</button>}
+      {approved && <button disabled={busy || check?.blockers.length !== 0} onClick={() => setConfirming(true)} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.moveToLive}</button>}</div>}</div>
     {notice && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{notice}</p>}
     {error && <p role="alert" className="mb-4 rounded-lg bg-danger-subtle p-3 text-on-danger-subtle">{error}</p>}
     <section className="rounded-xl border border-border bg-surface"><dl>
@@ -178,6 +209,14 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.ownerEmail}</dt><dd className="mt-1">{application.ownerEmail}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.submittedAt}</dt><dd className="mt-1">{application.submittedAt ? formatDateTime(application.submittedAt) : "—"}</dd></div>
     </dl></section>
+    {approved && <section aria-labelledby="live-check-title" className="mt-6 rounded-xl border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="live-check-title" className="font-semibold">{strings.liveCheckTitle}</h2>
+        <button disabled={checking} onClick={() => void loadCheck()} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{strings.liveCheckAgain}</button></div>
+      {!check ? checking && <p className="mt-3 text-muted">{strings.liveCheckLoading}</p>
+        : check.blockers.length === 0 ? <p className="mt-3 text-success">{strings.liveCheckReady}</p>
+        : <ul className="mt-3 list-disc space-y-2 pl-5">{check.blockers.map((blocker) => <li key={blocker}>{strings.liveBlockers[blocker]}
+          {blocker === "rate_card" && <> {check.rateCardMissing.map((key) => strings.rateCardFields[key]).join(", ")}. <Link className="text-primary underline" to="/rate-cards">{strings.rateCards}</Link></>}</li>)}</ul>}
+    </section>}
     {admin && application.state !== "draft" && <ShopVisitAndFeePanel api={api} application={application} />}
     {editing && !reasonOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setEditing(null); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="application-edit-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-border bg-raised p-6 shadow-xl">
@@ -205,6 +244,14 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
           {error && <p role="alert" className="text-danger">{error}</p>}
           <div className="flex gap-3"><button disabled={!areaManagers} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{strings.next}</button><button type="button" onClick={() => setPicking(false)} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
         </form>
+      </section>
+    </div>}
+    {confirming && <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim px-4" onKeyDown={(event) => { if (event.key === "Escape") setConfirming(false); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="move-to-live-title" className="w-full max-w-[520px] rounded-2xl border border-border bg-raised p-6 shadow-xl">
+        <h2 id="move-to-live-title" className="text-body font-semibold">{strings.moveToLive}</h2>
+        <p className="mt-2 text-muted">{strings.moveToLiveConfirm}</p>
+        <div className="mt-6 flex gap-3"><button autoFocus disabled={busy} onClick={() => void moveToLive()} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{busy ? strings.saving : strings.moveToLive}</button>
+          <button type="button" onClick={() => setConfirming(false)} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
       </section>
     </div>}
     {picking && reasonOpen && <ReasonDialog title={strings.areaManagerDialog} note={areaManagers?.find((account) => account.id === picked)?.email ?? strings.noAreaManager} confirmLabel={strings.saveAreaManager} busy={busy} reasonError={errors.reason} error={error} onConfirm={(reason) => void assign(reason)} onCancel={() => { setReasonOpen(false); setErrors({}); setError(""); }} />}

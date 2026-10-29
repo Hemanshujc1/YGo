@@ -25,6 +25,7 @@ import {
   Pack,
   PacksResponse,
   AdminShopApplication,
+  LiveCheck,
   ShopApplicationsResponse,
   ShopVisit,
   ShopOnboarding,
@@ -329,6 +330,16 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/shop-applications/:id/approve`: Under Review to Approved. */
     async approveShopApplication(id: string): Promise<ApiResult<AdminShopApplication>> {
       return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/approve`), AdminShopApplication);
+    },
+
+    /** `GET /v1/admin/shop-applications/:id/live-check`: what still blocks Live (#363). */
+    async shopLiveCheck(id: string): Promise<ApiResult<LiveCheck>> {
+      return result(await adminRequest("GET", `/v1/admin/shop-applications/${encodeURIComponent(id)}/live-check`), LiveCheck);
+    },
+
+    /** `POST /v1/admin/shop-applications/:id/go-live`: Approved to Live; SHOP_NOT_READY carries the blockers (#363). */
+    async moveShopToLive(id: string): Promise<ApiResult<AdminShopApplication>> {
+      return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/go-live`), AdminShopApplication);
     },
 
     /** Issue a private PUT URL from the authenticated API; never substitute an input URL. */

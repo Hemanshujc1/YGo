@@ -193,7 +193,7 @@ export const shops = pgTable("shops", {
   areaManagerId: uuid("area_manager_id").references(() => areaManagerMemberships.accountId),
 }, (table) => [
   index("shops_area_manager_id_idx").on(table.areaManagerId),
-  check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved')`),
+  check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved', 'live')`),
   check("shops_entity_type_valid", sql`${table.entityType} IN ('proprietorship', 'partnership_firm', 'llp', 'company')`),
   check("shops_service_radius_valid", sql`${table.serviceRadiusMetres} BETWEEN 500 AND 5000 AND ${table.serviceRadiusMetres} % 500 = 0`),
   check("shops_sent_complete", sql`${table.state} = 'draft' OR (${table.shopName} IS NOT NULL AND ${table.address} IS NOT NULL

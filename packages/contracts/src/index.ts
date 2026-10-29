@@ -144,6 +144,8 @@ export {
   AdminShopApplication,
   AssignShopAreaManagerBody,
   CorrectShopApplicationBody,
+  LiveBlocker,
+  LiveCheck,
   MyShopApplicationResponse,
   SaveShopApplicationBody,
   SendShopApplicationBody,

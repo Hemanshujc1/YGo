@@ -1,23 +1,26 @@
-import type { ShopApplication } from "@ygo/contracts";
+import type { LiveCheck, ShopApplication } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { Link } from "expo-router";
+import { Link, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ApplicationForm } from "../components/application-form";
 import { ApplicationStatus } from "../components/application-status";
 import { SignOut } from "../components/sign-out";
+import { waiting } from "../lib/application-status";
 import { strings } from "../strings";
 
 const words = strings.application;
 
-type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; application: ShopApplication | null };
+type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; application: ShopApplication | null; liveCheck: LiveCheck | null };
 
 /**
- * The signed-in home until shops go Live (#46) and staff join shops (#58):
+ * The signed-in home until a Live shop gets its own home and staff join shops (#58):
  * Start with no application, S17 for a Draft, and S18 once sent, refreshed by
- * pulling down. Owner's answers on #40 (Q12, Q13), #276 (Q7) and #292 (Q5).
+ * pulling down. From Approved on, S14 lists what still keeps the shop from
+ * Live and keeps the setup buttons (#363). Owner's answers on #40 (Q12, Q13),
+ * #276 (Q7), #292 (Q5) and #46 (11).
  */
 export default function Home() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -37,15 +40,20 @@ export default function Home() {
     } else setLoad({ kind: "loading" });
     const answer = await api.shopApplication().catch(() => null);
     setRefreshing(false);
-    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data.application });
+    if (answer?.ok) return setLoad({ kind: "loaded", ...answer.data });
     const message = answer ? strings.errors[answer.code] : refresh ? words.status.refreshFailed : words.loadFailed;
     if (refresh) setRefreshFailed(message);
     else setLoad({ kind: "failed", message });
   }
 
-  useEffect(() => {
-    void fetchApplication();
-  }, []);
+  // Loads on the first visit; coming back, say from accepting the agreement, refreshes in place.
+  const seen = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      void fetchApplication(seen.current);
+      seen.current = true;
+    }, []),
+  );
 
   async function start() {
     if (working.current) return;
@@ -55,7 +63,7 @@ export default function Home() {
     const answer = await api.startShopApplication().catch(() => null);
     working.current = false;
     setStarting(false);
-    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data });
+    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data, liveCheck: null });
     // Started on another phone: open that one.
     if (answer?.code === "SHOP_APPLICATION_EXISTS") return void fetchApplication();
     setStartFailed(answer ? strings.errors[answer.code] : words.start.offline);
@@ -80,10 +88,10 @@ export default function Home() {
     );
   }
 
-  const { application } = load;
+  const { application, liveCheck } = load;
   if (application?.state === "draft") {
     return (
-      <ApplicationForm application={application} onSent={(sent) => (sent ? setLoad({ kind: "loaded", application: sent }) : void fetchApplication())} />
+      <ApplicationForm application={application} onSent={(sent) => (sent ? setLoad({ kind: "loaded", application: sent, liveCheck: null }) : void fetchApplication())} />
     );
   }
 
@@ -91,7 +99,8 @@ export default function Home() {
     return (
       <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
-        {application.state === "approved" && (
+        {liveCheck && <Waiting check={liveCheck} />}
+        {(application.state === "approved" || application.state === "live") && (
           <View className="gap-3">
             <Text accessibilityRole="header" className="text-title font-semibold text-text">{strings.shopSetup.title}</Text>
             <Link href="/agreement" asChild>
@@ -129,6 +138,27 @@ export default function Home() {
       )}
       <Text className="text-secondary text-muted">{words.start.staff}</Text>
     </Plain>
+  );
+}
+
+/** S14's "Waiting for" list: YGo's steps as lines, the Owner's acceptance as a button (#363). */
+function Waiting({ check }: { check: LiveCheck }) {
+  const words = strings.shopSetup.waiting;
+  const items = waiting(check);
+  if (!items.length) return <Text className="text-body text-success">{words.ready}</Text>;
+  return (
+    <View className="gap-3">
+      <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.title}</Text>
+      {items.map((item) => item.own ? (
+        <Link key={item.blocker} href="/agreement" asChild>
+          <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+            <Text className="text-body font-semibold text-on-primary">{item.line}</Text>
+          </Pressable>
+        </Link>
+      ) : (
+        <Text key={item.blocker} className="text-body text-pending">• {item.line}</Text>
+      ))}
+    </View>
   );
 }
 

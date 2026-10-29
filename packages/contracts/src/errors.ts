@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CatalogImportRowErrors } from "./catalog";
+import { LiveCheck } from "./shops";
 
 /**
  * Every machine code the API returns. The server never sends display text
@@ -55,6 +56,9 @@ import { CatalogImportRowErrors } from "./catalog";
  * - RATE_CARD_INCOMPLETE (409): the shop's rate card is missing a required value (MNY-13).
  * - AGREEMENT_OUTDATED (409): the agreement version accepted is not the current one.
  * - RATE_CARD_CHANGED (409): a newer rate card affecting the shop was published after the one read.
+ * Move to Live (#363):
+ * - SHOP_NOT_READY (409): something still blocks Live; `liveCheck` names each blocker.
+ * - SHOP_STATE_CHANGE_REFUSED (409) also answers Move to Live on anything but Approved.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -90,6 +94,7 @@ export const ErrorCode = z.enum([
   "RATE_CARD_INCOMPLETE",
   "AGREEMENT_OUTDATED",
   "RATE_CARD_CHANGED",
+  "SHOP_NOT_READY",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -99,6 +104,7 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
  * the client shows its own message for each. With PINCODE_IN_OTHER_AREA,
  * `conflicts` names each pincode another Area holds. With CATALOG_IMPORT_ROWS_INVALID,
  * `rowErrors` uses the same CatalogImportRowError shape as a preview response.
+ * With SHOP_NOT_READY, `liveCheck` names what still blocks Live.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
@@ -107,6 +113,7 @@ export const ErrorEnvelope = z.object({
     conflicts: z.array(z.object({ pincode: z.string(), areaName: z.string() })).optional(),
     draftId: z.uuid().optional(),
     rowErrors: CatalogImportRowErrors.optional(),
+    liveCheck: LiveCheck.optional(),
   }).refine((error) => error.code !== "CATALOG_IMPORT_ROWS_INVALID" || error.rowErrors !== undefined),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

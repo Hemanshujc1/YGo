@@ -86,6 +86,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     assignShopAreaManager: vi.fn(),
     startShopApplicationReview: vi.fn(),
     approveShopApplication: vi.fn(),
+    shopLiveCheck: vi.fn().mockResolvedValue({ ok: true, data: { blockers: [], rateCardMissing: [] } }),
+    moveShopToLive: vi.fn(),
     createVisitPhotoUpload: vi.fn(),
     recordShopVisit: vi.fn(),
     getVisitPhotoAccess: vi.fn(),
@@ -654,6 +656,49 @@ describe("Admin web", () => {
     expect(api.approveShopApplication).toHaveBeenCalledWith(application.id);
   });
 
+  it("names what blocks Live, and moves the shop to Live only after the confirm (#363)", async () => {
+    const approved = { ...application, state: "approved" as const };
+    const { api } = setup(`/applications/${application.id}`, {
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: approved }),
+      shopLiveCheck: vi.fn()
+        .mockResolvedValueOnce({ ok: true, data: { blockers: ["visit", "rate_card", "agreement"], rateCardMissing: ["commission", "minimumCart"] } })
+        .mockResolvedValue({ ok: true, data: { blockers: [], rateCardMissing: [] } }),
+      // The server checks again on the move: here a fee entry is gone missing in between.
+      moveShopToLive: vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 409, code: "SHOP_NOT_READY", liveCheck: { blockers: ["fee"], rateCardMissing: [] } })
+        .mockResolvedValue({ ok: true, data: { ...approved, state: "live" } }),
+    });
+    const blockers = await screen.findByRole("region", { name: strings.liveCheckTitle });
+    expect(await within(blockers).findByText(strings.liveBlockers.visit)).toBeTruthy();
+    expect(within(blockers).getByText(strings.liveBlockers.agreement)).toBeTruthy();
+    expect(within(blockers).getByText(/Commission, Minimum cart\./)).toBeTruthy();
+    expect(within(blockers).getByRole("link", { name: strings.rateCards }).getAttribute("href")).toBe("/rate-cards");
+    const move = screen.getByRole("button", { name: strings.moveToLive });
+    expect(move).toHaveProperty("disabled", true);
+
+    fireEvent.click(within(blockers).getByRole("button", { name: strings.liveCheckAgain }));
+    expect(await within(blockers).findByText(strings.liveCheckReady)).toBeTruthy();
+    fireEvent.click(move);
+    const confirm = screen.getByRole("dialog", { name: strings.moveToLive });
+    expect(within(confirm).getByText(strings.moveToLiveConfirm)).toBeTruthy();
+    expect(api.moveShopToLive).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole("button", { name: strings.moveToLive }));
+    expect(await screen.findByText(strings.errors.SHOP_NOT_READY)).toBeTruthy();
+    expect(within(blockers).getByText(strings.liveBlockers.fee)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(within(blockers).getByRole("button", { name: strings.liveCheckAgain }));
+    await within(blockers).findByText(strings.liveCheckReady);
+    fireEvent.click(move);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.moveToLive }));
+    expect(await screen.findByText(strings.movedToLive)).toBeTruthy();
+    expect(screen.getByText(strings.applicationState.live)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: strings.moveToLive })).toBeNull();
+    expect(screen.queryByRole("region", { name: strings.liveCheckTitle })).toBeNull();
+    expect(api.moveShopToLive).toHaveBeenCalledTimes(2);
+    expect(api.moveShopToLive).toHaveBeenCalledWith(application.id);
+  });
+
   it("shows loading, empty and retryable error states for applications", async () => {
     let resolve!: (value: unknown) => void;
     const pending = new Promise((answer) => { resolve = answer; });
@@ -1083,6 +1128,18 @@ describe("Area Manager applications (#299)", () => {
     expect(await screen.findByText(strings.correctionSaved)).toBeTruthy();
     expect(api.correctShopApplication).toHaveBeenCalledWith(application.id, { shopName: "Fresh Foods", reason: "Board at the visit" });
     expect(api.getShopOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("leaves Move to Live to Admin on an Approved shop (#363)", async () => {
+    const { api } = setup(`/applications/${application.id}`, {
+      ...asRole("area_manager"),
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: { ...assigned, state: "approved" } }),
+    });
+    await screen.findByRole("heading", { name: application.shopName });
+    expect(screen.getByText(strings.adminDecides)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: strings.moveToLive })).toBeNull();
+    expect(screen.queryByRole("region", { name: strings.liveCheckTitle })).toBeNull();
+    expect(api.shopLiveCheck).not.toHaveBeenCalled();
   });
 });
 

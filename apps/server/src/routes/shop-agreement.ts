@@ -24,7 +24,7 @@ async function ownerShop(client: Pool | PoolClient, accountId: string, lock = fa
 }
 
 /** The newest publication that can change this shop's card: global, any category, or this shop; "0" before any. */
-async function affectingVersion(client: Pool | PoolClient, shopId: string): Promise<string> {
+export async function affectingVersion(client: Pool | PoolClient, shopId: string): Promise<string> {
   const row = await client.query<{ version: string }>(
     `SELECT COALESCE(MAX(version), 0)::text AS version FROM rate_card_versions
      WHERE scope_type IN ('global', 'category') OR (scope_type = 'shop' AND scope_id = $1)`, [shopId]);

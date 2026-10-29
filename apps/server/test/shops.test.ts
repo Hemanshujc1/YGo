@@ -150,11 +150,11 @@ describe("shop application", () => {
 
   it("starts a Draft with the account's name, phone and email, once", async () => {
     const { id, headers } = await owner("asha@example.com");
-    expect(await read(headers)).toEqual({ application: null });
+    expect(await read(headers)).toEqual({ application: null, liveCheck: null });
     const started = await start(headers);
     expect(started.statusCode).toBe(201);
     expect(started.json()).toEqual(draft);
-    expect(await read(headers)).toEqual({ application: started.json() });
+    expect(await read(headers)).toEqual({ application: started.json(), liveCheck: null });
     const link = await database.pool.query("SELECT shop_id AS \"shopId\", role FROM shop_members WHERE account_id = $1", [id]);
     expect(link.rows).toEqual([{ shopId: started.json().id, role: "owner" }]);
 
@@ -167,7 +167,7 @@ describe("shop application", () => {
     const refused = await start(headers);
     expect(refused.statusCode).toBe(403);
     expect(refused.json()).toEqual({ error: { code: "PROFILE_REQUIRED" } });
-    expect(await read(headers)).toEqual({ application: null });
+    expect(await read(headers)).toEqual({ application: null, liveCheck: null });
   });
 
   it("saves a Draft in parts, empties a field with null, and takes a pincode in no Area", async () => {
@@ -180,7 +180,7 @@ describe("shop application", () => {
     const second = await save(headers, { pan: "abcde1234f", location: null, serviceRadiusMetres: 3500 });
     expect(second.json()).toEqual({ ...first.json(), pan: "ABCDE1234F", location: null, serviceRadiusMetres: 3500 });
     expect((await save(headers, {})).json()).toEqual(second.json());
-    expect(await read(headers)).toEqual({ application: second.json() });
+    expect(await read(headers)).toEqual({ application: second.json(), liveCheck: null });
   });
 
   it("refuses a Draft value that breaks its rule, and an empty radius", async () => {
@@ -200,7 +200,7 @@ describe("shop application", () => {
     const sent = await send(headers, complete);
     expect(sent.statusCode).toBe(200);
     expect(sent.json()).toEqual({ ...draft, ...complete, state: "submitted", areaName: "Kothrud", submittedAt: "2030-01-01T00:01:01.000Z" });
-    expect(await read(headers)).toEqual({ application: sent.json() });
+    expect(await read(headers)).toEqual({ application: sent.json(), liveCheck: null });
   });
 
   it("follows the pincode when an Admin moves it to another Area, or out of every Area", async () => {
@@ -221,7 +221,7 @@ describe("shop application", () => {
     const started = (await start(headers)).json();
     const refused = await duringAreaSave("411038", () => send(headers, complete));
     expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
-    expect(await read(headers)).toEqual({ application: started });
+    expect(await read(headers)).toEqual({ application: started, liveCheck: null });
   });
 
   it("times out instead of accepting an unrelated lock, and rolls back the Area save", async () => {
@@ -259,7 +259,7 @@ describe("shop application", () => {
     const refused = await send(headers, complete);
     expect(refused.statusCode).toBe(409);
     expect(refused.json()).toEqual({ error: { code: "PINCODE_NOT_IN_AREA" } });
-    expect(await read(headers)).toEqual({ application: started });
+    expect(await read(headers)).toEqual({ application: started, liveCheck: null });
   });
 
   it("refuses a save or a second send once sent", async () => {
@@ -270,7 +270,7 @@ describe("shop application", () => {
     const sent = (await send(headers, complete)).json();
     expect((await save(headers, { shopName: "New name" })).json()).toEqual({ error: { code: "SHOP_APPLICATION_SENT" } });
     expect((await send(headers, complete)).json()).toEqual({ error: { code: "SHOP_APPLICATION_SENT" } });
-    expect(await read(headers)).toEqual({ application: sent });
+    expect(await read(headers)).toEqual({ application: sent, liveCheck: null });
   });
 
   it("keeps a sent shop complete, one shop per account, and the account while linked", async () => {
