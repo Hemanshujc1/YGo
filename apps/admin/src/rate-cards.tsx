@@ -140,7 +140,7 @@ export function RateCards({ api }: { api: Api }) {
         return <tr key={key} className="border-t border-border"><th className="p-2 font-medium">{strings.rateCardFields[key]}</th>
           <td className="p-2">{item ? JSON.stringify(item.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
           <td className="p-2">{item && <ScopeChip>{strings.rateCardSources[item.source.type]}</ScopeChip>}</td>
-          <td className="p-2">{!draftScopeMatchesPreview ? <span className="text-muted">{strings.rateCardDifferentDraftScope(editingScopeName)}</span> : draftIsMasked && draft ? <span className="text-muted">{strings.rateCardDraftMasked(strings.rateCardSources[draft.source])}</span> : draft ? <>{JSON.stringify(draft.value)}<span className="ml-2"><ScopeChip>{strings.rateCardSources[draft.source]}</ScopeChip></span></> : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
+          <td className="p-2">{!draftScopeMatchesPreview ? <span className="text-muted">{strings.rateCardDifferentDraftScope(editingScopeName)}</span> : draftIsMasked && draft ? <span className="text-muted">{strings.rateCardDraftMasked(strings.rateCardSources[draft.source])}</span> : draft ? JSON.stringify(draft.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
         </tr>;
       })}</tbody></table><p className="mt-3">{effective.complete ? strings.rateCardComplete : strings.rateCardIncomplete}</p></div>}
     </section>
