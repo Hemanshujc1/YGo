@@ -6,6 +6,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn } from "../admin";
+import { visibleListings } from "../listings";
 import { deriveKeys } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
 
@@ -64,12 +65,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
           COALESCE((SELECT jsonb_agg(jsonb_build_object('id', option.id, 'name', option.name,
               'quantity', trim_scale(option.quantity)::text, 'price', option.price::text) ORDER BY option.quantity)
             FROM shop_quantity_price_options option WHERE option.listing_id = listing.id), '[]') AS "quantityOptions"
-        FROM shop_listings listing
-        JOIN packs pack ON pack.id = listing.pack_id
-        JOIN master_products product ON product.id = pack.product_id
-        JOIN categories category ON category.id = product.category_id
-        LEFT JOIN categories parent ON parent.id = category.parent_id
-        WHERE listing.shop_id = $1 AND listing.available AND pack.active AND product.active AND product.published AND category.active AND COALESCE(parent.active, true)
+        FROM ${visibleListings("$1")}
         ORDER BY lower(product.name), pack.quantity`, [id]);
     return { listings: rows };
   });
