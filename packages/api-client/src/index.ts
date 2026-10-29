@@ -14,6 +14,7 @@ import {
   SavedAddressesResponse,
   Serviceability,
   FeedResponse,
+  ShopPageResponse,
   type FeedQuery,
   Session,
   ShopApplication,
@@ -342,6 +343,12 @@ export function createApiClient({
     async feed({ pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<FeedResponse>> {
       const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
       return result(await signedIn("GET", `/v1/feed?${query}`), FeedResponse);
+    },
+
+    /** `GET /v1/shops/:id`: C05, a shop that can serve this place with its products (DSC-2, DSC-4); 404 when it can't. */
+    async shopPage(id: string, { pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<ShopPageResponse>> {
+      const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
+      return result(await signedIn("GET", `/v1/shops/${encodeURIComponent(id)}?${query}`), ShopPageResponse);
     },
 
     /** `POST /v1/waitlist`: "Leave my number" on C03. */

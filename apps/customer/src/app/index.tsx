@@ -123,12 +123,17 @@ function Shops({ query }: { query: FeedQuery }) {
   return (
     <View className="mt-4 gap-3">
       {state.shops.map((shop) => (
-        <View key={shop.id} className="rounded-card border border-border bg-surface p-4">
+        <Pressable
+          key={shop.id}
+          accessibilityRole="button"
+          onPress={() => router.push({ pathname: "/shop/[id]", params: { id: shop.id, pincode: query.pincode, latitude: String(query.latitude), longitude: String(query.longitude) } })}
+          className="rounded-card border border-border bg-surface p-4 active:bg-primary-subtle"
+        >
           <Text className="text-headline font-semibold text-text">{shop.name}</Text>
           <Text className="mt-1 text-secondary tabular-nums text-muted">
             {words.card(shop.estimatedMinutes, formatMoney(Number(shop.deliveryFee)))}
           </Text>
-        </View>
+        </Pressable>
       ))}
     </View>
   );

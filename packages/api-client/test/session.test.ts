@@ -347,6 +347,24 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/feed?pincode=411038&latitude=18.5&longitude=73.8" });
   });
 
+  it("asks for a shop page with the same query and passes on a shop that can't serve (#370)", async () => {
+    const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
+    const page = {
+      shop: { id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "100", fssaiNumber: "11223344556677" },
+      groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
+        { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
+      ] }] }],
+    };
+    let found = true;
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : found ? answer(200, page) : answer(404, { error: { code: "NOT_FOUND" } }));
+    await client.verifyCode(signIn);
+    const here = { pincode: "411038", latitude: 18.5, longitude: 73.8 };
+    expect(await client.shopPage(id, here)).toEqual({ ok: true, data: page });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: `/v1/shops/${id}?pincode=411038&latitude=18.5&longitude=73.8` });
+    found = false;
+    expect(await client.shopPage(id, here)).toEqual({ ok: false, status: 404, code: "NOT_FOUND" });
+  });
+
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {
     const { client, stored } = setup(() => answer(200, { accessToken: "a1", account }));
     expect(await client.verifyCode({ email: "asha@example.com", code: "123456" })).toEqual({

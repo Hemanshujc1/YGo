@@ -145,3 +145,103 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     expect((await feed(undefined, {})).statusCode).toBe(401);
   });
 });
+
+async function category(categoryName: string, parentId: string | null = null) {
+  // The migrations seed the top categories (CAT-5), so reuse one that exists.
+  const found = await database.pool.query<{ id: string }>("SELECT id FROM categories WHERE name = $1 AND parent_id IS NOT DISTINCT FROM $2", [categoryName, parentId]);
+  const row = found.rows[0] ? found : await database.pool.query<{ id: string }>("INSERT INTO categories (name, parent_id) VALUES ($1, $2) RETURNING id", [categoryName, parentId]);
+  return row.rows[0]?.id ?? "";
+}
+
+/** A published product with one listed pack per entry; `stock` records an opening stock in base units. */
+async function product(shopId: string, categoryId: string, productName: string, baseUnit: "each" | "kg",
+  packs: Array<{ quantity: string; price: string; mrp: string; stock?: string; available?: boolean }>) {
+  const row = await database.pool.query<{ id: string }>(
+    `INSERT INTO master_products (name, category_id, base_unit, classification, published, image_256_key, image_512_key, image_1024_key)
+     VALUES ($1, $2, $3, $4, true, 'p/256.webp', 'p/512.webp', 'p/1024.webp') RETURNING id`, [productName, categoryId, baseUnit, baseUnit === "each" ? "counted" : "measured"]);
+  const productId = row.rows[0]?.id ?? "";
+  const listings: string[] = [];
+  for (const pack of packs) {
+    const packRow = await database.pool.query<{ id: string }>("INSERT INTO packs (product_id, quantity) VALUES ($1, $2) RETURNING id", [productId, pack.quantity]);
+    const listing = await database.pool.query<{ id: string }>(
+      `INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, available)
+       VALUES ($1, $2, $3, $3, $4, $5) RETURNING id`, [shopId, packRow.rows[0]?.id, pack.price, pack.mrp, pack.available ?? true]);
+    const listingId = listing.rows[0]?.id ?? "";
+    if (pack.stock !== undefined) {
+      await database.pool.query("INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity) VALUES ($1, $2, $3, 'opening', $4)",
+        [listingId, randomUUID(), randomUUID(), pack.stock]);
+    }
+    listings.push(listingId);
+  }
+  return { productId, listings };
+}
+
+const page = (id: string, query = "pincode=411038&latitude=18.5&longitude=73.8", headers: Record<string, string> = customer) =>
+  app.inject({ method: "GET", url: `/v1/shops/${id}?${query}`, headers });
+
+describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
+  it("shows the terms, then products under their top category with prices, discounts and stock", async () => {
+    const id = await shop("Near Dairy", 300);
+    await publish({ type: "global" }, card);
+    await publish({ type: "shop", id }, { minimumCart: "150.5" });
+    const groceries = await category("Groceries");
+    const pulses = await category("Pulses", groceries);
+    const stationery = await category("Stationery");
+    const switchedOff = await category("Toys");
+    await database.pool.query("UPDATE categories SET active = false WHERE id = $1", [switchedOff]);
+
+    const dal = await product(id, pulses, "Toor Dal", "kg", [
+      { quantity: "1", price: "135", mrp: "150", stock: "4" }, // 10% off
+      { quantity: "0.5", price: "70", mrp: "70", stock: "0" }, // no discount, out of stock at zero
+    ]);
+    const atta = await product(id, groceries, "atta", "kg", [{ quantity: "5", price: "199.99", mrp: "200", stock: "10" }]); // 0.005% off rounds to 0
+    const pen = await product(id, stationery, "Pen", "each", [{ quantity: "1", price: "10", mrp: "10" }]); // no stock recorded
+    await product(id, groceries, "Hidden Rice", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3", available: false }]);
+    await product(id, switchedOff, "Ball", "each", [{ quantity: "1", price: "50", mrp: "50", stock: "3" }]);
+    const unpublished = await product(id, groceries, "Draft Sugar", "kg", [{ quantity: "1", price: "45", mrp: "45", stock: "3" }]);
+    await database.pool.query("UPDATE master_products SET published = false WHERE id = $1", [unpublished.productId]);
+
+    const response = await page(id);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      shop: { id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "150.5", fssaiNumber: "11223344556677" },
+      groups: [
+        { category: "Groceries", products: [
+          { id: atta.productId, name: "atta", brand: null, baseUnit: "kg", packs: [
+            { listingId: atta.listings[0], quantity: "5", price: "199.99", mrp: "200.00", discountPercent: 0, outOfStock: false },
+          ] },
+          { id: dal.productId, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
+            { listingId: dal.listings[1], quantity: "0.5", price: "70.00", mrp: null, discountPercent: null, outOfStock: true },
+            { listingId: dal.listings[0], quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
+          ] },
+        ] },
+        { category: "Stationery", products: [
+          { id: pen.productId, name: "Pen", brand: null, baseUnit: "each", packs: [
+            { listingId: pen.listings[0], quantity: "1", price: "10.00", mrp: null, discountPercent: null, outOfStock: true },
+          ] },
+        ] },
+      ],
+    });
+  });
+
+  it("answers 404 wherever the feed would leave the shop out, and refuses a bad query, the admin web and no sign-in", async () => {
+    const id = await shop("Edge Stores", 2500);
+    const approved = await shop("Approved Stores", 100, { state: "approved" });
+    await publish({ type: "global" }, card);
+    expect((await page(id)).statusCode).toBe(404); // beyond its radius
+    await database.pool.query("UPDATE shops SET service_radius_metres = 3000 WHERE id = $1", [id]);
+    expect((await page(id)).statusCode).toBe(200);
+    expect((await page(approved)).statusCode).toBe(404);
+    expect((await page(randomUUID())).statusCode).toBe(404);
+    await database.pool.query("UPDATE areas SET paused = true WHERE id = $1", [shopAreaId]);
+    expect((await page(id)).statusCode).toBe(404);
+    await database.pool.query("UPDATE areas SET paused = false WHERE id = $1", [shopAreaId]);
+    await publish({ type: "global" }, { ...card, minimumCart: undefined });
+    expect((await page(id)).json()).toEqual({ error: { code: "NOT_FOUND" } });
+
+    expect((await page("not-a-uuid")).statusCode).toBe(400);
+    expect((await page(id, "pincode=411038")).statusCode).toBe(400);
+    expect((await page(id, undefined, admin)).statusCode).toBe(403);
+    expect((await page(id, undefined, {})).statusCode).toBe(401);
+  });
+});

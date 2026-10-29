@@ -175,6 +175,22 @@ export const strings = {
     noPin: "Choose your place on the map to see shops that deliver to you.",
     card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
   },
+  // C05 Shop page (#370).
+  shop: {
+    title: "Shop",
+    loading: "Opening the shop…",
+    failed: "Couldn't open this shop",
+    notServing: "This shop can't deliver to your location",
+    notServingBody: "It may be too far away, or not taking orders right now.",
+    home: "Back to Home",
+    minimumOrder: (amount: string) => `Minimum order ${amount}`,
+    fssai: (number: string) => `FSSAI licence ${number}`,
+    empty: "This shop hasn't listed any products yet.",
+    outOfStock: "Out of stock",
+    mrp: (amount: string) => `MRP ${amount}`,
+    off: (percent: number) => `${percent}% off`,
+    units: { g: "g", kg: "kg", ml: "ml", l: "L", pc: "pc", pcs: "pcs" },
+  },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.
   errors: {
