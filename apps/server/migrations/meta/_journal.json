@@ -176,6 +176,13 @@
       "when": 1793186354016,
       "tag": "0024_pricing_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793206043566,
+      "tag": "0025_shop_agreements",
+      "breakpoints": true
     }
   ]
 }

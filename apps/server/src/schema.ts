@@ -246,6 +246,21 @@ export const rateCardValues = pgTable("rate_card_values", {
   check("rate_card_values_one_value", sql`num_nonnulls(${table.moneyValue}, ${table.percentageValue}, ${table.integerValue}, ${table.booleanValue}, ${table.textValue}) = 1`),
 ]);
 
+// Each time an Owner accepts the onboarding agreement (ONB-5, #362): the wording
+// version, the rate-card publication they read, and when. A new rate card means a
+// new row, so earlier acceptances stay as they were.
+export const shopAgreementAcceptances = pgTable("shop_agreement_acceptances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  agreementVersion: integer("agreement_version").notNull(),
+  rateCardVersion: bigint("rate_card_version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("shop_agreement_acceptances_version_valid", sql`${table.agreementVersion} > 0`),
+  index("shop_agreement_acceptances_shop_idx").on(table.shopId, table.acceptedAt.desc()),
+]);
+
 // Shop-owned pack settings and base-unit inventory (#43, CAT-1, CAT-2, CAT-4).
 export const shopListings = pgTable("shop_listings", {
   id: uuid("id").primaryKey().defaultRandom(),

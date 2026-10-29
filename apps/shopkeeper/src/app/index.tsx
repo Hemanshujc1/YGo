@@ -94,6 +94,11 @@ export default function Home() {
         {application.state === "approved" && (
           <View className="gap-3">
             <Text accessibilityRole="header" className="text-title font-semibold text-text">{strings.shopSetup.title}</Text>
+            <Link href="/agreement" asChild>
+              <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+                <Text className="text-body font-semibold text-on-primary">{strings.agreement.open}</Text>
+              </Pressable>
+            </Link>
             <Link href="/listings" asChild>
               <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
                 <Text className="text-body font-semibold text-on-primary">{strings.shopSetup.listings}</Text>

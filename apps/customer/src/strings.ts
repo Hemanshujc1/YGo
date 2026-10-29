@@ -223,5 +223,9 @@ export const strings = {
     VISIT_PHOTO_LOCATION_MISSING: "This photo has no location. Choose a shop-front photo with location enabled.",
     SHOP_LISTING_NOT_READY: "Shop setup opens after Admin approves the application.",
     OPENING_STOCK_ALREADY_RECORDED: "Opening stock was already recorded for this product.",
+    SHOP_NOT_APPROVED: "This opens once YGo approves your shop.",
+    RATE_CARD_INCOMPLETE: "The rate card isn't complete yet.",
+    AGREEMENT_OUTDATED: "The agreement has changed. Read the new one, then accept it.",
+    RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
   } satisfies Record<ErrorCode, string>,
 };
