@@ -261,6 +261,19 @@ export const strings = {
     saveFailed: "Couldn't save your opening hours. Check your connection and try again.",
     retry: "Try again",
   },
+  // The Owner's open/closed switch on the Home of a Live shop (#380).
+  openSwitch: {
+    open: "Shop open",
+    closed: "Shop closed",
+    until: (when: string) => `Until ${when}`,
+    untilByYou: (when: string) => `Until ${when}, set by you`,
+    tomorrow: "tomorrow",
+    pickUntil: "Open until when?",
+    cancel: "Cancel",
+    loadFailed: "Couldn't check whether your shop is open.",
+    saveFailed: "Couldn't change it. Check your connection and try again.",
+    retry: "Try again",
+  },
   shopSetup: {
     title: "Get your shop ready",
     // S14 (#363): what still keeps an Approved shop from Live, from the same check Admin sees.
@@ -359,5 +372,6 @@ export const strings = {
     AGREEMENT_OUTDATED: "The agreement has changed. Read the new one, then accept it.",
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
     SHOP_NOT_READY: "Your shop isn't ready to go Live yet.",
+    SHOP_NOT_LIVE: "The open/closed switch works once your shop is Live.",
   } satisfies Record<ErrorCode, string>,
 };

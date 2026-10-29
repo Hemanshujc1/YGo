@@ -3,14 +3,14 @@ import { formatMinuteOfDay } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
+import { TimeSheet } from "../components/time-sheet";
 import { canAdd, copyToAll, nextOpening, TIMES, toRanges, toWeek, type Opening, type Week } from "../lib/hours";
 import { strings } from "../strings";
 
 const words = strings.hours;
-const ROW = 48;
 
 type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded" };
 /** Which time the picker is choosing: a day, one of its openings, and which end. */
@@ -103,9 +103,12 @@ export default function HoursScreen() {
         </>}
       </ScrollView>
       {picking && (
-        <TimePicker
+        <TimeSheet
           title={picking.end === "opens" ? words.pickOpens : words.pickCloses}
+          times={TIMES}
           selected={week[picking.day]?.[picking.index]?.[picking.end] ?? 0}
+          label={formatMinuteOfDay}
+          cancel={words.cancel}
           onPick={pick}
           onCancel={() => setPicking(null)}
         />
@@ -154,36 +157,5 @@ function Time({ label, minute, onPress }: { label: string; minute: number; onPre
     <Pressable accessibilityRole="button" accessibilityLabel={`${label} ${time}`} onPress={onPress} className="min-h-12 justify-center rounded-input border border-border-strong bg-surface px-3">
       <Text className="text-body tabular-nums text-text">{time}</Text>
     </Pressable>
-  );
-}
-
-/** A list of the day's half hours in a bottom sheet, opened on the current choice. */
-function TimePicker({ title, selected, onPick, onCancel }: { title: string; selected: number; onPick: (minute: number) => void; onCancel: () => void }) {
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal transparent visible animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onCancel}>
-      <View className="flex-1 justify-end bg-scrim">
-        <View accessibilityViewIsModal className="max-h-[70%] gap-2 rounded-t-sheet bg-raised px-4 pt-4" style={{ paddingBottom: insets.bottom + 12 }}>
-          <Text accessibilityRole="header" className="text-headline font-semibold text-text">{title}</Text>
-          <FlatList
-            data={TIMES}
-            keyExtractor={String}
-            initialScrollIndex={Math.max(0, TIMES.indexOf(selected) - 2)}
-            getItemLayout={(_, index) => ({ length: ROW, offset: ROW * index, index })}
-            renderItem={({ item }) => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: item === selected }}
-                onPress={() => onPick(item)}
-                className={`h-12 justify-center rounded-input px-3 ${item === selected ? "bg-primary-subtle" : ""}`}
-              >
-                <Text className={`text-body tabular-nums ${item === selected ? "font-semibold text-on-primary-subtle" : "text-text"}`}>{formatMinuteOfDay(item)}</Text>
-              </Pressable>
-            )}
-          />
-          <Button label={words.cancel} onPress={onCancel} variant="text" />
-        </View>
-      </View>
-    </Modal>
   );
 }

@@ -192,10 +192,15 @@ export const shops = pgTable("shops", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   // The Area Manager Admin assigned the shop to, paid on it (#299); none means Admin's own shop.
   areaManagerId: uuid("area_manager_id").references(() => areaManagerMemberships.accountId),
+  // The Owner's open/closed switch (#380): which way it is set, and when the weekly hours take over again.
+  // Once that time passes the pair is ignored, so nothing needs clearing.
+  openOverride: boolean("open_override"),
+  openOverrideUntil: timestamp("open_override_until", { withTimezone: true }),
 }, (table) => [
   index("shops_area_manager_id_idx").on(table.areaManagerId),
   check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved', 'live')`),
   check("shops_entity_type_valid", sql`${table.entityType} IN ('proprietorship', 'partnership_firm', 'llp', 'company')`),
+  check("shops_open_override_pair", sql`(${table.openOverride} IS NULL) = (${table.openOverrideUntil} IS NULL)`),
   check("shops_service_radius_valid", sql`${table.serviceRadiusMetres} BETWEEN 500 AND 5000 AND ${table.serviceRadiusMetres} % 500 = 0`),
   check("shops_sent_complete", sql`${table.state} = 'draft' OR (${table.shopName} IS NOT NULL AND ${table.address} IS NOT NULL
     AND ${table.pincode} IS NOT NULL AND ${table.location} IS NOT NULL AND ${table.ownerName} IS NOT NULL

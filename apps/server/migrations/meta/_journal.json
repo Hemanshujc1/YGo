@@ -197,6 +197,13 @@
       "when": 1793272600515,
       "tag": "0027_shop_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793274503551,
+      "tag": "0028_shop_open_override",
+      "breakpoints": true
     }
   ]
 }

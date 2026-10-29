@@ -56,3 +56,25 @@ export type ShopHours = z.infer<typeof ShopHours>;
 /** `GET` and `PUT /v1/me/shop-hours`: the week's ranges by day and opening time; empty until the Owner first saves. */
 export const ShopHoursResponse = z.strictObject({ ranges: z.array(ShopHoursRange) });
 export type ShopHoursResponse = z.infer<typeof ShopHoursResponse>;
+
+/**
+ * `PUT /v1/me/shop-open`: the Owner's open/closed switch (#380). Matching the
+ * weekly hours cancels any override. Closing during hours lasts until the next
+ * opening; opening outside hours needs `until`, a half hour no later than it.
+ */
+export const ShopOpenChange = z.strictObject({ open: z.boolean(), until: z.iso.datetime().optional() });
+export type ShopOpenChange = z.infer<typeof ShopOpenChange>;
+
+/** `GET` and `PUT /v1/me/shop-open`: whether the shop is open now, and why. */
+export const ShopOpenStatus = z.strictObject({
+  open: z.boolean(),
+  /** When `open` changes next; null for a shop with no closed time and no override. */
+  until: z.iso.datetime().nullable(),
+  /** The Owner's switch, not the weekly hours, decides `open` until `until`. */
+  setByOwner: z.boolean(),
+  /** What the weekly hours alone say now. */
+  scheduledOpen: z.boolean(),
+  /** The next time the hours go from closed to open; null when the week has no closed time. */
+  nextOpening: z.iso.datetime().nullable(),
+});
+export type ShopOpenStatus = z.infer<typeof ShopOpenStatus>;

@@ -39,6 +39,11 @@ export const formatTime = (value: Date | string | number) =>
 // A time of day held as minutes past midnight in India, as opening hours store it (#371): 540 is "9:00 AM".
 export const formatMinuteOfDay = (minutes: number) => formatTime(Date.UTC(2000, 0, 1, 0, minutes - 330));
 
+const indianWeekday = new Intl.DateTimeFormat(locale, { timeZone, weekday: "short" });
+
+// The short weekday in India: "Tue".
+export const formatWeekday = (value: Date | string | number) => indianWeekday.format(new Date(value));
+
 export const formatDateTime = (value: Date | string | number) =>
   `${formatDate(value)}, ${formatTime(value)}`;
 

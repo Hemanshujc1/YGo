@@ -23,6 +23,8 @@ import {
   ShopAgreementResponse,
   type AcceptShopAgreementBody,
   ShopHoursResponse,
+  ShopOpenStatus,
+  type ShopOpenChange,
   type ShopHours,
   type ShopListingCatalogItem,
   type SaveShopListingBody as SaveShopListingInput,
@@ -438,6 +440,16 @@ export function createApiClient({
     /** `PUT /v1/me/shop-hours`: replaces the whole week. */
     async saveShopHours(body: ShopHours): Promise<ApiResult<ShopHoursResponse>> {
       return result(await signedIn("PUT", "/v1/me/shop-hours", body), ShopHoursResponse);
+    },
+
+    /** `GET /v1/me/shop-open`: whether the Owner's Live shop is open now, and until when (#380). */
+    async shopOpen(): Promise<ApiResult<ShopOpenStatus>> {
+      return result(await signedIn("GET", "/v1/me/shop-open"), ShopOpenStatus);
+    },
+
+    /** `PUT /v1/me/shop-open`: the Owner's open/closed switch. */
+    async setShopOpen(body: ShopOpenChange): Promise<ApiResult<ShopOpenStatus>> {
+      return result(await signedIn("PUT", "/v1/me/shop-open", body), ShopOpenStatus);
     },
 
     /**

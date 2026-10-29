@@ -375,6 +375,16 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-hours", body: { ranges } });
   });
 
+  it("reads and sets the Owner's open/closed switch (#380)", async () => {
+    const status = { open: false, until: "2030-01-02T03:30:00.000Z", setByOwner: true, scheduledOpen: true, nextOpening: "2030-01-02T03:30:00.000Z" };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, status));
+    await client.verifyCode(signIn);
+    expect(await client.shopOpen()).toEqual({ ok: true, data: status });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/shop-open" });
+    expect(await client.setShopOpen({ open: false })).toEqual({ ok: true, data: status });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-open", body: { open: false } });
+  });
+
   it("counts a sign-in answer that breaks the contract as INTERNAL and keeps no session", async () => {
     const { client, stored } = setup(() => answer(200, { accessToken: "a1", account }));
     expect(await client.verifyCode({ email: "asha@example.com", code: "123456" })).toEqual({

@@ -34,6 +34,7 @@ import { registerProfileRoutes } from "./routes/profile";
 import { registerShopRoutes } from "./routes/shops";
 import { registerShopAgreementRoutes } from "./routes/shop-agreement";
 import { registerShopHoursRoutes } from "./routes/shop-hours";
+import { registerShopOpenRoutes } from "./routes/shop-open";
 import { registerShopListingRoutes } from "./routes/shop-listings";
 
 export interface AppOptions {
@@ -127,6 +128,7 @@ export function buildApp({
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopHoursRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopOpenRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
     registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
