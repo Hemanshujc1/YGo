@@ -1,16 +1,17 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { SearchProduct, SearchResponse, SearchShop } from "@ygo/contracts";
+import { SearchQuery, type SearchProduct, type SearchResponse, type SearchShop } from "@ygo/contracts";
 import { strings } from "../strings";
 
+const typedText = SearchQuery.shape.q;
 /** The longest search the server takes (#398). */
-export const searchMaxLength = 60;
+export const searchMaxLength = typedText.maxLength ?? undefined;
 /** The pause after the last letter before searching (owner's answer 11 on #49). */
 export const searchDelay = 300;
 
-/** The text to search for, or null below 2 characters (owner's answer 11 on #49). */
+/** The text to search for, trimmed, or null until the server's rule takes it: from 2 characters (owner's answer 11 on #49). */
 export function searchText(typed: string): string | null {
-  const text = typed.trim();
-  return text.length >= 2 ? text : null;
+  const parsed = typedText.safeParse(typed);
+  return parsed.success ? parsed.data : null;
 }
 
 export type SearchState =

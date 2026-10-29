@@ -6,13 +6,13 @@ import { visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { feedCard, servingShops } from "./feed";
 
-/**
- * True when every typed word in `$2` (one list of alternatives per word) matches the search text `text`:
- * at the start of one of its words, or, from 4 letters, as a near spelling (owner's answers 9 on #49 and 1 on #398).
- */
-const everyWord = (text: string) => `NOT EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) word WHERE NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements_text(word) alt
-    WHERE strpos(' ' || ${text}, ' ' || alt) > 0 OR (length(alt) >= 4 AND alt <% ${text})))`;
+/** One typed word's alternatives (`word`) match `text`: at the start of one of its words, or, from 4 letters, as a near spelling (owner's answers 9 on #49 and 1 on #398). */
+const wordIn = (text: string) => `EXISTS (SELECT 1 FROM jsonb_array_elements_text(word) alt
+    WHERE strpos(' ' || ${text}, ' ' || alt) > 0 OR (length(alt) >= 4 AND alt <% ${text}))`;
+/** Every typed word in `$2`, one list of alternatives each, matches `text`. */
+const everyWord = (text: string) => `NOT EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) word WHERE NOT ${wordIn(text)})`;
+/** At least one typed word matches `text`. */
+const someWord = (text: string) => `EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) word WHERE ${wordIn(text)})`;
 
 /** C16 Search (#398, DSC-3): the shops Home lists that match by name or by a product they list. */
 export function registerSearchRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
@@ -35,20 +35,23 @@ export function registerSearchRoutes(app: FastifyInstance, { pool, clock, secret
     const wordsJson = JSON.stringify(alternatives);
 
     const shops = await Promise.all((await servingShops(pool, clock.now(), place)).map(async (shop) => {
-      // A shop matched by its name alone shows just its card (owner's answer 12 on #49).
-      const byName = await pool.query<{ hit: boolean }>(`SELECT ${everyWord("search_text($1)")} AS hit`, [shop.name, wordsJson]);
-      if (byName.rows[0]?.hit) return { ...feedCard(shop), products: [], moreProducts: 0 };
-      // Otherwise each word may match the shop's name, the product's name or its brand; up to 5 products, A to Z (owner's answer 2 on #398).
+      // Each word may match the shop's name, the product's name or its brand, and one must match the product itself;
+      // up to 5 products, A to Z (owner's answer 2 on #398).
       const { rows } = await pool.query<SearchProduct & { total: number }>(
         `SELECT product.id, product.name, product.brand,
             bool_or(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = listing.id), 0) > 0) AS "inStock",
             count(*) OVER ()::int AS total
           FROM ${visibleListings}
             AND ${everyWord("search_text($3 || ' ' || product.name || ' ' || COALESCE(product.brand, ''))")}
+            AND ${someWord("search_text(product.name || ' ' || COALESCE(product.brand, ''))")}
           GROUP BY product.id
           ORDER BY lower(product.name), product.id
           LIMIT 5`, [shop.id, wordsJson, shop.name]);
-      if (rows.length === 0) return undefined;
+      if (rows.length === 0) {
+        // A shop matched by its name alone shows just its card (owner's answer 12 on #49).
+        const byName = await pool.query<{ hit: boolean }>(`SELECT ${everyWord("search_text($1)")} AS hit`, [shop.name, wordsJson]);
+        return byName.rows[0]?.hit ? { ...feedCard(shop), products: [], moreProducts: 0 } : undefined;
+      }
       const products = rows.map(({ id, name, brand, inStock }) => ({ id, name, brand, inStock }));
       return { ...feedCard(shop), products, moreProducts: (rows[0]?.total ?? 0) - rows.length };
     }));

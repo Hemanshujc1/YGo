@@ -27,8 +27,9 @@ export default function Search() {
   const query = { pincode, latitude: Number(latitude), longitude: Number(longitude) };
 
   // Searches about 0.3 s after the last letter; only the newest answer shows (owner's answer 11 on #49).
+  // Keyed on the cleaned text, so a space alone doesn't search again.
+  const text = searchText(typed);
   useEffect(() => {
-    const text = searchText(typed);
     if (!text) {
       asks.drop();
       setState({ kind: "idle" });
@@ -45,7 +46,7 @@ export default function Search() {
       clearTimeout(timer);
       asks.drop();
     };
-  }, [typed, attempt, asks, pincode, latitude, longitude]);
+  }, [text, attempt, asks, pincode, latitude, longitude]);
 
   const now = Date.now();
   return (

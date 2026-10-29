@@ -371,8 +371,12 @@ describe("Customer search (#398, DSC-3)", () => {
     expect(await found("onn")).toEqual([]); // under 4 letters a word must match as typed
     expect(await found("kirana dal")).toEqual([["Shree Kirana", ["Toor Dal in"], 0]]);
     expect(await found("milk dal")).toEqual([]);
-    // A shop matched by its name alone shows just its card.
+    // A shop matched by its name alone shows just its card, and a name that only starts like the search doesn't hide its products.
     expect(await found("near dairy")).toEqual([["Near Dairy", [], 0]]);
+    const milkman = await shop("Milkman Stores", 500);
+    await product(milkman, groceries, "Toned Milk", "each", [{ quantity: "1", price: "30", mrp: "30", stock: "5" }], "Gokul");
+    expect(await found("milk")).toEqual([["Near Dairy", ["Toned Milk in"], 0], ["Milkman Stores", ["Toned Milk in"], 0]]);
+    expect(await found("milkman")).toEqual([["Milkman Stores", [], 0]]);
 
     // Search terms: one word, and a phrase only when all its words are typed (owner's answer 4 on #398).
     await database.pool.query("INSERT INTO search_terms (typed_word, catalog_word) VALUES ('kanda', 'onion'), ('arhar dal', 'toor dal')");
