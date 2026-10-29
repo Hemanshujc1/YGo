@@ -59,6 +59,8 @@ import { LiveCheck } from "./shops";
  * Move to Live (#363):
  * - SHOP_NOT_READY (409): something still blocks Live; `liveCheck` names each blocker.
  * - SHOP_STATE_CHANGE_REFUSED (409) also answers Move to Live on anything but Approved.
+ * Open/closed switch (#380):
+ * - SHOP_NOT_LIVE (409): the switch works only once the shop is Live.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -95,6 +97,7 @@ export const ErrorCode = z.enum([
   "AGREEMENT_OUTDATED",
   "RATE_CARD_CHANGED",
   "SHOP_NOT_READY",
+  "SHOP_NOT_LIVE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
 import { ApplicationForm } from "../components/application-form";
 import { ApplicationStatus } from "../components/application-status";
+import { OpenSwitch } from "../components/open-switch";
 import { SignOut } from "../components/sign-out";
 import { waiting } from "../lib/application-status";
 import { strings } from "../strings";
@@ -98,6 +99,7 @@ export default function Home() {
   if (application) {
     return (
       <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+        {application.state === "live" && <OpenSwitch />}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
         {liveCheck && <Waiting check={liveCheck} />}
         {(application.state === "approved" || application.state === "live") && (

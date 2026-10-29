@@ -38,6 +38,8 @@ export function registerShopHoursRoutes(app: FastifyInstance, { pool, clock, sec
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "approved" && shop.state !== "live") return reply.code(409).send({ error: { code: "SHOP_NOT_APPROVED" } });
       await client.query("DELETE FROM shop_hours WHERE shop_id = $1", [shop.id]);
+      // A running open/closed switch was worked out from the old hours (owner's answer 3 on #380).
+      await client.query("UPDATE shops SET open_override = NULL, open_override_until = NULL WHERE id = $1", [shop.id]);
       await client.query(
         `INSERT INTO shop_hours (shop_id, weekday, opens, closes)
          SELECT $1, * FROM unnest($2::smallint[], $3::smallint[], $4::smallint[])`,

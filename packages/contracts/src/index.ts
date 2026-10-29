@@ -215,6 +215,8 @@ export {
   ShopHours,
   ShopHoursRange,
   ShopHoursResponse,
+  ShopOpenChange,
+  ShopOpenStatus,
   Weekday,
 } from "./shop-hours";
 export { FeedQuery, FeedResponse, FeedShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";

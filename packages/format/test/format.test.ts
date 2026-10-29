@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime } from "../src/index";
+import { formatDate, formatDateTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -22,6 +22,11 @@ function expectIndianFormats() {
 
   it("shows a minute of the day as a time (#371)", () => {
     expect([0, 540, 720, 1410].map(formatMinuteOfDay)).toEqual(["12:00 AM", "9:00 AM", "12:00 PM", "11:30 PM"]);
+  });
+
+  it("names the weekday in India, where 1 Jan 2030 6:30 PM UTC is already Wednesday", () => {
+    expect(formatWeekday("2030-01-01T12:00:00Z")).toBe("Tue");
+    expect(formatWeekday("2030-01-01T18:30:00Z")).toBe("Wed");
   });
 }
 
