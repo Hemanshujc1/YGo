@@ -1,4 +1,5 @@
 import { PublishRateCardBody, RateCardValues, RATE_CARD_KEYS, type RateCardKey, type RateCardResponse, type RateCardScope, type RateCardValues as Values } from "@ygo/contracts";
+import { formatMoney } from "@ygo/format";
 import { useEffect, useState, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
 import { createAdminApiClient } from "@ygo/api-client";
@@ -10,6 +11,79 @@ import { strings } from "./strings";
 type Api = ReturnType<typeof createAdminApiClient>;
 type Loaded = { categories: Array<{ id: string; name: string }>; shops: Array<{ id: string; shopName: string }> };
 type PreviewScopes = { global: Values; category: Values; shop: Values };
+
+const previewText = strings.rateCardPreviewValues;
+const money = (value: string) => formatMoney(Number(value));
+const percentage = (value: string) => previewText.percentage(value);
+const join = (...parts: Array<string | null | undefined>) => parts.filter((part): part is string => Boolean(part)).join(strings.rateCardPreviewSeparator);
+
+/** Human-readable copy for one effective or draft value in this screen's comparison table. */
+function rateCardValueText(key: RateCardKey, value: unknown): string {
+  if (key === "commission") {
+    const parsed = RateCardValues.shape.commission.safeParse(value);
+    if (!parsed.success || parsed.data === undefined) return strings.rateCardInvalid;
+    const rule = parsed.data;
+    const fixed = money(rule.fixedAmount ?? "0");
+    const share = percentage(rule.percentage ?? "0");
+    const formula = rule.formula === "fixed" ? previewText.fixed(fixed)
+      : rule.formula === "percentage" ? share
+        : rule.formula === "fixed_plus_percentage" ? previewText.fixedPlusPercentage(fixed, share)
+          : rule.formula === "higher_of" ? previewText.higherOf(fixed, share) : previewText.lowerOf(fixed, share);
+    return join(
+      formula,
+      rule.formula === "fixed" ? undefined : strings.rateCardOptions[rule.base],
+      rule.minimum === null ? undefined : previewText.minimum(money(rule.minimum)),
+      rule.maximum === null ? undefined : previewText.maximum(money(rule.maximum)),
+    );
+  }
+  if (key === "deliveryFee") {
+    const parsed = RateCardValues.shape.deliveryFee.safeParse(value);
+    if (!parsed.success || parsed.data === undefined) return strings.rateCardInvalid;
+    return join(
+      previewText.fee(money(parsed.data.amount)),
+      previewText.platformShare(percentage(parsed.data.split.platformPercentage)),
+      previewText.shopShare(percentage(parsed.data.split.shopPercentage)),
+    );
+  }
+  if (key === "smallCartFee") {
+    const parsed = RateCardValues.shape.smallCartFee.safeParse(value);
+    if (!parsed.success || parsed.data === undefined) return strings.rateCardInvalid;
+    const rule = parsed.data;
+    if (!rule.enabled) return previewText.off;
+    return join(
+      previewText.fee(money(rule.amount)), previewText.below(money(rule.threshold)),
+      rule.cap === null ? undefined : previewText.cap(money(rule.cap)),
+      previewText.platformShare(percentage(rule.split.platformPercentage)),
+      previewText.shopShare(percentage(rule.split.shopPercentage)),
+    );
+  }
+  if (key === "pickup") {
+    const parsed = RateCardValues.shape.pickup.safeParse(value);
+    if (!parsed.success || parsed.data === undefined) return strings.rateCardInvalid;
+    const rule = parsed.data;
+    if (!rule.enabled) return previewText.off;
+    return join(
+      previewText.customerFee(money(rule.customerFee)),
+      rule.shopFee === null ? undefined : previewText.shopFee(money(rule.shopFee)),
+      rule.cap === null ? undefined : previewText.cap(money(rule.cap)),
+      rule.contributionFloor === null ? undefined : previewText.contributionFloor(money(rule.contributionFloor)),
+    );
+  }
+  if (key === "counterBillCharge") {
+    const parsed = RateCardValues.shape.counterBillCharge.safeParse(value);
+    return parsed.success && parsed.data !== undefined ? previewText.off : strings.rateCardInvalid;
+  }
+  if (key === "statementGraceDays") {
+    const parsed = RateCardValues.shape.statementGraceDays.safeParse(value);
+    return parsed.success && parsed.data !== undefined ? previewText.days(parsed.data) : strings.rateCardInvalid;
+  }
+  if (key === "maximumShopDiscountPercentage") {
+    const parsed = RateCardValues.shape.maximumShopDiscountPercentage.safeParse(value);
+    return parsed.success && parsed.data !== undefined ? percentage(parsed.data) : strings.rateCardInvalid;
+  }
+  const parsed = RateCardValues.shape[key].safeParse(value);
+  return parsed.success && parsed.data !== undefined ? money(parsed.data) : strings.rateCardInvalid;
+}
 
 export function RateCards({ api }: { api: Api }) {
   const { categories, shops } = useLoaderData() as Loaded;
@@ -133,14 +207,14 @@ export function RateCards({ api }: { api: Api }) {
       <div className="mt-4 flex gap-6"><label className="flex min-h-10 items-center gap-2"><input className="h-10 w-10" type="checkbox" checked={usesPickup} onChange={(event) => setUsesPickup(event.target.checked)} />{strings.rateCardUsesPickup}</label><label className="flex min-h-10 items-center gap-2"><input className="h-10 w-10" type="checkbox" checked={usesBargain} onChange={(event) => setUsesBargain(event.target.checked)} />{strings.rateCardUsesBargain}</label></div>
       {loadingPreview && <p role="status" className="mt-4 text-muted">{strings.rateCardPreviewLoading}</p>}
       {previewError && <div className="mt-4"><p role="alert" className="text-danger">{previewError}</p><button type="button" onClick={() => setPreviewRetry((current) => current + 1)} className="mt-2 text-primary underline">{strings.retry}</button></div>}
-      {effective && <div className="mt-4 overflow-x-auto"><table className="w-full text-left"><thead><tr><th className="p-2">{strings.rateCardValues}</th><th className="p-2">{strings.rateCardNow}</th><th className="p-2">{strings.rateCardSource}</th><th className="p-2">{strings.rateCardDraftAt(editingScopeName)}</th></tr></thead><tbody>{RATE_CARD_KEYS.map((key) => {
+      {effective && <div className="mt-4 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[880px] table-fixed text-left"><thead className="bg-sunken"><tr><th className="w-[18%] p-2 font-medium">{strings.rateCardValues}</th><th className="w-[32%] p-2 font-medium">{strings.rateCardNow}</th><th className="w-[14%] p-2 font-medium">{strings.rateCardSource}</th><th className="w-[36%] p-2 font-medium">{strings.rateCardDraftAt(editingScopeName)}</th></tr></thead><tbody>{RATE_CARD_KEYS.map((key) => {
         const item = effective.values[key];
         const draft = draftValue(key);
         const draftIsMasked = draftScopeMatchesPreview && values[key] !== undefined && draft?.source !== scopeType && draft !== undefined && scopePriority[scopeType] < scopePriority[draft.source];
-        return <tr key={key} className="border-t border-border"><th className="p-2 font-medium">{strings.rateCardFields[key]}</th>
-          <td className="p-2">{item ? JSON.stringify(item.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
-          <td className="p-2">{item && <ScopeChip>{strings.rateCardSources[item.source.type]}</ScopeChip>}</td>
-          <td className="p-2">{!draftScopeMatchesPreview ? <span className="text-muted">{strings.rateCardDifferentDraftScope(editingScopeName)}</span> : draftIsMasked && draft ? <span className="text-muted">{strings.rateCardDraftMasked(strings.rateCardSources[draft.source])}</span> : draft ? JSON.stringify(draft.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
+        return <tr key={key} className="border-t border-border"><th className="p-2 align-top font-medium">{strings.rateCardFields[key]}</th>
+          <td className="break-words p-2 align-top tabular-nums">{item ? rateCardValueText(key, item.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
+          <td className="p-2 align-top">{item && <ScopeChip>{strings.rateCardSources[item.source.type]}</ScopeChip>}</td>
+          <td className="break-words p-2 align-top tabular-nums">{!draftScopeMatchesPreview ? <span className="text-muted">{strings.rateCardDifferentDraftScope(editingScopeName)}</span> : draftIsMasked && draft ? <span className="text-muted">{strings.rateCardDraftMasked(strings.rateCardSources[draft.source])}</span> : draft ? rateCardValueText(key, draft.value) : <span className="text-danger">{strings.rateCardMissing}</span>}</td>
         </tr>;
       })}</tbody></table><p className="mt-3">{effective.complete ? strings.rateCardComplete : strings.rateCardIncomplete}</p></div>}
     </section>
