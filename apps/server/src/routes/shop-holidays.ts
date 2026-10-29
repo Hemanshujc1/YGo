@@ -101,7 +101,8 @@ export function registerShopHolidayRoutes(app: FastifyInstance, { pool, clock, s
     // An ended holiday is a record, so it can't be found to change.
     const old = await upcoming(client, shopId, id, today);
     if (!old) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    if (await refused(client, reply, shopId, today, dates, id, old.starts < today ? old.starts : null)) return reply;
+    // One starting today has started too, so its start stays.
+    if (await refused(client, reply, shopId, today, dates, id, old.starts <= today ? old.starts : null)) return reply;
     await client.query("UPDATE shop_holidays SET starts = $2, ends = $3 WHERE id = $1", [id, dates.starts, dates.ends]);
     await todayChanged(client, shopId, old.starts <= today, dates.starts <= today);
     return "saved";

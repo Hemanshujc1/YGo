@@ -269,8 +269,11 @@ describe("Holidays (#382)", () => {
     const removed = (await remove(owner.headers, id)).json();
     expect(removed.upcoming).toEqual([]);
     expect(dates(removed.past)).toEqual(["2030-01-01 2030-01-02"]);
-    // One that starts today is simply gone.
-    await add(owner.headers, "2030-01-03");
+    // One added for today counts as started: its start stays, and removing it means it's simply gone.
+    expect((await add(owner.headers, "2030-01-03", "2030-01-04")).statusCode).toBe(200);
+    const today = await idOf(owner.headers, "2030-01-03");
+    expect((await edit(owner.headers, today, "2030-01-04")).json().error.fields).toEqual(["starts"]);
+    expect(dates((await edit(owner.headers, today, "2030-01-03", "2030-01-06")).json().upcoming)).toEqual(["2030-01-03 2030-01-06"]);
     expect((await remove(owner.headers, await idOf(owner.headers, "2030-01-03"))).json().upcoming).toEqual([]);
   });
 

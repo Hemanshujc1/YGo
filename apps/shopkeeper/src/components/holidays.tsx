@@ -5,7 +5,7 @@ import { Button, Text } from "@ygo/mobile";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { api } from "../api";
-import { dateChoices, dateOf, pickFrom, type Draft } from "../lib/holidays";
+import { dateChoices, dateOf, editDraft, pickFrom, type Draft } from "../lib/holidays";
 import { strings } from "../strings";
 import { Confirm } from "./confirm";
 import { TimeSheet } from "./time-sheet";
@@ -100,7 +100,7 @@ export function Holidays() {
             key={holiday.id}
             accessibilityRole="button"
             accessibilityLabel={`${words.edit} ${span(holiday)}`}
-            onPress={() => open({ ...holiday, started: holiday.starts < today })}
+            onPress={() => open(editDraft(holiday, today))}
             className="min-h-12 flex-row items-center justify-between gap-2"
           >
             <Text className="flex-1 text-body text-text">{span(holiday)}</Text>
@@ -134,7 +134,7 @@ export function Holidays() {
       <Confirm
         visible={confirming}
         title={words.removeTitle}
-        body={draft?.started ? words.removeStarted : words.removeBody}
+        body={draft && draft.starts < today ? words.removeStarted : words.removeBody}
         confirm={words.remove}
         cancel={words.cancel}
         onConfirm={() => {
