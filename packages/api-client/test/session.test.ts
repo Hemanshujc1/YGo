@@ -368,6 +368,16 @@ describe("each call", () => {
     expect(await client.shopPage(id, here)).toEqual({ ok: false, status: 404, code: "NOT_FOUND" });
   });
 
+  it("searches with the pincode, the pin and the typed text (#398)", async () => {
+    const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
+    const shop = { id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, holiday: false,
+      products: [{ id, name: "Toor Dal", brand: "Tata", inStock: true }], moreProducts: 2 };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
+    await client.verifyCode(signIn);
+    expect(await client.search({ pincode: "411038", latitude: 18.5, longitude: 73.8, q: "arhar dal" })).toEqual({ ok: true, data: { shops: [shop] } });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/search?pincode=411038&latitude=18.5&longitude=73.8&q=arhar+dal" });
+  });
+
   it("reads and saves the Owner's opening hours (#371)", async () => {
     const ranges = [{ weekday: 1, opens: 540, closes: 1260 }];
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { ranges }));

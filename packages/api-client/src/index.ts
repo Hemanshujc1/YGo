@@ -14,8 +14,10 @@ import {
   SavedAddressesResponse,
   Serviceability,
   FeedResponse,
+  SearchResponse,
   ShopPageResponse,
   type FeedQuery,
+  type SearchQuery,
   Session,
   ShopApplication,
   ShopListingsResponse,
@@ -356,6 +358,12 @@ export function createApiClient({
     async shopPage(id: string, { pincode, latitude, longitude }: FeedQuery): Promise<ApiResult<ShopPageResponse>> {
       const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude) });
       return result(await signedIn("GET", `/v1/shops/${encodeURIComponent(id)}?${query}`), ShopPageResponse);
+    },
+
+    /** `GET /v1/search`: C16, the shops that can serve this place matching the typed text, each with up to 5 matching products (DSC-3). */
+    async search({ pincode, latitude, longitude, q }: SearchQuery): Promise<ApiResult<SearchResponse>> {
+      const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude), q });
+      return result(await signedIn("GET", `/v1/search?${query}`), SearchResponse);
     },
 
     /** `POST /v1/waitlist`: "Leave my number" on C03. */

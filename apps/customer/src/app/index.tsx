@@ -1,19 +1,20 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { FeedQuery, FeedShop, HealthResponse } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
 import { Button, Text, useSession } from "@ygo/mobile";
 import { Link, router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
-import { closedLine, feedQuery } from "../lib/feed";
+import { Search } from "../components/icons";
+import { ShopCard } from "../components/shop-card";
+import { feedQuery } from "../lib/feed";
 import { askArea, type AreaAnswer, newestOnly, placeLabel, stale } from "../lib/location-flow";
 import { savedPlace } from "../lib/saved-place";
 import { strings } from "../strings";
 
 // C04 Home (#369): the way to Account, where shops deliver (#216) and the shops
-// that can serve that place. The server's health stays until a status screen replaces it.
+// that can serve that place, with the way into search (#398). The server's health stays until a status screen replaces it.
 
 type AreaState =
   | { kind: "checking" }
@@ -77,7 +78,14 @@ function AreaLine() {
         <Text className="text-body tabular-nums text-text">{words.delivering(area.label)}</Text>
         <Button label={words.change} onPress={() => router.push("/location")} variant="text" />
       </View>
-      {area.query ? <Shops query={area.query} /> : <Text className="mt-4 text-body text-muted">{strings.feed.noPin}</Text>}
+      {area.query ? (
+        <>
+          <SearchBox query={area.query} />
+          <Shops query={area.query} />
+        </>
+      ) : (
+        <Text className="mt-4 text-body text-muted">{strings.feed.noPin}</Text>
+      )}
     </>
   );
 }
@@ -123,21 +131,23 @@ function Shops({ query }: { query: FeedQuery }) {
   const now = Date.now();
   return (
     <View className="mt-4 gap-3">
-      {state.shops.map((shop) => (
-        <Pressable
-          key={shop.id}
-          accessibilityRole="button"
-          onPress={() => router.push({ pathname: "/shop/[id]", params: { id: shop.id, pincode: query.pincode, latitude: String(query.latitude), longitude: String(query.longitude) } })}
-          className="rounded-card border border-border bg-surface p-4 active:bg-primary-subtle"
-        >
-          <Text className="text-headline font-semibold text-text">{shop.name}</Text>
-          <Text className="mt-1 text-secondary tabular-nums text-muted">
-            {words.card(shop.estimatedMinutes, formatMoney(Number(shop.deliveryFee)))}
-          </Text>
-          {!shop.open && <Text className="mt-1 text-secondary tabular-nums text-muted">{closedLine(shop, now)}</Text>}
-        </Pressable>
-      ))}
+      {state.shops.map((shop) => <ShopCard key={shop.id} shop={shop} query={query} now={now} />)}
     </View>
+  );
+}
+
+/** The way into C16 (#398), shown only while Home lists shops, as search needs the same place (owner's answer 4 on #398). */
+function SearchBox({ query }: { query: FeedQuery }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={strings.search.box}
+      onPress={() => router.push({ pathname: "/search", params: { pincode: query.pincode, latitude: String(query.latitude), longitude: String(query.longitude) } })}
+      className="mt-4 h-[52px] flex-row items-center gap-3 rounded-full border border-border-strong bg-surface px-4 active:bg-primary-subtle"
+    >
+      <Search className="text-muted" size={20} />
+      <Text className="text-body text-muted">{strings.search.box}</Text>
+    </Pressable>
   );
 }
 

@@ -218,6 +218,13 @@
       "when": 1793284049039,
       "tag": "0030_search_terms",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793295116997,
+      "tag": "0031_search_extensions",
+      "breakpoints": true
     }
   ]
 }

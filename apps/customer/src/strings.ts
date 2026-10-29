@@ -221,6 +221,18 @@ export const strings = {
       week: "Opening hours for the week",
     },
   },
+  // C16 Search (#398): no prices on results (owner's answer 13 on #49).
+  search: {
+    title: "Search",
+    box: "Search products or shops",
+    hint: "Type at least 2 letters to search shops near you.",
+    searching: "Searching…",
+    none: (text: string) => `Nothing matches '${text}' near you`,
+    failed: "Couldn't search",
+    inStock: "In stock",
+    outOfStock: "Out of stock",
+    more: (count: number) => `+ ${count} more at this shop`,
+  },
   // The server sends a machine code, never words (ADR-0004). @ygo/api-client
   // already turns a code it does not know into INTERNAL.
   errors: {
