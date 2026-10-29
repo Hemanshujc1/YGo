@@ -35,8 +35,9 @@ export default function Search() {
       setState({ kind: "idle" });
       return;
     }
+    // Old results go at once, so nothing on screen belongs to earlier text.
+    setState({ kind: "searching" });
     const timer = setTimeout(() => {
-      setState({ kind: "searching" });
       void (async () => {
         const answer = await asks.ask(api.search({ pincode, latitude: Number(latitude), longitude: Number(longitude), q: text }).catch(() => "offline" as const));
         if (answer !== stale) setState(searchAnswer(text, answer));
