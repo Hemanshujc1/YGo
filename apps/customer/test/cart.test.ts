@@ -264,6 +264,34 @@ describe("the cart store (#406)", () => {
     expect([other.saves.length, other.loads.length]).toEqual([1, 0]);
   });
 
+  it("asks nothing more once stopped while a save is on its way, even on CART_CHANGED or NOT_FOUND", async () => {
+    for (const code of ["CART_CHANGED", "NOT_FOUND"] as const) {
+      const server = fakeServer();
+      const store = await loaded(server, cart(1, [line(atta, 1)]));
+      store.setCount(code === "CART_CHANGED" ? atta : dal, 2);
+      await vi.advanceTimersByTimeAsync(300);
+      store.stop();
+      server.saves[0]?.answer(refused(code, code === "CART_CHANGED" ? 409 : 404));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect([server.saves.length, server.loads.length]).toEqual([1, 0]);
+      expect(store.get()).toMatchObject({ server: { revision: 1 }, notice: null });
+    }
+  });
+
+  it("drops the recovery GET's reply when stopped while it is on its way", async () => {
+    const server = fakeServer();
+    const store = await loaded(server, cart(1, [line(atta, 1)]));
+    store.setCount(atta, 2);
+    await vi.advanceTimersByTimeAsync(300);
+    server.saves[0]?.answer(refused("CART_CHANGED", 409));
+    await vi.advanceTimersByTimeAsync(0);
+    store.stop();
+    server.loads.shift()?.(ok(cart(5, [line(atta, 1)])));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.saves).toHaveLength(1);
+    expect(store.get().server?.revision).toBe(1);
+  });
+
   it("shows no cart when there is none and the shop can't deliver here", async () => {
     const server = fakeServer();
     const store = createCart(server.client, shopId, 300);

@@ -147,6 +147,8 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
         const place = query;
         const { body, sent } = nextSave(view.server, edits);
         const answer: Answer = await client.saveCart(shopId, place, body).catch(() => "offline" as const);
+        // Stopped while the save was on its way: its reply is another account's, and nothing more is asked.
+        if (stopped) return;
         if (answer !== "offline" && answer.ok) {
           // The server may hold a count at stock; its count stands (owner's answer 9 on #50).
           settle(sent);
@@ -166,6 +168,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
         }
         if (++reloads > maxReloads) return fail(strings.errors.CART_CHANGED);
         const fresh = await client.cart(shopId, place).catch(() => "offline" as const);
+        if (stopped) return;
         if (fresh !== "offline" && fresh.ok) show(fresh.data);
         else if (fresh !== "offline" && fresh.code === "NOT_FOUND") {
           edits.clear();
@@ -184,7 +187,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
     const ticket = ++loads;
     if (!view.server) set({ status: "loading", message: null });
     const answer: Answer = await client.cart(shopId, place).catch(() => "offline" as const);
-    if (ticket !== loads || sending) return;
+    if (ticket !== loads || sending || stopped) return;
     if (answer !== "offline" && answer.ok) {
       show(answer.data);
       // Counts a failed save left behind go again.
