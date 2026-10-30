@@ -62,7 +62,7 @@ describe("offline Stock entry boundary", () => {
   });
   it("offers cleanup/support with blocked sign-out, then avoids recreating storage after erasure", async () => {
     mock.view = { mode: "erasing", accountId: "account", shopId: "shop" };
-    let tree = await ready(); expect(elements(tree).find((node) => node.type === "SignOut")?.props.disabled).toBe(true);
+    let tree: unknown = await ready(); expect(elements(tree).find((node) => node.type === "SignOut")?.props.disabled).toBe(true);
     (elements(tree).find((node) => node.props.label === "Retry cleanup")?.props.onPress as () => void)();
     expect(mock.cleanup).toHaveBeenCalled(); expect(elements(tree).some((node) => node.props.address === "help@example.com")).toBe(true);
     mock.view = { mode: "ended", accountId: "account" }; tree = render();
