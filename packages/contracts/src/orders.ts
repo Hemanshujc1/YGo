@@ -125,8 +125,9 @@ export const ShopOrderResponse = z.strictObject({
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
 
 /**
- * A line Accept can't fill from the stock left (NOT_ENOUGH_STOCK). `available` is what is left in the base unit;
- * a whole-pack line shows it as packs ("Only 1 left of Toor Dal 2 kg"), a part line as is ("Only 300 g left of Toor Dal").
+ * A line Accept can't fill from the stock left (NOT_ENOUGH_STOCK). `available` is what is left in the base unit, never packs:
+ * the app divides it by `quantity` and rounds down for a whole-pack line (3 kg of 2 kg packs is "Only 1 left of Toor Dal 2 kg"),
+ * and shows it as is for a part line ("Only 300 g left of Toor Dal").
  */
 export const ShortLine = OrderLine.pick({ name: true, brand: true, baseUnit: true, quantity: true, count: true, part: true })
   .extend({ available: z.string() });

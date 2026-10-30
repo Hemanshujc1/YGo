@@ -19,7 +19,8 @@ export const frozenOrder = (o: string) => `json_build_object('label', ${o}.addre
             'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
           FROM order_lines l WHERE l.order_id = ${o}.id) AS lines,
         ${o}.product_value::text AS "productValue", ${o}.delivery_fee::text AS "deliveryFee", ${o}.small_cart_fee::text AS "smallCartFee", ${o}.total::text AS total,
-        (SELECT h.reason_code FROM order_status_history h WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop') AS "rejectReason"`;
+        CASE WHEN ${o}.status = 'rejected_by_shop' THEN (SELECT h.reason_code FROM order_status_history h
+          WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' ORDER BY h.at DESC LIMIT 1) END AS "rejectReason"`;
 
 /** C09 and C19: one of the Customer's orders as it was frozen, with the Owner's phone read now (ORD-8). */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string): Promise<OrderResponse | undefined> {

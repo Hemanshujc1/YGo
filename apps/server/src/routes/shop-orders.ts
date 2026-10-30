@@ -86,15 +86,16 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       if (now.getTime() >= order.placedAt.getTime() + answerMs) return { code: "ORDER_EXPIRED" };
       if (to === "accepted") {
         // A listing switched off or repriced since placement doesn't block Accept: the order keeps its price (answer 14).
-        await client.query("SELECT 1 FROM shop_listings WHERE id IN (SELECT listing_id FROM order_lines WHERE order_id = $1) ORDER BY id FOR UPDATE", [id]);
+        // NO KEY UPDATE queues behind placement's FOR SHARE and other Accepts, but not behind cart saves' key checks.
+        await client.query("SELECT 1 FROM shop_listings WHERE id IN (SELECT listing_id FROM order_lines WHERE order_id = $1) ORDER BY id FOR NO KEY UPDATE", [id]);
         const { rows: shortLines } = await client.query<ShortLine>(
           `SELECT l.name, l.brand, l.base_unit AS "baseUnit", trim_scale(l.pack_quantity)::text AS quantity, l.count,
               trim_scale(l.part_quantity)::text AS part, trim_scale(GREATEST(stock.left, 0))::text AS available
             FROM order_lines l JOIN shop_listings listing ON listing.id = l.listing_id
             CROSS JOIN LATERAL (SELECT ${stockOf("listing")} AS left) stock
-            WHERE l.order_id = $1
-              AND stock.left < (SELECT sum(same.stock_quantity) FROM order_lines same WHERE same.order_id = l.order_id AND same.listing_id = l.listing_id)
+            WHERE l.order_id = $1 AND stock.left < l.stock_quantity
             ORDER BY l.position`, [id]);
+        // A cart holds one line per listing, so each line is checked against its listing's stock alone.
         if (shortLines.length > 0) return { code: "NOT_ENOUGH_STOCK", shortLines };
       }
       if (!await moveOrder(client, order, to, { id: who.accountId, role: order.role }, now, reason)) return { code: "ORDER_STATUS_CHANGED" };
