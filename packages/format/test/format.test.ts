@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatMoneyFixed, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -13,8 +13,9 @@ function expectIndianFormats() {
     expect(formatMoney(12_345_678_901_234_567_891n)).toBe("₹1,23,45,67,89,01,23,45,67,891");
   });
 
-  it("shows fixed money with two decimals for Admin and columns of amounts", () => {
-    expect([formatMoneyFixed(125_000), formatMoneyFixed(20.5), formatMoneyFixed(-20)]).toEqual(["₹1,25,000.00", "₹20.50", "−₹20.00"]);
+  it("rounds to paise before dropping .00 and never shows a negative zero", () => {
+    expect([formatMoney(59.999), formatMoney(0.004), formatMoney(-0.001), formatMoney(-0), formatMoney(59.995), formatMoney(19.994)])
+      .toEqual(["₹60", "₹0", "₹0", "₹0", "₹60", "₹19.99"]);
   });
 
   it("shows dates and 12-hour times in India", () => {

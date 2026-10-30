@@ -35,12 +35,14 @@ export const formatNumber = (value: number | bigint) => indianNumber.format(valu
 // Android puts a space after ₹ and iOS does not; the design system has none.
 const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "₹");
 
-// Always two decimals (₹60.00), for Admin and for bills and other columns of amounts that line up (#413).
-export const formatMoneyFixed = (value: number | bigint) => tidyMoney(indianMoney.format(value));
-
-// The rule everywhere else: ₹60 for whole rupees, ₹59.50 with paise, never ".00" (#413).
-export const formatMoney = (value: number | bigint) =>
-  typeof value === "bigint" || Number.isInteger(value) ? tidyMoney(indianWholeMoney.format(value)) : formatMoneyFixed(value);
+// Never a trailing zero (#413): ₹60 for whole rupees, ₹59.50 with paise. The amount is rounded to
+// paise first, so 59.999 shows ₹60, and "+ 0" turns a rounded -0 into 0 so no "−₹0" appears.
+// A bigint is whole rupees already.
+export const formatMoney = (value: number | bigint) => {
+  if (typeof value === "bigint") return tidyMoney(indianWholeMoney.format(value));
+  const paise = Math.round(value * 100);
+  return tidyMoney(paise % 100 === 0 ? indianWholeMoney.format(paise / 100 + 0) : indianMoney.format(paise / 100));
+};
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 

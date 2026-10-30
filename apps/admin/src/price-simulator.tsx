@@ -3,7 +3,7 @@ import {
   PriceSimulatorBody, type DeliveredQuote, type PriceSimulatorResponse, type RateCardKey, type RateCardScope,
   type RateCardValues as Values, type SimulatorListing,
 } from "@ygo/contracts";
-import { formatMoneyFixed } from "@ygo/format";
+import { formatMoney } from "@ygo/format";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLoaderData } from "react-router";
 import { RateCardFields, rateCardIssues, type FieldIssue } from "./components/rate-card-fields";
@@ -21,7 +21,7 @@ const DELIVERED_KEYS: RateCardKey[] = ["commission", "deliveryFee", "smallCartFe
 const text = strings.simulator;
 
 /** Display only: every amount arrives worked out by the server's one calculation (MNY-15). */
-const money = (amount: string) => formatMoneyFixed(Number(amount));
+const money = (amount: string) => formatMoney(Number(amount));
 
 function rows(listings: SimulatorListing[]): Row[] {
   return listings.flatMap((listing) => {

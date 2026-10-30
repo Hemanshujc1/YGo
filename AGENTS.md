@@ -40,7 +40,7 @@ Every kind of shared code has exactly one home. Before creating a component, hel
 - Extract on the second use, not the first: the second copy inside one app moves to that app's `components/` or `lib/`.
 - Code two apps need moves into the matching package above. A new package needs an ADR first.
 - Forms check input with the `@ygo/contracts` schema the server uses, and show each field's message from the app's own strings. A rule not there yet is added there, citing where it was decided. Only `@ygo/contracts` writes zod schemas, apart from the server's Fastify glue (`src/zod.ts`) and environment check (`src/config.ts`); the gate (`ygo/no-zod`) fails a `zod` import anywhere else. It cannot see a hand-written check such as a regex in a form, so review looks for one.
-- Show amounts and numbers through `@ygo/format` with no trailing zero: "₹60" not "₹60.00", "₹59.50" with paise, "10%" not "10.00%". Admin, bills and columns of amounts that must line up use `formatMoneyFixed` (two decimals). Never hand-write `toFixed(2)` or `.00` (design system section 3, #413).
+- Show amounts and numbers through `@ygo/format` with no trailing zero: "₹60" not "₹60.00", "₹59.50" with paise, "10%" not "10.00%". Admin, bills and tables follow it too, with no exception. Never hand-write `toFixed(2)` or `.00` (design system section 3, #413).
 - Mobile and web keep separate UI components; no UI is shared between them (ADR-0001, ADR-0007, ADR-0009).
 - Add a dependency only after checking that no installed one does the job, and say why in the PR.
 

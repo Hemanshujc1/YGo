@@ -140,7 +140,7 @@ Rules:
 
 | Item | Format |
 |---|---|
-| Money | ₹1,25,000 and ₹60, Indian digit grouping. A whole-rupee amount never shows ".00"; an amount with paise shows two digits (₹59.50, never ₹59.5). Admin, bills and other columns of amounts that must line up show two decimals (₹60.00), through `formatMoneyFixed` (#413) |
+| Money | ₹1,25,000 and ₹60, Indian digit grouping. A whole-rupee amount never shows ".00"; an amount with paise shows two digits (₹59.50, never ₹59.5). Admin, bills and tables follow the same rule (#413) |
 | Percent and number | 10%, 7.69%, 5 kg, 1.5 kg: no trailing zeros ("10%", not "10.00%"); the percent off shows two decimals only when it has them |
 | Discount | −₹20 |
 | Date | 13/10/2026 |

@@ -136,7 +136,7 @@ describe("Admin web", () => {
     await waitFor(() => expect(within(row).getByText(strings.rateCardSources.global)).toBeTruthy());
     const cells = within(row).getAllByRole("cell");
     expect(cells[1]?.textContent).toBe(strings.rateCardSources.global);
-    expect(cells[2]?.textContent).toBe("₹0.00");
+    expect(cells[2]?.textContent).toBe("₹0");
     fireEvent.click(screen.getByRole("button", { name: strings.rateCardPublish }));
     expect(api.publishRateCard).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Update global minimum" } });
@@ -181,19 +181,19 @@ describe("Admin web", () => {
 
     const commission = await screen.findByRole("row", { name: /Commission/ });
     const commissionCells = within(commission).getAllByRole("cell");
-    expect(commissionCells[0]?.textContent).toBe("Higher of ₹5.00 or 10% · Before shop discount · Minimum ₹2.00 · Maximum ₹50.50");
-    expect(commissionCells[2]?.textContent).toBe("12.5% · After shop discount · Minimum ₹3.00");
+    expect(commissionCells[0]?.textContent).toBe("Higher of ₹5 or 10% · Before shop discount · Minimum ₹2 · Maximum ₹50.50");
+    expect(commissionCells[2]?.textContent).toBe("12.5% · After shop discount · Minimum ₹3");
 
     const delivery = screen.getByRole("row", { name: /^Delivery fee/ });
-    expect(within(delivery).getAllByRole("cell")[0]?.textContent).toBe("Fee ₹30.00 · Platform share 20% · Shop share 80%");
-    expect(within(delivery).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹20.00 · Platform share 100% · Shop share 0%");
+    expect(within(delivery).getAllByRole("cell")[0]?.textContent).toBe("Fee ₹30 · Platform share 20% · Shop share 80%");
+    expect(within(delivery).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹20 · Platform share 100% · Shop share 0%");
 
     const smallCart = screen.getByRole("row", { name: /Small-cart fee/ });
     expect(within(smallCart).getAllByRole("cell")[0]?.textContent).toBe("Off");
-    expect(within(smallCart).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹15.00 · Below ₹200.00 · Cap ₹30.00 · Platform share 25% · Shop share 75%");
+    expect(within(smallCart).getAllByRole("cell")[2]?.textContent).toBe("Fee ₹15 · Below ₹200 · Cap ₹30 · Platform share 25% · Shop share 75%");
 
     const pickup = screen.getByRole("row", { name: /^Pickup/ });
-    expect(within(pickup).getAllByRole("cell")[0]?.textContent).toBe("Customer fee ₹5.00 · Shop fee ₹2.00 · Cap ₹8.00 · Contribution floor ₹3.00");
+    expect(within(pickup).getAllByRole("cell")[0]?.textContent).toBe("Customer fee ₹5 · Shop fee ₹2 · Cap ₹8 · Contribution floor ₹3");
     expect(within(pickup).getAllByRole("cell")[2]?.textContent).toBe("Off");
 
     const counter = screen.getByRole("row", { name: /Counter-bill charge/ });
@@ -209,7 +209,7 @@ describe("Admin web", () => {
 
     const bargain = screen.getByRole("row", { name: /Bargain minimum commission/ });
     expect(within(bargain).getAllByRole("cell")[0]?.textContent).toBe("₹12.25");
-    expect(within(bargain).getAllByRole("cell")[2]?.textContent).toBe("₹13.00");
+    expect(within(bargain).getAllByRole("cell")[2]?.textContent).toBe("₹13");
 
     const discount = screen.getByRole("row", { name: /Maximum shop discount percentage/ });
     expect(within(discount).getAllByRole("cell")[0]?.textContent).toBe("12.5%");
@@ -225,17 +225,17 @@ describe("Admin web", () => {
     {
       name: "fixed",
       value: { formula: "fixed", fixedAmount: "4", percentage: null, minimum: null, maximum: null, base: "after_shop_discount" },
-      expected: "Fixed ₹4.00",
+      expected: "Fixed ₹4",
     },
     {
       name: "fixed plus percentage",
       value: { formula: "fixed_plus_percentage", fixedAmount: "1", percentage: "2.5", minimum: null, maximum: null, base: "after_shop_discount" },
-      expected: "₹1.00 + 2.5% · After shop discount",
+      expected: "₹1 + 2.5% · After shop discount",
     },
     {
       name: "lower of",
       value: { formula: "lower_of", fixedAmount: "6", percentage: "9", minimum: null, maximum: "40", base: "before_shop_discount" },
-      expected: "Lower of ₹6.00 or 9% · Before shop discount · Maximum ₹40.00",
+      expected: "Lower of ₹6 or 9% · Before shop discount · Maximum ₹40",
     },
   ])("formats the $name commission formula in current and draft values", async ({ value, expected }) => {
     const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
@@ -350,8 +350,8 @@ describe("Admin web", () => {
     const row = screen.getByRole("row", { name: /Minimum cart/ });
     const draftCell = within(row).getAllByRole("cell")[2];
     if (!draftCell) throw new Error("Draft cell is missing");
-    await waitFor(() => expect(draftCell.textContent).toContain("₹20.00"));
-    expect(draftCell.textContent).toBe("₹20.00");
+    await waitFor(() => expect(draftCell.textContent).toContain("₹20"));
+    expect(draftCell.textContent).toBe("₹20");
     expect(within(row).getAllByRole("cell")[1]?.textContent).toBe(strings.rateCardSources.shop);
   });
 
@@ -1554,7 +1554,7 @@ describe("Price simulator (A05, #358)", () => {
     expect(screen.getByText("₹231.45")).toBeTruthy();
     expect(screen.getByText(strings.simulator.shopKeepsHint)).toBeTruthy();
     expect(screen.getByText("₹29.05")).toBeTruthy();
-    expect(screen.getByText(strings.simulator.shares("₹6.00", "₹24.00"))).toBeTruthy();
+    expect(screen.getByText(strings.simulator.shares("₹6", "₹24"))).toBeTruthy();
     expect(screen.getByText(strings.simulator.yes)).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: strings.simulator.draft })).toBeNull();
     expect(screen.getAllByText(strings.rateCardSources.global).length).toBeGreaterThan(1);
