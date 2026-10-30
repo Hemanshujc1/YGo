@@ -53,13 +53,13 @@ export default function OpeningStockScreen() {
     let queue: OpeningStockQueue;
     try {
       queue = await openOpeningStock(identity.account.id);
+      const now = session.get();
+      if (!("account" in now) || now.account.id !== identity.account.id) return;
       queue.importLegacy(shopId, legacyOpeningStock);
     } catch {
       setLoad({ kind: "failed", message: words.storageFailed });
       return;
     }
-    const now = session.get();
-    if (!("account" in now) || now.account.id !== identity.account.id) return;
     const items = listings.data.items.filter((item) => item.listing !== null);
     setLoad({ kind: "loaded", shopId, queue, items });
     setQuantities(Object.fromEntries(items.map((item) => [item.packId, queue.pending(shopId, item.packId)?.quantity ?? ""])));
