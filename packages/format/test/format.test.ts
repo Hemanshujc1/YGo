@@ -10,6 +10,7 @@ function expectIndianFormats() {
   it("shows money without .00 for whole rupees and with two digits for paise (#413)", () => {
     expect([formatMoney(125_000), formatMoney(60), formatMoney(0), formatMoney(20.5), formatMoney(59.05), formatMoney(-20), formatMoney(-20.5), formatMoney(10n)])
       .toEqual(["₹1,25,000", "₹60", "₹0", "₹20.50", "₹59.05", "−₹20", "−₹20.50", "₹10"]);
+    expect(formatMoney(12_345_678_901_234_567_891n)).toBe("₹1,23,45,67,89,01,23,45,67,891");
   });
 
   it("shows fixed money with two decimals for Admin and columns of amounts", () => {

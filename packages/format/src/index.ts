@@ -40,7 +40,7 @@ export const formatMoneyFixed = (value: number | bigint) => tidyMoney(indianMone
 
 // The rule everywhere else: ₹60 for whole rupees, ₹59.50 with paise, never ".00" (#413).
 export const formatMoney = (value: number | bigint) =>
-  Number.isInteger(Number(value)) ? tidyMoney(indianWholeMoney.format(value)) : formatMoneyFixed(value);
+  typeof value === "bigint" || Number.isInteger(value) ? tidyMoney(indianWholeMoney.format(value)) : formatMoneyFixed(value);
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 
