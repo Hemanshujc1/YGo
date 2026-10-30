@@ -1,7 +1,6 @@
 import type { OrderResponse } from "@ygo/contracts";
-import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { AppState } from "react-native";
+import { useInFront } from "@ygo/mobile";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "../api";
 import { createOrder } from "./order";
 
@@ -17,13 +16,6 @@ export function useOrder(id: string) {
   const [order] = useState(() => createOrder(api, id, placed.get(id)));
   useEffect(() => void placed.delete(id), [id]);
   const view = useSyncExternalStore(order.subscribe, order.get);
-  useFocusEffect(useCallback(() => {
-    order.start();
-    const watch = AppState.addEventListener("change", (state) => (state === "active" ? order.start() : order.stop()));
-    return () => {
-      watch.remove();
-      order.stop();
-    };
-  }, [order]));
+  useInFront(order);
   return { order, view };
 }

@@ -1,10 +1,12 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type CartResponse, type ErrorCode, type OrderResponse, type OrderStatus, TERMINAL_ORDER_STATUSES } from "@ygo/contracts";
+import type { Treatment } from "@ygo/mobile";
+import { createPoller, phoneTimers, type Timers } from "@ygo/mobile/poller";
 import { strings } from "../strings";
 
-/** Who has to act, as the Customer sees it (design system section 6). */
-export type Treatment = "needsYou" | "waiting" | "inProgress" | "completed" | "ended";
+export type { Timers };
 
+/** Who has to act, as the Customer sees it (design system section 6). */
 export const treatments: Record<OrderStatus, Treatment> = {
   placed: "waiting",
   scheduled_pending_review: "inProgress",
@@ -75,24 +77,14 @@ type Client = {
   cancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
 };
 
-/** Passed in, so the tests run the clock themselves. */
-export type Timers = { set(run: () => void, ms: number): unknown; clear(handle: unknown): void };
-
-const phoneTimers: Timers = {
-  set: (run, ms) => setTimeout(run, ms),
-  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
 /**
  * One order on C09/C19. While started it reads the order every `every` ms, and stops on its own
  * once the status is final (owner's improvement on #52); `seed` is the order placement answered with.
  */
 export function createOrder(client: Client, id: string, seed?: OrderResponse, timers: Timers = phoneTimers, every = pollEvery) {
   let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, notice: null };
-  let running = false;
-  let timer: unknown;
-  /** Raised by each read and by Cancel, so an older answer never replaces a newer one. */
-  let ticket = 0;
+  // Each read and Cancel takes a ticket, so an older answer never replaces a newer one.
+  const poller = createPoller(() => void read(), every, timers);
   const listeners = new Set<() => void>();
 
   const set = (next: Partial<OrderView>) => {
@@ -100,27 +92,17 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     for (const listener of listeners) listener();
   };
   const final = () => view.order !== null && isFinal(view.order.status);
-  const unschedule = () => {
-    if (timer !== undefined) timers.clear(timer);
-    timer = undefined;
-  };
-  const schedule = () => {
-    unschedule();
-    if (running && !final()) timer = timers.set(() => {
-      timer = undefined;
-      void read();
-    }, every);
-  };
+  const schedule = () => poller.schedule(!final());
 
   async function read(pull = false) {
     // Cancel's answer is the newest word on the order; a read waits until it lands.
     if (view.cancelling) return;
-    const mine = ++ticket;
-    unschedule();
+    const latest = poller.ticket();
+    poller.unschedule();
     if (pull) set({ refreshing: true });
     else if (!view.order) set({ status: "loading", message: null });
     const answer = await client.order(id).catch(() => "offline" as const);
-    if (mine !== ticket) return;
+    if (!latest()) return;
     if (answer !== "offline" && answer.ok) set({ status: "ready", order: answer.data, message: null, refreshing: false });
     else {
       const message = answer === "offline" ? strings.area.offline : strings.errors[answer.code];
@@ -138,14 +120,13 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
 
     /** The screen is in front: read now and keep reading, unless the order has ended. */
     start() {
-      running = true;
+      poller.start();
       if (!final()) void read();
     },
 
     /** The screen closed or the app went to the background. */
     stop() {
-      running = false;
-      unschedule();
+      poller.stop();
     },
 
     /** Pull to refresh, and Try again after a failed read. */
@@ -156,8 +137,8 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     async cancel() {
       if (view.cancelling) return;
       // An older read landing after this must not bring back the placed status.
-      ticket += 1;
-      unschedule();
+      poller.ticket();
+      poller.unschedule();
       set({ cancelling: true, notice: null });
       const answer = await client.cancelOrder(id).catch(() => "offline" as const);
       // A pull to refresh dropped by the ticket above is over too.

@@ -1,5 +1,5 @@
 import { formatNumber } from "@ygo/format";
-import type { ErrorCode } from "@ygo/contracts";
+import type { ErrorCode, OrderStatus, RejectReason } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -187,6 +187,60 @@ export const strings = {
     suspended: "Your shop is suspended. Stock tools remain available; customers cannot place orders.",
     queueFull: "Your offline queue is full. Sync your saved changes before changing Stock again.",
     queueExpired: "Your saved changes have reached the offline time limit. Sync them before changing Stock again.",
+  },
+  // S04 and S05 (#431): a Live or Suspended shop answers its orders.
+  orders: {
+    open: "Orders", title: "Orders", back: "Back", loading: "Loading orders", retry: "Try again",
+    offline: "Couldn't load. Check your connection and try again.",
+    groups: { new: "New", accepted: "Accepted", doneToday: "Done today" },
+    empty: "No orders yet today. New orders show here.",
+    row: (items: number, total: string) => `${items} ${items === 1 ? "item" : "items"} · ${total}`,
+    detailTitle: (number: number) => `Order #${number}`,
+    titleLoading: "Order",
+    loadingOne: "Loading the order",
+    failed: "Couldn't load this order",
+    expiresIn: (time: string) => `Expires in ${time}`,
+    timeUp: "Time is up",
+    part: (part: string, pack: string) => `${part} of a ${pack} pack`,
+    collect: "To collect at the door",
+    collectNote: "Cash or UPI when the order is handed over.",
+    deliverTo: "Deliver to",
+    labels: { home: "Home", work: "Work", other: "Other" },
+    accept: "Accept", accepting: "Accepting", reject: "Reject", rejecting: "Rejecting",
+    cancelledByCustomer: "This order was cancelled by the customer.",
+    answered: "This order was already answered.",
+    shortTitle: "Not enough stock for:",
+    // "Toor Dal 1 kg: 1 left, order needs 2", or "Toor Dal: 300 g left, order needs 500 g" for part of a pack.
+    short: (item: string, left: string, needs: string) => `${item}: ${left} left, order needs ${needs}`,
+    rejectedBecause: (reason: string) => `Rejected: ${reason}`,
+    sheet: { title: "Reject this order?", confirm: "Reject order", cancel: "Keep order" },
+    reasons: {
+      out_of_stock: "Items out of stock",
+      too_busy: "Too busy right now",
+      closing_soon: "Closing soon",
+      cannot_deliver: "Can't deliver to this address",
+    } satisfies Record<RejectReason, string>,
+    units: { g: "g", kg: "kg", ml: "ml", l: "L", pc: "pc", pcs: "pcs" },
+    // Design system section 6, the Shopkeeper's column.
+    statuses: {
+      placed: "New order",
+      scheduled_pending_review: "Review by cutoff",
+      awaiting_customer_confirm: "Waiting for customer",
+      accepted: "Accepted",
+      scheduled_confirmed: "Scheduled",
+      preparing: "Packing",
+      ready: "Ready",
+      out_for_delivery: "Out for delivery",
+      arrived: "At customer",
+      delivered: "Delivered",
+      picked_up: "Picked up",
+      rejected_by_shop: "Rejected",
+      expired: "Expired, no answer",
+      not_collected: "Not collected",
+      cancelled_by_customer: "Cancelled by customer",
+      cancelled_by_shop: "Cancelled",
+      delivery_failed: "Delivery failed",
+    } satisfies Record<OrderStatus, string>,
   },
   agreement: {
     open: "Agreement and rate card",

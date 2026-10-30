@@ -292,6 +292,27 @@ describe("each call", () => {
     ]);
   });
 
+  it("reads, accepts and rejects a shop's order, and carries the short lines NOT_ENOUGH_STOCK answers with (#431)", async () => {
+    const orderId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
+    const shortLines = [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, available: "1" }];
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path.endsWith("/accept")) return answer(409, { error: { code: "NOT_ENOUGH_STOCK", shortLines } });
+      return answer(409, { error: { code: "ORDER_EXPIRED" } });
+    });
+    await client.verifyCode(signIn);
+    expect(await client.shopOrders()).toMatchObject({ ok: false, code: "ORDER_EXPIRED" });
+    expect(await client.shopOrder(orderId)).toMatchObject({ ok: false, code: "ORDER_EXPIRED" });
+    expect(await client.acceptOrder(orderId)).toMatchObject({ ok: false, status: 409, code: "NOT_ENOUGH_STOCK", shortLines });
+    expect(await client.rejectOrder(orderId, { reason: "too_busy" })).toMatchObject({ ok: false, code: "ORDER_EXPIRED" });
+    expect(calls.slice(1).map(({ method, path, body: sent }) => ({ method, path, sent }))).toEqual([
+      { method: "GET", path: "/v1/me/shop-orders", sent: undefined },
+      { method: "GET", path: `/v1/me/shop-orders/${orderId}`, sent: undefined },
+      { method: "POST", path: `/v1/me/shop-orders/${orderId}/accept`, sent: undefined },
+      { method: "POST", path: `/v1/me/shop-orders/${orderId}/reject`, sent: { reason: "too_busy" } },
+    ]);
+  });
+
   it("reads a pincode in no Area as its code", async () => {
     const { client } = setup((call) =>
       call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "PINCODE_NOT_IN_AREA" } }),

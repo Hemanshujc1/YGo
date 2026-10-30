@@ -711,6 +711,9 @@ importers:
       '@ygo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@ygo/format':
+        specifier: workspace:*
+        version: link:../format
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -739,9 +742,15 @@ importers:
       expo-navigation-bar:
         specifier: 57.0.3
         version: 57.0.3(expo@57.0.27)(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)
+      expo-router:
+        specifier: 57.0.25
+        version: 57.0.25(9e9db3849cf7b5baab0ef2f273e300f8)
       expo-secure-store:
         specifier: 57.0.4
         version: 57.0.4(expo@57.0.27)
+      lucide-react-native:
+        specifier: 1.57.0
+        version: 1.57.0(@types/react@19.2.18)(react-native-svg@15.15.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       nativewind:
         specifier: 4.2.7
         version: 4.2.7(d4b646630704b5b094151fa95945489e)

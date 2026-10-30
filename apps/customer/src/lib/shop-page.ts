@@ -1,16 +1,11 @@
 import type { PartPack, ShopHoursRange, ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
 import { formatDayTime, formatMinuteOfDay, formatNumber } from "@ygo/format";
+import { packLabel as sharedPackLabel } from "@ygo/mobile/pack-label";
 import { strings } from "../strings";
 import { money } from "./money";
 
 /** A pack's size: grams or millilitres below 1 kg or 1 L, as the quantity stepper shows them (design system). */
-export function packLabel(quantity: string, baseUnit: ShopPageProduct["baseUnit"]): string {
-  const units = strings.shop.units;
-  const amount = Number(quantity);
-  if (baseUnit === "each") return `${formatNumber(amount)} ${amount === 1 ? units.pc : units.pcs}`;
-  if (amount < 1) return `${formatNumber(Math.round(amount * 1000))} ${baseUnit === "kg" ? units.g : units.ml}`;
-  return `${formatNumber(amount)} ${baseUnit === "kg" ? units.kg : units.l}`;
-}
+export const packLabel = (quantity: string, baseUnit: ShopPageProduct["baseUnit"]): string => sharedPackLabel(quantity, baseUnit, strings.shop.units);
 
 /** "Only 400 g left · ₹16": what is left of a pack, on C05 and C07 (owner's answer 5 on #377). */
 export function partLabel(part: PartPack, baseUnit: ShopPageProduct["baseUnit"]): string {
