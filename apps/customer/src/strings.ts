@@ -200,7 +200,7 @@ export const strings = {
     empty: "This shop hasn't listed any products yet.",
     outOfStock: "Out of stock",
     mrp: (amount: string) => `MRP ${amount}`,
-    off: (percent: number) => `${percent}% off`,
+    off: (percent: string) => `${percent}% off`,
     units: { g: "g", kg: "kg", ml: "ml", l: "L", pc: "pc", pcs: "pcs" },
     // The opening hours line and its week (owner's answer 10 on #371, 1–3 on #381).
     hours: {

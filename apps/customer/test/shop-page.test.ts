@@ -8,8 +8,9 @@ describe("shop page labels (#370)", () => {
       .toEqual(["500 g", "250 ml", "1 kg", "1.5 L", "1 pc", "12 pcs"]);
   });
 
-  it("names a whole percent off, and nothing below 1%", () => {
-    expect([offLabel({ discountPercent: 10 }), offLabel({ discountPercent: 0 }), offLabel({ discountPercent: null })]).toEqual(["10% off", null, null]);
+  it("names the percent off to two decimals with no trailing zeros, and nothing at 0.00%", () => {
+    expect([offLabel({ discountPercent: "7.69" }), offLabel({ discountPercent: "10.00" }), offLabel({ discountPercent: "7.50" }), offLabel({ discountPercent: "0.00" }), offLabel({ discountPercent: null })])
+      .toEqual(["7.69% off", "10% off", "7.5% off", null, null]);
   });
 
   it("keeps the server's category, product and pack order as SectionList sections", () => {

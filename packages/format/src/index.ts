@@ -8,6 +8,12 @@ const indianMoney = new Intl.NumberFormat(locale, {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const indianWholeMoney = new Intl.NumberFormat(locale, {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
 const indianDate = new Intl.DateTimeFormat(locale, {
   timeZone,
   day: "2-digit",
@@ -29,6 +35,10 @@ export const formatNumber = (value: number | bigint) => indianNumber.format(valu
 // Android puts a space after ₹ and iOS does not; the design system has none.
 export const formatMoney = (value: number | bigint) =>
   indianMoney.format(value).replace("-", "−").replace(/₹\s/, "₹");
+
+// A shelf price: ₹60 for whole rupees, ₹59.50 otherwise (#411).
+export const formatPrice = (value: number) =>
+  Number.isInteger(value) ? indianWholeMoney.format(value).replace(/₹\s/, "₹") : formatMoney(value);
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 

@@ -11,9 +11,10 @@ export function packLabel(quantity: string, baseUnit: ShopPageProduct["baseUnit"
   return `${formatNumber(amount)} ${baseUnit === "kg" ? units.kg : units.l}`;
 }
 
-/** "10% off" for a whole percent of at least 1; a smaller cut shows only the struck MRP (owner's answer 3 on #370). */
+/** "7.69% off", "10% off" with no trailing zeros; a cut that rounds to 0.00% shows only the struck MRP (owners' answers on #411). */
 export function offLabel(pack: Pick<ShopPagePack, "discountPercent">): string | null {
-  return pack.discountPercent ? strings.shop.off(pack.discountPercent) : null;
+  const percent = Number(pack.discountPercent);
+  return percent > 0 ? strings.shop.off(formatNumber(percent)) : null;
 }
 
 /** C05's SectionList sections: one per top category, its products as the rows, both in the server's order (#370). */
