@@ -43,9 +43,9 @@ export const ShopPagePack = z.strictObject({
   /** The pack size in the product's base unit, such as "0.5" kg or "12" each. */
   quantity: z.string(),
   price: ShopPrice,
-  /** Both set only when the price is below the MRP; the percent is whole and rounded down (owner's answer 3 on #370). */
+  /** Both set only when the price is below the MRP; the percent has two decimals, as text like "7.69" (owner's answer 3 on #370, #411). */
   mrp: ShopPrice.nullable(),
-  discountPercent: z.number().int().min(0).max(100).nullable(),
+  discountPercent: z.string().regex(/^(?:100|\d{1,2})\.\d{2}$/).nullable(),
   /** Stock at or below zero: shown, never orderable (DSC-4, owner's answer 9 on #47). */
   outOfStock: z.boolean(),
 });

@@ -355,7 +355,7 @@ describe("each call", () => {
         fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2, holidays: [],
       },
       groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
-        { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
+        { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: "10.00", outOfStock: false },
       ] }] }],
     };
     let found = true;

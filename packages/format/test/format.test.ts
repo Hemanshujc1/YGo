@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPrice, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -11,6 +11,10 @@ function expectIndianFormats() {
     expect(formatMoney(125_000)).toBe("₹1,25,000.00");
     expect(formatMoney(20.5)).toBe("₹20.50");
     expect(formatMoney(-20)).toBe("−₹20.00");
+  });
+
+  it("shows a shelf price without .00 for whole rupees (#411)", () => {
+    expect([formatPrice(60), formatPrice(59.5), formatPrice(1250)]).toEqual(["₹60", "₹59.50", "₹1,250"]);
   });
 
   it("shows dates and 12-hour times in India", () => {

@@ -195,7 +195,10 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
       { quantity: "1", price: "135", mrp: "150", stock: "4" }, // 10% off
       { quantity: "0.5", price: "70", mrp: "70", stock: "0" }, // no discount, out of stock at zero
     ]);
-    const atta = await product(id, groceries, "atta", "kg", [{ quantity: "5", price: "199.99", mrp: "200", stock: "10" }]); // 0.005% off rounds to 0
+    const atta = await product(id, groceries, "atta", "kg", [
+      { quantity: "5", price: "199.99", mrp: "200", stock: "10" }, // 0.005% off rounds up to 0.01
+      { quantity: "10", price: "60", mrp: "65", stock: "5" }, // 7.69% off (#411)
+    ]);
     const pen = await product(id, stationery, "Pen", "each", [{ quantity: "1", price: "10", mrp: "10" }]); // no stock recorded
     await product(id, groceries, "Hidden Rice", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3", available: false }]);
     await product(id, switchedOff, "Ball", "each", [{ quantity: "1", price: "50", mrp: "50", stock: "3" }]);
@@ -213,11 +216,12 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
       groups: [
         { category: "Groceries", products: [
           { id: atta.productId, name: "atta", brand: null, baseUnit: "kg", packs: [
-            { listingId: atta.listings[0], quantity: "5", price: "199.99", mrp: "200.00", discountPercent: 0, outOfStock: false },
+            { listingId: atta.listings[0], quantity: "5", price: "199.99", mrp: "200.00", discountPercent: "0.01", outOfStock: false },
+            { listingId: atta.listings[1], quantity: "10", price: "60.00", mrp: "65.00", discountPercent: "7.69", outOfStock: false },
           ] },
           { id: dal.productId, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
             { listingId: dal.listings[1], quantity: "0.5", price: "70.00", mrp: null, discountPercent: null, outOfStock: true },
-            { listingId: dal.listings[0], quantity: "1", price: "135.00", mrp: "150.00", discountPercent: 10, outOfStock: false },
+            { listingId: dal.listings[0], quantity: "1", price: "135.00", mrp: "150.00", discountPercent: "10.00", outOfStock: false },
           ] },
         ] },
         { category: "Stationery", products: [
