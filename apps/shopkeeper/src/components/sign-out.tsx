@@ -4,7 +4,7 @@ import { Link } from "expo-router";
 import { View } from "react-native";
 import { session } from "../api";
 import { strings } from "../strings";
-import { openingStockBeforeSignOut, openingStockFailuresBeforeSignOut } from "../lib/opening-stock-database";
+import { openingStockBeforeSignOut } from "../lib/opening-stock-database";
 
 const words = strings.application.signOut;
 
@@ -31,16 +31,15 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
     setMessage(null);
     setPending(false);
     try {
-      const count = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
-      const failures = await openingStockFailuresBeforeSignOut(before.account.id);
+      const counts = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
       const current = session.get();
       if (!("account" in current) || current.account.id !== before.account.id) return;
-      if (count > 0) {
-        setMessage(words.pending(count));
+      if (counts.pending > 0) {
+        setMessage(words.pending(counts.pending));
         setPending(true);
         return;
       }
-      if (failures > 0 && acceptedAccount !== before.account.id) { setFailedWarning(before.account.id); setAsking(true); return; }
+      if (counts.failed > 0 && acceptedAccount !== before.account.id) { setFailedWarning(before.account.id); setAsking(true); return; }
       await session.signOut();
     } catch {
       const current = session.get();

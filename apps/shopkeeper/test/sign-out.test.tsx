@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   state: [] as unknown[], cursor: 0, working: { current: false },
   identity: { status: "signed-in", account: { id: "account-1" } },
-  count: vi.fn(), failures: vi.fn(), signOut: vi.fn(),
+  count: vi.fn(), signOut: vi.fn(),
 }));
 vi.mock("react", () => ({
   useRef: () => mock.working,
@@ -17,7 +17,7 @@ vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", Text: "Tex
 vi.mock("react-native", () => ({ View: "View" }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({ session: { get: () => mock.identity, signOut: mock.signOut } }));
-vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count, openingStockFailuresBeforeSignOut: mock.failures }));
+vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
 
 import { SignOut } from "../src/components/sign-out";
 
@@ -38,11 +38,11 @@ describe("opening-stock sign-out guard", () => {
   beforeEach(() => {
     vi.clearAllMocks(); mock.state = []; mock.working.current = false;
     mock.identity = { status: "signed-in", account: { id: "account-1" } };
-    mock.count.mockResolvedValue(0); mock.failures.mockResolvedValue(0); mock.signOut.mockResolvedValue(true);
+    mock.count.mockResolvedValue({ pending: 0, failed: 0 }); mock.signOut.mockResolvedValue(true);
   });
 
   it("blocks sign-out with the pending count and a stock retry link", async () => {
-    mock.count.mockResolvedValue(2);
+    mock.count.mockResolvedValue({ pending: 2, failed: 0 });
     const view = await pressSignOut();
     expect(mock.count).toHaveBeenCalledWith("account-1", "shop-1");
     expect(mock.signOut).not.toHaveBeenCalled();
@@ -68,7 +68,7 @@ describe("opening-stock sign-out guard", () => {
   });
 
   it("warns before signing out with acknowledged failures, then checks pending work again", async () => {
-    mock.failures.mockResolvedValue(2);
+    mock.count.mockResolvedValue({ pending: 0, failed: 2 });
     const view = await pressSignOut();
     expect(mock.signOut).not.toHaveBeenCalled();
     const confirmation = view.props.children[3];
@@ -80,7 +80,7 @@ describe("opening-stock sign-out guard", () => {
   });
 
   it("does not apply another account's failure-warning confirmation", async () => {
-    mock.failures.mockResolvedValue(1);
+    mock.count.mockResolvedValue({ pending: 0, failed: 1 });
     const view = await pressSignOut();
     mock.identity = { status: "signed-in", account: { id: "account-2" } };
     view.props.children[3].props.onConfirm();
@@ -96,7 +96,7 @@ describe("opening-stock sign-out guard", () => {
   it("accepts a refreshed session object for the same account", async () => {
     mock.count.mockImplementation(async () => {
       mock.identity = { status: "signed-in", account: { id: "account-1" } };
-      return 0;
+      return { pending: 0, failed: 0 };
     });
     await pressSignOut();
     expect(mock.signOut).toHaveBeenCalledOnce();
@@ -105,7 +105,7 @@ describe("opening-stock sign-out guard", () => {
   it("does not sign out an account that changed during the storage check", async () => {
     mock.count.mockImplementation(async () => {
       mock.identity = { status: "signed-in", account: { id: "account-2" } };
-      return 0;
+      return { pending: 0, failed: 0 };
     });
     await pressSignOut();
     expect(mock.signOut).not.toHaveBeenCalled();

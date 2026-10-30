@@ -169,11 +169,6 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       db.runSync(`INSERT INTO opening_stock VALUES (?, ?, ?, ?, 0) ON CONFLICT (shop_id, pack_id)
         DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at, clock_suspect = 0`, shopId, packId, JSON.stringify(checked), now().toISOString());
     },
-    clear(shopId: string, packId: string, sent: OpeningStockEntry) {
-      // A delayed response must never delete a newer edit.
-      db.runSync(`DELETE FROM opening_stock WHERE shop_id = ? AND pack_id = ?
-        AND json_extract(payload, '$.clientId') = ? AND json_extract(payload, '$.quantity') = ?`, shopId, packId, sent.clientId, sent.quantity);
-    },
     count(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')) + (SELECT count(*) FROM opening_stock_held) AS count");
       if (!row) throw new Error("Could not count opening stock");

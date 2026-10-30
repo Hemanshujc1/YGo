@@ -260,6 +260,9 @@ describe("ordered opening-stock sync", () => {
     const { actor, action, send } = await setup();
     const old = action(1, { createdAt: "2029-12-24T00:00:00.000Z" });
     expect((await send([old])).json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD" });
+    const frozen = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers,
+      payload: { deviceId: randomUUID(), sentAt: old.createdAt, actions: [{ ...old, id: randomUUID(), clockSuspect: true }] } });
+    expect(frozen.json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD", clockSuspect: true });
     const legacy = action(2, { createdAt: old.createdAt });
     const previous = await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock`, headers: actor.headers,
       payload: { clientId: legacy.id, quantity: "2.5" } });

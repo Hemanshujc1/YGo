@@ -44,15 +44,11 @@ export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> 
 }
 
 /** Undefined means the shop lookup failed; null means the server confirmed no shop. */
-export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<number> {
+export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number }> {
   if (verifiedShopId === undefined && legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"))) {
     throw new Error("Verify the shop before checking legacy opening stock");
   }
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
-  return queue.count();
-}
-
-export async function openingStockFailuresBeforeSignOut(accountId: string): Promise<number> {
-  return (await openOpeningStock(accountId)).failureCount();
+  return { pending: queue.count(), failed: queue.failureCount() };
 }

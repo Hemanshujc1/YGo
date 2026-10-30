@@ -1,3 +1,4 @@
+import type { SyncActionsBody } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,6 +13,11 @@ const shopId = "00000000-0000-4000-8000-000000000001";
 const packId = "00000000-0000-4000-8000-000000000002";
 const entry = { quantity: "2.5", clientId: "00000000-0000-4000-8000-000000000003" };
 
+function acknowledge(queue: ReturnType<typeof openingStockQueue>, batch: SyncActionsBody = queue.batch(shopId)) {
+  queue.acknowledge(batch, { results: batch.actions.map((action) => ({ actionId: action.id, sequence: action.sequence,
+    status: "applied", code: null, result: { listingId: packId, quantity: entry.quantity, recordedAt: new Date().toISOString() }, clockSuspect: false })) });
+}
+
 describe("offline opening stock", () => {
   let db: DatabaseSync;
   let queue: ReturnType<typeof openingStockQueue>;
@@ -22,7 +28,7 @@ describe("offline opening stock", () => {
     queue.save(shopId, packId, entry);
     expect(queue.pending(shopId, packId)).toEqual(entry);
     expect(queue.pending("00000000-0000-4000-8000-000000000004", packId)).toBeNull();
-    queue.clear(shopId, packId, entry);
+    acknowledge(queue);
     expect(queue.pending(shopId, packId)).toBeNull();
   });
 
@@ -97,17 +103,18 @@ describe("opening-stock durability", () => {
     } finally { db.close(); }
   });
 
-  it("retains a conflicting legacy record and never lets an old reply erase a newer edit", () => {
+  it("retains conflicting legacy bytes and never lets an old acknowledgement erase newer work", () => {
     const db = new DatabaseSync(":memory:");
     try {
       const queue = openingStockQueue(adapter(db), randomUUID);
-      const newer = { ...entry, quantity: "8" };
+      queue.save(shopId, packId, entry);
+      const oldBatch = queue.batch(shopId);
+      const newer = { ...entry, clientId: randomUUID(), quantity: "8" };
       queue.save(shopId, packId, newer);
       queue.importLegacy(shopId, legacy(new Map([[`opening:${shopId}:${packId}`, JSON.stringify(entry)]])));
-      queue.clear(shopId, packId, entry);
+      acknowledge(queue, oldBatch);
       expect(queue.pending(shopId, packId)).toEqual(newer);
-      expect(queue.count()).toBe(2);
-      expect(queue.attentionCount()).toBe(1);
+      expect(queue.count()).toBe(2); expect(queue.attentionCount()).toBe(1);
     } finally { db.close(); }
   });
 
@@ -119,8 +126,9 @@ describe("opening-stock durability", () => {
       const key = `opening:${shopId}:${packId}`;
       const values = new Map([[key, JSON.stringify(entry)]]);
       queue.save(shopId, packId, newer);
+      const beforeImport = queue.batch(shopId);
       expect(() => queue.importLegacy(shopId, { ...legacy(values), remove: () => { throw new Error("interrupted"); } })).toThrow();
-      queue.clear(shopId, packId, newer);
+      acknowledge(queue, beforeImport);
       queue.importLegacy(shopId, legacy(values));
       expect(queue.pending(shopId, packId)).toBeNull();
       expect(queue.count()).toBe(1);
@@ -209,9 +217,10 @@ describe("opening-stock durability", () => {
       queue.save(shopId, packId, entry);
       expect(() => queue.recover(shopId, "bad-pack", packId, entry)).toThrow("Target stock");
       expect(queue.attentionCount()).toBe(1);
-      queue.clear(shopId, packId, entry);
-      queue.recover(shopId, "bad-pack", packId, entry);
-      expect(queue.pending(shopId, packId)).toEqual(entry);
+      acknowledge(queue);
+      const corrected = { ...entry, clientId: randomUUID() };
+      queue.recover(shopId, "bad-pack", packId, corrected);
+      expect(queue.pending(shopId, packId)).toEqual(corrected);
       expect(queue.count()).toBe(1);
       expect(db.prepare("SELECT payload FROM opening_stock_recovered").get()?.payload).toBe("broken bytes");
     } finally { db.close(); }

@@ -55,7 +55,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
             WHERE sl.shop_id = $1 AND sl.pack_id = $2 AND sm.actor_id = $3 AND sm.client_id = $4
               AND sm.kind = 'opening' AND sm.quantity = $5::numeric`,
           [action.shopId, payload.data.packId, who.accountId, action.id, payload.data.quantity]);
-          const age = (clockSuspect ? Date.parse(body.sentAt) : now.getTime()) - Date.parse(action.createdAt);
+          const age = now.getTime() - Date.parse(action.createdAt);
           if (!legacy.rowCount && age > maxAgeSeconds * 1000) result.code = "ACTION_TOO_OLD";
           else {
             const answer = await applyOpeningStock(client, who.accountId, action.shopId, payload.data.packId, { clientId: action.id, quantity: payload.data.quantity });

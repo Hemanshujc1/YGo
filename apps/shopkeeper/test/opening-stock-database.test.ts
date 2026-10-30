@@ -77,9 +77,9 @@ describe("opening-stock native boundary", () => {
     native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
     native.legacy.set(`opening:${shop}:bad`, "broken");
     const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
-    expect(await openingStockBeforeSignOut(account, shop)).toBe(2);
-    expect(await openingStockBeforeSignOut("other-account", null)).toBe(0);
-    expect(await openingStockBeforeSignOut(account, shop)).toBe(2);
+    expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
+    expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
+    expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
   });
 
   it("cannot skip unverified legacy entries when the shop lookup failed", async () => {
