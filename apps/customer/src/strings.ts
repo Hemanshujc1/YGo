@@ -199,6 +199,8 @@ export const strings = {
     fssai: (number: string) => `FSSAI licence ${number}`,
     empty: "This shop hasn't listed any products yet.",
     outOfStock: "Out of stock",
+    // Less than one pack left, sold whole (owner's answer 5 on #377).
+    partLeft: (quantity: string, price: string) => `Only ${quantity} left · ${price}`,
     mrp: (amount: string) => `MRP ${amount}`,
     off: (percent: string) => `${percent}% off`,
     units: { g: "g", kg: "kg", ml: "ml", l: "L", pc: "pc", pcs: "pcs" },

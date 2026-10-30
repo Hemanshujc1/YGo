@@ -1,6 +1,7 @@
-import type { ShopHoursRange, ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
+import type { PartPack, ShopHoursRange, ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
 import { formatDayTime, formatMinuteOfDay, formatNumber } from "@ygo/format";
 import { strings } from "../strings";
+import { money } from "./money";
 
 /** A pack's size: grams or millilitres below 1 kg or 1 L, as the quantity stepper shows them (design system). */
 export function packLabel(quantity: string, baseUnit: ShopPageProduct["baseUnit"]): string {
@@ -9,6 +10,11 @@ export function packLabel(quantity: string, baseUnit: ShopPageProduct["baseUnit"
   if (baseUnit === "each") return `${formatNumber(amount)} ${amount === 1 ? units.pc : units.pcs}`;
   if (amount < 1) return `${formatNumber(Math.round(amount * 1000))} ${baseUnit === "kg" ? units.g : units.ml}`;
   return `${formatNumber(amount)} ${baseUnit === "kg" ? units.kg : units.l}`;
+}
+
+/** "Only 400 g left · ₹16": what is left of a pack, on C05 and C07 (owner's answer 5 on #377). */
+export function partLabel(part: PartPack, baseUnit: ShopPageProduct["baseUnit"]): string {
+  return strings.shop.partLeft(packLabel(part.quantity, baseUnit), money(part.price));
 }
 
 /** "7.69% off", "10% off" with no trailing zeros; a cut that rounds to 0.00% shows only the struck MRP (owners' answers on #411). */

@@ -355,7 +355,7 @@ describe("each call", () => {
         fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2, holidays: [],
       },
       groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
-        { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: "10.00", outOfStock: false },
+        { listingId: id, quantity: "1", price: "135.00", mrp: "150.00", discountPercent: "10.00", outOfStock: false, part: null },
       ] }] }],
     };
     let found = true;
@@ -382,7 +382,7 @@ describe("each call", () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
     const cart = {
       shop: { id, name: "Sai General Stores" }, revision: 1,
-      lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count: 2, state: "orderable", left: null, lineTotal: "270.00" }],
+      lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count: 2, state: "orderable", part: null, left: null, lineTotal: "270.00" }],
       quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
     };
     let changed = false;

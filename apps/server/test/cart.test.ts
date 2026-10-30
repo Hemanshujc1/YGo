@@ -122,7 +122,7 @@ const read = (shopId: string, headers: Record<string, string> = customer, query 
 const save = (shopId: string, revision: number, lines: Array<{ listingId: string | undefined; count: number }>, headers: Record<string, string> = customer, query = here) =>
   app.inject({ method: "PUT", url: `/v1/carts/${shopId}?${query}`, headers, payload: { revision, lines } });
 const dalLine = (listingId: string | undefined, count: number, more: object = {}) => ({
-  listingId, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count, state: "orderable", left: null, lineTotal: null, ...more,
+  listingId, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count, state: "orderable", part: null, left: null, lineTotal: null, ...more,
 });
 
 /** A Live shop with a complete card, Toor Dal (1 kg, 10 in stock) and Atta (5 kg, 20 kg in stock: 4 packs). */
@@ -146,7 +146,7 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
       shop: { id: shopId, name: "Sai General Stores" }, revision: 1,
       lines: [
         dalLine(dal, 2, { lineTotal: "270.00" }),
-        { listingId: atta, name: "Atta", brand: null, baseUnit: "kg", quantity: "5", price: "199.99", count: 1, state: "orderable", left: null, lineTotal: "199.99" },
+        { listingId: atta, name: "Atta", brand: null, baseUnit: "kg", quantity: "5", price: "199.99", count: 1, state: "orderable", part: null, left: null, lineTotal: "199.99" },
       ],
       quote: { productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99" },
       placeable: true, reasons: [],
@@ -205,11 +205,11 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     await database.pool.query("UPDATE stock_movements SET quantity = 5 WHERE listing_id = $1", [atta]);
     expect((await read(shopId)).json()).toMatchObject({ lines: [{ count: 1 }, { count: 1, left: 1, lineTotal: "199.99" }], quote: { productValue: "334.99" } });
 
-    // None left, as part of a pack counts as none until #377 (#410): the line stays, unpriced, and the cart can't be ordered until it's removed (CRT-4).
-    await database.pool.query("UPDATE stock_movements SET quantity = 4.999 WHERE listing_id = $1", [atta]);
+    // None left: the line stays, unpriced, and the cart can't be ordered until it's removed (CRT-4).
+    await database.pool.query("UPDATE stock_movements SET quantity = 0 WHERE listing_id = $1", [atta]);
     await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
     expect((await read(shopId)).json()).toMatchObject({
-      revision: 1, lines: [{ count: 1, state: "orderable" }, { count: 4, state: "outOfStock", left: null, lineTotal: null }],
+      revision: 1, lines: [{ count: 1, state: "orderable" }, { count: 4, state: "outOfStock", part: null, left: null, lineTotal: null }],
       quote: { productValue: "135.00" }, placeable: false, reasons: [{ code: "LINE_UNAVAILABLE" }],
     });
     // A cart that has none can't newly add it (C17).
@@ -226,6 +226,49 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     // 999 packs from thousands in stock: not the last ones left.
     const salt = (await product(shopId, await category("Salt"), "Salt", "each", [{ quantity: "1", price: "1", mrp: "1", stock: "5000" }])).listings[0];
     expect((await save(shopId, 3, [{ listingId: salt, count: 999 }])).json()).toMatchObject({ lines: [{ count: 999, left: null }] });
+  });
+
+  it("sells what is left of a measured pack as one line at a proportional price, and follows stock (#377)", async () => {
+    const { shopId, dal, atta } = await stocked();
+    const setStock = async (listingId: string | undefined, quantity: string) => {
+      await database.pool.query("ALTER TABLE stock_movements DISABLE TRIGGER stock_movements_no_update_delete");
+      await database.pool.query("UPDATE stock_movements SET quantity = $2 WHERE listing_id = $1", [listingId, quantity]);
+      await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
+    };
+    // 2 kg of a 5 kg ₹199.99 pack: ₹79.996, half-up to ₹80.00. A count above 1 is held at 1, and no more can be added.
+    await setStock(atta, "2");
+    expect((await save(shopId, 0, [{ listingId: dal, count: 1 }, { listingId: atta, count: 3 }])).json()).toMatchObject({
+      lines: [{ count: 1, part: null }, { quantity: "5", price: "199.99", count: 1, state: "orderable", part: { quantity: "2", price: "80.00" }, left: 1, lineTotal: "80.00" }],
+      quote: { productValue: "215.00" }, placeable: true,
+    });
+    expect((await read(shopId)).json()).toMatchObject({ lines: [{}, { count: 1 }] });
+
+    // Read from stock on every request: the part shrinks with it, rounding half-up (199.99 × 0.025 / 5 = 0.99995 → 1.00).
+    await setStock(atta, "0.025");
+    expect((await read(shopId)).json()).toMatchObject({ lines: [{}, { count: 1, part: { quantity: "0.025", price: "1.00" }, lineTotal: "1.00" }] });
+    // A restock past one pack makes it a whole pack at the pack's price again (owner's answer 6).
+    await setStock(atta, "12");
+    expect((await read(shopId)).json()).toMatchObject({ lines: [{}, { count: 1, part: null, left: null, lineTotal: "199.99" }] });
+    // Below the shop's minimum order, the remainder is not on sale (owner's answer 8).
+    await database.pool.query("UPDATE shop_listings SET minimum_order_quantity = 0.5, quantity_step = 0.5 WHERE id = $1", [atta]);
+    await setStock(atta, "0.499");
+    expect((await read(shopId)).json()).toMatchObject({ lines: [{}, { state: "outOfStock", part: null, lineTotal: null }], placeable: false });
+    await setStock(atta, "0.5");
+    expect((await read(shopId)).json()).toMatchObject({ lines: [{}, { state: "orderable", part: { quantity: "0.5", price: "20.00" } }] });
+
+    // Counted goods stay whole packs: 5 of a 12-pack is out of stock (owner's answer 2), and a part that would cost nothing isn't sold.
+    const groceries = await category("Groceries");
+    const eggs = (await product(shopId, groceries, "Eggs", "each", [{ quantity: "12", price: "84", mrp: "84", stock: "5" }])).listings[0];
+    const tea = (await product(shopId, groceries, "Loose Tea", "kg", [{ quantity: "1", price: "1", mrp: "1", stock: "0.004" }])).listings[0];
+    const someone = await signIn("/v1/auth", "fourth@example.com");
+    expect((await save(shopId, 0, [{ listingId: eggs, count: 1 }], someone)).statusCode).toBe(404);
+    expect((await save(shopId, 0, [{ listingId: tea, count: 1 }], someone)).statusCode).toBe(404);
+
+    // The phone can't name a part's quantity or price.
+    for (const line of [{ listingId: atta, count: 1, part: { quantity: "5", price: "1" } }, { listingId: atta, count: 1, quantity: "5" }]) {
+      const sent = await app.inject({ method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer, payload: { revision: 1, lines: [line] } });
+      expect(sent.statusCode).toBe(400);
+    }
   });
 
   it("takes only this shop's packs, and each Customer sees only their own cart", async () => {

@@ -10,7 +10,7 @@ const dal = "3f1c2b9a-0d4e-4b7a-8c61-2e5f9d8a7b02";
 
 const line = (listingId: string, count: number, more: Partial<CartLine> = {}): CartLine => ({
   listingId, name: listingId === atta ? "Atta" : "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "60",
-  count, state: "orderable", left: null, lineTotal: String(60 * count), ...more,
+  count, state: "orderable", part: null, left: null, lineTotal: String(60 * count), ...more,
 });
 const cart = (revision: number, lines: CartLine[], more: Partial<CartResponse> = {}): CartResponse => ({
   shop: { id: shopId, name: "Day Dairy" }, revision, lines,

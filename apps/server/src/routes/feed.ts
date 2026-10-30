@@ -5,7 +5,7 @@ import {
   ShopPageParams, ShopPageResponse, type ShopPagePack, type ShopPageProduct,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { stockOf, visibleListings } from "../listings";
+import { inStock, partOf, visibleListings } from "../listings";
 import { pointFrom } from "../points";
 import { holidaysNear, holidaysOf, indiaWeekday, openStatus, overrideOf } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -85,13 +85,13 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
     const { id } = request.params as ShopPageParams;
     const [shop] = await servingShops(pool, clock.now(), request.query as FeedQuery, id);
     if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    // Out of stock at or below zero (owner's answer 9 on #47); the MRP and the percent off, to two decimals, show only below it (answer 3 on #370, #411).
+    // Out of stock with neither a whole pack nor a part on sale (owner's answer 9 on #47, #377); the MRP and the percent off, to two decimals, show only below it (answer 3 on #370, #411).
     const { rows } = await pool.query<ListingRow>(
       `SELECT COALESCE(parent.name, category.name) AS category, product.id, product.name, product.brand, product.base_unit AS "baseUnit",
           listing.id AS "listingId", trim_scale(pack.quantity)::text AS quantity, listing.online_price::text AS price,
           CASE WHEN listing.online_price < listing.mrp THEN listing.mrp::text END AS mrp,
           CASE WHEN listing.online_price < listing.mrp THEN round((listing.mrp - listing.online_price) * 100 / listing.mrp, 2)::text END AS "discountPercent",
-          ${stockOf("listing")} <= 0 AS "outOfStock"
+          NOT ${inStock("listing")} AS "outOfStock", ${partOf("listing")} AS part
         FROM ${visibleListings}
         ORDER BY lower(COALESCE(parent.name, category.name)), lower(product.name), product.id, pack.quantity`, [id]);
     const groups: ShopPageResponse["groups"] = [];

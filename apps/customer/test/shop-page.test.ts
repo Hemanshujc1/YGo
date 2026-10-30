@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { closedLine } from "../src/lib/feed";
-import { hoursLine, offLabel, packLabel, shopSections, weekRows } from "../src/lib/shop-page";
+import { hoursLine, offLabel, packLabel, partLabel, shopSections, weekRows } from "../src/lib/shop-page";
 
 describe("shop page labels (#370)", () => {
   it("shows a pack below 1 kg or 1 L in g or ml, and counts pieces", () => {
     expect([packLabel("0.5", "kg"), packLabel("0.25", "l"), packLabel("1", "kg"), packLabel("1.5", "l"), packLabel("1", "each"), packLabel("12", "each")])
       .toEqual(["500 g", "250 ml", "1 kg", "1.5 L", "1 pc", "12 pcs"]);
+  });
+
+  it("names what is left of a pack with its price and no trailing zeros (#377)", () => {
+    expect([partLabel({ quantity: "0.4", price: "16.00" }, "kg"), partLabel({ quantity: "2.5", price: "59.50" }, "l")])
+      .toEqual(["Only 400 g left · ₹16", "Only 2.5 L left · ₹59.50"]);
   });
 
   it("names the percent off to two decimals with no trailing zeros, and nothing at 0.00%", () => {
@@ -14,7 +19,7 @@ describe("shop page labels (#370)", () => {
   });
 
   it("keeps the server's category, product and pack order as SectionList sections", () => {
-    const pack = (listingId: string, quantity: string) => ({ listingId, quantity, price: "10.00", mrp: null, discountPercent: null, outOfStock: false });
+    const pack = (listingId: string, quantity: string) => ({ listingId, quantity, price: "10.00", mrp: null, discountPercent: null, outOfStock: false, part: null });
     const product = (id: string, packs: ReturnType<typeof pack>[]) => ({ id, name: id, brand: null, baseUnit: "kg" as const, packs });
     const groups = [
       { category: "Groceries", products: [product("atta", [pack("a1", "5")]), product("dal", [pack("d1", "0.5"), pack("d2", "1")])] },

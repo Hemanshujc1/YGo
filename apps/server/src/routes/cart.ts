@@ -1,15 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, CartResponse, type CartLine, type CartReason, ErrorEnvelope, FeedQuery, SaveCartBody } from "@ygo/contracts";
+import { CartParams, CartResponse, type CartLine, type CartReason, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
-import { stockOf, visibleListings } from "../listings";
+import { partOf, stockOf, visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { servingShops, type ServingShop } from "./feed";
 import { deliveredQuote, latestRateCardVersion } from "./price-simulator";
 
 type Line = { listingId: string; count: number };
-type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & { categoryId: string; onSale: boolean; packsLeft: number };
+type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & {
+  categoryId: string; onSale: boolean; packsLeft: number; part: PartPack | null;
+};
+
+/** How many of a pack the cart may hold now: a part, set only when no whole pack is left, is one line of count 1 (#377). */
+const leftOf = (pack: Pack) => pack.part ? 1 : pack.packsLeft;
 
 /** Each line's pack as it is now, or undefined for one this shop doesn't list; prices and stock are read, never sent. */
 async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[]): Promise<Array<Pack | undefined>> {
@@ -17,9 +22,8 @@ async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[])
     `SELECT entry.position::int AS position, l.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
         trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
         EXISTS (SELECT 1 FROM ${visibleListings} AND listing.id = l.id) AS "onSale",
-        -- Whole packs only until #377 sells part packs (#410). Capped at 1000, one above
-        -- the largest count, so a count of 999 is never shown as the last packs left.
-        LEAST(GREATEST(floor(${stockOf("l")} / pack.quantity), 0), 1000)::int AS "packsLeft"
+        -- Capped at 1000, one above the largest count, so a count of 999 is never shown as the last packs left.
+        LEAST(GREATEST(floor(${stockOf("l")} / pack.quantity), 0), 1000)::int AS "packsLeft", ${partOf("l")} AS part
       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)
       JOIN shop_listings l ON l.id = (entry.line->>'listingId')::uuid AND l.shop_id = $1
       JOIN packs pack ON pack.id = l.pack_id
@@ -43,12 +47,13 @@ async function cartView(
   const lines: CartLine[] = saved.map((line, index) => {
     const pack = packs[index];
     if (!pack) throw new Error("A saved cart line lost its listing");
-    const { onSale, packsLeft } = pack;
+    const left = leftOf(pack);
     const shown = { listingId: pack.listingId, name: pack.name, brand: pack.brand, baseUnit: pack.baseUnit, quantity: pack.quantity, price: pack.price };
-    if (!onSale) return { ...shown, count: line.count, state: "unavailable", left: null, lineTotal: null };
-    if (packsLeft === 0) return { ...shown, count: line.count, state: "outOfStock", left: null, lineTotal: null };
-    const count = Math.min(line.count, packsLeft);
-    return { ...shown, count, state: "orderable", left: count === packsLeft ? packsLeft : null, lineTotal: null };
+    if (!pack.onSale) return { ...shown, count: line.count, state: "unavailable", part: null, left: null, lineTotal: null };
+    if (left === 0) return { ...shown, count: line.count, state: "outOfStock", part: null, left: null, lineTotal: null };
+    // The line follows stock: a part while less than a pack is left, a whole pack at the pack's price after a restock (owner's answer 6 on #377).
+    const count = Math.min(line.count, left);
+    return { ...shown, count, state: "orderable", part: pack.part, left: count === left ? left : null, lineTotal: null };
   });
   const orderable = lines.flatMap((line, index) => line.state === "orderable" ? [{ line, categoryId: packs[index]?.categoryId ?? "" }] : []);
 
@@ -57,7 +62,7 @@ async function cartView(
   const priceReasons: CartReason[] = [];
   if (serving && orderable.length) {
     const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
-      listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.price, count: line.count,
+      listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.part?.price ?? line.price, count: line.count,
     })), await latestRateCardVersion(client));
     // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
     if (priced.status === "incomplete") delivering = false;
@@ -114,11 +119,13 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
       const packs = await packsOf(client, shopId, lines);
       const had = new Set(cart.lines.map((line) => line.listingId));
       // Every line is a pack of this shop; one not yet in the cart must be on sale, in stock, at a shop that can deliver here (C17).
-      if (packs.some((pack) => !pack || (!had.has(pack.listingId) && !(pack.onSale && pack.packsLeft > 0 && serving)))) return "NOT_FOUND";
-      // A count is held at stock (owner's answer 9 on #50); a line with none left keeps its count until removed. Nothing is reserved.
+      if (packs.some((pack) => !pack || (!had.has(pack.listingId) && !(pack.onSale && leftOf(pack) > 0 && serving)))) return "NOT_FOUND";
+      // A count is held at stock, and a part at 1 (owner's answer 9 on #50, answer 5 on #377); a line with none left
+      // keeps its count until removed. Nothing is reserved.
       const held = lines.map((line, index) => {
         const pack = packs[index];
-        return { listingId: line.listingId, count: pack?.onSale && pack.packsLeft > 0 ? Math.min(line.count, pack.packsLeft) : line.count };
+        const left = pack?.onSale ? leftOf(pack) : 0;
+        return { listingId: line.listingId, count: left > 0 ? Math.min(line.count, left) : line.count };
       });
       await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [cart.id]);
       await client.query(

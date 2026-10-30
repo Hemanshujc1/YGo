@@ -13,8 +13,23 @@ export const visibleListings = `shop_listings listing
 
 /**
  * A listing's stock in base units (CAT-4), 0 with no movements; `listing` is the alias the query gives `shop_listings`.
- * C05 and search count a listing in stock above 0, a part pack included, since #377 will sell part packs
- * (owner's answer 2 on #410); the cart takes whole packs only until #377 changes it.
  */
 export const stockOf = (listing: string) =>
   `COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = ${listing}.id), 0)`;
+
+/**
+ * The part of a pack on sale when less than one pack is left (#377), as jsonb `{quantity, price}`, or NULL.
+ * Only for measured goods, and only when the remainder is at least the shop's minimum order (owner's answers 2, 3 and 8);
+ * the price is in proportion to the pack's online price, rounded half-up to the paisa (answer 4), and a part
+ * that would cost nothing is not offered. Read from stock on every request: the phone never sends it.
+ * The query names the pack `pack` and the product `product`.
+ */
+export const partOf = (listing: string) => `(SELECT CASE
+    WHEN product.classification = 'measured' AND remainder.stock > 0 AND remainder.stock < pack.quantity
+      AND remainder.stock >= COALESCE(${listing}.minimum_order_quantity, 0) AND remainder.price > 0
+    THEN jsonb_build_object('quantity', trim_scale(remainder.stock)::text, 'price', remainder.price::text) END
+  FROM (SELECT stock, round(${listing}.online_price * stock / pack.quantity, 2) AS price
+    FROM (SELECT ${stockOf(listing)} AS stock) stock) remainder)`;
+
+/** A listing can be ordered now: a whole pack is left, or a part of one (C05 and search, #377). */
+export const inStock = (listing: string) => `(${stockOf(listing)} >= pack.quantity OR ${partOf(listing)} IS NOT NULL)`;

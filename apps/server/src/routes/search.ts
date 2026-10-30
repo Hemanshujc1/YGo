@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { ErrorEnvelope, SearchQuery, SearchResponse, type SearchProduct } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { stockOf, visibleListings } from "../listings";
+import { inStock, visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { feedCard, servingShops } from "./feed";
 
@@ -39,7 +39,7 @@ export function registerSearchRoutes(app: FastifyInstance, { pool, clock, secret
       // up to 5 products, A to Z (owner's answer 2 on #398).
       const { rows } = await pool.query<SearchProduct & { total: number }>(
         `SELECT product.id, product.name, product.brand,
-            bool_or(${stockOf("listing")} > 0) AS "inStock",
+            bool_or(${inStock("listing")}) AS "inStock",
             count(*) OVER ()::int AS total
           FROM ${visibleListings}
             AND ${everyWord("search_text($3 || ' ' || product.name || ' ' || COALESCE(product.brand, ''))")}
