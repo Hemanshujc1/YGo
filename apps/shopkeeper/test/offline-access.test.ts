@@ -63,6 +63,11 @@ describe("verified offline shop access", () => {
     storage.erase = vi.fn(async () => { blocked = undefined; record = null; });
     await restarted.cleanup(); expect(restarted.get().mode).toBe("ended");
   });
+  it("shows ended access for a closed shop even before Stock has created a cache", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "closed" } });
+    const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
+    expect(storage.erase).toHaveBeenCalledWith(account.id, shopId); expect(access.get().mode).toBe("ended");
+  });
   it("erases an older database without lease metadata when the server confirms no access", async () => {
     storage.hasData = () => true; fetch.mockResolvedValue({ ok: true, data: { shopId: null, state: null } });
     const access = offlineAccess(storage, fetch, () => time); await access.verify(account);

@@ -64,7 +64,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       if (mine !== turn) return;
       if (!answer.ok) { if (record) cached(record); return; }
       const { shopId, state } = answer.data;
-      if ((record && (shopId !== record.shopId || state === "closed")) || (!record && storage.hasData(account.id) && (!shopId || state === "closed"))) {
+      if (state === "closed" || (record && shopId !== record.shopId) || (!record && storage.hasData(account.id) && !shopId)) {
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
         return;
       }
