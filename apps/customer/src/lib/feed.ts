@@ -8,6 +8,12 @@ export function feedQuery(place: Place): FeedQuery | null {
   return place.point ? { pincode: place.pincode, ...place.point } : null;
 }
 
+/** The place a shop or cart link carries as route params; undefined for a link without one, or a broken one. */
+export function paramsQuery({ pincode, latitude, longitude }: { pincode?: string; latitude?: string; longitude?: string }): FeedQuery | undefined {
+  const place = { pincode: pincode ?? "", latitude: Number(latitude), longitude: Number(longitude) };
+  return place.pincode && latitude && longitude && Number.isFinite(place.latitude) && Number.isFinite(place.longitude) ? place : undefined;
+}
+
 /**
  * A closed shop's card line, "Closed · opens tomorrow 9:00 AM", or
  * "Holiday · opens …" on one of its holidays; none while open (owner's answer
