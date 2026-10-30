@@ -29,6 +29,10 @@ const indianTime = new Intl.DateTimeFormat(locale, {
 
 export const formatNumber = (value: number | bigint) => indianNumber.format(value);
 
+// A decimal string without its trailing zeros ("10.00" -> "10", "12.3450" -> "12.345"). It only cuts text,
+// so a rate such as "12.3456" is never rounded (ADR-0004), unlike formatNumber, which keeps three digits.
+export const trimDecimal = (text: string) => (text.includes(".") ? text.replace(/\.?0+$/, "") : text);
+
 // Only format() is used: Hermes on iOS has no NumberFormat.formatToParts.
 
 // The only hyphen in a rupee amount is its sign, shown as a true minus.
