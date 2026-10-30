@@ -32,7 +32,7 @@ vi.mock("../src/lib/opening-stock-database", () => ({
 import OpeningStockScreen from "../src/app/opening-stock";
 
 const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
-const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: {}, openingStockRecorded: false, stock: "0" };
+const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: { id: entry.clientId }, openingStockRecorded: false, stock: "0" };
 const listings = { ok: true, data: { items: [item] } };
 const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
 function render() { mock.cursor = 0; return OpeningStockScreen(); }
@@ -126,6 +126,20 @@ describe("opening-stock account boundary", () => {
     press("Try again"); await settle();
     expect(mock.set).not.toHaveBeenCalled();
   });
+  it("updates every listing acknowledged by a save's batch", async () => {
+    const secondId = "00000000-0000-4000-8000-000000000002";
+    const second = { ...item, packId: "pack-2", name: "Dal", listing: { id: secondId } };
+    mock.listings.mockResolvedValue({ ok: true, data: { items: [item, second] } });
+    render(); await settle();
+    mock.pending.mockImplementation((_shop: string, pack: string) => ({ ...entry, clientId: pack === item.packId ? entry.clientId : secondId }));
+    mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [{ id: entry.clientId, sequence: 1 }, { id: secondId, sequence: 2 }] });
+    mock.opening.mockResolvedValue({ ok: true, data: { results: [entry.clientId, secondId].map((id, index) => ({ actionId: id, sequence: index + 1,
+      status: "applied", code: null, result: { listingId: id, quantity: "2.5", recordedAt: new Date().toISOString() }, clockSuspect: false })) } });
+    press("Save opening stock"); await settle();
+    expect(mock.opening).toHaveBeenCalledOnce();
+    expect(elements(render()).filter((node) => node.props.label === "Save opening stock")).toHaveLength(0);
+  });
+
   it("requires recovery before automatically syncing a conflicting active version", async () => {
     mock.heldPacks.mockReturnValue([item.packId]); mock.pending.mockReturnValue(entry);
     render(); await settle();

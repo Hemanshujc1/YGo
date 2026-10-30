@@ -188,16 +188,19 @@ export default function OpeningStockScreen() {
     const code = ErrorCode.safeParse(result?.code);
     const answer = result?.status === "applied" && result.result ? { ok: true as const, data: result.result }
       : result?.status === "rejected" && code.success ? { ok: false as const, code: code.data } : null;
-    if (answer?.ok) {
+    const applied = new Map(response?.results.flatMap((row) => row.status === "applied" && row.result ? [[row.result.listingId, row.result] as const] : []));
+    if (applied.size > 0) {
       setLoad((current) => current.kind === "loaded" ? {
         ...current,
-        items: current.items.map((row) => row.packId === item.packId
-          ? { ...row, stock: answer.data.quantity, openingStockRecorded: true }
-          : row),
+        items: current.items.map((row) => {
+          const saved = row.listing && applied.get(row.listing.id);
+          return saved ? { ...row, stock: saved.quantity, openingStockRecorded: true } : row;
+        }),
       } : current);
-      setMessage((current) => ({ ...current, [item.packId]: words.stockRecorded }));
-      return;
+      setMessage((current) => ({ ...current, ...Object.fromEntries(load.items
+        .filter((row) => row.listing && applied.has(row.listing.id)).map((row) => [row.packId, words.stockRecorded])) }));
     }
+    if (answer?.ok) return;
     if (answer?.code === "OPENING_STOCK_ALREADY_RECORDED") {
       setMessage((current) => ({ ...current, [item.packId]: `${words.stockConflict} ${entry.data.quantity} ${item.baseUnit}.` }));
       const updated = await api.shopListings().catch(() => null);
