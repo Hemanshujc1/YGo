@@ -21,6 +21,7 @@ import {
   ShopPageResponse,
   CartResponse,
   OrderResponse,
+  OrdersResponse,
   type PlaceOrderBody,
   type RejectOrderBody,
   ShopOrderResponse,
@@ -385,6 +386,11 @@ export function createApiClient({
     /** `POST /v1/carts/:shopId/order`: places the cart for delivery to a saved address (#424); CART_CHANGED carries the cart as it is now. */
     async placeOrder(shopId: string, body: PlaceOrderBody): Promise<ApiResult<OrderResponse>> {
       return result(await signedIn("POST", `/v1/carts/${encodeURIComponent(shopId)}/order`, body), OrderResponse);
+    },
+
+    /** `GET /v1/orders`: C18, the Customer's orders, active ones first (#426). */
+    async orders(): Promise<ApiResult<OrdersResponse>> {
+      return result(await signedIn("GET", "/v1/orders"), OrdersResponse);
     },
 
     /** `GET /v1/orders/:id`: C09 and C19, one of the Customer's orders. */

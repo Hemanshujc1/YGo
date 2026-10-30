@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, PlaceOrderBody } from "@ygo/contracts";
+import {
+  CartParams, ErrorEnvelope, ORDER_ANSWER_SECONDS, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody,
+  TERMINAL_ORDER_STATUSES,
+} from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { moveOrder, recordStatus } from "../orders";
@@ -22,17 +25,26 @@ export const frozenOrder = (o: string) => `json_build_object('label', ${o}.addre
         CASE WHEN ${o}.status = 'rejected_by_shop' THEN (SELECT h.reason_code FROM order_status_history h
           WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' ORDER BY h.at DESC LIMIT 1) END AS "rejectReason"`;
 
-/** C09 and C19: one of the Customer's orders as it was frozen, with the Owner's phone read now (ORD-8). */
-async function orderView(client: Pool | PoolClient, orderId: string, accountId: string): Promise<OrderResponse | undefined> {
+/** The shop as C18 and C19 show it, with the Owner's phone read now (ORD-8). */
+const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.shop_name, 'phone', (SELECT a.phone FROM shop_members m
+          JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = ${s}.id AND m.role = 'owner' ORDER BY a.id LIMIT 1))`;
+
+/** Still placed at `now` but past its answer time, the moment Accept starts refusing (owner's answer 4 on #426). */
+const answerExpired = (o: string, now: string) =>
+  `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${ORDER_ANSWER_SECONDS}) <= ${now}::timestamptz)`;
+
+/** C09 and C19: one of the Customer's orders as it was frozen. */
+async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date): Promise<OrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt"> & { placedAt: Date }>(
-    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt",
-        json_build_object('id', s.id, 'name', s.shop_name, 'phone', (SELECT a.phone FROM shop_members m JOIN accounts a ON a.id = m.account_id
-          WHERE m.shop_id = s.id AND m.role = 'owner' ORDER BY a.id LIMIT 1)) AS shop,
-        ${frozenOrder("o")}
+    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, ${frozenOrder("o")},
+        ${answerExpired("o", "$3")} AS "answerExpired"
       FROM orders o JOIN shops s ON s.id = o.shop_id
-      WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId]);
+      WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
   return row && { ...row, placedAt: row.placedAt.toISOString() };
 }
+
+/** C18 shows this many past orders, with no paging yet (owner's answer 2 on #426). */
+const PAST_SHOWN = 50;
 
 export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
@@ -109,13 +121,32 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       return { id: order.id };
     });
     if (placed === "CHANGED") return changed();
-    return reply.code(201).send(await orderView(pool, placed.id, who.accountId));
+    return reply.code(201).send(await orderView(pool, placed.id, who.accountId, clock.now()));
+  });
+
+  // C18 (#426): the Customer's own orders, active ones first.
+  app.get("/v1/orders", { schema: { response: { 200: OrdersResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    type Row = Omit<OrderSummary, "placedAt"> & { placedAt: Date };
+    const ended = `(o.status = ANY($2::text[]) OR ${answerExpired("o", "$3")})`;
+    const rows = (where: string, order: string, limit = "") => pool.query<Row>(
+      `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, o.total::text AS total, ${answerExpired("o", "$3")} AS "answerExpired"
+        FROM orders o JOIN shops s ON s.id = o.shop_id
+        WHERE o.account_id = $1 AND ${where} ORDER BY ${order} ${limit}`,
+      [who.accountId, TERMINAL_ORDER_STATUSES, clock.now()]);
+    const [active, past] = await Promise.all([
+      rows(`NOT ${ended}`, "o.status IN ('awaiting_customer_confirm', 'arrived') DESC, o.placed_at DESC, o.number DESC"),
+      rows(ended, "o.placed_at DESC, o.number DESC", `LIMIT ${PAST_SHOWN}`),
+    ]);
+    const summary = (row: Row): OrderSummary => ({ ...row, placedAt: row.placedAt.toISOString() });
+    return { active: active.rows.map(summary), past: past.rows.map(summary) };
   });
 
   app.get("/v1/orders/:id", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const order = await orderView(pool, (request.params as OrderParams).id, who.accountId);
+    const order = await orderView(pool, (request.params as OrderParams).id, who.accountId, clock.now());
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
   });
 
@@ -133,6 +164,6 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       return "MOVED";
     });
     if (moved !== "MOVED") return reply.code(moved === "NOT_FOUND" ? 404 : 409).send({ error: { code: moved } });
-    return orderView(pool, id, who.accountId);
+    return orderView(pool, id, who.accountId, clock.now());
   });
 }

@@ -269,7 +269,7 @@ describe("each call", () => {
     ]);
   });
 
-  it("places, reads and cancels an order, and carries the cart a CART_CHANGED answers with (#427)", async () => {
+  it("places, lists, reads and cancels orders, and carries the cart a CART_CHANGED answers with (#427, #426)", async () => {
     const shopId = "5b0c7f1e-2a4d-4e8f-9b6a-1c3d5e7f9a0b";
     const orderId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
     const cart = { shop: { id: shopId, name: "Sai General Stores" }, revision: 3, lines: [], quote: null, placeable: false, reasons: [] };
@@ -281,11 +281,13 @@ describe("each call", () => {
     await client.verifyCode(signIn);
     const body = { revision: 2, total: "482.00", addressId: orderId };
     expect(await client.placeOrder(shopId, body)).toMatchObject({ ok: false, status: 409, code: "CART_CHANGED", cart });
+    expect(await client.orders()).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     expect(await client.order(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     expect(await client.cancelOrder(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     await client.savedAddresses(shopId);
     expect(calls.slice(1).map(({ method, path, body: sent }) => ({ method, path, sent }))).toEqual([
       { method: "POST", path: `/v1/carts/${shopId}/order`, sent: body },
+      { method: "GET", path: "/v1/orders", sent: undefined },
       { method: "GET", path: `/v1/orders/${orderId}`, sent: undefined },
       { method: "POST", path: `/v1/orders/${orderId}/cancel`, sent: undefined },
       { method: "GET", path: `/v1/me/addresses?shopId=${shopId}`, sent: undefined },

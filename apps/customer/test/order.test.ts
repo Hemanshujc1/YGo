@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type CartResponse, OrderStatus, type OrderResponse, RejectReason } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { createOrder, isFinal, placeOrder, type Timers, treatments } from "../src/lib/order";
+import { createOrder, isFinal, placeOrder, shownStatus, type Timers, treatments } from "../src/lib/order";
 import { strings } from "../src/strings";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
@@ -13,7 +13,7 @@ const order = (status: OrderStatus = "placed"): OrderResponse => ({
   shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
   address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null,
+  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
@@ -150,6 +150,22 @@ describe("C09/C19 order (#427)", () => {
     server.reads.shift()?.(ok(order("expired")));
     await pulling;
     expect(store.get()).toMatchObject({ refreshing: false, order: { status: "expired" } });
+  });
+
+  it("stops on a placed order past its answer time, showing it as the shop not answering (#426)", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order(), clock.timers);
+    store.start();
+    const late = { ...order(), answerExpired: true };
+    server.reads.shift()?.(ok(late));
+    await settle();
+    expect(shownStatus(late)).toBe("expired");
+    expect(shownStatus(order())).toBe("placed");
+    expect(clock.pending.size).toBe(0);
+    store.stop();
+    store.start();
+    expect(server.reads).toHaveLength(0);
   });
 
   it("opened with no order, shows loading, then a failure with Try again, keeping polling", async () => {

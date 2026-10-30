@@ -11,7 +11,7 @@ import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
 import { money } from "../../lib/money";
-import { treatments } from "../../lib/order";
+import { shownStatus, treatments } from "../../lib/order";
 import { addressLine } from "../../lib/saved-addresses";
 import { packLabel } from "../../lib/shop-page";
 import { useOrder } from "../../lib/use-order";
@@ -60,14 +60,16 @@ function CallShop({ phone }: { phone: string | null }) {
 }
 
 function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
+  const status = shownStatus(order);
   const quote = { productValue: order.productValue, deliveryFee: order.deliveryFee, smallCartFee: order.smallCartFee, total: order.total };
   return (
     <View className="gap-4">
-      {placed && order.status === "placed" && <PlacedMark />}
+      {placed && status === "placed" && <PlacedMark />}
       <View className="gap-2">
-        <StatusChip word={words.statuses[order.status]} treatment={treatments[order.status]} />
+        <StatusChip word={words.statuses[status]} treatment={treatments[status]} />
         <Text className="text-secondary tabular-nums text-muted">{`${order.shop.name} · ${formatTime(order.placedAt)}`}</Text>
-        {order.status === "placed" && <Text className="text-body text-text">{words.waiting}</Text>}
+        {status === "placed" && <Text className="text-body text-text">{words.waiting}</Text>}
+        {status === "expired" && <Text className="text-body text-text">{words.expired}</Text>}
         {order.rejectReason && <Text className="text-body text-text">{words.rejectedBecause(words.rejectReasons[order.rejectReason])}</Text>}
       </View>
 
@@ -143,7 +145,8 @@ export default function OrderScreen() {
         {phone !== undefined && (
           <View className="gap-2.5">
             <CallShop phone={phone} />
-            {shown?.status === "placed" && (
+            {/* Past its answer time the shop can't take it, so there is nothing left to cancel. */}
+            {shown && shownStatus(shown) === "placed" && (
               <Button label={view.cancelling ? words.cancelling : words.cancel} busy={view.cancelling} onPress={() => setAsking(true)} variant="text" />
             )}
             {view.notice && <Text accessibilityLiveRegion="polite" className="text-secondary text-text">{view.notice}</Text>}

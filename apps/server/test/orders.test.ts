@@ -180,7 +180,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
         { name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" },
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
-      productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null,
+      productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null, answerExpired: false,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: other })).statusCode).toBe(404);
@@ -612,6 +612,77 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
     }]);
     expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
     expect(listed.doneToday?.map((row) => row.id)).toEqual([rejected.id, cancelled.id]);
+  });
+});
+
+describe("Customer's order list (#426, ORD-1)", () => {
+  const list = (headers: Record<string, string> = customer) => app.inject({ method: "GET", url: "/v1/orders", headers });
+  const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);
+  const move = (orderId: string, status: OrderStatus) => database.pool.query("UPDATE orders SET status = $2 WHERE id = $1", [orderId, status]);
+
+  it("lists active orders first, those waiting on the Customer on top, then past ones, newest first, and only the Customer's own", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const one = async () => ((await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string; number: number });
+    const cancelled = await one();
+    await cancel(cancelled.id);
+    const accepted = await one();
+    await accept(accepted.id, owner);
+    const arrived = await one();
+    await move(arrived.id, "arrived");
+    at("2030-01-01T00:01:00.000Z");
+    const rejected = await one();
+    await reject(rejected.id, owner);
+    const waiting = await one();
+    // Placed in the same instant as `waiting`: the higher number comes first.
+    const confirm = await one();
+    await move(confirm.id, "awaiting_customer_confirm");
+    const theirs = (await ordered(shopId, [{ listingId: dal, count: 1 }], await address("other@example.com"), other)).json() as { id: string };
+
+    const listed = await list();
+    expect(listed.statusCode).toBe(200);
+    const { active, past } = listed.json() as { active: Array<{ id: string }>; past: Array<{ id: string }> };
+    expect(ids(active)).toEqual([confirm.id, arrived.id, waiting.id, accepted.id]);
+    expect(ids(past)).toEqual([rejected.id, cancelled.id]);
+    expect(active[2]).toEqual({
+      id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:01:00.000Z",
+      shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" }, total: "180.00", answerExpired: false,
+    });
+    expect(ids((await list(other)).json().active)).toEqual([theirs.id]);
+  });
+
+  it("moves a placed order past its answer time to past, still placed, and says so on C19 too", async () => {
+    const { shopId, dal, home } = await stocked();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string; answerExpired: boolean };
+    expect(order.answerExpired).toBe(false);
+    at("2030-01-01T00:09:59.999Z");
+    expect(ids((await list()).json().active)).toEqual([order.id]);
+    expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toMatchObject({ answerExpired: false });
+
+    // The moment Accept starts refusing (ORDER_EXPIRED).
+    at("2030-01-01T00:10:00.000Z");
+    const listed = (await list()).json() as { active: unknown[]; past: Array<{ id: string; status: string; answerExpired: boolean }> };
+    expect(listed.active).toEqual([]);
+    expect(listed.past).toMatchObject([{ id: order.id, status: "placed", answerExpired: true }]);
+    expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toMatchObject({ status: "placed", answerExpired: true });
+  });
+
+  it("shows the newest 50 past orders and every active one, and an empty list for a Customer with none", async () => {
+    expect((await list()).json()).toEqual({ active: [], past: [] });
+    const { shopId, dal, home } = await stocked();
+    const oldest = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await cancel(oldest.id);
+    await database.pool.query(
+      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_area_line,
+         address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote)
+       SELECT account_id, shop_id, 'cancelled_by_customer', placed_at + g * interval '1 second', status_changed_at, address_label, address_flat,
+         address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote
+       FROM orders, generate_series(1, 50) AS g WHERE id = $1`, [oldest.id]);
+    at("2030-01-01T00:02:00.000Z");
+    const waiting = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const listed = (await list()).json() as { active: Array<{ id: string }>; past: Array<{ id: string }> };
+    expect(ids(listed.active)).toEqual([waiting.id]);
+    expect(listed.past).toHaveLength(50);
+    expect(ids(listed.past)).not.toContain(oldest.id);
   });
 });
 

@@ -29,6 +29,12 @@ export const treatments: Record<OrderStatus, Treatment> = {
 
 export const isFinal = (status: OrderStatus) => TERMINAL_ORDER_STATUSES.includes(status);
 
+/**
+ * The status C18 and C19 show: a placed order the shop can no longer answer reads as "Shop did not answer"
+ * until #57 moves it to Expired (owner's answer 4 on #426).
+ */
+export const shownStatus = (order: Pick<OrderResponse, "status" | "answerExpired">): OrderStatus => (order.answerExpired ? "expired" : order.status);
+
 /** How Place order went: placed, no answer, the cart changed (with the cart as it is now), the address gone, or a refusal. */
 export type Placed =
   | { kind: "placed"; order: OrderResponse }
@@ -91,7 +97,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     view = { ...view, ...next };
     for (const listener of listeners) listener();
   };
-  const final = () => view.order !== null && isFinal(view.order.status);
+  const final = () => view.order !== null && isFinal(shownStatus(view.order));
   const schedule = () => poller.schedule(!final());
 
   async function read(pull = false) {

@@ -282,6 +282,7 @@ export const strings = {
     retry: "Try again",
     placed: "Order placed",
     waiting: "The shop has your order. You can cancel for free until they accept it.",
+    expired: "The shop didn't answer in time, so this order has ended. You pay nothing.",
     call: "Call the shop",
     noPhone: "This shop hasn't added a phone number",
     cancel: "Cancel order",
@@ -321,6 +322,17 @@ export const strings = {
       cancelled_by_shop: "Cancelled by shop",
       delivery_failed: "Delivery failed",
     } satisfies Record<OrderStatus, string>,
+  },
+  // C18 Order list (#426).
+  orders: {
+    open: "Orders",
+    title: "Your orders",
+    loading: "Opening your orders…",
+    failed: "Couldn't open your orders",
+    retry: "Try again",
+    empty: "No orders yet. Orders you place show here.",
+    active: "Active",
+    past: "Past orders",
   },
   // C16 Search (#398): no prices on results (owner's answer 13 on #49).
   search: {
