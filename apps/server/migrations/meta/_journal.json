@@ -253,6 +253,13 @@
       "when": 1793370616876,
       "tag": "0035_stock_out_of_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793371210458,
+      "tag": "0036_suspended_stock_state",
+      "breakpoints": true
     }
   ]
 }

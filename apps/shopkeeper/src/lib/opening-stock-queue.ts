@@ -105,7 +105,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         db.runSync("UPDATE sync_device SET sequence = ?", device.sequence);
         for (const row of db.getAllSync<{ action: string; pack_id: string }>("SELECT action, pack_id FROM opening_stock_actions WHERE status = 'pending' ORDER BY sequence LIMIT 500")) {
           const action = JSON.parse(row.action) as SyncAction;
-          if (action.shopId !== shopId || db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${row.pack_id}`)) break;
+          if (action.shopId !== shopId || (action.type === "opening_stock" && db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${row.pack_id}`))) break;
           actions.push(action);
         }
       });
@@ -177,7 +177,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         if (!db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", sourceKey)) throw new Error("No held opening stock");
         if (sourcePack !== targetPack && (db.getFirstSync("SELECT 1 FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, targetPack)
           || db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${targetPack}`))) throw new Error("Target stock needs attention");
-        const sent = db.getFirstSync<{ action: string }>("SELECT action FROM opening_stock_actions WHERE shop_id = ? AND pack_id = ? AND status = 'pending'", shopId, sourcePack);
+        const sent = db.getFirstSync<{ action: string }>("SELECT action FROM opening_stock_actions WHERE shop_id = ? AND pack_id = ? AND status = 'pending' AND json_extract(action, '$.type') = 'opening_stock'", shopId, sourcePack);
         if (sent) {
           const action = JSON.parse(sent.action) as SyncAction;
           if (action.id !== checked.clientId || JSON.stringify(action.payload) !== JSON.stringify({ packId: targetPack, quantity: checked.quantity })) throw new Error("Recover the pending original first");

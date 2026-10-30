@@ -184,6 +184,7 @@ export const strings = {
     failed: (reference: string) => `This change was refused. Your original is retained. Support reference: ${reference}`,
     corrected: "Save this switch again to retry with a new reference.",
     opening: "Opening stock and recovery",
+    suspended: "Your shop is suspended. Stock tools remain available; customers cannot place orders.",
     queueFull: "Your offline queue is full. Sync your saved changes before changing Stock again.",
     queueExpired: "Your saved changes have reached the offline time limit. Sync them before changing Stock again.",
   },

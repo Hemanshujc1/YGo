@@ -48,7 +48,13 @@ function press(label: string) {
   expect(element, label).toBeDefined();
   (element?.props.onPress as () => void)();
 }
-function texts() { return elements(render()).map((node) => node.props.children).filter((value) => typeof value === "string"); }
+function texts() {
+  return elements(render()).flatMap((node) => {
+    const children = node.props.children;
+    if (typeof children === "string") return [children];
+    return Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number") ? [children.join("")] : [];
+  });
+}
 function switchAccount() { mock.get.mockReturnValue({ account: { id: "account-2" } }); mock.set.mockClear(); }
 
 describe("minimal Stock screen", () => {
@@ -108,4 +114,17 @@ describe("minimal Stock screen", () => {
     }
     expect(mock.set).not.toHaveBeenCalled();
   });
+  it("refreshes the current server flag after replay and ignores a previous account's refresh", async () => {
+    render(); await settle(); press("Rice: Out of stock"); await settle();
+    mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
+      actionId: action.id, sequence: action.sequence, status: "applied", code: null, result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false,
+    })) } }));
+    // The replay acknowledges true, but another phone has since saved false.
+    press("Retry sync"); await settle();
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
+    mock.stock.mockImplementationOnce(async () => { switchAccount(); return { ok: false }; });
+    press("Rice: Out of stock"); await settle();
+    expect(mock.set).not.toHaveBeenCalled();
+  });
+
 });

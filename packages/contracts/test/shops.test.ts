@@ -213,3 +213,8 @@ describe("shop application error codes", () => {
     }
   });
 });
+
+it("accepts the Suspended shop state needed by Stock", async () => {
+  const { ShopState } = await import("../src/shops");
+  expect(ShopState.parse("suspended")).toBe("suspended");
+});

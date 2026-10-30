@@ -9,7 +9,7 @@ export type Mark = "done" | "current" | "later";
 /** Each step with where it stands for a shop in `state`: done before it, current at it, later after it. A Live shop has every step done (#363). */
 export function steps(state: ShopState): { step: Step; mark: Mark }[] {
   // A ShopState missing from STEPS fails the typecheck here, so no state can mark every step "later".
-  const at = state === "live" ? STEPS.length : STEPS.indexOf(state);
+  const at = (state === "live" || state === "suspended") ? STEPS.length : STEPS.indexOf(state);
   return STEPS.map((step, index) => ({ step, mark: index < at ? "done" : index === at ? "current" : "later" }));
 }
 

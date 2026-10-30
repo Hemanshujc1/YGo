@@ -26,6 +26,14 @@ export default function StockScreen() {
   async function sync(current: Loaded, token = visit.current) {
     const response = await syncOpeningStockBatch(current.queue, current.stock.shopId, (body) => api.syncActions(body));
     if (!isCurrentAccount(current.accountId) || visit.current !== token) return;
+    // A replay returns its original result, which another phone may since have superseded.
+    const refreshed = response?.results.some((row) => row.status === "applied") ? await api.shopStock().catch(() => null) : null;
+    if (!isCurrentAccount(current.accountId) || visit.current !== token) return;
+    if (refreshed?.ok && refreshed.data.shopId === current.stock.shopId) {
+      setLoad((old) => old.kind === "loaded" ? { ...old, stock: refreshed.data } : old);
+      redraw((value) => value + 1);
+      return;
+    }
     setLoad((old) => old.kind === "loaded" ? { ...old, stock: { ...old.stock, items: old.stock.items.map((item) => {
       const applied = response?.results.findLast((row) => row.status === "applied" && row.result?.listingId === item.listingId && "outOfStock" in row.result);
       return applied?.result && "outOfStock" in applied.result ? { ...item, outOfStock: applied.result.outOfStock } : item;
@@ -81,6 +89,7 @@ export default function StockScreen() {
       </>}
       {message && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{message}</Text>}
       {load.kind === "loaded" && <>
+        {load.stock.state === "suspended" && <Text className="text-body text-danger">{words.suspended}</Text>}
         <Button label={words.retry} variant="secondary" onPress={() => void sync(load)} />
         {load.stock.items.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
         {load.stock.items.map((item) => {

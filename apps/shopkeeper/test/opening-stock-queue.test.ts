@@ -400,3 +400,16 @@ it("blocks new flags at configurable count/time limits while retaining the origi
     expect(queue.batch(shopId).actions).toHaveLength(2);
   } finally { db.close(); }
 });
+
+it("lets held legacy stock recover after an independent flag is queued for the same pack", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const queue = openingStockQueue(adapter(db), randomUUID);
+    queue.importLegacy(shopId, legacy(new Map([[`opening:${shopId}:${packId}`, "broken original"]])));
+    queue.saveFlag(shopId, packId, true);
+    expect(queue.batch(shopId).actions.map((action) => action.type)).toEqual(["stock_flag"]);
+    expect(() => queue.recover(shopId, packId, packId, entry)).not.toThrow();
+    expect(queue.batch(shopId).actions.map((action) => action.type)).toEqual(["stock_flag", "opening_stock"]);
+    expect(db.prepare("SELECT payload FROM opening_stock_recovered").get()?.payload).toBe("broken original");
+  } finally { db.close(); }
+});

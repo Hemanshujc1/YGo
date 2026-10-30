@@ -41,3 +41,7 @@ describe("waiting (#363)", () => {
     expect(waiting({ blockers: [], rateCardMissing: [] })).toEqual([]);
   });
 });
+
+it("keeps completed onboarding steps done for a suspended shop", () => {
+  expect(marks("suspended")).toEqual(marks("live"));
+});
