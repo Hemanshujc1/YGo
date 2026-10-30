@@ -21,7 +21,7 @@ const entry = { quantity: "2", clientId: "00000000-0000-4000-8000-000000000004" 
 
 describe("opening-stock native boundary", () => {
   const databases: DatabaseSync[] = [];
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.flags.clear(); native.files.clear();
     native.delete.mockImplementation(async (key: string) => { native.secrets.delete(key); }); native.drop.mockImplementation(async (name: string) => { if (!native.files.delete(name)) throw new Error("DatabaseNotFoundException"); }); native.exists = false; native.cipher = "4.0";
     native.get.mockImplementation(async (key: string) => native.secrets.get(key) ?? null);
@@ -33,6 +33,7 @@ describe("opening-stock native boundary", () => {
       const db = new DatabaseSync(":memory:"); databases.push(db);
       return { ...adapter(db), getFirstAsync: async () => native.cipher ? { cipher_version: native.cipher } : null, execAsync: native.exec, closeAsync: native.close };
     });
+    await import("../src/lib/opening-stock-database");
   });
   afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 

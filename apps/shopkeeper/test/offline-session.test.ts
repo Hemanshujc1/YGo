@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedAccess } from "../src/lib/offline-access";
 
 const mock = vi.hoisted(() => ({ me: vi.fn(), lookup: vi.fn(), signOut: vi.fn(), token: "saved-token" as string | null,
@@ -20,14 +20,16 @@ const account = { id: "00000000-0000-4000-8000-000000000001", email: "asha@examp
 const shopId = "00000000-0000-4000-8000-000000000002";
 
 describe("Shopkeeper launch and session lifecycle", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules(); vi.clearAllMocks();
     vi.stubEnv("EXPO_PUBLIC_API_BASE_URL", "http://localhost:3000"); vi.stubEnv("EXPO_PUBLIC_SUPPORT_EMAIL", "help@example.com");
     mock.token = "saved-token"; mock.active = account.id;
     mock.record = { account, shopId, verifiedAt: Date.now(), stockAllowed: true };
     mock.me.mockRejectedValue(new Error("offline")); mock.lookup.mockRejectedValue(new Error("offline"));
     mock.signOut.mockResolvedValue(undefined); mock.close.mockResolvedValue(undefined);
+    await import("../src/api");
   });
+  afterEach(() => vi.unstubAllEnvs());
   it("cold launches offline with encrypted identity, but never restores it without a saved sign-in", async () => {
     const { session, access } = await import("../src/api");
     await session.check(); expect(session.get()).toEqual({ status: "signed-in", account }); expect(access.get().mode).toBe("offline");
