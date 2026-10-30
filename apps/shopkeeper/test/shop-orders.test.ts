@@ -43,6 +43,14 @@ function fakeTimers() {
       pending.clear();
       for (const { run } of due) run();
     },
+    /** Runs only the timers set for `ms`. */
+    fireAt(ms: number) {
+      for (const [handle, timer] of pending) {
+        if (timer.ms !== ms) continue;
+        pending.delete(handle);
+        timer.run();
+      }
+    },
   };
 }
 
@@ -115,7 +123,7 @@ describe("S05 New order (#431)", () => {
     reads.shift()?.(ok(order()));
     await settle();
     expect(one.get()).toMatchObject({ status: "ready", offset: 0 });
-    expect([...pending.values()].map(({ ms }) => ms)).toEqual([15_000]);
+    expect([...pending.values()].map(({ ms }) => ms).sort()).toEqual([15_000, 462_000]);
     fire();
     reads.shift()?.(ok(order("accepted")));
     await settle();
@@ -198,15 +206,61 @@ describe("S05 New order (#431)", () => {
     answers.shift()?.(refused("NOT_ENOUGH_STOCK", short));
     expect(await accepting).toBe(false);
     expect(one.get()).toMatchObject({ notice: strings.errors.NOT_ENOUGH_STOCK, shortLines: short, expired: false });
-    // Still New, so it keeps reading.
-    expect(pending.size).toBe(1);
+    // Still New, so it keeps reading (and the expiry timer stays set).
+    expect([...pending.values()].map(({ ms }) => ms)).toContain(15_000);
 
     const rejecting = one.reject("out_of_stock");
     answers.shift()?.(refused("ORDER_EXPIRED"));
-    await settle();
-    reads.shift()?.(ok(order()));
     expect(await rejecting).toBe(false);
+    expect(reads).toHaveLength(0);
     expect(one.get()).toMatchObject({ notice: strings.errors.ORDER_EXPIRED, shortLines: [], expired: true, answering: null });
+    expect(pending.size).toBe(0);
+  });
+
+  it("marks the order expired when the countdown reaches 0, dropping the pending read, and reads nothing on resume", async () => {
+    const { client, reads } = fakeServer();
+    const { timers, pending, fire, fireAt } = fakeTimers();
+    let phone = Date.parse("2030-01-01T00:02:18.000Z");
+    const one = createShopOrder(client, id, timers, 15_000, () => phone);
+    one.start();
+    reads.shift()?.(ok(order()));
+    await settle();
+    expect(one.get().expired).toBe(false);
+    expect([...pending.values()].map(({ ms }) => ms)).toContain(15_000);
+
+    phone = Date.parse(expires);
+    fireAt(462_000);
+    expect(one.get()).toMatchObject({ expired: true, order: { status: "placed" } });
+    expect(pending.size).toBe(0);
+    fire();
+    await settle();
+    expect(reads).toHaveLength(0);
+
+    // Into the background and back.
+    one.stop();
+    one.start();
+    await settle();
+    expect(reads).toHaveLength(0);
+    expect(pending.size).toBe(0);
+    expect(await one.accept()).toBe(false);
+  });
+
+  it("marks the order expired, without reading, when the time ran out in the background", async () => {
+    const { client, reads } = fakeServer();
+    const { timers, pending } = fakeTimers();
+    let phone = Date.parse("2030-01-01T00:02:18.000Z");
+    const one = createShopOrder(client, id, timers, 15_000, () => phone);
+    one.start();
+    reads.shift()?.(ok(order()));
+    await settle();
+    one.stop();
+    expect(pending.size).toBe(0);
+
+    phone = Date.parse(expires) + 60_000;
+    one.start();
+    await settle();
+    expect(one.get().expired).toBe(true);
+    expect(reads).toHaveLength(0);
     expect(pending.size).toBe(0);
   });
 

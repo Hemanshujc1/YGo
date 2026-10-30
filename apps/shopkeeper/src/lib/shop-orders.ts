@@ -142,12 +142,31 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     notify();
   };
   const poller = createPoller(() => void read(), every, timers);
-  const placed = () => view.order === null || view.order.status === "placed";
-  // The server marks no order expired when its time runs out, so reading stops by the clock too.
-  const waiting = () =>
-    view.order === null || (view.order.status === "placed" && !view.expired && !!view.order.expiresAt && secondsLeft(view.order.expiresAt, view.offset, now()) > 0);
-  const landed = (order: ShopOrderResponse, also: Partial<OrderView> = {}) =>
+  // Still New and in time: only then is the order read again.
+  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired);
+
+  // The server marks no order expired when its time runs out, so the store does, by the server's clock.
+  let expiry: unknown;
+  const disarm = () => {
+    if (expiry !== undefined) timers.clear(expiry);
+    expiry = undefined;
+  };
+  function arm() {
+    disarm();
+    const { order } = view;
+    if (view.expired || order?.status !== "placed" || !order.expiresAt) return;
+    const left = Date.parse(order.expiresAt) - (now() + view.offset);
+    if (left > 0) expiry = timers.set(arm, left);
+    else {
+      poller.unschedule();
+      set({ expired: true });
+    }
+  }
+
+  const landed = (order: ShopOrderResponse, also: Partial<OrderView> = {}) => {
     set({ status: "ready", order, offset: clockOffset(order.now, now()), message: null, refreshing: false, ...also });
+    arm();
+  };
 
   async function read(pull = false, forAnswer = false) {
     // The answer to Accept or Reject is the newest word on the order; a read waits until it lands.
@@ -165,7 +184,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
 
   /** True when the order was answered, so S05 goes back to S04. */
   async function answer(kind: "accept" | "reject", send: () => Promise<ApiResult<ShopOrderResponse>>): Promise<boolean> {
-    if (view.answering) return false;
+    // Time is up: the buttons are off, and nothing is sent.
+    if (view.answering || view.expired) return false;
     // An older read landing after this must not bring back the placed status.
     poller.ticket();
     poller.unschedule();
@@ -188,9 +208,9 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
       return false;
     }
     if (result !== "offline" && result.code === "ORDER_EXPIRED") {
-      set({ notice: strings.errors.ORDER_EXPIRED, expired: true });
-      await read(false, true);
-      set({ answering: null });
+      // No read after this: the server would still say New.
+      disarm();
+      set({ answering: null, notice: strings.errors.ORDER_EXPIRED, expired: true });
       return false;
     }
     set({ answering: null, notice: failure(result), shortLines: result !== "offline" && !result.ok ? result.shortLines ?? [] : [] });
@@ -204,9 +224,14 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     subscribe,
     start() {
       poller.start();
-      if (placed()) void read();
+      // Back in front: an order whose time ran out meanwhile is marked expired, not read.
+      arm();
+      if (waiting()) void read();
     },
-    stop: poller.stop,
+    stop() {
+      disarm();
+      poller.stop();
+    },
     refresh: () => read(true),
     retry: () => read(),
     accept: () => answer("accept", () => client.acceptOrder(id)),
