@@ -159,6 +159,32 @@ describe("S05 New order (#431)", () => {
     }
   });
 
+  it("keeps the buttons off while it reads again, and says so when that read fails", async () => {
+    const { client, reads, answers } = fakeServer();
+    const one = createShopOrder(client, id, fakeTimers().timers);
+    one.start();
+    reads.shift()?.(ok(order()));
+    await settle();
+    const accepting = one.accept();
+    answers.shift()?.(refused("ORDER_STATUS_CHANGED"));
+    await settle();
+    expect(one.get().answering).toBe("accept");
+    expect(await one.accept()).toBe(false);
+    reads.shift()?.(refused("INTERNAL"));
+    expect(await accepting).toBe(false);
+    expect(one.get()).toMatchObject({ answering: null, notice: strings.errors.INTERNAL, order: { status: "placed" } });
+  });
+
+  it("stops reading once the time is up by the server's clock", async () => {
+    const { client, reads } = fakeServer();
+    const { timers, pending } = fakeTimers();
+    const one = createShopOrder(client, id, timers, 15_000, () => Date.parse("2030-01-01T00:02:18.000Z"));
+    one.start();
+    reads.shift()?.(ok({ ...order(), now: "2030-01-01T00:10:00.000Z" }));
+    await settle();
+    expect(pending.size).toBe(0);
+  });
+
   it("turns the buttons off when the server says the time is up, and lists the short lines", async () => {
     const { client, reads, answers } = fakeServer();
     const { timers, pending } = fakeTimers();
@@ -180,7 +206,8 @@ describe("S05 New order (#431)", () => {
     await settle();
     reads.shift()?.(ok(order()));
     expect(await rejecting).toBe(false);
-    expect(one.get()).toMatchObject({ notice: strings.errors.ORDER_EXPIRED, shortLines: [], expired: true });
+    expect(one.get()).toMatchObject({ notice: strings.errors.ORDER_EXPIRED, shortLines: [], expired: true, answering: null });
+    expect(pending.size).toBe(0);
   });
 
   it("drops a read that lands after Accept was tapped", async () => {

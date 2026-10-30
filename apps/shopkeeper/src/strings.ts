@@ -191,7 +191,7 @@ export const strings = {
   // S04 and S05 (#431): a Live or Suspended shop answers its orders.
   orders: {
     open: "Orders", title: "Orders", back: "Back", loading: "Loading orders", retry: "Try again",
-    offline: "Couldn't reach YGo. Check your internet and try again.",
+    offline: "Couldn't load. Check your connection and try again.",
     groups: { new: "New", accepted: "Accepted", doneToday: "Done today" },
     empty: "No orders yet today. New orders show here.",
     row: (items: number, total: string) => `${items} ${items === 1 ? "item" : "items"} · ${total}`,

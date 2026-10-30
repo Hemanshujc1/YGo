@@ -6,7 +6,8 @@ import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
-import { createShopOrders, money, treatments } from "../../lib/shop-orders";
+import { money } from "../../lib/money";
+import { createShopOrders, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
 
 // S04 Orders (#431): New, Accepted and Done today, read every 15 s while in front.

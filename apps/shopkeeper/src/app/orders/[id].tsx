@@ -6,30 +6,36 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
-import { clock, createShopOrder, lineLabel, money, secondsLeft, shortLabel, treatments } from "../../lib/shop-orders";
+import { money } from "../../lib/money";
+import { clock, createShopOrder, lineLabel, secondsLeft, shortLabel, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
 
 // S05 New order detail (#431): Accept is the biggest and lowest button; Reject asks for a reason first.
 
 const words = strings.orders;
 
-/** Seconds left by the server's clock, ticking once a second while the order is New. */
+/** Seconds left by the server's clock, ticking once a second while the order is New, until it reaches 0. */
 function useSecondsLeft(expiresAt: string | null, offset: number) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!expiresAt) return;
     setNow(Date.now());
-    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const tick = setInterval(() => {
+      const phone = Date.now();
+      setNow(phone);
+      if (secondsLeft(expiresAt, offset, phone) === 0) clearInterval(tick);
+    }, 1000);
     return () => clearInterval(tick);
-  }, [expiresAt]);
+  }, [expiresAt, offset]);
   return expiresAt ? secondsLeft(expiresAt, offset, now) : null;
 }
 
 /** 20/28 tabular in a bordered pill; under one minute a 2 px warning border, never flashing (design system section 5). */
 function Countdown({ seconds }: { seconds: number }) {
   const low = seconds < 60;
+  // Only "Time is up" is read out; a reading every second would drown the buttons.
   return (
-    <View accessibilityLiveRegion={low ? "polite" : "none"} className={`self-start rounded-full px-4 py-1 ${low ? "border-2 border-warning" : "border border-border-strong"}`}>
+    <View accessibilityLiveRegion={seconds === 0 ? "polite" : "none"} className={`self-start rounded-full px-4 py-1 ${low ? "border-2 border-warning" : "border border-border-strong"}`}>
       <Text className="text-title font-semibold tabular-nums text-text">{seconds > 0 ? words.expiresIn(clock(seconds)) : words.timeUp}</Text>
     </View>
   );

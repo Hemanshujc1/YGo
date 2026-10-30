@@ -1,6 +1,6 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { OrderLine, OrderStatus, RejectReason, ShopOrderResponse, ShopOrdersResponse, ShortLine } from "@ygo/contracts";
-import { formatMoney, formatNumber } from "@ygo/format";
+import { formatNumber } from "@ygo/format";
 import type { Treatment } from "@ygo/mobile";
 import { packLabel } from "@ygo/mobile/pack-label";
 import { createPoller, phoneTimers, type Timers } from "@ygo/mobile/poller";
@@ -32,7 +32,6 @@ export const treatments: Record<OrderStatus, Treatment> = {
 /** S04 and S05 read again this often while in front (#431). */
 export const pollEvery = 15_000;
 
-export const money = (amount: string) => formatMoney(Number(amount));
 export const pack = (quantity: string, baseUnit: OrderLine["baseUnit"]) => packLabel(quantity, baseUnit, words.units);
 
 /** "2 × 1 kg", or "500 g of a 1 kg pack" for the part of a pack bought (#377). */
@@ -144,11 +143,15 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
   };
   const poller = createPoller(() => void read(), every, timers);
   const placed = () => view.order === null || view.order.status === "placed";
-  const landed = (order: ShopOrderResponse) => set({ status: "ready", order, offset: clockOffset(order.now, now()), message: null, refreshing: false });
+  // The server marks no order expired when its time runs out, so reading stops by the clock too.
+  const waiting = () =>
+    view.order === null || (view.order.status === "placed" && !view.expired && !!view.order.expiresAt && secondsLeft(view.order.expiresAt, view.offset, now()) > 0);
+  const landed = (order: ShopOrderResponse, also: Partial<OrderView> = {}) =>
+    set({ status: "ready", order, offset: clockOffset(order.now, now()), message: null, refreshing: false, ...also });
 
-  async function read(pull = false) {
+  async function read(pull = false, forAnswer = false) {
     // The answer to Accept or Reject is the newest word on the order; a read waits until it lands.
-    if (view.answering) return;
+    if (view.answering && !forAnswer) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
@@ -157,7 +160,7 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     if (!latest()) return;
     if (answer !== "offline" && answer.ok) landed(answer.data);
     else set({ status: view.order ? "ready" : "failed", message: failure(answer), refreshing: false });
-    poller.schedule(placed());
+    poller.schedule(waiting());
   }
 
   /** True when the order was answered, so S05 goes back to S04. */
@@ -168,25 +171,31 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     poller.unschedule();
     set({ answering: kind, notice: null, shortLines: [], refreshing: false });
     const result = await send().catch(() => "offline" as const);
-    set({ answering: null });
+    // The buttons stay off until the answer and anything read for it have landed.
     if (result !== "offline" && result.ok) {
-      landed(result.data);
+      landed(result.data, { answering: null });
       return true;
     }
     if (result !== "offline" && result.code === "ORDER_STATUS_CHANGED") {
       // The customer cancelled, or another phone of the shop answered first (owner's answer 7 on #431).
-      await read();
-      set({ notice: view.order?.status === "cancelled_by_customer" ? words.cancelledByCustomer : words.answered });
+      await read(false, true);
+      const status = view.order?.status;
+      const notice = status === "cancelled_by_customer" ? words.cancelledByCustomer
+        // Still New here means the read failed, so the order's new state is unknown.
+        : status === "placed" ? view.message ?? strings.errors.ORDER_STATUS_CHANGED
+        : words.answered;
+      set({ answering: null, notice });
       return false;
     }
     if (result !== "offline" && result.code === "ORDER_EXPIRED") {
       set({ notice: strings.errors.ORDER_EXPIRED, expired: true });
-      await read();
+      await read(false, true);
+      set({ answering: null });
       return false;
     }
-    set({ notice: failure(result), shortLines: result !== "offline" && !result.ok ? result.shortLines ?? [] : [] });
+    set({ answering: null, notice: failure(result), shortLines: result !== "offline" && !result.ok ? result.shortLines ?? [] : [] });
     // A read dropped while the answer was on its way didn't set the next one.
-    poller.schedule(placed());
+    poller.schedule(waiting());
     return false;
   }
 

@@ -97,8 +97,9 @@ export default function Home() {
   }
 
   if (application) {
+    const answersOrders = application.state === "live" || application.state === "suspended";
     return (
-      <Plain stock={application.state === "live" || application.state === "suspended"} orders={application.state === "live" || application.state === "suspended"} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+      <Plain stock={answersOrders} orders={answersOrders} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
         {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
