@@ -1,5 +1,4 @@
-import type { CartLine, FeedQuery } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
+import type { CartLine } from "@ygo/contracts";
 import { Button, Text } from "@ygo/mobile";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useMemo } from "react";
@@ -8,7 +7,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stepper } from "../../components/stepper";
 import { TopBar } from "../../components/top-bar";
 import { feeText, reasonText, type CartView } from "../../lib/cart";
+import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
+import { money } from "../../lib/money";
 import { packLabel } from "../../lib/shop-page";
 import { useCart } from "../../lib/use-cart";
 import { strings } from "../../strings";
@@ -19,7 +20,6 @@ import { strings } from "../../strings";
 type Params = { shopId: string; pincode: string; latitude: string; longitude: string };
 
 const words = strings.cart;
-const money = (amount: string) => formatMoney(Number(amount));
 
 /** Where a figure goes while a newer cart is saving: never the old figure (design system rule 7). */
 const pending = <View className="h-5 w-14 rounded-tag bg-sunken" />;
@@ -134,11 +134,8 @@ export default function CartScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { shopId, pincode, latitude, longitude } = useLocalSearchParams<Params>();
-  const query = useMemo<FeedQuery | undefined>(() => {
-    const place = { pincode, latitude: Number(latitude), longitude: Number(longitude) };
-    return pincode && Number.isFinite(place.latitude) && Number.isFinite(place.longitude) ? place : undefined;
-  }, [pincode, latitude, longitude]);
-  const { view, setCount, retry, reload } = useCart(shopId ?? "", query);
+  const query = useMemo(() => paramsQuery({ pincode, latitude, longitude }), [pincode, latitude, longitude]);
+  const { cart, view } = useCart(shopId ?? "", query);
   // Back to the shop page this cart was opened from, or a new one when it isn't in the stack.
   const backToShop = () => router.navigate({ pathname: "/shop/[id]", params: { id: shopId, pincode, latitude, longitude } });
 
@@ -156,7 +153,7 @@ export default function CartScreen() {
           <View className="items-start">
             <Text className="text-body font-semibold text-text">{words.failed}</Text>
             <Text className="text-secondary text-muted">{view.message}</Text>
-            <Button label={words.retry} onPress={() => reload(query)} variant="text" />
+            <Button label={words.retry} onPress={cart.retry} variant="text" />
           </View>
         )}
         {/* A link without a place has no cart to price. */}
@@ -167,7 +164,7 @@ export default function CartScreen() {
             <Button label={strings.shop.home} onPress={() => goHome(navigation)} variant="text" />
           </View>
         )}
-        {view.status === "ready" && query && <Cart view={view} setCount={setCount} retry={retry} backToShop={backToShop} />}
+        {view.status === "ready" && query && <Cart view={view} setCount={cart.setCount} retry={cart.retry} backToShop={backToShop} />}
       </ScrollView>
     </View>
   );

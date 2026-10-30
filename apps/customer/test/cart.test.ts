@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { CartLine, CartResponse, SaveCartBody } from "@ygo/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cartBarLabel, createCart, feeText, reasonText, rebase, saveBody, stockLeft, withCount } from "../src/lib/cart";
+import { cartBarLabel, createCart, feeText, nextSave, reasonText, rebase, saveBody, stockLeft, withCount } from "../src/lib/cart";
 
 const shopId = "8a0e4f8e-1c55-4d3c-9b8e-6b6f1f7f2a10";
 const place = { pincode: "411045", latitude: 18.56, longitude: 73.78 };
@@ -43,6 +43,13 @@ describe("cart helpers (#406)", () => {
   it("lays the Customer's latest counts over a cart changed elsewhere", () => {
     expect(rebase([line(atta, 1), line(dal, 5)], new Map([[atta, 4], [dal, 0]]))).toEqual([{ listingId: atta, count: 4 }]);
     expect(rebase([line(dal, 1)], new Map([[atta, 2]]))).toEqual([{ listingId: dal, count: 1 }, { listingId: atta, count: 2 }]);
+  });
+
+  it("adds at most one new pack per save, so a refused save names its pack (#410)", () => {
+    const server = cart(3, [line(atta, 1)]);
+    const { body, sent } = nextSave(server, new Map([[dal, 1], ["3f1c2b9a-0d4e-4b7a-8c61-2e5f9d8a7b03", 2], [atta, 4]]));
+    expect(body).toEqual({ revision: 3, lines: [{ listingId: atta, count: 4 }, { listingId: dal, count: 1 }] });
+    expect([...sent]).toEqual([[dal, 1], [atta, 4]]);
   });
 
   it("counts packs on the bar and stops + only where the server says stock ends", () => {
@@ -155,16 +162,64 @@ describe("the cart store (#406)", () => {
     expect(server.saves).toHaveLength(1);
   });
 
-  it("keeps the taps after a failed save and sends them again on retry", async () => {
+  it("adds the good pack when two are added together and only one is refused", async () => {
+    const server = fakeServer();
+    const store = await loaded(server, cart(0, []));
+    store.setCount(dal, 1);
+    store.setCount(atta, 1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.saves[0]?.body.lines).toEqual([{ listingId: dal, count: 1 }]);
+    server.saves[0]?.answer(refused("NOT_FOUND", 404));
+    await vi.advanceTimersByTimeAsync(0);
+    server.loads.shift()?.(ok(cart(0, [])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.saves[1]?.body).toEqual({ revision: 0, lines: [{ listingId: atta, count: 1 }] });
+    server.saves[1]?.answer(ok(cart(1, [line(atta, 1)])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get()).toMatchObject({ saving: false, lines: [{ listingId: atta, count: 1 }], notice: "A pack you added can't be ordered right now, so it wasn't added." });
+  });
+
+  it("keeps the taps after a failed save, shows no old total, and sends them again on retry or the next load", async () => {
     const server = fakeServer();
     const store = await loaded(server, cart(0, []));
     store.setCount(atta, 1);
     await vi.advanceTimersByTimeAsync(300);
     server.saves[0]?.answer({ ok: false, status: 500, code: "INTERNAL" });
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.get()).toMatchObject({ saving: false, message: "Something went wrong on the server.", lines: [{ listingId: atta, count: 1 }] });
+    expect(store.get()).toMatchObject({ saving: true, message: "Something went wrong on the server.", lines: [{ listingId: atta, count: 1 }] });
     store.retry();
+    server.loads.shift()?.(ok(cart(0, [])));
+    await vi.advanceTimersByTimeAsync(0);
     expect(server.saves[1]?.body).toEqual({ revision: 0, lines: [{ listingId: atta, count: 1 }] });
+    server.saves[1]?.answer({ ok: false, status: 503, code: "UNAVAILABLE" });
+    await vi.advanceTimersByTimeAsync(0);
+    // A screen showing again reads the cart and sends the taps again.
+    void store.load(place);
+    server.loads.shift()?.(ok(cart(0, [])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.saves).toHaveLength(3);
+  });
+
+  it("keeps a tap made during the first load, and fails openly when its save fails", async () => {
+    const server = fakeServer();
+    const store = createCart(server.client, shopId, 300);
+    void store.load(place);
+    store.setCount(atta, 1);
+    server.loads.shift()?.(ok(cart(2, [line(dal, 1)])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get().lines).toEqual([{ listingId: dal, count: 1 }, { listingId: atta, count: 1 }]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.saves[0]?.body.revision).toBe(2);
+    server.saves[0]?.answer({ ok: false, status: 500, code: "INTERNAL" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get()).toMatchObject({ status: "ready", message: "Something went wrong on the server." });
+
+    const first = fakeServer();
+    const fresh = createCart(first.client, shopId, 300);
+    void fresh.load(place);
+    first.loads.shift()?.({ ok: false, status: 500, code: "INTERNAL" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fresh.get()).toMatchObject({ status: "failed", message: "Something went wrong on the server." });
   });
 
   it("shows no cart when there is none and the shop can't deliver here", async () => {

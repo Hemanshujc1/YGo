@@ -2,7 +2,7 @@ import type { FeedQuery } from "@ygo/contracts";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useSyncExternalStore } from "react";
 import { api } from "../api";
-import { createCart, type Cart } from "./cart";
+import { createCart, stockLeft, type Cart } from "./cart";
 
 // One cart per shop for the app's life, so C05 and C07 show the same counts (#406). The server holds the cart.
 const carts = new Map<string, Cart>();
@@ -24,5 +24,12 @@ export function useCart(shopId: string, query: FeedQuery | undefined) {
   useFocusEffect(useCallback(() => {
     if (pincode !== undefined && latitude !== undefined && longitude !== undefined) void cart.load({ pincode, latitude, longitude });
   }, [cart, pincode, latitude, longitude]));
-  return { view, setCount: cart.setCount, retry: cart.retry, reload: cart.load };
+  return { cart, view };
+}
+
+/** One pack's count and the packs left at stock, so a tap redraws only the pack it changed. */
+export function usePack(cart: Cart, listingId: string): { count: number; left: number | null } {
+  const count = useSyncExternalStore(cart.subscribe, () => cart.get().lines.find((line) => line.listingId === listingId)?.count ?? 0);
+  const left = useSyncExternalStore(cart.subscribe, () => stockLeft(cart.get().server, listingId));
+  return { count, left };
 }

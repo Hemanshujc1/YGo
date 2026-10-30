@@ -1,5 +1,4 @@
-import type { FeedQuery, ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
+import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
 import { Button, Text } from "@ygo/mobile";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { memo, useCallback, useMemo, useState } from "react";
@@ -8,10 +7,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
 import { Stepper } from "../../components/stepper";
 import { TopBar } from "../../components/top-bar";
-import { cartBarLabel, stockLeft, type CartView } from "../../lib/cart";
+import { cartBarLabel, type Cart } from "../../lib/cart";
+import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
+import { money } from "../../lib/money";
 import { hoursLine, offLabel, packLabel, shopSections, weekRows } from "../../lib/shop-page";
-import { useCart } from "../../lib/use-cart";
+import { useCart, usePack } from "../../lib/use-cart";
 import { strings } from "../../strings";
 
 // C05 Shop page (#370): the shop's terms (DSC-2), then its products under their top category.
@@ -24,14 +25,12 @@ type PageState =
   | { kind: "failed"; message: string };
 
 type Params = { id: string; pincode: string; latitude: string; longitude: string };
-type Choose = { cart: CartView; setCount: (listingId: string, count: number) => void };
 
 const words = strings.shop;
-const money = (amount: string) => formatMoney(Number(amount));
 
-function Pack({ pack, baseUnit, first, cart, setCount }: { pack: ShopPagePack; baseUnit: ShopPageProduct["baseUnit"]; first: boolean } & Choose) {
+function Pack({ pack, baseUnit, first, cart }: { pack: ShopPagePack; baseUnit: ShopPageProduct["baseUnit"]; first: boolean; cart: Cart }) {
   const off = offLabel(pack);
-  const count = cart.lines.find((line) => line.listingId === pack.listingId)?.count ?? 0;
+  const { count, left } = usePack(cart, pack.listingId);
   return (
     <View className={`min-h-12 flex-row flex-wrap items-center gap-x-3 gap-y-1 py-2 ${first ? "" : "border-t border-border"}`}>
       <Text className="min-w-16 text-body tabular-nums text-text">{packLabel(pack.quantity, baseUnit)}</Text>
@@ -53,21 +52,24 @@ function Pack({ pack, baseUnit, first, cart, setCount }: { pack: ShopPagePack; b
           </Text>
         )}
         <Text className={`text-label font-semibold tabular-nums ${pack.outOfStock ? "text-muted" : "text-text"}`}>{money(pack.price)}</Text>
-        {!pack.outOfStock && (
-          <Stepper count={count} max={stockLeft(cart.server, pack.listingId)} onChange={(next) => setCount(pack.listingId, next)} />
+        {pack.outOfStock ? (
+          // Sold out after it was added: it stays in the cart until removed (owner's answer 9 on #50).
+          count > 0 && <Button label={strings.cart.remove} onPress={() => cart.setCount(pack.listingId, 0)} variant="text" />
+        ) : (
+          <Stepper count={count} max={left} onChange={(next) => cart.setCount(pack.listingId, next)} />
         )}
       </View>
     </View>
   );
 }
 
-function Product({ product, ...choose }: { product: ShopPageProduct } & Choose) {
+function Product({ product, cart }: { product: ShopPageProduct; cart: Cart }) {
   return (
     <View className="rounded-card border border-border bg-surface px-4 py-3">
       <Text className="text-body font-semibold text-text">{product.name}</Text>
       {product.brand && <Text className="text-secondary text-muted">{product.brand}</Text>}
       <View className="mt-1">
-        {product.packs.map((pack, index) => <Pack key={pack.listingId} pack={pack} baseUnit={product.baseUnit} first={index === 0} {...choose} />)}
+        {product.packs.map((pack, index) => <Pack key={pack.listingId} pack={pack} baseUnit={product.baseUnit} first={index === 0} cart={cart} />)}
       </View>
     </View>
   );
@@ -113,13 +115,13 @@ const productGap = () => <View className="h-3" />;
  * A SectionList, so a large shop draws only the products near the screen: one section per top category (#370).
  * NativeWind maps no class prop onto SectionList's content container, so each row carries the side gutter.
  */
-function Page({ page, bottom, ...choose }: { page: ShopPageResponse; bottom: number } & Choose) {
+function Page({ page, bottom, cart }: { page: ShopPageResponse; bottom: number; cart: Cart }) {
   const sections = useMemo(() => shopSections(page.groups), [page.groups]);
   return (
     <SectionList
       sections={sections}
       keyExtractor={(product) => product.id}
-      renderItem={({ item }) => <View className="px-4"><ProductRow product={item} {...choose} /></View>}
+      renderItem={({ item }) => <View className="px-4"><ProductRow product={item} cart={cart} /></View>}
       renderSectionHeader={({ section }) => (
         <Text accessibilityRole="header" className="px-4 pb-3 pt-6 text-headline font-semibold text-text">{section.title}</Text>
       )}
@@ -138,12 +140,12 @@ export default function ShopPage() {
   const { id, pincode, latitude, longitude } = useLocalSearchParams<Params>();
   const [state, setState] = useState<PageState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
-  const query = useMemo<FeedQuery | undefined>(() => {
-    const place = { pincode, latitude: Number(latitude), longitude: Number(longitude) };
-    return id && pincode && Number.isFinite(place.latitude) && Number.isFinite(place.longitude) ? place : undefined;
-  }, [id, pincode, latitude, longitude]);
-  const { view: cart, setCount } = useCart(id ?? "", query);
-  const bar = state.kind === "loaded" && cart.lines.length > 0;
+  const query = useMemo(() => paramsQuery({ pincode, latitude, longitude }), [pincode, latitude, longitude]);
+  const { cart, view } = useCart(id ?? "", query);
+  const loaded = state.kind === "loaded";
+  const bar = loaded && view.lines.length > 0;
+  // A refused Add or a failed save is said here too, where nearly every Add happens.
+  const said = loaded ? view.notice ?? (view.message && strings.cart.notSaved) : null;
 
   // Asked again each time the page shows, as Home does, so stock and prices stay current.
   useFocusEffect(useCallback(() => {
@@ -172,7 +174,7 @@ export default function ShopPage() {
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       <TopBar title={state.kind === "loaded" ? state.page.shop.name : words.title} />
       {state.kind === "loaded" ? (
-        <Page page={state.page} bottom={bar ? 0 : insets.bottom} cart={cart} setCount={setCount} />
+        <Page page={state.page} bottom={bar || said ? 0 : insets.bottom} cart={cart} />
       ) : (
         <ScrollView contentContainerClassName="px-4" contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 32 }}>
           {state.kind === "loading" && (
@@ -197,12 +199,20 @@ export default function ShopPage() {
           )}
         </ScrollView>
       )}
-      {bar && (
-        <View className="border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: insets.bottom + 12 }}>
-          <Button
-            label={cartBarLabel(cart.lines)}
-            onPress={() => router.push({ pathname: "/cart/[shopId]", params: { shopId: id, pincode, latitude, longitude } })}
-          />
+      {(bar || said) && (
+        <View className="gap-2 border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: insets.bottom + 12 }}>
+          {said && (
+            <View className="flex-row flex-wrap items-center justify-between gap-x-3">
+              <Text className="shrink text-secondary text-text">{said}</Text>
+              {view.message && <Button label={strings.cart.retry} onPress={cart.retry} variant="text" />}
+            </View>
+          )}
+          {bar && (
+            <Button
+              label={cartBarLabel(view.lines)}
+              onPress={() => router.push({ pathname: "/cart/[shopId]", params: { shopId: id, pincode, latitude, longitude } })}
+            />
+          )}
         </View>
       )}
     </View>
