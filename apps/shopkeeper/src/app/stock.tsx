@@ -1,6 +1,7 @@
 import { StockFlagPayload } from "@ygo/contracts";
 import { trimDecimal } from "@ygo/format";
 import { Button, SupportEmail, Text } from "@ygo/mobile";
+import { Cloud } from "lucide-react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
@@ -38,8 +39,10 @@ export default function StockScreen() {
 
   async function sync(current: Loaded, token = visit.current) {
     try {
-      await syncOpeningStockBatch(current.queue, current.stock.shopId, (body) => api.syncActions(body));
+      const since = current.queue.cache.cursor(current.stock.shopId);
+      const response = await syncOpeningStockBatch(current.queue, current.stock.shopId, (body) => api.syncActions(body));
       if (!isCurrentAccount(current.accountId) || visit.current !== token) return;
+      if (response) current.queue.cache.confirmFlags(current.stock.shopId, response.results, since);
       // Pull current server state even after a replay: its original result may be superseded.
       await pull(current, token);
       if (!isCurrentAccount(current.accountId) || visit.current !== token) return;
@@ -102,7 +105,10 @@ export default function StockScreen() {
         <Button label={words.retry} variant="secondary" onPress={() => void refresh(++visit.current)} />
         <SupportEmail address={supportEmail} className="text-secondary" />
       </>}
-      {message && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{message}</Text>}
+      {message && <View className="flex-row items-center gap-2">
+        {message === words.refreshFailed && <Cloud size={20} className="text-pending" />}
+        <Text accessibilityLiveRegion="polite" className={message === words.refreshFailed ? "flex-1 text-body text-pending" : "flex-1 text-body text-danger"}>{message}</Text>
+      </View>}
       {load.kind === "loaded" && <>
         {load.stock.state === "suspended" && <Text className="text-body text-danger">{words.suspended}</Text>}
         <Button label={words.retry} variant="secondary" onPress={() => void sync(load)} />

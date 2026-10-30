@@ -13,6 +13,7 @@ export const ShopStockResponse = z.strictObject({
 });
 export const StockCursor = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,18})$/);
 export const SyncChangesQuery = z.strictObject({ since: StockCursor.optional() });
+export type SyncChangesQuery = z.infer<typeof SyncChangesQuery>;
 export const SyncChangesResponse = z.strictObject({
   shopId: z.uuid(), state: ShopStockResponse.shape.state, cursor: StockCursor,
   changes: z.array(z.strictObject({ packId: z.uuid(), item: ShopStockResponse.shape.items.element.nullable(), deletedAt: z.iso.datetime().nullable() })

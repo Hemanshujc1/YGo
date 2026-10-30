@@ -44,3 +44,13 @@ it("keeps a tombstoned pending row until acknowledgement, retaining failure reco
   queue.cache.apply(page(3));
   expect(queue.cache.read(shopId)?.items).toEqual([item]);
 });
+
+it("upgrades v4 without changing queued originals", () => {
+  queue.saveFlag(shopId, packId, true);
+  const original = queue.batch(shopId);
+  db.exec("DROP TABLE stock_cache_items; DROP TABLE stock_cache_shops; PRAGMA user_version = 4");
+  queue = openingStockQueue(adapter(db), randomUUID);
+  expect(queue.batch(shopId)).toMatchObject({ deviceId: original.deviceId, actions: original.actions });
+  expect(queue.cache.cursor(shopId)).toBeUndefined();
+  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+});

@@ -15,7 +15,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
   } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const { since } = request.query as { since?: string };
+    const { since } = request.query as SyncChangesQuery;
     return withTransaction(pool, async (client) => {
       const { rows: [shop] } = await client.query<{ id: string; state: "live" | "suspended" }>(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
         WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [who.accountId]);

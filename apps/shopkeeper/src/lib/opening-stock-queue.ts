@@ -51,7 +51,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   if (version < 4) db.withTransactionSync(() => db.execSync("PRAGMA user_version = 4;"));
 
   if (version < 5) db.withTransactionSync(() => db.execSync(`CREATE TABLE stock_cache_shops (shop_id TEXT PRIMARY KEY, cursor TEXT NOT NULL, state TEXT NOT NULL);
-    CREATE TABLE stock_cache_items (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL, deleted_at TEXT,
+    CREATE TABLE stock_cache_items (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL, deleted_at TEXT, acknowledged_flag INTEGER,
       PRIMARY KEY (shop_id, pack_id)); PRAGMA user_version = 5;`));
 
   function failed(shopId: string, packId: string): SyncActionResult | null {

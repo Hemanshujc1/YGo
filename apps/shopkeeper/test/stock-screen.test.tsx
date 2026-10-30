@@ -25,6 +25,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
+vi.mock("lucide-react-native", () => ({ Cloud: "Cloud" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
@@ -157,6 +158,22 @@ describe("minimal Stock screen", () => {
     expect(texts().join(" ")).toContain(id);
     expect(queue.failureCount()).toBe(1);
     expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
+  });
+
+  it("keeps the acknowledged switch when the following pull fails, then replaces replay echoes on an empty successful pull", async () => {
+    render(); await settle();
+    mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
+      actionId: action.id, sequence: action.sequence, status: "applied", code: null, result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false,
+    })) } }));
+    mock.stock.mockRejectedValue(new Error("pull offline"));
+    press("Rice: Out of stock"); await settle();
+    expect(queue.count()).toBe(0);
+    expect(texts()).toContain("Saved");
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
+    // Another phone restored false before the server projection changed; no delta is needed.
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } });
+    press("Retry sync"); await settle();
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
   });
 
 });
