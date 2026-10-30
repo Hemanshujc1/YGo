@@ -50,5 +50,5 @@ The owner checks new and changed screens, phone and admin website alike, in batc
 - A screen PR's body carries its batch line under "Screen check": `- [ ] <app>, <screen>: <what to tap>; expect <what to see> (#<PR>)`.
 - A batch is one GitHub issue titled `Screen check: batch <N>`, labelled `ready-for-human`. After merging a screen PR, the merger adds its line to the open batch, or opens the next batch when none is open.
 - A batch is ready at 4 screens, or at 3 when no other screen PR is open. The merger then adds "(ready)" to its title and tells the owner "batch ready" with its link. A ready batch takes no more lines; later screens start the next batch.
-- The owner runs the batch from the latest `main`, phone screens on the OPPO, and ticks each line that passes. For each failed line, an agent opens a fix issue and links it on that line; the fix PR's own line goes into a later batch.
-- The batch closes when every line is ticked or links its fix issue.
+- The owner runs the batch from the latest `main`, phone screens on the OPPO, and says which lines pass. The agent running the check (the `screen-check` skill) ticks each line the owner passed; it never ticks one on its own. For each failed line, an agent opens a fix issue and links it on that line; the fix PR's own line goes into a later batch.
+- When every line is ticked or links its fix issue, that agent closes the batch.

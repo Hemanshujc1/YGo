@@ -1,6 +1,6 @@
 ---
 name: screen-check
-description: Get a YGo screen ready for the owner to check, or help fix a failed screen-check line. Use when the owner asks to test, check, run or debug a screen, a "Screen check" batch or line, or a screen-test issue. Starts the database, mail inbox, server, Metro or Admin web and the phone build (OPPO or iOS Simulator), then gives exact tap-by-tap steps.
+description: Get a YGo screen ready for the owner to check, or help fix a failed screen-check line. Use when the owner asks to test, check, run or debug a screen, a "Screen check" batch or line, or a screen-test issue. Starts the database, mail inbox, server, Metro or Admin web and the phone build (OPPO or iOS Simulator), then gives exact tap-by-tap steps. Ticks the lines the owner passes on GitHub and closes the batch when none is left open.
 ---
 
 # Screen check
@@ -105,6 +105,16 @@ After the steps, tell the owner in two or three lines: what is running (server, 
 2. Say whether it is the app, the server, or the setup (wrong data, stale build, wrong wifi address). Setup problems you fix at once.
 3. An app or server bug becomes a fix issue linked on that line (`docs/agents/workflow.md`, section 7); use `mattpocock-skills:diagnosing-bugs` to find the cause. The fix PR carries its own "Screen check" line.
 
-## 7. Clean up
+## 7. Record the results on GitHub
 
-When the owner is done, or says stop: stop the background Metro, Vite and server you started. Shut down a Simulator you booted only if the owner asks. Leave the Docker containers running unless asked; they hold the owner's data. Put back any `.env` value you changed for a line (`MIN_*_VERSION`). If a ticked batch needs ticking, the owner ticks it; do not tick lines for them.
+The owner's word decides each line; you write it down. Tick a line only when the owner says it passed, never on your own test or a screenshot.
+
+1. **A line passed.** Read the batch body (`gh issue view <batch> --json body --jq .body`), turn that line's `- [ ]` into `- [x]`, and save it with `gh issue edit <batch> --body-file <scratchpad>/batch.md`. Find the line by its `(#<PR>)` ending and change only that line.
+2. **A line failed.** Leave it unticked and add ` → fix #<issue>` at its end, once the fix issue from step 6 exists.
+3. **Every line is ticked or links a fix issue.** Close the batch: `gh issue close <batch> --comment "All lines checked: <n> passed, fixes in #a, #b."` (or "all passed").
+
+Done when the batch on GitHub shows what the owner reported, and it is closed if no line is left open.
+
+## 8. Clean up
+
+When the owner is done, or says stop: stop the background Metro, Vite and server you started. Shut down a Simulator you booted only if the owner asks. Leave the Docker containers running unless asked; they hold the owner's data. Put back any `.env` value you changed for a line (`MIN_*_VERSION`).
