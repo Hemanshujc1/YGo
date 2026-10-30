@@ -331,4 +331,18 @@ describe("the cart store (#406)", () => {
     await loading;
     expect(store.get()).toMatchObject({ status: "none", lines: [] });
   });
+  it("shows the cart a refused placement answered with, and drops an older load still on its way (#427)", async () => {
+    const server = fakeServer();
+    const store = createCart(server.client, shopId, 300);
+    const first = store.load(place);
+    server.loads.shift()?.(ok(cart(2, [line(atta, 1)])));
+    await first;
+    const older = store.load(place);
+    expect(store.get().pricedFor).toEqual(place);
+    const work = { ...place, latitude: 18.6 };
+    store.adopt(cart(3, [line(atta, 1, { lineTotal: "70" })], { quote: { productValue: "70", deliveryFee: "20", smallCartFee: null, total: "90" } }), work);
+    server.loads.shift()?.(ok(cart(2, [line(atta, 1)])));
+    await older;
+    expect(store.get()).toMatchObject({ status: "ready", server: { revision: 3, quote: { total: "90" } }, pricedFor: work });
+  });
 });

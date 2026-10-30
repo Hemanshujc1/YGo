@@ -1,13 +1,12 @@
 import { indiaToday, type ShopHoliday, type ShopHolidaysResponse } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import { formatDayMonth, formatDayMonthYear, formatWeekday } from "@ygo/format";
-import { Button, Text } from "@ygo/mobile";
+import { Button, Confirm, Text } from "@ygo/mobile";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { api } from "../api";
 import { dateChoices, dateOf, editDraft, pickFrom, type Draft } from "../lib/holidays";
 import { strings } from "../strings";
-import { Confirm } from "./confirm";
 import { TimeSheet } from "./time-sheet";
 
 const words = strings.holidays;

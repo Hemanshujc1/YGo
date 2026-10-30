@@ -1,7 +1,8 @@
-import { Button, Text } from "@ygo/mobile";
 import { Modal, View } from "react-native";
+import { Button } from "./sign-in-parts";
+import { Text } from "./text";
 
-/** A yes-or-cancel question in the YGo design rather than the phone's own alert: Sign out and Send (#295, Q7). */
+/** A yes-or-cancel question in the YGo design rather than the phone's own alert: Sign out and Send (#295, Q7), Cancel an order (#427). */
 export function Confirm({
   visible,
   title,

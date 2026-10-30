@@ -325,6 +325,23 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect((await place(shopId, { ...body, addressId: home })).statusCode).toBe(201);
   });
 
+  it("lists for C07 only the Customer's pinned addresses the shop delivers to, newest first (#427)", async () => {
+    const { shopId, home } = await stocked();
+    const near = await address("customer@example.com", 500, "Flat 7");
+    await address("customer@example.com", null, "Flat 9");
+    await address("customer@example.com", -2300, "Flat 12");
+    await address("other@example.com");
+    await database.pool.query("UPDATE saved_addresses SET saved_at = now() + interval '1 minute' WHERE id = $1", [near]);
+    const listed = await app.inject({ method: "GET", url: `/v1/me/addresses?shopId=${shopId}`, headers: customer });
+    expect((listed.json() as { addresses: Array<{ id: string }> }).addresses.map((row) => row.id)).toEqual([near, home]);
+    // Without a shop every address lists, as C15 shows them.
+    expect((await app.inject({ method: "GET", url: "/v1/me/addresses", headers: customer })).json().addresses).toHaveLength(4);
+    // A paused Area delivers nowhere.
+    await database.pool.query("UPDATE areas SET paused = true WHERE name = 'Kothrud'");
+    expect((await app.inject({ method: "GET", url: `/v1/me/addresses?shopId=${shopId}`, headers: customer })).json()).toEqual({ addresses: [] });
+    expect((await app.inject({ method: "GET", url: "/v1/me/addresses?shopId=nope", headers: customer })).statusCode).toBe(400);
+  });
+
   it("refuses the shop's own Owner or Staff, and their cart says why (ACC-9)", async () => {
     const { shopId, dal, owner } = await stocked();
     const ownHome = await address("owner@example.com");

@@ -1,4 +1,5 @@
 export { AppShell } from "./app-shell";
+export { Confirm } from "./confirm";
 export { findPlace, type Found, type Locator } from "./find-place";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
 export { colourIcons } from "./icons";

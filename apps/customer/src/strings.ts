@@ -1,4 +1,4 @@
-import type { ErrorCode } from "@ygo/contracts";
+import type { ErrorCode, OrderStatus } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -259,6 +259,60 @@ export const strings = {
       notDelivering: "This shop doesn't deliver to your location",
       ownShop: "You can't order from your own shop",
     },
+    // Deliver to and Place order (#427).
+    deliverTo: "Deliver to",
+    change: "Change",
+    loadingAddresses: "Loading your addresses…",
+    addressesFailed: "Couldn't load your addresses",
+    noAddress: "Add an address this shop delivers to",
+    addAddress: "Add address",
+    close: "Close",
+    place: (amount: string) => `Place order · ${amount}`,
+    placing: "Placing your order…",
+    placeOffline: "Could not reach the server. Your order is not placed yet.",
+    changed: "Your cart changed. Check the new total and place again.",
+    gone: "Your cart or that address changed on another phone. Check them and place again.",
+  },
+  // C09 and C19 (#427). Status words and their looks are design system section 6.
+  order: {
+    title: (number: number) => `Order #${number}`,
+    titleLoading: "Order",
+    loading: "Opening your order…",
+    failed: "Couldn't open your order",
+    retry: "Try again",
+    placed: "Order placed",
+    waiting: "The shop has your order. You can cancel for free until they accept it.",
+    call: "Call the shop",
+    noPhone: "This shop hasn't added a phone number",
+    cancel: "Cancel order",
+    cancelling: "Cancelling…",
+    cancelTitle: "Cancel this order?",
+    cancelBody: "It's free, as the shop hasn't accepted it yet.",
+    keep: "Keep order",
+    answered: "The shop already answered this order, so it can't be cancelled here.",
+    cancelOffline: "Could not reach the server. Your order is not cancelled.",
+    deliverTo: "Delivering to",
+    pay: "Pay the shop at the door, in cash or UPI.",
+    part: (part: string, pack: string) => `${part} of a ${pack} pack`,
+    statuses: {
+      placed: "Waiting for shop",
+      scheduled_pending_review: "Booked for slot",
+      awaiting_customer_confirm: "Confirm new total",
+      accepted: "Accepted",
+      scheduled_confirmed: "Booked for slot",
+      preparing: "Being packed",
+      ready: "Ready",
+      out_for_delivery: "On the way",
+      arrived: "At your door",
+      delivered: "Delivered",
+      picked_up: "Collected",
+      rejected_by_shop: "Shop could not take it",
+      expired: "Shop did not answer",
+      not_collected: "Not collected",
+      cancelled_by_customer: "Cancelled",
+      cancelled_by_shop: "Cancelled by shop",
+      delivery_failed: "Delivery failed",
+    } satisfies Record<OrderStatus, string>,
   },
   // C16 Search (#398): no prices on results (owner's answer 13 on #49).
   search: {

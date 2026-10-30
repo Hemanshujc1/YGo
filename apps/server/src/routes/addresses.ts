@@ -5,6 +5,7 @@ import {
   ErrorEnvelope,
   SaveAddressBody,
   SavedAddress,
+  SavedAddressesQuery,
   SavedAddressesResponse,
   SavedAddressParams,
 } from "@ygo/contracts";
@@ -12,6 +13,7 @@ import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { pointFrom, pointJson } from "../points";
 import { deriveKeys, mobileSignedIn } from "../tokens";
+import { servingShops } from "./feed";
 
 /** At most 10 per account (owner decision on #217). */
 const LIMIT = 10;
@@ -22,11 +24,17 @@ const addressSql = `SELECT id, label, flat, area_line AS "areaLine", pincode, ${
 export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
 
-  app.get("/v1/me/addresses", { schema: { response: { 200: SavedAddressesResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, async (request, reply) => {
+  app.get("/v1/me/addresses", { schema: { querystring: SavedAddressesQuery, response: { 200: SavedAddressesResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
+    const { shopId } = request.query as SavedAddressesQuery;
     const rows = await pool.query<SavedAddress>(`${addressSql} WHERE account_id = $1 ORDER BY saved_at DESC, id`, [who.accountId]);
-    return { addresses: rows.rows };
+    if (!shopId) return { addresses: rows.rows };
+    // C07's Deliver to (#427): the rule placing checks, at each address's own pin (DSC-1). At most 10 addresses.
+    const now = clock.now();
+    const served = await Promise.all(rows.rows.map(async (address) =>
+      address.point !== null && (await servingShops(pool, now, { pincode: address.pincode, ...address.point }, shopId)).length > 0));
+    return { addresses: rows.rows.filter((_, index) => served[index]) };
   });
 
   // The pincode and the point are checked by the contract; no lookups (owner decision on #217).
