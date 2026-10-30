@@ -10,13 +10,11 @@ import { type OpeningStockQueue, refreshListingsAfterConflict, refreshListingsFo
 import { strings } from "../strings";
 import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
 
+import { isCurrentAccount } from "../lib/account";
+
 const words = strings.shopSetup;
 type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; queue: OpeningStockQueue; items: ShopListingCatalogItem[]; accountId: string };
 
-function isCurrentAccount(accountId: string): boolean {
-  const current = session.get();
-  return "account" in current && current.account.id === accountId;
-}
 
 function clientId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
@@ -188,7 +186,7 @@ export default function OpeningStockScreen() {
     const code = ErrorCode.safeParse(result?.code);
     const answer = result?.status === "applied" && result.result ? { ok: true as const, data: result.result }
       : result?.status === "rejected" && code.success ? { ok: false as const, code: code.data } : null;
-    const applied = new Map(response?.results.flatMap((row) => row.status === "applied" && row.result ? [[row.result.listingId, row.result] as const] : []));
+    const applied = new Map(response?.results.flatMap((row) => row.status === "applied" && row.result && "quantity" in row.result ? [[row.result.listingId, row.result] as const] : []));
     if (applied.size > 0) {
       setLoad((current) => current.kind === "loaded" ? {
         ...current,

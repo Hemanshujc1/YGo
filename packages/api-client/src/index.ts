@@ -1,4 +1,5 @@
 import {
+  ShopStockResponse,
   SyncActionsResponse,
   type SyncActionsBody,
   Account,
@@ -465,6 +466,11 @@ export function createApiClient({
     /** `PUT /v1/me/shop-listings/:packId`: save this shop's settings for a catalog pack. */
     async saveShopListing(packId: string, body: SaveShopListingInput): Promise<ApiResult<ShopListingCatalogItem>> {
       return result(await signedIn("PUT", `/v1/me/shop-listings/${encodeURIComponent(packId)}`, body), ShopListingsResponse.shape.items.element);
+    },
+
+    /** Stock tools for the linked Owner or Staff member, after going Live. */
+    async shopStock(): Promise<ApiResult<ShopStockResponse>> {
+      return result(await signedIn("GET", "/v1/me/stock"), ShopStockResponse);
     },
 
     /** Ordered outbox push; acknowledged replays return their original per-action results. */

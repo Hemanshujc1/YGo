@@ -433,3 +433,18 @@ describe("Customer search (#398, DSC-3)", () => {
     expect((await search("rice", {})).statusCode).toBe(401);
   });
 });
+
+it("keeps manually out-of-stock whole and part packs visible on C05, restoring availability when cleared", async () => {
+  const id = await shop("Near Dairy", 300);
+  await publish({ type: "global" }, card);
+  const groceries = await category("Groceries");
+  const item = await product(id, groceries, "Rice", "kg", [{ quantity: "1", price: "60", mrp: "65", stock: "3" }, { quantity: "2", price: "120", mrp: "130", stock: "0.5" }]);
+  await database.pool.query("UPDATE shop_listings SET out_of_stock = true WHERE shop_id = $1", [id]);
+  const flagged = (await page(id)).json().groups[0].products[0].packs;
+  expect(flagged).toHaveLength(2);
+  expect(flagged.every((pack: { outOfStock: boolean; part: unknown }) => pack.outOfStock && pack.part === null)).toBe(true);
+  await database.pool.query("UPDATE shop_listings SET out_of_stock = false WHERE shop_id = $1", [id]);
+  const cleared = (await page(id)).json().groups[0].products[0].packs;
+  expect(cleared.every((pack: { outOfStock: boolean }) => !pack.outOfStock)).toBe(true);
+  expect(cleared.find((pack: { listingId: string }) => pack.listingId === item.listings[1]).part).toMatchObject({ quantity: "0.5", price: "30.00" });
+});

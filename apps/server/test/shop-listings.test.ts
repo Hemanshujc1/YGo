@@ -277,11 +277,11 @@ describe("ordered opening-stock sync", () => {
 });
 
 // Exercise the actual phone outbox over HTTP against Fastify and PostgreSQL.
-it("reopens the encrypted module's SQL queue and server after a committed response is lost", async () => {
+it.each(["opening_stock", "stock_flag"] as const)("reopens the SQL queue and server after a committed %s response is lost", async (type) => {
   // Load the phone module at runtime so its native declaration globals do not enter the server's TypeScript program.
   const { openingStockQueue, syncOpeningStockBatch } = await import(new URL("../../shopkeeper/src/lib/opening-stock-queue.ts", import.meta.url).href);
   const { adapter } = await import(new URL("../../shopkeeper/test/stock-database-fixture.ts", import.meta.url).href);
-  const actor = await shop();
+  const actor = await shop("live");
   await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
   const directory = mkdtempSync(join(tmpdir(), "ygo-sync-"));
   const path = join(directory, "outbox.db");
@@ -289,7 +289,8 @@ it("reopens the encrypted module's SQL queue and server after a committed respon
   try {
     let queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
     const clientId = randomUUID();
-    queue.save(actor.shopId, actor.packId, { quantity: "3", clientId });
+    if (type === "opening_stock") queue.save(actor.shopId, actor.packId, { quantity: "3", clientId });
+    else queue.saveFlag(actor.shopId, actor.packId, true);
     let address = await app.listen({ host: "127.0.0.1", port: 0 });
     const send = async (body: SyncActionsBody) => {
       const response = await fetch(`${address}/v1/sync/actions`, { method: "POST", headers: { ...actor.headers, "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -307,6 +308,69 @@ it("reopens the encrypted module's SQL queue and server after a committed respon
     expect((await syncOpeningStockBatch(queue, actor.shopId, send))?.results[0]?.status).toBe("applied");
     expect(queue.count()).toBe(0);
     expect(db.prepare("SELECT attempts, status FROM opening_stock_actions").get()).toMatchObject({ attempts: 2, status: "applied" });
-    expect((await database.pool.query("SELECT count(*)::int AS n, min(client_id::text) AS id FROM stock_movements")).rows[0]).toEqual({ n: 1, id: clientId });
+    expect((await database.pool.query("SELECT count(*)::int AS n, min(client_id::text) AS id FROM stock_movements")).rows[0])
+      .toEqual(type === "opening_stock" ? { n: 1, id: clientId } : { n: 0, id: null });
+    if (type === "stock_flag") expect((await database.pool.query("SELECT out_of_stock FROM shop_listings WHERE shop_id = $1", [actor.shopId])).rows[0]?.out_of_stock).toBe(true);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+describe("manual Stock flags (#392)", () => {
+  async function setup(state = "live") {
+    const actor = await shop();
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock`, headers: actor.headers, payload: { quantity: "7", clientId: randomUUID() } });
+    await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [actor.shopId, state]);
+    const deviceId = randomUUID();
+    const action = (sequence: number, outOfStock: boolean, overrides = {}) => ({ id: randomUUID(), sequence, shopId: actor.shopId, type: "stock_flag",
+      payload: { packId: actor.packId, outOfStock }, createdAt: clock.now().toISOString(), clockSuspect: false, ...overrides });
+    const send = (actions: object[], headers = actor.headers, device = deviceId) => app.inject({ method: "POST", url: "/v1/sync/actions", headers,
+      payload: { deviceId: device, sentAt: clock.now().toISOString(), actions } });
+    const read = (headers = actor.headers) => app.inject({ method: "GET", url: "/v1/me/stock", headers });
+    return { actor, action, send, read };
+  }
+
+  it.each(["live", "suspended"])("lets Owner and Staff use Stock in %s, preserving FIFO/replay and quantity", async (state) => {
+    const { actor, action, send, read } = await setup(state);
+    const staff = await owner("staff@example.com");
+    await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    expect((await read(staff.headers)).json()).toMatchObject({ shopId: actor.shopId, state, items: [{ packId: actor.packId, quantity: "7.000", outOfStock: false }] });
+    const entries = [action(1, true), action(2, false), action(3, true)];
+    const first = await send(entries, staff.headers);
+    expect(first.statusCode).toBe(200);
+    expect(first.json().results.map((row: { status: string; result: { outOfStock: boolean } }) => [row.status, row.result.outOfStock]))
+      .toEqual([["applied", true], ["applied", false], ["applied", true]]);
+    expect((await send(entries, staff.headers)).json()).toEqual(first.json());
+    // Another phone's later receipt wins even with an earlier client timestamp.
+    const later = action(1, false, { createdAt: "2029-12-31T23:00:00.000Z" });
+    expect((await send([later], actor.headers, randomUUID())).json().results[0].status).toBe("applied");
+    expect((await read()).json().items[0]).toMatchObject({ outOfStock: false, quantity: "7.000" });
+    expect((await database.pool.query("SELECT count(*)::int AS n, sum(quantity)::text AS quantity FROM stock_movements")).rows[0]).toEqual({ n: 1, quantity: "7.000" });
+    // Replay an older result without restoring that old flag.
+    expect((await send(entries, staff.headers)).json()).toEqual(first.json());
+    expect((await read()).json().items[0].outOfStock).toBe(false);
+    const opening = action(4, false, { type: "opening_stock", payload: { packId: actor.packId, quantity: "2" } });
+    expect((await send([opening], staff.headers)).statusCode).toBe(404);
+  });
+
+  it.each(["draft", "submitted", "under_review", "approved"])("refuses Stock in %s without changing quantities", async (state) => {
+    const { action, send, read } = await setup(state);
+    expect((await read()).statusCode).toBe(409);
+    expect((await send([action(1, true)])).json().results[0]).toMatchObject({ status: "rejected", code: "SHOP_LISTING_NOT_READY" });
+    expect((await database.pool.query("SELECT out_of_stock FROM shop_listings")).rows[0]?.out_of_stock).toBe(false);
+  });
+
+  it("rejects malformed, old and missing-pack flags independently, and scopes reads/replays to current access", async () => {
+    const { actor, action, send, read } = await setup();
+    const stranger = await owner("stranger@example.com");
+    expect((await read(stranger.headers)).statusCode).toBe(404);
+    expect((await send([action(1, true)], stranger.headers)).statusCode).toBe(404);
+    const entries = [action(1, true, { payload: { packId: actor.packId, outOfStock: "true" } }),
+      action(2, true, { createdAt: "2029-12-20T00:00:00.000Z" }), action(3, true, { payload: { packId: randomUUID(), outOfStock: true } }), action(4, true)];
+    expect((await send(entries)).json().results.map((row: { code: string | null }) => row.code)).toEqual(["VALIDATION_FAILED", "ACTION_TOO_OLD", "NOT_FOUND", null]);
+    expect((await send([{ ...entries[3], payload: { packId: actor.packId, outOfStock: false } }])).json().results[0].code).toBe("ACTION_CONFLICT");
+    await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [actor.id]);
+    expect((await send(entries)).statusCode).toBe(404);
+    expect((await read()).statusCode).toBe(404);
+  });
 });

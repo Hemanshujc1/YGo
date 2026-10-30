@@ -1,7 +1,17 @@
 import { z } from "zod";
-import { BaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
+import { PackQuantity } from "./fields";
+import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });
+export const StockFlagPayload = z.strictObject({ packId: z.uuid(), outOfStock: z.boolean() });
+export const StockFlagResponse = z.strictObject({ listingId: z.uuid(), outOfStock: z.boolean(), recordedAt: z.iso.datetime() });
+export const ShopStockResponse = z.strictObject({
+  shopId: z.uuid(), state: z.enum(["live", "suspended"]), items: z.array(z.strictObject({
+    listingId: z.uuid(), packId: z.uuid(), name: z.string(), packQuantity: PackQuantity,
+    baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, outOfStock: z.boolean(),
+  })),
+});
+export type ShopStockResponse = z.infer<typeof ShopStockResponse>;
 export const SyncAction = z.strictObject({
   id: z.uuid(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), shopId: z.uuid(),
   type: z.string().min(1).max(80), payload: z.unknown(), createdAt: z.iso.datetime(), clockSuspect: z.boolean(),
@@ -15,7 +25,7 @@ export const SyncActionCode = z.enum([
 ]);
 export const SyncActionResult = z.strictObject({
   actionId: z.uuid(), sequence: z.number().int().positive(), status: z.enum(["applied", "rejected", "retry"]),
-  code: SyncActionCode.nullable(), result: OpeningStockResponse.nullable(), clockSuspect: z.boolean(),
+  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse]).nullable(), clockSuspect: z.boolean(),
 }).refine((row) => row.status === "applied" ? row.code === null && row.result !== null : row.code !== null && row.result === null);
 export const SyncActionsResponse = z.strictObject({ results: z.array(SyncActionResult) });
 export type SyncAction = z.infer<typeof SyncAction>;

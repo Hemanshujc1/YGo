@@ -88,4 +88,13 @@ describe("opening-stock native boundary", () => {
     await expect(openingStockBeforeSignOut(account)).rejects.toThrow("Verify the shop");
     expect(native.legacy.size).toBe(1);
   });
+
+it("counts durable manual flags before sign-out without reading another account's database", async () => {
+  const { openOpeningStock, openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
+  const queue = await openOpeningStock(account);
+  queue.saveFlag(shop, pack, true);
+  expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 1, failed: 0, stockPending: 1 });
+  expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
+});
+
 });

@@ -168,7 +168,7 @@ export const strings = {
     signOut: {
       failedTitle: "Saved stock needs attention",
       failedBody: "Some stock entries were refused by the server. They will stay encrypted on this phone for this account. Sign out anyway?",
-      pending: (count: number) => `${formatNumber(count)} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
+      pending: (count: number) => `${formatNumber(count)} stock entries are waiting to sync. Open Stock or Opening stock and retry before signing out.`,
       checkFailed: "Couldn't check your saved stock. Try again before signing out.",
       openStock: "Open Opening stock",
       title: "Sign out?",
@@ -177,6 +177,17 @@ export const strings = {
     },
   },
   // S19 (#362). The agreement's wording is version AGREEMENT_VERSION in @ygo/contracts: change both together.
+  stock: {
+    title: "Stock", back: "Back", outOfStock: "Out of stock", empty: "No listed packs yet.",
+    pending: "Saved on this phone · waiting to sync", saved: "Saved", retry: "Retry sync", loadFailed: "Couldn't load Stock. Try again online.",
+    storageFailed: "Couldn't save on this phone. Try again before leaving this screen.",
+    failed: (reference: string) => `This change was refused. Your original is retained. Support reference: ${reference}`,
+    corrected: "Save this switch again to retry with a new reference.",
+    opening: "Opening stock and recovery",
+    suspended: "Your shop is suspended. Stock tools remain available; customers cannot place orders.",
+    queueFull: "Your offline queue is full. Sync your saved changes before changing Stock again.",
+    queueExpired: "Your saved changes have reached the offline time limit. Sync them before changing Stock again.",
+  },
   agreement: {
     open: "Agreement and rate card",
     title: "Agreement and rate card",

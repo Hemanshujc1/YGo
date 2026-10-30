@@ -98,8 +98,9 @@ export default function Home() {
 
   if (application) {
     return (
-      <Plain verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+      <Plain stock={application.state === "live" || application.state === "suspended"} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
+        {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
         {liveCheck && <Waiting check={liveCheck} />}
         {(application.state === "approved" || application.state === "live") && (
@@ -132,7 +133,7 @@ export default function Home() {
   }
 
   return (
-    <Plain verifiedShopId={null}>
+    <Plain stock verifiedShopId={null}>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">
         {words.start.title}
       </Text>
@@ -170,7 +171,7 @@ function Waiting({ check }: { check: LiveCheck }) {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshing = false, onRefresh, verifiedShopId }: { verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock = false }: { stock?: boolean; verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
@@ -181,6 +182,11 @@ function Plain({ children, refreshing = false, onRefresh, verifiedShopId }: { ve
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
     >
       {children}
+      {stock && <Link href="/stock" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+          <Text className="text-body font-semibold text-primary">{strings.stock.title}</Text>
+        </Pressable>
+      </Link>}
       <View className="mt-8 gap-8">
         <ThemePicker session={session} words={strings.theme} />
         <SignOut verifiedShopId={verifiedShopId} />

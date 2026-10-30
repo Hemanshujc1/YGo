@@ -25,11 +25,11 @@ export const stockOf = (listing: string) =>
  * The query names the pack `pack` and the product `product`.
  */
 export const partOf = (listing: string) => `(SELECT CASE
-    WHEN product.classification = 'measured' AND remainder.stock > 0 AND remainder.stock < pack.quantity
+    WHEN NOT ${listing}.out_of_stock AND product.classification = 'measured' AND remainder.stock > 0 AND remainder.stock < pack.quantity
       AND remainder.stock >= COALESCE(${listing}.minimum_order_quantity, 0) AND remainder.price > 0
     THEN jsonb_build_object('quantity', trim_scale(remainder.stock)::text, 'price', remainder.price::text) END
   FROM (SELECT stock, round(${listing}.online_price * stock / pack.quantity, 2) AS price
     FROM (SELECT ${stockOf(listing)} AS stock) stock) remainder)`;
 
-/** A listing can be ordered now: a whole pack is left, or a part of one (C05 and search, #377). */
-export const inStock = (listing: string) => `(${stockOf(listing)} >= pack.quantity OR ${partOf(listing)} IS NOT NULL)`;
+/** A listing can be ordered now: it is not manually out of stock, and a whole pack or part is left (C05 and search, #377). */
+export const inStock = (listing: string) => `(NOT ${listing}.out_of_stock AND (${stockOf(listing)} >= pack.quantity OR ${partOf(listing)} IS NOT NULL))`;

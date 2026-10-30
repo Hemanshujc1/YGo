@@ -209,7 +209,7 @@ export const shops = pgTable("shops", {
   openOverrideUntil: timestamp("open_override_until", { withTimezone: true }),
 }, (table) => [
   index("shops_area_manager_id_idx").on(table.areaManagerId),
-  check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved', 'live')`),
+  check("shops_state_valid", sql`${table.state} IN ('draft', 'submitted', 'under_review', 'approved', 'live', 'suspended')`),
   check("shops_entity_type_valid", sql`${table.entityType} IN ('proprietorship', 'partnership_firm', 'llp', 'company')`),
   check("shops_open_override_pair", sql`(${table.openOverride} IS NULL) = (${table.openOverrideUntil} IS NULL)`),
   check("shops_service_radius_valid", sql`${table.serviceRadiusMetres} BETWEEN 500 AND 5000 AND ${table.serviceRadiusMetres} % 500 = 0`),
@@ -314,6 +314,7 @@ export const shopListings = pgTable("shop_listings", {
   mrp: numeric("mrp", { precision: 12, scale: 2 }).notNull(),
   lowStockLevel: numeric("low_stock_level", { precision: 12, scale: 3 }).notNull().default("0"),
   available: boolean("available").notNull().default(true),
+  outOfStock: boolean("out_of_stock").notNull().default(false),
   minimumOrderQuantity: numeric("minimum_order_quantity", { precision: 12, scale: 3 }),
   quantityStep: numeric("quantity_step", { precision: 12, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

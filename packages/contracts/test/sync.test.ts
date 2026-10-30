@@ -12,3 +12,13 @@ describe("batch sync contracts", () => {
     expect(SyncActionsResponse.safeParse({ results: [{ actionId: id, sequence: 1, status: "applied", code: null, result: null, clockSuspect: false }] }).success).toBe(false);
   });
 });
+
+it("accepts boolean flag results and keeps payloads strict", async () => {
+  const { StockFlagPayload, ShopStockResponse } = await import("../src/sync");
+  expect(StockFlagPayload.safeParse({ packId: id, outOfStock: true }).success).toBe(true);
+  for (const outOfStock of ["true", 1, null]) expect(StockFlagPayload.safeParse({ packId: id, outOfStock }).success).toBe(false);
+  expect(StockFlagPayload.safeParse({ packId: id, outOfStock: false, quantity: "0" }).success).toBe(false);
+  expect(SyncActionsResponse.safeParse({ results: [{ actionId: id, sequence: 1, status: "applied", code: null,
+    result: { listingId: id, outOfStock: false, recordedAt: action.createdAt }, clockSuspect: false }] }).success).toBe(true);
+  expect(ShopStockResponse.safeParse({ shopId: id, state: "approved", items: [] }).success).toBe(false);
+});

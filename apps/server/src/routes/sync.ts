@@ -1,4 +1,4 @@
-import { ErrorEnvelope, OpeningStockPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
@@ -27,9 +27,9 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       const results: SyncActionResult[] = [];
       for (const action of body.actions) {
         // Access is checked even for replays; neither an ID nor a device grants shop access.
-        const shop = await client.query<{ state: string }>(`SELECT s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
-          WHERE s.id = $1 AND m.account_id = $2 AND m.role = 'owner' FOR UPDATE OF s`, [action.shopId, who.accountId]);
-        if (!shop.rows[0]) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        const shop = await client.query<{ state: string; role: string }>(`SELECT s.state, m.role FROM shops s JOIN shop_members m ON m.shop_id = s.id
+          WHERE s.id = $1 AND m.account_id = $2 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [action.shopId, who.accountId]);
+        if (!shop.rows[0] || (action.type === "opening_stock" && shop.rows[0].role !== "owner")) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         const clockSuspect = action.clockSuspect || Math.abs(now.getTime() - Date.parse(body.sentAt)) > clockSkewSeconds * 1000
           || Date.parse(action.createdAt) > Date.parse(body.sentAt) + clockSkewSeconds * 1000;
         const result: SyncActionResult = { actionId: action.id, sequence: action.sequence, status: "retry", code: null, result: null, clockSuspect };
@@ -47,7 +47,22 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
         }
         result.status = "rejected";
         const payload = OpeningStockPayload.safeParse(action.payload);
-        if (action.type !== "opening_stock" || !payload.success) result.code = "VALIDATION_FAILED";
+        if (action.type === "stock_flag") {
+          const flag = StockFlagPayload.safeParse(action.payload);
+          if (!flag.success) result.code = "VALIDATION_FAILED";
+          else if (shop.rows[0].state !== "live" && shop.rows[0].state !== "suspended") result.code = "SHOP_LISTING_NOT_READY";
+          else if (now.getTime() - Date.parse(action.createdAt) > maxAgeSeconds * 1000) result.code = "ACTION_TOO_OLD";
+          else {
+            const { rows: [listing] } = await client.query<{ id: string }>(`UPDATE shop_listings SET out_of_stock = $3, updated_at = $4
+              WHERE shop_id = $1 AND pack_id = $2 RETURNING id`, [action.shopId, flag.data.packId, flag.data.outOfStock, now]);
+            if (!listing) result.code = "NOT_FOUND";
+            else {
+              result.status = "applied";
+              result.result = { listingId: listing.id, outOfStock: flag.data.outOfStock, recordedAt: now.toISOString() };
+            }
+          }
+        } else if (shop.rows[0].role !== "owner") result.code = "NOT_FOUND";
+        else if (action.type !== "opening_stock" || !payload.success) result.code = "VALIDATION_FAILED";
         else if (shop.rows[0].state !== "approved" && shop.rows[0].state !== "live") result.code = "SHOP_LISTING_NOT_READY";
         else {
           // A legacy endpoint's lost response remains replayable even after the age bound.

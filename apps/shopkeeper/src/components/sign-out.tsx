@@ -19,7 +19,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
 
   const working = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<false | "opening" | "stock">(false);
 
   async function signOut(acceptedAccount: string | null = null) {
     if (working.current) return;
@@ -36,7 +36,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
       if (!("account" in current) || current.account.id !== before.account.id) return;
       if (counts.pending > 0) {
         setMessage(words.pending(counts.pending));
-        setPending(true);
+        setPending(counts.stockPending ? "stock" : "opening");
         return;
       }
       if (counts.failed > 0 && acceptedAccount !== before.account.id) { setFailedWarning(before.account.id); setAsking(true); return; }
@@ -61,7 +61,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
         variant="secondary"
       />
       {message && <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-pending">{message}</Text>}
-      {pending && <Link href="/opening-stock" className="mt-3 py-3 text-body text-primary">{words.openStock}</Link>}
+      {pending && <Link href={pending === "stock" ? "/stock" : "/opening-stock"} className="mt-3 py-3 text-body text-primary">{pending === "stock" ? strings.stock.title : words.openStock}</Link>}
       <Confirm
         visible={asking}
         title={failedWarning ? words.failedTitle : words.title}
