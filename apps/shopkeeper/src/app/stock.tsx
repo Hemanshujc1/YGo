@@ -1,7 +1,7 @@
 import { StockFlagPayload } from "@ygo/contracts";
 import { trimDecimal } from "@ygo/format";
 import { Button, SupportEmail, Text } from "@ygo/mobile";
-import { Cloud } from "lucide-react-native";
+import { Cloud } from "../components/icons";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
