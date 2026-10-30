@@ -205,7 +205,7 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     await database.pool.query("UPDATE stock_movements SET quantity = 5 WHERE listing_id = $1", [atta]);
     expect((await read(shopId)).json()).toMatchObject({ lines: [{ count: 1 }, { count: 1, left: 1, lineTotal: "199.99" }], quote: { productValue: "334.99" } });
 
-    // None left: the line stays, unpriced, and the cart can't be ordered until it's removed (CRT-4).
+    // None left, as part of a pack counts as none until #377 (#410): the line stays, unpriced, and the cart can't be ordered until it's removed (CRT-4).
     await database.pool.query("UPDATE stock_movements SET quantity = 4.999 WHERE listing_id = $1", [atta]);
     await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
     expect((await read(shopId)).json()).toMatchObject({

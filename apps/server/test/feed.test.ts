@@ -197,7 +197,7 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
     ]);
     const atta = await product(id, groceries, "atta", "kg", [
       { quantity: "5", price: "199.99", mrp: "200", stock: "10" }, // 0.005% off rounds up to 0.01
-      { quantity: "10", price: "60", mrp: "65", stock: "5" }, // 7.69% off (#411)
+      { quantity: "10", price: "60", mrp: "65", stock: "5" }, // 7.69% off (#411); half a pack left is in stock (owner's answer 2 on #410)
     ]);
     const pen = await product(id, stationery, "Pen", "each", [{ quantity: "1", price: "10", mrp: "10" }]); // no stock recorded
     await product(id, groceries, "Hidden Rice", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3", available: false }]);
@@ -362,6 +362,7 @@ describe("Customer search (#398, DSC-3)", () => {
     await product(kirana, groceries, "Sandal Soap", "each", [{ quantity: "1", price: "40", mrp: "40", stock: "9" }]);
     await product(kirana, groceries, "Tomato", "kg", [{ quantity: "1", price: "30", mrp: "30", stock: "9" }]);
     await product(kirana, groceries, "Crème Fraîche", "each", [{ quantity: "1", price: "90", mrp: "90", stock: "1" }]);
+    await product(kirana, groceries, "Jaggery", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "0.4" }]);
     await product(kirana, groceries, "Hidden Onion", "kg", [{ quantity: "1", price: "40", mrp: "40", stock: "9", available: false }]);
 
     // Word starts only: "dal" finds Toor Dal, not Sandal; a product is in stock when any pack is (owner's answers 1 and 3 on #398).
@@ -370,6 +371,8 @@ describe("Customer search (#398, DSC-3)", () => {
     // Brand, accents, a near spelling from 4 letters, and words split across the shop's name and a product.
     expect(await found("amul")).toEqual([["Near Dairy", ["Toned Milk in"], 0]]);
     expect(await found("creme")).toEqual([["Shree Kirana", ["Crème Fraîche in"], 0]]);
+    // Part of a pack left is in stock, as on C05 (owner's answer 2 on #410).
+    expect(await found("jaggery")).toEqual([["Shree Kirana", ["Jaggery in"], 0]]);
     expect(await found("tomatoe")).toEqual([["Shree Kirana", ["Tomato in"], 0]]);
     expect(await found("potato")).toEqual([]);
     expect(await found("onn")).toEqual([]); // under 4 letters a word must match as typed

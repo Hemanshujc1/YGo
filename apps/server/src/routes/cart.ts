@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { CartParams, CartResponse, type CartLine, type CartReason, ErrorEnvelope, FeedQuery, SaveCartBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
-import { visibleListings } from "../listings";
+import { stockOf, visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { servingShops, type ServingShop } from "./feed";
 import { deliveredQuote, latestRateCardVersion } from "./price-simulator";
@@ -17,10 +17,9 @@ async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[])
     `SELECT entry.position::int AS position, l.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
         trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
         EXISTS (SELECT 1 FROM ${visibleListings} AND listing.id = l.id) AS "onSale",
-        -- Stock is held in base units (CAT-4), so a pack needs its whole quantity. Capped at 1000, one above
+        -- Whole packs only until #377 sells part packs (#410). Capped at 1000, one above
         -- the largest count, so a count of 999 is never shown as the last packs left.
-        LEAST(GREATEST(floor(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = l.id), 0)
-          / pack.quantity), 0), 1000)::int AS "packsLeft"
+        LEAST(GREATEST(floor(${stockOf("l")} / pack.quantity), 0), 1000)::int AS "packsLeft"
       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)
       JOIN shop_listings l ON l.id = (entry.line->>'listingId')::uuid AND l.shop_id = $1
       JOIN packs pack ON pack.id = l.pack_id
