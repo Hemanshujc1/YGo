@@ -44,8 +44,8 @@ export default function OrdersScreen() {
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       <TopBar title={words.title} />
       <ScrollView
-        contentContainerClassName="gap-4 px-4"
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 32 }}
+        contentContainerClassName="gap-4 px-4 pt-2"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         refreshControl={<RefreshControl refreshing={view.refreshing} onRefresh={() => void orders.refresh()} />}
       >
         {view.status === "loading" && (

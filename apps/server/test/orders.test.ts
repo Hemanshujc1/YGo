@@ -664,6 +664,11 @@ describe("Customer's order list (#426, ORD-1)", () => {
     expect(listed.active).toEqual([]);
     expect(listed.past).toMatchObject([{ id: order.id, status: "placed", answerExpired: true }]);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toMatchObject({ status: "placed", answerExpired: true });
+    // Cancel refuses from the same moment, as C19 hides it, so the order ends as the shop not answering.
+    const cancelled = await cancel(order.id);
+    expect(cancelled.statusCode).toBe(409);
+    expect(cancelled.json()).toEqual({ error: { code: "ORDER_EXPIRED" } });
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [order.id])).rows).toEqual([{ status: "placed" }]);
   });
 
   it("shows the newest 50 past orders and every active one, and an empty list for a Customer with none", async () => {

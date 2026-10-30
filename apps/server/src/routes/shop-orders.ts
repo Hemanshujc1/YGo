@@ -9,7 +9,7 @@ import { withTransaction } from "../db";
 import { stockOf } from "../listings";
 import { moveOrder } from "../orders";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { frozenOrder } from "./orders";
+import { answerExpired, frozenOrder } from "./orders";
 
 const answerMs = ORDER_ANSWER_SECONDS * 1000;
 
@@ -44,11 +44,11 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           json_build_object('flat', o.address_flat, 'areaLine', o.address_area_line) AS address
         FROM orders o
         WHERE o.shop_id = $1 AND (
-          (o.status = 'placed' AND o.placed_at > $2::timestamptz - make_interval(secs => $3))
-          OR o.status = ANY($4::text[])
-          OR (o.status = ANY($5::text[]) AND (o.status_changed_at AT TIME ZONE 'Asia/Kolkata')::date = ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date))
-        ORDER BY CASE WHEN o.status = ANY($5::text[]) THEN -extract(epoch FROM o.status_changed_at) ELSE extract(epoch FROM o.placed_at) END`,
-      [member.shopId, now, ORDER_ANSWER_SECONDS, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES]);
+          (o.status = 'placed' AND NOT ${answerExpired("o", "$2")})
+          OR o.status = ANY($3::text[])
+          OR (o.status = ANY($4::text[]) AND (o.status_changed_at AT TIME ZONE 'Asia/Kolkata')::date = ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date))
+        ORDER BY CASE WHEN o.status = ANY($4::text[]) THEN -extract(epoch FROM o.status_changed_at) ELSE extract(epoch FROM o.placed_at) END`,
+      [member.shopId, now, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES]);
     const summary = (row: Row): ShopOrderSummary => ({ ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt) });
     return {
       now: now.toISOString(),

@@ -152,9 +152,9 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
       if (answer !== "offline" && answer.ok) {
         set({ status: "ready", order: answer.data });
         schedule();
-      } else if (answer !== "offline" && answer.code === "ORDER_STATUS_CHANGED") {
-        // The shop answered first; asking it to cancel comes later (#59).
-        set({ notice: strings.order.answered });
+      } else if (answer !== "offline" && (answer.code === "ORDER_STATUS_CHANGED" || answer.code === "ORDER_EXPIRED")) {
+        // The shop answered first, or its time ran out before the next read showed it; asking it to cancel comes later (#59).
+        set({ notice: answer.code === "ORDER_EXPIRED" ? strings.errors.ORDER_EXPIRED : strings.order.answered });
         await read();
       } else {
         set({ notice: answer === "offline" ? strings.order.cancelOffline : strings.errors[answer.code] });

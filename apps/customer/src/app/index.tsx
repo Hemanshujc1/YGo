@@ -177,17 +177,17 @@ export default function Home() {
     >
       <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
       {/* Orders sits beside Account until the tab bar (owner's answer 5 on #426). */}
-      <View className="mt-4 flex-row gap-2">
-        {([["/orders", strings.orders.open], ["/account", strings.account.open]] as const).map(([href, label]) => (
-          <Link key={href} href={href} asChild>
-            <Pressable
-              accessibilityRole="button"
-              className="min-h-12 items-center justify-center rounded-button border border-border bg-surface px-4"
-            >
-              <Text className="text-secondary font-medium text-text">{label}</Text>
-            </Pressable>
-          </Link>
-        ))}
+      <View className="mt-4 flex-row gap-2 self-start">
+        <Link href="/orders" asChild>
+          <Pressable accessibilityRole="button" className="min-h-12 items-center justify-center rounded-button border border-border bg-surface px-4">
+            <Text className="text-secondary font-medium text-text">{strings.orders.open}</Text>
+          </Pressable>
+        </Link>
+        <Link href="/account" asChild>
+          <Pressable accessibilityRole="button" className="min-h-12 items-center justify-center rounded-button border border-border bg-surface px-4">
+            <Text className="text-secondary font-medium text-text">{strings.account.open}</Text>
+          </Pressable>
+        </Link>
       </View>
       <AreaLine />
       <Text className="mt-6 text-secondary text-muted">{strings.health}</Text>

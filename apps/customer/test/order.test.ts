@@ -20,7 +20,7 @@ const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
 };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "ORDER_STATUS_CHANGED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
+const refused = (code: "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
   ({ ok: false, status, code, ...more }) as ApiResult<never>;
 
 /** Timers the test runs by hand. */
@@ -245,6 +245,23 @@ describe("C09/C19 order (#427)", () => {
     server.reads.shift()?.(ok(order("accepted")));
     await cancelling;
     expect(store.get().order?.status).toBe("accepted");
+  });
+
+  it("says the shop's time ran out when Cancel lands past it, and reads the order again (#426)", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order(), clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(order()));
+    await settle();
+    const cancelling = store.cancel();
+    server.cancels.shift()?.(refused("ORDER_EXPIRED", 409));
+    await settle();
+    expect(store.get().notice).toBe(strings.errors.ORDER_EXPIRED);
+    server.reads.shift()?.(ok({ ...order(), answerExpired: true }));
+    await cancelling;
+    expect(store.get().order?.answerExpired).toBe(true);
+    expect(clock.pending.size).toBe(0);
   });
 
   it("says Cancel didn't reach the server when offline, and keeps polling", async () => {

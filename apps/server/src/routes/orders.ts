@@ -29,8 +29,11 @@ export const frozenOrder = (o: string) => `json_build_object('label', ${o}.addre
 const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.shop_name, 'phone', (SELECT a.phone FROM shop_members m
           JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = ${s}.id AND m.role = 'owner' ORDER BY a.id LIMIT 1))`;
 
-/** Still placed at `now` but past its answer time, the moment Accept starts refusing (owner's answer 4 on #426). */
-const answerExpired = (o: string, now: string) =>
+/**
+ * Still placed at `now` but past its answer time: Accept, Reject and Cancel refuse from this moment, and S04 stops
+ * listing it as New (owner's answer 4 on #426). The one place the 600 s cut-off is written in SQL.
+ */
+export const answerExpired = (o: string, now: string) =>
   `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${ORDER_ANSWER_SECONDS}) <= ${now}::timestamptz)`;
 
 /** C09 and C19: one of the Customer's orders as it was frozen. */
@@ -128,19 +131,20 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
   app.get("/v1/orders", { schema: { response: { 200: OrdersResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    type Row = Omit<OrderSummary, "placedAt"> & { placedAt: Date };
-    const ended = `(o.status = ANY($2::text[]) OR ${answerExpired("o", "$3")})`;
-    const rows = (where: string, order: string, limit = "") => pool.query<Row>(
-      `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, o.total::text AS total, ${answerExpired("o", "$3")} AS "answerExpired"
-        FROM orders o JOIN shops s ON s.id = o.shop_id
-        WHERE o.account_id = $1 AND ${where} ORDER BY ${order} ${limit}`,
+    type Row = Omit<OrderSummary, "placedAt"> & { placedAt: Date; ended: boolean };
+    // One statement at one `now`, so an order changing meanwhile can't land in both groups or neither.
+    const { rows } = await pool.query<Row>(
+      `SELECT * FROM (
+          SELECT *, row_number() OVER (PARTITION BY ended ORDER BY "placedAt" DESC, number DESC) AS rank FROM (
+            SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, o.total::text AS total,
+              ${answerExpired("o", "$3")} AS "answerExpired", (o.status = ANY($2::text[]) OR ${answerExpired("o", "$3")}) AS ended
+            FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.account_id = $1) AS mine) AS ranked
+        WHERE NOT ended OR rank <= ${PAST_SHOWN}
+        ORDER BY ended, status IN ('awaiting_customer_confirm', 'arrived') DESC, "placedAt" DESC, number DESC`,
       [who.accountId, TERMINAL_ORDER_STATUSES, clock.now()]);
-    const [active, past] = await Promise.all([
-      rows(`NOT ${ended}`, "o.status IN ('awaiting_customer_confirm', 'arrived') DESC, o.placed_at DESC, o.number DESC"),
-      rows(ended, "o.placed_at DESC, o.number DESC", `LIMIT ${PAST_SHOWN}`),
-    ]);
-    const summary = (row: Row): OrderSummary => ({ ...row, placedAt: row.placedAt.toISOString() });
-    return { active: active.rows.map(summary), past: past.rows.map(summary) };
+    const summary = ({ id, number, status, placedAt, shop, total, answerExpired: late }: Row): OrderSummary =>
+      ({ id, number, status, placedAt: placedAt.toISOString(), shop, total, answerExpired: late });
+    return { active: rows.filter((row) => !row.ended).map(summary), past: rows.filter((row) => row.ended).map(summary) };
   });
 
   app.get("/v1/orders/:id", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
@@ -159,7 +163,12 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       const { rows: [order] } = await client.query<{ id: string; status: OrderStatus }>(
         "SELECT id, status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
       if (!order) return "NOT_FOUND";
-      if (!await moveOrder(client, order, "cancelled_by_customer", { id: who.accountId, role: "customer" }, clock.now())) return "ORDER_STATUS_CHANGED";
+      // Read after the lock, as Accept does, so a wait on it can't stamp an earlier time.
+      const now = clock.now();
+      const { rows: [late] } = await client.query<{ late: boolean }>(`SELECT ${answerExpired("orders", "$2")} AS late FROM orders WHERE id = $1`, [id, now]);
+      // Past its answer time the order has ended as the shop not answering, so there is nothing to cancel (owner's answer 4 on #426).
+      if (late?.late) return "ORDER_EXPIRED";
+      if (!await moveOrder(client, order, "cancelled_by_customer", { id: who.accountId, role: "customer" }, now)) return "ORDER_STATUS_CHANGED";
       await client.query("COMMIT");
       return "MOVED";
     });
