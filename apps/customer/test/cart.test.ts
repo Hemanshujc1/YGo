@@ -338,9 +338,11 @@ describe("the cart store (#406)", () => {
     server.loads.shift()?.(ok(cart(2, [line(atta, 1)])));
     await first;
     const older = store.load(place);
-    store.adopt(cart(3, [line(atta, 1, { lineTotal: "70" })], { quote: { productValue: "70", deliveryFee: "20", smallCartFee: null, total: "90" } }));
+    expect(store.get().pricedFor).toEqual(place);
+    const work = { ...place, latitude: 18.6 };
+    store.adopt(cart(3, [line(atta, 1, { lineTotal: "70" })], { quote: { productValue: "70", deliveryFee: "20", smallCartFee: null, total: "90" } }), work);
     server.loads.shift()?.(ok(cart(2, [line(atta, 1)])));
     await older;
-    expect(store.get()).toMatchObject({ status: "ready", server: { revision: 3, quote: { total: "90" } } });
+    expect(store.get()).toMatchObject({ status: "ready", server: { revision: 3, quote: { total: "90" } }, pricedFor: work });
   });
 });

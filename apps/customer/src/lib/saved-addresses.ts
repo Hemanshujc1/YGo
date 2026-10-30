@@ -3,7 +3,7 @@ import { AddressAreaLine, AddressPoint, type SavedAddress, type SavedAddressesRe
 import { type Place, sentOutcome, typedPlace } from "./location-flow";
 
 /** A row's second line: "4B, Prabhat Road, Shivaji Nagar, Pune", or "4B, 411045" for a place saved without a pin (#243, Q2). */
-export const addressLine = (address: SavedAddress) => `${address.flat}, ${address.areaLine ?? address.pincode}`;
+export const addressLine = (address: Pick<SavedAddress, "flat" | "areaLine" | "pincode">) => `${address.flat}, ${address.areaLine ?? address.pincode}`;
 
 /** C15's saved addresses section (#243, Q5): loading, failed with Try again, or the list. */
 export type SavedList = { kind: "loading" } | { kind: "failed" } | { kind: "loaded"; addresses: SavedAddress[] };

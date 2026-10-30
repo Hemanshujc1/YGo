@@ -32,7 +32,7 @@ export type Placed =
   | { kind: "placed"; order: OrderResponse }
   | { kind: "offline" }
   | { kind: "changed"; cart: CartResponse | null }
-  | { kind: "addressGone" }
+  | { kind: "gone" }
   | { kind: "error"; code: ErrorCode };
 
 /** Places the cart C07 shows, at the revision and total on screen, for the chosen address (#424). */
@@ -50,8 +50,8 @@ export async function placeOrder(
   }
   if (answer.ok) return { kind: "placed", order: answer.data };
   if (answer.code === "CART_CHANGED") return { kind: "changed", cart: answer.cart ?? null };
-  // The address was removed or lost its pin on another phone.
-  if (answer.code === "NOT_FOUND") return { kind: "addressGone" };
+  // The address or the cart is gone, as when either was removed or placed from another phone.
+  if (answer.code === "NOT_FOUND") return { kind: "gone" };
   return { kind: "error", code: answer.code };
 }
 
@@ -113,6 +113,8 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
   };
 
   async function read(pull = false) {
+    // Cancel's answer is the newest word on the order; a read waits until it lands.
+    if (view.cancelling) return;
     const mine = ++ticket;
     unschedule();
     if (pull) set({ refreshing: true });
@@ -155,9 +157,11 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
       if (view.cancelling) return;
       // An older read landing after this must not bring back the placed status.
       ticket += 1;
+      unschedule();
       set({ cancelling: true, notice: null });
       const answer = await client.cancelOrder(id).catch(() => "offline" as const);
-      set({ cancelling: false });
+      // A pull to refresh dropped by the ticket above is over too.
+      set({ cancelling: false, refreshing: false });
       if (answer !== "offline" && answer.ok) {
         set({ status: "ready", order: answer.data });
         schedule();

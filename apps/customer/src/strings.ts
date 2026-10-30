@@ -271,7 +271,7 @@ export const strings = {
     placing: "Placing your order…",
     placeOffline: "Could not reach the server. Your order is not placed yet.",
     changed: "Your cart changed. Check the new total and place again.",
-    addressGone: "That address was removed. Choose another one.",
+    gone: "Your cart or that address changed on another phone. Check them and place again.",
   },
   // C09 and C19 (#427). Status words and their looks are design system section 6.
   order: {
@@ -293,6 +293,7 @@ export const strings = {
     cancelOffline: "Could not reach the server. Your order is not cancelled.",
     deliverTo: "Delivering to",
     pay: "Pay the shop at the door, in cash or UPI.",
+    part: (part: string, pack: string) => `${part} of a ${pack} pack`,
     statuses: {
       placed: "Waiting for shop",
       scheduled_pending_review: "Booked for slot",

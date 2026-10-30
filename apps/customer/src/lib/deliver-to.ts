@@ -11,17 +11,19 @@ export function addressQuery(address: SavedAddress): FeedQuery | undefined {
   return address.point ? { pincode: address.pincode, ...address.point } : undefined;
 }
 
+/** The address Confirm location just saved for C07's Add address, chosen when the cart shows again (owner's answer 4 on #427). */
+let added: string | undefined;
+export const addedFromCart = (id: string) => void (added = id);
+
 /**
- * Which address C07 delivers to (owner's answers 2–4 on #427): one just added from C07, else the
- * Customer's own choice for this shop, else the place chosen on Home, else the newest. `addresses`
- * are the ones the shop delivers to, newest first; `known` the ids the last list held.
+ * Which address C07 delivers to (owner's answers 2 and 3 on #427): the Customer's own choice for
+ * this shop, else the place chosen on Home, else the newest. `addresses` are the ones the shop
+ * delivers to, newest first.
  */
 export function pickAddress(
   addresses: readonly SavedAddress[],
-  { known, chosen, place }: { known: ReadonlySet<string> | null; chosen: string | undefined; place: FeedQuery | undefined },
+  { chosen, place }: { chosen: string | undefined; place: FeedQuery | undefined },
 ): SavedAddress | null {
-  const added = known && addresses.find((address) => !known.has(address.id));
-  if (added) return added;
   const kept = addresses.find((address) => address.id === chosen);
   if (kept) return kept;
   const here = place && addresses.find(({ pincode, point }) =>
@@ -34,7 +36,6 @@ export type DeliverTo = { status: "loading" | "failed" | "ready"; addresses: Sav
 /** One shop's Deliver to, kept with its cart until the app closes or the account changes. */
 export function createDeliverTo(client: { savedAddresses(shopId: string): Promise<ApiResult<SavedAddressesResponse>> }, shopId: string) {
   let view: DeliverTo = { status: "loading", addresses: [], address: null };
-  let known: Set<string> | null = null;
   /** Set by the Customer, or by an address they just added; otherwise the choice follows Home's place. */
   let chosen: string | undefined;
   let ticket = 0;
@@ -59,9 +60,10 @@ export function createDeliverTo(client: { savedAddresses(shopId: string): Promis
       if (mine !== ticket) return;
       // A failed reload keeps the list shown.
       if (!found) return set({ status: view.status === "ready" ? "ready" : "failed" });
-      const address = pickAddress(found, { known, chosen, place });
-      if (known && address && !known.has(address.id)) chosen = address.id;
-      known = new Set(found.map((row) => row.id));
+      // An address added from C07 the shop doesn't deliver to stays out, and the choice stays as it was.
+      if (added && found.some((row) => row.id === added)) chosen = added;
+      added = undefined;
+      const address = pickAddress(found, { chosen, place });
       set({ status: "ready", addresses: found, address });
     },
 

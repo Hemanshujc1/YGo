@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { SavedAddress, SavedAddressesResponse } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { addressQuery, createDeliverTo, deliverLine, pickAddress } from "../src/lib/deliver-to";
+import { addedFromCart, addressQuery, createDeliverTo, deliverLine, pickAddress } from "../src/lib/deliver-to";
 
 const shopId = "5b0c7f1e-2a4d-4e8f-9b6a-1c3d5e7f9a0b";
 const address = (id: string, label: SavedAddress["label"], flat: string, latitude: number): SavedAddress => ({
@@ -19,15 +19,14 @@ describe("Deliver to (#427)", () => {
     expect(addressQuery({ ...work, point: null })).toBeUndefined();
   });
 
-  it("picks one just added, else the Customer's choice, else Home's place, else the newest", () => {
+  it("picks the Customer's choice, else Home's place, else the newest", () => {
     const list = [work, home];
-    expect(pickAddress(list, { known: null, chosen: undefined, place: homePlace })).toBe(home);
-    expect(pickAddress(list, { known: null, chosen: undefined, place: { ...homePlace, latitude: 18.6 } })).toBe(work);
-    expect(pickAddress(list, { known: null, chosen: work.id, place: homePlace })).toBe(work);
-    expect(pickAddress([added, ...list], { known: new Set([work.id, home.id]), chosen: work.id, place: homePlace })).toBe(added);
+    expect(pickAddress(list, { chosen: undefined, place: homePlace })).toBe(home);
+    expect(pickAddress(list, { chosen: undefined, place: { ...homePlace, latitude: 18.6 } })).toBe(work);
+    expect(pickAddress(list, { chosen: work.id, place: homePlace })).toBe(work);
     // A choice since removed falls back.
-    expect(pickAddress([home], { known: new Set([work.id, home.id]), chosen: work.id, place: undefined })).toBe(home);
-    expect(pickAddress([], { known: null, chosen: undefined, place: homePlace })).toBeNull();
+    expect(pickAddress([home], { chosen: work.id, place: undefined })).toBe(home);
+    expect(pickAddress([], { chosen: undefined, place: homePlace })).toBeNull();
   });
 
   it("asks for the shop's addresses, keeps a choice, and keeps an address added from C07 chosen", async () => {
@@ -41,9 +40,18 @@ describe("Deliver to (#427)", () => {
     store.choose(work.id);
     await store.load(homePlace);
     expect(store.get().address).toBe(work);
+    // An address the shop now reaches but the Customer didn't add from C07 leaves their choice alone.
     answer = { ok: true, data: { addresses: [added, work, home] } };
     await store.load(homePlace);
+    expect(store.get().address).toBe(work);
+    // One saved from C07's Add address is chosen, and stays chosen.
+    addedFromCart(added.id);
+    await store.load(homePlace);
     expect(store.get().address).toBe(added);
+    await store.load(homePlace);
+    expect(store.get().address).toBe(added);
+    // One the shop doesn't deliver to leaves the choice as it was.
+    addedFromCart("0b6f3f1e-8f2a-4d6e-9a51-5c1d2e3f4a09");
     await store.load(homePlace);
     expect(store.get().address).toBe(added);
   });

@@ -73,7 +73,7 @@ describe("placing the cart (#427)", () => {
     expect(await placeOrder(answering(new TypeError("Network request failed")), shopId, cart, addressId)).toEqual({ kind: "offline" });
     const now = { ...cart, revision: 3 };
     expect(await placeOrder(answering(refused("CART_CHANGED", 409, { cart: now })), shopId, cart, addressId)).toEqual({ kind: "changed", cart: now });
-    expect(await placeOrder(answering(refused("NOT_FOUND", 404)), shopId, cart, addressId)).toEqual({ kind: "addressGone" });
+    expect(await placeOrder(answering(refused("NOT_FOUND", 404)), shopId, cart, addressId)).toEqual({ kind: "gone" });
     expect(await placeOrder(answering(refused("OWN_SHOP", 403)), shopId, cart, addressId)).toEqual({ kind: "error", code: "OWN_SHOP" });
   });
 });
@@ -183,6 +183,35 @@ describe("C09/C19 order (#427)", () => {
     await settle();
     expect(store.get()).toMatchObject({ cancelling: false, notice: null, order: { status: "cancelled_by_customer" } });
     expect(clock.pending.size).toBe(0);
+  });
+
+  it("reads nothing while Cancel is on its way, so a read can't land after it with the placed status", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order(), clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(order()));
+    await settle();
+    const cancelling = store.cancel();
+    expect(clock.pending.size).toBe(0);
+    // The app comes back to the front while Cancel is on its way.
+    store.start();
+    expect(server.reads).toHaveLength(0);
+    server.cancels.shift()?.(ok(order("cancelled_by_customer")));
+    await cancelling;
+    expect(store.get().order?.status).toBe("cancelled_by_customer");
+  });
+
+  it("stops the pull-to-refresh spinner when Cancel drops the pull's read", async () => {
+    const server = fakeServer();
+    const store = createOrder(server.client, id, order(), fakeTimers().timers);
+    void store.refresh();
+    const cancelling = store.cancel();
+    server.cancels.shift()?.(ok(order("cancelled_by_customer")));
+    await cancelling;
+    server.reads.shift()?.(ok(order()));
+    await settle();
+    expect(store.get()).toMatchObject({ refreshing: false, order: { status: "cancelled_by_customer" } });
   });
 
   it("says the shop answered first when Cancel is refused, and reads the order again", async () => {

@@ -74,6 +74,8 @@ export type CartView = {
   message: string | null;
   /** A pack the server refused to add (#410). */
   notice: string | null;
+  /** The place `server` was priced for, so Place order waits for a new address's price (#427). */
+  pricedFor: FeedQuery | null;
 };
 
 /**
@@ -111,7 +113,7 @@ const maxReloads = 3;
  * older save never replaces newer counts on screen.
  */
 export function createCart(client: Client, shopId: string, delay = cartDelay) {
-  let view: CartView = { status: "loading", server: null, lines: [], saving: false, message: null, notice: null };
+  let view: CartView = { status: "loading", server: null, lines: [], saving: false, message: null, notice: null, pricedFor: null };
   let query: FeedQuery | undefined;
   /** Each count the Customer set that the server hasn't answered yet. */
   const edits = new Map<string, number>();
@@ -128,7 +130,8 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
     for (const listener of listeners) listener();
   };
   /** The server's cart with the Customer's unanswered counts over it. */
-  const show = (fresh: CartResponse) => set({ status: "ready", server: fresh, lines: rebase(fresh.lines, edits), saving: edits.size > 0, message: null });
+  const show = (fresh: CartResponse, place: FeedQuery | undefined) =>
+    set({ status: "ready", server: fresh, lines: rebase(fresh.lines, edits), saving: edits.size > 0, message: null, pricedFor: place ?? null });
   /** Counts the server answered, unless the Customer changed them again meanwhile. */
   const settle = (sent: ReadonlyMap<string, number>) => {
     for (const [listingId, count] of sent) if (edits.get(listingId) === count) edits.delete(listingId);
@@ -153,7 +156,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
         if (answer !== "offline" && answer.ok) {
           // The server may hold a count at stock; its count stands (owner's answer 9 on #50).
           settle(sent);
-          show(answer.data);
+          show(answer.data, place);
           continue;
         }
         if (answer === "offline" || (answer.code !== "CART_CHANGED" && answer.code !== "NOT_FOUND")) return fail(failure(answer));
@@ -170,7 +173,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
         if (++reloads > maxReloads) return fail(strings.errors.CART_CHANGED);
         const fresh = await client.cart(shopId, place).catch(() => "offline" as const);
         if (stopped) return;
-        if (fresh !== "offline" && fresh.ok) show(fresh.data);
+        if (fresh !== "offline" && fresh.ok) show(fresh.data, place);
         else if (fresh !== "offline" && fresh.code === "NOT_FOUND") {
           edits.clear();
           return set({ status: "none", server: null, lines: [], saving: false });
@@ -190,7 +193,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
     const answer: Answer = await client.cart(shopId, place).catch(() => "offline" as const);
     if (ticket !== loads || sending || stopped) return;
     if (answer !== "offline" && answer.ok) {
-      show(answer.data);
+      show(answer.data, place);
       // Counts a failed save left behind go again.
       if (edits.size && !timer) void send();
     } else if (answer !== "offline" && answer.code === "NOT_FOUND") {
@@ -217,11 +220,11 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
       timer = setTimeout(() => void send(), delay);
     },
 
-    /** The cart a refused placement answered with (CART_CHANGED, #427): shown as a fresh read is. */
-    adopt(fresh: CartResponse) {
+    /** The cart a refused placement answered with (CART_CHANGED, #427), priced at `place`, the address's pin. */
+    adopt(fresh: CartResponse, place: FeedQuery) {
       if (sending || stopped) return;
       loads += 1;
-      show(fresh);
+      show(fresh, place);
     },
 
     /** Try again after a failed load or save: reads the cart, then sends any unanswered taps. */

@@ -8,10 +8,11 @@ import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, w
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import { Bell, CircleArrowRight, CircleCheck, CircleX, Clock, Phone } from "../../components/icons";
+import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
-import { feeText } from "../../lib/cart";
 import { money } from "../../lib/money";
 import { treatments, type Treatment } from "../../lib/order";
+import { addressLine } from "../../lib/saved-addresses";
 import { packLabel } from "../../lib/shop-page";
 import { useOrder } from "../../lib/use-order";
 import { strings } from "../../strings";
@@ -64,18 +65,11 @@ function PlacedMark() {
   );
 }
 
-function Row({ label, value, total = false }: { label: string; value: string; total?: boolean }) {
-  return (
-    <View className="flex-row items-center justify-between gap-3 py-1">
-      <Text className={total ? "text-body font-semibold text-text" : "text-body text-muted"}>{label}</Text>
-      <Text className={`tabular-nums ${total ? "text-title font-semibold text-text" : "text-body text-text"}`}>{value}</Text>
-    </View>
-  );
-}
-
-/** "2 × 1 kg", or the part of a pack bought (#377). */
-const lineLabel = (line: OrderLine) =>
-  [line.brand, line.part ? packLabel(line.part, line.baseUnit) : `${line.count} × ${packLabel(line.quantity, line.baseUnit)}`].filter(Boolean).join(" · ");
+/** "Aashirvaad · 2 × 5 kg", or "500 g of a 1 kg pack" for the part of a pack bought (#377). */
+const lineLabel = (line: OrderLine) => {
+  const pack = packLabel(line.quantity, line.baseUnit);
+  return [line.brand, line.part ? words.part(packLabel(line.part, line.baseUnit), pack) : `${line.count} × ${pack}`].filter(Boolean).join(" · ");
+};
 
 const call = (phone: string) => void Linking.openURL(`tel:${phone}`);
 
@@ -108,19 +102,13 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
         ))}
       </View>
 
-      <View className="rounded-card border border-border bg-surface p-4">
-        <Row label={strings.cart.items} value={money(quote.productValue)} />
-        <Row label={strings.cart.delivery} value={feeText(quote.deliveryFee)} />
-        {quote.smallCartFee && <Row label={strings.cart.smallCart} value={money(quote.smallCartFee)} />}
-        <View className="mt-2 border-t border-border pt-2">
-          <Row label={strings.cart.total} value={money(quote.total)} total />
-        </View>
+      <QuoteRows quote={quote}>
         <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
-      </View>
+      </QuoteRows>
 
       <View>
         <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${order.address.flat}, ${order.address.areaLine ?? order.address.pincode}`}</Text>
+        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
       </View>
     </View>
   );

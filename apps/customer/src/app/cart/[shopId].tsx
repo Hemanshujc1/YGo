@@ -6,8 +6,9 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, View } from "react-nat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
 import { Stepper } from "../../components/stepper";
+import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
-import { feeText, reasonText, type CartView } from "../../lib/cart";
+import { reasonText, type CartView } from "../../lib/cart";
 import { addressQuery, deliverLine, type DeliverTo } from "../../lib/deliver-to";
 import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
@@ -64,15 +65,6 @@ function Line({ line, count, saving, setCount }: { line: CartLine; count: number
   );
 }
 
-function Row({ label, value, total = false }: { label: string; value: string; total?: boolean }) {
-  return (
-    <View className="flex-row items-center justify-between gap-3 py-1">
-      <Text className={total ? "text-body font-semibold text-text" : "text-body text-muted"}>{label}</Text>
-      <Text className={`tabular-nums ${total ? "text-title font-semibold text-text" : "text-body text-text"}`}>{value}</Text>
-    </View>
-  );
-}
-
 function Cart({ view, setCount, retry, backToShop }: { view: CartView; setCount: (listingId: string, count: number) => void; retry: () => void; backToShop: () => void }) {
   const server = view.server;
   if (!server) return null;
@@ -115,13 +107,8 @@ function Cart({ view, setCount, retry, backToShop }: { view: CartView; setCount:
           ) : (
             <>
               {quote && (
-                <View className="mt-4 rounded-card border border-border bg-surface p-4">
-                  <Row label={words.items} value={money(quote.productValue)} />
-                  <Row label={words.delivery} value={feeText(quote.deliveryFee)} />
-                  {quote.smallCartFee && <Row label={words.smallCart} value={money(quote.smallCartFee)} />}
-                  <View className="mt-2 border-t border-border pt-2">
-                    <Row label={words.total} value={money(quote.total)} total />
-                  </View>
+                <View className="mt-4">
+                  <QuoteRows quote={quote} />
                 </View>
               )}
               {server.reasons.map((reason) => (
@@ -256,21 +243,27 @@ export default function CartScreen() {
         // In place of the cart, so Back goes to the shop page and not to an empty cart (owner's answer 7 on #427).
         return router.replace({ pathname: "/order/[id]", params: { id: done.order.id, placed: "1" } });
       case "changed":
-        if (done.cart) cart.adopt(done.cart);
+        if (done.cart && query) cart.adopt(done.cart, query);
         else cart.retry();
         return setProblem({ text: words.changed, retry: false });
-      case "addressGone":
-        setProblem({ text: words.addressGone, retry: false });
+      case "gone":
+        // The server can't say which one: read both again.
+        setProblem({ text: words.gone, retry: false });
+        cart.retry();
         return void deliverTo.load(home);
+      // Only no answer turns the button into Try again; a refusal won't change on a retry (owner's answer 6 on #427).
       case "offline":
         return setProblem({ text: words.placeOffline, retry: true });
       case "error":
-        return setProblem({ text: strings.errors[done.code], retry: true });
+        return setProblem({ text: strings.errors[done.code], retry: false });
     }
   }
 
   const server = view.server;
-  const placeable = Boolean(server?.placeable && server.quote && to.address && !view.saving && !view.message);
+  // Off until the cart is priced at the chosen address, so the total on the button is the one sent.
+  const priced = view.pricedFor !== null && query !== undefined && view.pricedFor.pincode === query.pincode
+    && view.pricedFor.latitude === query.latitude && view.pricedFor.longitude === query.longitude;
+  const placeable = Boolean(server?.placeable && server.quote && to.address && priced && !view.saving && !view.message);
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>

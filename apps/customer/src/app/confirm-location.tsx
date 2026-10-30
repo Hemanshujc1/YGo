@@ -9,6 +9,7 @@ import { api, session } from "../api";
 import { MapPin } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { askArea, newestOnly, type Place, stale, typedPlace } from "../lib/location-flow";
+import { addedFromCart } from "../lib/deliver-to";
 import { goHome } from "../lib/go-home";
 import {
   addressBody,
@@ -146,7 +147,11 @@ export default function ConfirmLocation() {
         {
           askArea: (pincode) => askArea(api, pincode),
           // A saved address with no pin gets the pin, so no second address is made (#373, answer 6).
-          saveAddress: (address) => (saved && address.point ? api.pinAddress(saved.id, { point: address.point }) : api.saveAddress(address)),
+          saveAddress: async (address) => {
+            const answer = await (saved && address.point ? api.pinAddress(saved.id, { point: address.point }) : api.saveAddress(address));
+            if (answer.ok && params.back) addedFromCart(answer.data.id);
+            return answer;
+          },
           keep: (kept) => savePlace(accountId, kept),
         },
         now,
