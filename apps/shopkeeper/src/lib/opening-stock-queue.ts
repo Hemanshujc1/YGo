@@ -112,7 +112,14 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
           // active queue, even if the original active version has since synced.
           if (db.getFirstSync(`SELECT 1 FROM opening_stock_held WHERE source_key = ? AND payload = ?
             UNION ALL SELECT 1 FROM opening_stock_recovered WHERE source_key = ? AND payload = ?`, key, raw, key, raw)) return;
-          if (entry && db.getFirstSync("SELECT 1 FROM opening_stock_actions WHERE id = ? AND status IN ('applied', 'rejected')", entry.clientId)) return;
+          const acknowledged = entry && db.getFirstSync<{ shop_id: string; pack_id: string; quantity: string }>(`SELECT shop_id, pack_id,
+            json_extract(action, '$.payload.quantity') AS quantity FROM opening_stock_actions WHERE id = ? AND status IN ('applied', 'rejected')`, entry.clientId);
+          if (acknowledged) {
+            if (acknowledged.shop_id !== shopId || acknowledged.pack_id !== packId || acknowledged.quantity !== entry.quantity) {
+              db.runSync("INSERT OR IGNORE INTO opening_stock_held VALUES (?, ?)", key, raw);
+            }
+            return;
+          }
           const existing = db.getFirstSync<{ payload: string }>("SELECT payload FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, packId);
           const saved = existing && parse(existing.payload);
           if (entry && (!existing || (saved?.clientId === entry.clientId && saved.quantity === entry.quantity))) {
@@ -148,6 +155,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
           const action = JSON.parse(sent.action) as SyncAction;
           if (action.id !== checked.clientId || JSON.stringify(action.payload) !== JSON.stringify({ packId: targetPack, quantity: checked.quantity })) throw new Error("Recover the pending original first");
         }
+        // A correction is a new action; keep the acknowledged original and its ID in history.
+        if (db.getFirstSync("SELECT 1 FROM opening_stock_actions WHERE id = ? AND status IN ('applied', 'rejected')", checked.clientId)) checked.clientId = newId();
         const replacement = JSON.stringify({ packId: targetPack, ...checked });
         db.runSync(`INSERT OR IGNORE INTO opening_stock_recovered SELECT source_key, payload, ? FROM opening_stock_held WHERE source_key = ?`, replacement, sourceKey);
         db.runSync(`INSERT OR IGNORE INTO opening_stock_recovered SELECT ?, payload, ? FROM opening_stock WHERE shop_id = ? AND pack_id = ?`, sourceKey, replacement, shopId, sourcePack);

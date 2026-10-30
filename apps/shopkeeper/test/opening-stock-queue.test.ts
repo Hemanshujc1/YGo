@@ -308,6 +308,27 @@ describe("durable ordered action records", () => {
     expect(queue.count()).toBe(0); expect(values.size).toBe(0);
   });
 
+  it.each(["applied", "rejected"] as const)("preserves and recovers a changed legacy version reusing a %s ID", (status) => {
+    const queue = openingStockQueue(adapter(db), randomUUID);
+    queue.save(shopId, packId, entry);
+    const batch = queue.batch(shopId);
+    const result = applied(entry.clientId, 1);
+    queue.acknowledge(batch, { results: [status === "applied" ? result : { ...result, status: "rejected", code: "VALIDATION_FAILED", result: null }] });
+    const changed = { ...entry, quantity: "8" };
+    const values = new Map([[`opening:${shopId}:${packId}`, JSON.stringify(changed)]]);
+    queue.importLegacy(shopId, legacy(values));
+    expect(queue.versions(shopId, packId)).toEqual(expect.arrayContaining([{ payload: JSON.stringify(changed), entry: changed }]));
+    expect(queue.count()).toBe(1); expect(queue.attentionCount()).toBe(1);
+    expect(db.prepare("SELECT action FROM opening_stock_actions").get()?.action).toContain('"quantity":"2.5"');
+    expect(values.size).toBe(0);
+    queue.recover(shopId, packId, packId, changed);
+    const recovered = queue.pending(shopId, packId);
+    expect(recovered?.quantity).toBe("8"); expect(recovered?.clientId).not.toBe(entry.clientId);
+    expect(queue.batch(shopId).actions[0]).toMatchObject({ id: recovered?.clientId, sequence: 2 });
+    expect(queue.count()).toBe(1);
+    expect(db.prepare("SELECT payload FROM opening_stock_recovered WHERE payload = ?").get(JSON.stringify(changed))?.payload).toBe(JSON.stringify(changed));
+  });
+
   it("shares one in-flight batch and refuses to mutate its saved payload", async () => {
     const queue = openingStockQueue(adapter(db), randomUUID);
     queue.save(shopId, packId, entry);
