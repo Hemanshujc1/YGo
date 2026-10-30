@@ -1,3 +1,4 @@
+import { formatNumber } from "@ygo/format";
 import type { ErrorCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
@@ -165,6 +166,9 @@ export const strings = {
       refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },
     signOut: {
+      pending: (count: number) => `${formatNumber(count)} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
+      checkFailed: "Couldn't check your saved stock. Try again before signing out.",
+      openStock: "Open Opening stock",
       title: "Sign out?",
       body: "Changes you haven't saved will be lost.",
       cancel: "Cancel",
@@ -349,6 +353,16 @@ export const strings = {
     searchEmpty: "No products match that name or barcode.",
     stockRecorded: "Opening stock recorded.",
     stockQueued: "Opening stock is waiting to sync.",
+    storageFailed: "Couldn't open or save your stock on this phone. Your saved entries have been kept. Try again.",
+    recovery: {
+      title: "Recover saved opening stock",
+      body: "Review the saved versions below. Choose one or enter the correct quantity and product. Originals stay encrypted on this phone for support. After recovery, tap Save opening stock to sync before signing out.",
+      product: "Product for the recovered quantity",
+      quantity: "Recovered quantity in base units",
+      use: (quantity: string) => `Use saved quantity ${quantity}`,
+      save: "Keep recovered quantity",
+      support: "Unsure, or the product is missing? Contact support with the reference above before recovering. Do not uninstall the app or clear its data.",
+    },
     stockConflict: "This shop already has opening stock recorded. The queued amount was not recorded:",
     stockStatusUnavailable: "The recorded stock status could not be refreshed. Try again to check it.",
     errors: { onlinePrice: "Enter a valid price.", counterPrice: "Enter a valid price.", mrp: "Enter a valid price.", lowStockLevel: "Enter a valid quantity.", minimumOrderQuantity: "Enter a valid quantity.", quantityStep: "Enter a valid quantity.", quantity: "Enter a valid quantity.", quantityOptions: "Check the quantity-price options." },
