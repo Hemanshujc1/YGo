@@ -243,6 +243,12 @@ describe("S05 New order (#431)", () => {
     expect(reads).toHaveLength(0);
     expect(pending.size).toBe(0);
     expect(await one.accept()).toBe(false);
+
+    // Pull to refresh and Try again fetch nothing either.
+    await one.refresh();
+    await one.retry();
+    expect(reads).toHaveLength(0);
+    expect(one.get()).toMatchObject({ refreshing: false, expired: true });
   });
 
   it("marks the order expired, without reading, when the time ran out in the background", async () => {
@@ -262,6 +268,23 @@ describe("S05 New order (#431)", () => {
     expect(one.get().expired).toBe(true);
     expect(reads).toHaveLength(0);
     expect(pending.size).toBe(0);
+  });
+
+  it("still reads again after an answer while in time, but not once the time ran out during it", async () => {
+    const { client, reads, answers } = fakeServer();
+    const { timers, fireAt } = fakeTimers();
+    let phone = Date.parse("2030-01-01T00:02:18.000Z");
+    const one = createShopOrder(client, id, timers, 15_000, () => phone);
+    one.start();
+    reads.shift()?.(ok(order()));
+    await settle();
+    const accepting = one.accept();
+    phone = Date.parse(expires);
+    fireAt(462_000);
+    answers.shift()?.(refused("ORDER_STATUS_CHANGED"));
+    expect(await accepting).toBe(false);
+    expect(reads).toHaveLength(0);
+    expect(one.get()).toMatchObject({ answering: null, expired: true, notice: strings.errors.ORDER_STATUS_CHANGED });
   });
 
   it("drops a read that lands after Accept was tapped", async () => {

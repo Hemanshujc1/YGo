@@ -171,6 +171,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
   async function read(pull = false, forAnswer = false) {
     // The answer to Accept or Reject is the newest word on the order; a read waits until it lands.
     if (view.answering && !forAnswer) return;
+    // Time is up: nothing reads the order again, whether a poll, a pull, Try again, a resume or an answer.
+    if (view.expired) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
