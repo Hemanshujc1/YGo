@@ -671,6 +671,33 @@ describe("Customer's order list (#426, ORD-1)", () => {
     expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [order.id])).rows).toEqual([{ status: "placed" }]);
   });
 
+  it("refuses a Cancel that waits on the order's lock past the answer time, reading the time after the lock", async () => {
+    const { shopId, dal, home } = await stocked();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    at("2030-01-01T00:09:59.000Z");
+    const hold = await database.pool.connect();
+    try {
+      // Holds the order row, as an Accept in flight would, so Cancel arrives in time but waits on the lock.
+      await hold.query("BEGIN");
+      await hold.query("SELECT 1 FROM orders WHERE id = $1 FOR UPDATE", [order.id]);
+      const cancelling = cancel(order.id);
+      const waiting = () => database.pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'");
+      for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < 1; tries += 1) {
+        if (tries > 100) throw new Error("Cancel never waited on the order");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // The deadline passes while Cancel waits.
+      at("2030-01-01T00:10:00.000Z");
+      await hold.query("COMMIT");
+      const cancelled = await cancelling;
+      expect(cancelled.statusCode).toBe(409);
+      expect(cancelled.json()).toEqual({ error: { code: "ORDER_EXPIRED" } });
+    } finally { hold.release(); }
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [order.id])).rows).toEqual([{ status: "placed" }]);
+    expect(await history(order.id)).toEqual([]);
+  });
+
   it("shows the newest 50 past orders and every active one, and an empty list for a Customer with none", async () => {
     expect((await list()).json()).toEqual({ active: [], past: [] });
     const { shopId, dal, home } = await stocked();
