@@ -10,6 +10,7 @@
     "ios": { "supportsTablet": false },
     "plugins": [
       "expo-router",
+      ["expo-sqlite", { "useSQLCipher": true }],
       ["expo-navigation-bar", { "enforceContrast": false }],
       ["expo-secure-store", { "configureAndroidBackup": true, "faceIDPermission": false }],
       [
