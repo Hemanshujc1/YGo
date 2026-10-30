@@ -239,6 +239,13 @@
       "when": 1793361461743,
       "tag": "0033_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793368459267,
+      "tag": "0034_sync_actions",
+      "breakpoints": true
     }
   ]
 }

@@ -166,6 +166,8 @@ export const strings = {
       refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },
     signOut: {
+      failedTitle: "Saved stock needs attention",
+      failedBody: "Some stock entries were refused by the server. They will stay encrypted on this phone for this account. Sign out anyway?",
       pending: (count: number) => `${formatNumber(count)} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
       checkFailed: "Couldn't check your saved stock. Try again before signing out.",
       openStock: "Open Opening stock",
@@ -352,6 +354,7 @@ export const strings = {
     invalid: "Check the fields marked above.",
     searchEmpty: "No products match that name or barcode.",
     stockRecorded: "Opening stock recorded.",
+    syncAttention: "This saved stock entry needs attention. It is kept on this phone. Contact support with its reference.",
     stockQueued: "Opening stock is waiting to sync.",
     storageFailed: "Couldn't open or save your stock on this phone. Your saved entries have been kept. Try again.",
     recovery: {

@@ -40,6 +40,7 @@ import { registerShopAgreementRoutes } from "./routes/shop-agreement";
 import { registerShopHolidayRoutes } from "./routes/shop-holidays";
 import { registerShopHoursRoutes } from "./routes/shop-hours";
 import { registerShopOpenRoutes } from "./routes/shop-open";
+import { registerSyncRoutes } from "./routes/sync";
 import { registerShopListingRoutes } from "./routes/shop-listings";
 
 export interface AppOptions {
@@ -57,6 +58,8 @@ export interface AppOptions {
   places?: PlaceFinder;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
   minAppVersions?: Record<AppName, AppVersion>;
+  syncMaxAgeSeconds?: number;
+  syncClockSkewSeconds?: number;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -86,6 +89,8 @@ export function buildApp({
   visitPhotos,
   places,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
+  syncMaxAgeSeconds = 7 * 86400,
+  syncClockSkewSeconds = 300,
   logger = false,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
@@ -131,6 +136,7 @@ export function buildApp({
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds });
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopHoursRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

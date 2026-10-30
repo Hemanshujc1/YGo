@@ -592,3 +592,21 @@ export const orderStatusHistory = pgTable("order_status_history", {
   check("order_status_history_actor_valid", sql`(${table.actorRole} = 'system') = (${table.actorId} IS NULL)`),
   check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
 ]);
+
+export const syncDevices = pgTable("sync_devices", {
+  accountId: uuid("account_id").notNull(),
+  deviceId: uuid("device_id").notNull(),
+  sequence: bigint("sequence", { mode: "number" }).notNull().default(0),
+}, (table) => [uniqueIndex("sync_devices_identity_idx").on(table.accountId, table.deviceId)]);
+
+export const syncActions = pgTable("sync_actions", {
+  accountId: uuid("account_id").notNull(),
+  actionId: uuid("action_id").notNull(),
+  deviceId: uuid("device_id").notNull(),
+  sequence: bigint("sequence", { mode: "number" }).notNull(),
+  action: text("action").notNull(),
+  result: text("result").notNull(),
+  clockSuspect: boolean("clock_suspect").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [uniqueIndex("sync_actions_identity_idx").on(table.accountId, table.actionId),
+  uniqueIndex("sync_actions_sequence_idx").on(table.accountId, table.deviceId, table.sequence)]);

@@ -92,6 +92,8 @@ In `apps/server/.env`, set `PRODUCT_IMAGE_BUCKET=ygo-product-images`, `S3_ENDPOI
 | `PORT` | no | `3000` |
 | `LOG_LEVEL` | no | `info` |
 | `MIN_CUSTOMER_VERSION` | no | `0.0.0`; an older Customer app gets `426 UPDATE_REQUIRED` |
+| `SYNC_MAX_AGE_SECONDS` | no | `604800` (7 days); oldest new sync action accepted |
+| `SYNC_CLOCK_SKEW_SECONDS` | no | `300` (5 minutes); clock differences beyond this are flagged |
 | `MIN_SHOPKEEPER_VERSION` | no | `0.0.0`; an older Shopkeeper app gets `426 UPDATE_REQUIRED` |
 
 The process refuses to start when one is missing or malformed.
@@ -200,3 +202,9 @@ ExifReader parses GPS and capture metadata because the installed Sharp exposes
 raw EXIF rather than these fields. The AWS presigner signs the configured S3
 endpoint; no installed dependency provided this operation. ExifReader's shipped
 bundle needs no install script, so its optional custom-build script stays off.
+
+## Ordered stock sync (#391)
+
+`POST /v1/sync/actions` accepts up to 500 actions with a device ID and consecutive sequence numbers. Each result is applied, permanently rejected, or awaiting retry (a sequence gap or a reused ID). The authenticated Owner must still belong to each action's shop. A rejected action advances the sequence so independent work can continue. Shop writes and replay results commit together; acknowledged replays return their original result for 30 days. After replay expiry, the durable device sequence still prevents an old action from applying again. The older opening-stock endpoint remains supported and its original IDs are recognized by batch sync.
+
+Clock-suspect actions remain accepted and have `clock_suspect` recorded in `sync_actions` for support/Admin inspection. Clock skew alone does not reject an action; the separate hard age limit always uses server time. No client clock orders writes. Replay records expire on the account's next push; the device sequence is retained.

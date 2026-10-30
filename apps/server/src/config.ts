@@ -12,6 +12,8 @@ const BaseEnv = z.object({
   ADMIN_COOKIE_DOMAIN: z.string().regex(/^\.?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i).optional(),
   GOOGLE_CLIENT_IDS: z.string().default(""),
   APPLE_CLIENT_IDS: z.string().default(""),
+  SYNC_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(7 * 86400),
+  SYNC_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().default(300),
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

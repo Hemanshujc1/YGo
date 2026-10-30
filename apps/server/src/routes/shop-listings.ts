@@ -80,6 +80,42 @@ const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name, p.bra
   WHERE pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)
   `;
 
+export async function applyOpeningStock(client: PoolClient, accountId: string, shopId: string, packId: string, body: OpeningStockBody): Promise<
+  { code: "NOT_FOUND" | "VALIDATION_FAILED" | "OPENING_STOCK_ALREADY_RECORDED" } | { status: 200 | 201; result: OpeningStockResponse }
+> {
+  const listing = await client.query<{ id: string; baseUnit: string }>(
+    `SELECT sl.id, p.base_unit AS "baseUnit" FROM shop_listings sl
+     JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id
+     WHERE sl.shop_id = $1 AND sl.pack_id = $2 FOR UPDATE OF sl`,
+    [shopId, packId],
+  );
+  const row = listing.rows[0];
+  if (!row) return { code: "NOT_FOUND" };
+  if (row.baseUnit === "each" && !isWholeBaseUnitQuantity(body.quantity)) {
+    return { code: "VALIDATION_FAILED" };
+}
+const existing = await client.query<{ actorId: string; clientId: string; quantity: string; sameQuantity: boolean; createdAt: Date }>(
+  `SELECT actor_id AS "actorId", client_id AS "clientId", quantity, quantity = $2::numeric AS "sameQuantity",
+    created_at AS "createdAt" FROM stock_movements WHERE listing_id = $1 AND kind = 'opening' FOR UPDATE`,
+  [row.id, body.quantity],
+);
+if (existing.rows[0]) {
+  const saved = existing.rows[0];
+  if (saved.actorId === accountId && saved.clientId === body.clientId && saved.sameQuantity) {
+    return { status: 200, result: { listingId: row.id, quantity: saved.quantity, recordedAt: saved.createdAt.toISOString() } };
+  }
+  return { code: "OPENING_STOCK_ALREADY_RECORDED" };
+}
+const inserted = await client.query<{ quantity: string; createdAt: Date }>(
+  `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
+   VALUES ($1, $2, $3, 'opening', $4) RETURNING quantity, created_at AS "createdAt"`,
+  [row.id, accountId, body.clientId, body.quantity],
+);
+const movement = inserted.rows[0];
+if (!movement) throw new Error("Opening stock insert returned no row");
+return { status: 201, result: { listingId: row.id, quantity: movement.quantity, recordedAt: movement.createdAt.toISOString() } };
+}
+
 export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, secret }: Auth): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
@@ -172,39 +208,11 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       const shop = await ownerShop(client, who.accountId);
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.state !== "approved" && shop.state !== "live") return notReady(reply);
-      const listing = await client.query<{ id: string; baseUnit: string }>(
-        `SELECT sl.id, p.base_unit AS "baseUnit" FROM shop_listings sl
-         JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id
-         WHERE sl.shop_id = $1 AND sl.pack_id = $2 FOR UPDATE OF sl`,
-        [shop.id, packId],
-      );
-      const row = listing.rows[0];
-      if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-      if (row.baseUnit === "each" && !isWholeBaseUnitQuantity(body.quantity)) {
-        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", fields: ["quantity"] } });
-      }
-      const existing = await client.query<{ actorId: string; clientId: string; quantity: string; sameQuantity: boolean; createdAt: Date }>(
-        `SELECT actor_id AS "actorId", client_id AS "clientId", quantity, quantity = $2::numeric AS "sameQuantity",
-          created_at AS "createdAt" FROM stock_movements WHERE listing_id = $1 AND kind = 'opening' FOR UPDATE`,
-        [row.id, body.quantity],
-      );
-      if (existing.rows[0]) {
-        const saved = existing.rows[0];
-        if (saved.actorId === who.accountId && saved.clientId === body.clientId && saved.sameQuantity) {
-          await client.query("COMMIT");
-          return reply.code(200).send({ listingId: row.id, quantity: saved.quantity, recordedAt: saved.createdAt.toISOString() });
-        }
-        return reply.code(409).send({ error: { code: "OPENING_STOCK_ALREADY_RECORDED" } });
-      }
-      const inserted = await client.query<{ quantity: string; createdAt: Date }>(
-        `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
-         VALUES ($1, $2, $3, 'opening', $4) RETURNING quantity, created_at AS "createdAt"`,
-        [row.id, who.accountId, body.clientId, body.quantity],
-      );
-      const movement = inserted.rows[0];
-      if (!movement) throw new Error("Opening stock insert returned no row");
+      const answer = await applyOpeningStock(client, who.accountId, shop.id, packId, body);
+      if ("code" in answer) return reply.code(answer.code === "NOT_FOUND" ? 404 : answer.code === "VALIDATION_FAILED" ? 400 : 409)
+        .send({ error: { code: answer.code, ...(answer.code === "VALIDATION_FAILED" ? { fields: ["quantity"] } : {}) } });
       await client.query("COMMIT");
-      return reply.code(201).send({ listingId: row.id, quantity: movement.quantity, recordedAt: movement.createdAt.toISOString() });
+      return reply.code(answer.status).send(answer.result);
     }).catch((error: unknown) => {
       if ((error as { constraint?: string }).constraint === "stock_movements_one_opening_idx") {
         return reply.code(409).send({ error: { code: "OPENING_STOCK_ALREADY_RECORDED" } });

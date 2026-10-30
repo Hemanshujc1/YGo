@@ -1,3 +1,8 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SyncActionsResponse, type SyncActionsBody } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -192,4 +197,116 @@ describe("Owner shop listings and opening stock", () => {
       [actor.shopId, actor.packId],
     )).rejects.toMatchObject({ constraint: "shop_listings_prices_valid" });
   });
+});
+
+describe("ordered opening-stock sync", () => {
+  async function setup() {
+    const actor = await shop();
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const deviceId = randomUUID();
+    const action = (sequence = 1, overrides = {}) => ({ id: randomUUID(), sequence, shopId: actor.shopId, type: "opening_stock",
+      payload: { packId: actor.packId, quantity: "2.5" }, createdAt: clock.now().toISOString(), clockSuspect: false, ...overrides });
+    const send = (actions: object[], device = deviceId, headers = actor.headers) => app.inject({ method: "POST", url: "/v1/sync/actions", headers,
+      payload: { deviceId: device, sentAt: clock.now().toISOString(), actions } });
+    return { actor, deviceId, action, send };
+  }
+
+  it("serializes concurrent replay, detects changed IDs, and replays the original result for 30 days", async () => {
+    const { actor, action, send, deviceId } = await setup();
+    const entry = action();
+    const [first, second] = await Promise.all([send([entry]), send([entry])]);
+    expect(first.statusCode).toBe(200); expect(second.json()).toEqual(first.json());
+    expect(first.json().results[0]).toMatchObject({ status: "applied", code: null });
+    expect((await send([{ ...entry, payload: { ...entry.payload, quantity: "9" } }])).json().results[0].code).toBe("ACTION_CONFLICT");
+    expect((await send([entry], randomUUID())).json().results[0].code).toBe("ACTION_CONFLICT");
+    clock.set(new Date("2030-01-30T00:00:00Z"));
+    actor.headers = (await owner()).headers;
+    expect((await send([entry])).json()).toEqual(first.json());
+    clock.set(new Date("2030-02-01T00:00:00Z"));
+    actor.headers = (await owner()).headers;
+    expect((await send([entry])).json().results[0].code).toBe("ACTION_CONFLICT");
+    expect((await database.pool.query("SELECT sequence FROM sync_devices WHERE device_id = $1", [deviceId])).rows[0]?.sequence).toBe("1");
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM stock_movements")).rows[0]?.n).toBe(1);
+  });
+
+  it("requires missing sequences and lets an acknowledged permanent failure precede independent work", async () => {
+    const { action, send } = await setup();
+    const second = action(2);
+    expect((await send([second])).json().results[0]).toMatchObject({ status: "retry", code: "SEQUENCE_MISSING" });
+    const invalid = action(1, { payload: { quantity: "broken" } });
+    const response = await send([invalid, second, action(3)]);
+    expect(response.json().results.map((r: { status: string; code: string }) => [r.status, r.code])).toEqual([
+      ["rejected", "VALIDATION_FAILED"], ["applied", null], ["rejected", "OPENING_STOCK_ALREADY_RECORDED"],
+    ]);
+    expect((await send([invalid])).json().results[0]).toEqual(response.json().results[0]);
+  });
+
+  it("scopes devices, action IDs and results to the authenticated owner and shop", async () => {
+    const { actor, action, send } = await setup();
+    const entry = action();
+    const other = await shop("approved", "second@example.com");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${other.packId}`, headers: other.headers, payload: listingBody });
+    const staff = await owner("staff-sync@example.com");
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    expect((await send([entry], undefined, staff.headers)).statusCode).toBe(404);
+    expect((await send([entry], undefined, other.headers)).statusCode).toBe(404);
+    expect((await send([entry])).json().results[0].status).toBe("applied");
+    expect((await send([{ ...entry, shopId: other.shopId, payload: { packId: other.packId, quantity: "3" } }], undefined, other.headers)).json().results[0].status).toBe("applied");
+    expect((await send([{ ...action(2), shopId: other.shopId }])).statusCode).toBe(404);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM stock_movements")).rows[0]?.n).toBe(2);
+  });
+
+  it("enforces the age bound, flags clock skew, and recognizes the older endpoint's original ID", async () => {
+    const { actor, action, send } = await setup();
+    const old = action(1, { createdAt: "2029-12-24T00:00:00.000Z" });
+    expect((await send([old])).json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD" });
+    const frozen = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers,
+      payload: { deviceId: randomUUID(), sentAt: old.createdAt, actions: [{ ...old, id: randomUUID(), clockSuspect: true }] } });
+    expect(frozen.json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD", clockSuspect: true });
+    const legacy = action(2, { createdAt: old.createdAt });
+    const previous = await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock`, headers: actor.headers,
+      payload: { clientId: legacy.id, quantity: "2.5" } });
+    const replay = (await send([legacy])).json().results[0];
+    expect(replay.status).toBe("applied"); expect(replay.result).toEqual(previous.json());
+    const pack = (await database.pool.query("INSERT INTO packs (product_id, quantity) SELECT product_id, '2' FROM packs WHERE id = $1 RETURNING id", [actor.packId])).rows[0]?.id as string;
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${pack}`, headers: actor.headers, payload: listingBody });
+    const flagged = action(3, { createdAt: "2030-01-01T00:06:00.000Z", payload: { packId: pack, quantity: "1" } });
+    expect((await send([flagged])).json().results[0]).toMatchObject({ clockSuspect: true, status: "applied" });
+    expect((await database.pool.query("SELECT clock_suspect FROM sync_actions WHERE action_id = $1", [flagged.id])).rows[0]?.clock_suspect).toBe(true);
+  });
+});
+
+// Exercise the actual phone outbox over HTTP against Fastify and PostgreSQL.
+it("reopens the encrypted module's SQL queue and server after a committed response is lost", async () => {
+  // Load the phone module at runtime so its native declaration globals do not enter the server's TypeScript program.
+  const { openingStockQueue, syncOpeningStockBatch } = await import(new URL("../../shopkeeper/src/lib/opening-stock-queue.ts", import.meta.url).href);
+  const { adapter } = await import(new URL("../../shopkeeper/test/stock-database-fixture.ts", import.meta.url).href);
+  const actor = await shop();
+  await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+  const directory = mkdtempSync(join(tmpdir(), "ygo-sync-"));
+  const path = join(directory, "outbox.db");
+  let db = new DatabaseSync(path);
+  try {
+    let queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
+    const clientId = randomUUID();
+    queue.save(actor.shopId, actor.packId, { quantity: "3", clientId });
+    let address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const send = async (body: SyncActionsBody) => {
+      const response = await fetch(`${address}/v1/sync/actions`, { method: "POST", headers: { ...actor.headers, "content-type": "application/json" }, body: JSON.stringify(body) });
+      expect(response.status).toBe(200);
+      return { ok: true as const, data: SyncActionsResponse.parse(await response.json()) };
+    };
+    await syncOpeningStockBatch(queue, actor.shopId, async (body: SyncActionsBody) => { await send(body); throw new Error("lost response"); });
+    expect(queue.count()).toBe(1);
+    const before = queue.batch(actor.shopId);
+    db.close(); await app.close();
+    db = new DatabaseSync(path); queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
+    expect(queue.batch(actor.shopId)).toMatchObject({ deviceId: before.deviceId, actions: before.actions });
+    app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+    address = await app.listen({ host: "127.0.0.1", port: 0 });
+    expect((await syncOpeningStockBatch(queue, actor.shopId, send))?.results[0]?.status).toBe("applied");
+    expect(queue.count()).toBe(0);
+    expect(db.prepare("SELECT attempts, status FROM opening_stock_actions").get()).toMatchObject({ attempts: 2, status: "applied" });
+    expect((await database.pool.query("SELECT count(*)::int AS n, min(client_id::text) AS id FROM stock_movements")).rows[0]).toEqual({ n: 1, id: clientId });
+  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
 });

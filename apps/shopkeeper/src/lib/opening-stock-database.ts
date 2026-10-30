@@ -1,4 +1,4 @@
-import { getRandomBytesAsync } from "expo-crypto";
+import { getRandomBytesAsync, randomUUID } from "expo-crypto";
 import { File } from "expo-file-system";
 import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, getItemAsync, setItemAsync } from "expo-secure-store";
 import { defaultDatabaseDirectory, openDatabaseAsync } from "expo-sqlite";
@@ -27,7 +27,7 @@ async function open(accountId: string): Promise<OpeningStockQueue> {
     if (!cipher?.cipher_version) throw new Error("Rebuild Shopkeeper with SQLCipher enabled");
     // Only the validated, locally generated hexadecimal key is interpolated.
     await db.execAsync(`PRAGMA key = "x'${key}'";`);
-    return openingStockQueue(db);
+    return openingStockQueue(db, randomUUID);
   } catch (error) {
     await db.closeAsync();
     throw error;
@@ -44,11 +44,11 @@ export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> 
 }
 
 /** Undefined means the shop lookup failed; null means the server confirmed no shop. */
-export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<number> {
+export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number }> {
   if (verifiedShopId === undefined && legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"))) {
     throw new Error("Verify the shop before checking legacy opening stock");
   }
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
-  return queue.count();
+  return { pending: queue.count(), failed: queue.failureCount() };
 }
