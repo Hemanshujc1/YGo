@@ -1,3 +1,5 @@
+import { STOCK_HOLDING_ORDER_STATUSES } from "@ygo/contracts";
+
 /**
  * The listings a Customer can see, as FROM and WHERE text over `listing`, `pack`, `product`, `category` and `parent`:
  * switched on by the shop, with its pack, product and categories active and the product published.
@@ -11,11 +13,19 @@ export const visibleListings = `shop_listings listing
     WHERE listing.shop_id = $1 AND listing.available AND pack.active AND product.active AND product.published
       AND category.active AND COALESCE(parent.active, true)`;
 
+/** The statuses whose lines hold stock, as SQL text. */
+const holding = STOCK_HOLDING_ORDER_STATUSES.map((status) => `'${status}'`).join(", ");
+
 /**
- * A listing's stock in base units (CAT-4), 0 with no movements; `listing` is the alias the query gives `shop_listings`.
+ * A listing's stock left to sell in base units (CAT-4): what is on hand, less what accepted orders hold (#425).
+ * 0 with no movements; `listing` is the alias the query gives `shop_listings`. Nothing writes a movement for a
+ * hold, so an order leaving those statuses (rejected, cancelled, expired) gives its stock back by itself.
+ * It starts from the shop's orders in those statuses (`orders_shop_id_status_idx`), a handful, so it doesn't grow with order history.
  */
 export const stockOf = (listing: string) =>
-  `COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = ${listing}.id), 0)`;
+  `(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = ${listing}.id), 0)
+    - COALESCE((SELECT sum(held.stock_quantity) FROM orders holder JOIN order_lines held ON held.order_id = holder.id
+      WHERE holder.shop_id = ${listing}.shop_id AND holder.status IN (${holding}) AND held.listing_id = ${listing}.id), 0))`;
 
 /**
  * The part of a pack on sale when less than one pack is left (#377), as jsonb `{quantity, price}`, or NULL.

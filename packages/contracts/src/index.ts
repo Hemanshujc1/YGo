@@ -234,6 +234,9 @@ export {
 } from "./shop-hours";
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
-export { OrderLine, OrderParams, OrderResponse, OrderStatus, PlaceOrderBody, TERMINAL_ORDER_STATUSES } from "./orders";
+export {
+  ORDER_ANSWER_SECONDS, OrderLine, OrderParams, OrderResponse, OrderStatus, PlaceOrderBody, RejectOrderBody, RejectReason, ShopOrderResponse,
+  ShopOrderSummary, ShopOrdersResponse, ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
+} from "./orders";
 
 export { ShopStockResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse } from "./sync";

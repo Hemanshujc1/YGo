@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type CartResponse, OrderStatus, type OrderResponse } from "@ygo/contracts";
+import { type CartResponse, OrderStatus, type OrderResponse, RejectReason } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
 import { createOrder, isFinal, placeOrder, type Timers, treatments } from "../src/lib/order";
 import { strings } from "../src/strings";
@@ -13,7 +13,7 @@ const order = (status: OrderStatus = "placed"): OrderResponse => ({
   shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
   address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00",
+  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
@@ -87,6 +87,11 @@ describe("order statuses (design system section 6)", () => {
     expect([strings.order.statuses.placed, treatments.placed]).toEqual(["Waiting for shop", "waiting"]);
     expect([treatments.arrived, treatments.delivered, treatments.expired]).toEqual(["needsYou", "completed", "ended"]);
     expect(OrderStatus.options.filter(isFinal)).toHaveLength(8);
+  });
+
+  it("words every reason the shop can reject with, as the shop's list does (#425)", () => {
+    for (const reason of RejectReason.options) expect(strings.order.rejectReasons[reason]).toBeTruthy();
+    expect(strings.order.rejectedBecause(strings.order.rejectReasons.out_of_stock)).toBe("The shop said: Items out of stock");
   });
 });
 

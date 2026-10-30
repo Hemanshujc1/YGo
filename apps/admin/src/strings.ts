@@ -562,5 +562,7 @@ export const strings = {
     CART_CHANGED: "This cart changed elsewhere. Reload it and try again.",
     OWN_SHOP: "An account can't order from its own shop.",
     ORDER_STATUS_CHANGED: "This order changed. Reload it and try again.",
+    ORDER_EXPIRED: "This order expired before the shop answered it.",
+    NOT_ENOUGH_STOCK: "The shop doesn't have enough stock for this order.",
   } satisfies Record<ErrorCode, string>,
 };

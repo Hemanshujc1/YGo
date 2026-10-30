@@ -1,4 +1,4 @@
-import type { ErrorCode, OrderStatus } from "@ygo/contracts";
+import type { ErrorCode, OrderStatus, RejectReason } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -294,6 +294,14 @@ export const strings = {
     deliverTo: "Delivering to",
     pay: "Pay the shop at the door, in cash or UPI.",
     part: (part: string, pack: string) => `${part} of a ${pack} pack`,
+    // The shop's reason, in the words its Reject list shows (owner's answer 3 on #425).
+    rejectReasons: {
+      out_of_stock: "Items out of stock",
+      too_busy: "Too busy right now",
+      closing_soon: "Closing soon",
+      cannot_deliver: "Can't deliver to this address",
+    } satisfies Record<RejectReason, string>,
+    rejectedBecause: (reason: string) => `The shop said: ${reason}`,
     statuses: {
       placed: "Waiting for shop",
       scheduled_pending_review: "Booked for slot",
@@ -370,5 +378,7 @@ export const strings = {
     CART_CHANGED: "Your cart was changed. Check it and try again.",
     OWN_SHOP: "You can't order from your own shop.",
     ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
+    ORDER_EXPIRED: "The shop didn't answer this order in time.",
+    NOT_ENOUGH_STOCK: "The shop doesn't have enough stock for this order.",
   } satisfies Record<ErrorCode, string>,
 };

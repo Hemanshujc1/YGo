@@ -5,8 +5,8 @@ export type OrderActor = { id: string; role: "customer" | "owner" | "staff" } | 
 
 /** Each move an order may make, and who may make it (#9). Later tickets add theirs here. */
 const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArray<OrderActor["role"]>>>>> = {
-  // Free while the shop hasn't answered (ORD-5).
-  placed: { cancelled_by_customer: ["customer"] },
+  // Free while the shop hasn't answered (ORD-5); the shop's Owner or Staff answers it (#425).
+  placed: { cancelled_by_customer: ["customer"], accepted: ["owner", "staff"], rejected_by_shop: ["owner", "staff"] },
 };
 
 export const canMove = (from: OrderStatus, to: OrderStatus, role: OrderActor["role"]) => MOVES[from]?.[to]?.includes(role) ?? false;

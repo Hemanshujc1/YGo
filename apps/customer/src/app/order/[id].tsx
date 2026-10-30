@@ -88,6 +88,7 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
         <StatusChip status={order.status} />
         <Text className="text-secondary tabular-nums text-muted">{`${order.shop.name} · ${formatTime(order.placedAt)}`}</Text>
         {order.status === "placed" && <Text className="text-body text-text">{words.waiting}</Text>}
+        {order.rejectReason && <Text className="text-body text-text">{words.rejectedBecause(words.rejectReasons[order.rejectReason])}</Text>}
       </View>
 
       <View className="rounded-card border border-border bg-surface px-4">
