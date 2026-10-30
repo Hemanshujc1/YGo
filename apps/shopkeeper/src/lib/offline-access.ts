@@ -68,7 +68,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
         return;
       }
-      if (shopId && state !== "closed") {
+      if (shopId) {
         const stockAllowed = state === "live" || state === "suspended";
         const next = { account, shopId, verifiedAt: now(), stockAllowed };
         await storage.save(next);
@@ -77,7 +77,6 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
         saved = next;
         show({ mode: "online", accountId: account.id, ...(stockAllowed ? { shopId, expiresAt: next.verifiedAt + 72 * 3600_000 } : {}) });
       } else {
-        if (record) await storage.save({ ...record, verifiedAt: 0 });
         if (mine === turn) show({ mode: "online", accountId: account.id });
       }
     },
