@@ -9,17 +9,25 @@ import { packsOf, pricedCart, savedCart } from "./cart";
 import { servingShops } from "./feed";
 import { latestRateCardVersion } from "./price-simulator";
 
+/**
+ * The columns C19 and S05 both show of order `o`, as it was frozen: address, lines, amounts, and the shop's
+ * reason when it rejected the order (owner's answer 3 on #425).
+ */
+export const frozenOrder = (o: string) => `json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
+          'areaLine', ${o}.address_area_line, 'pincode', ${o}.address_pincode) AS address,
+        (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
+            'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
+          FROM order_lines l WHERE l.order_id = ${o}.id) AS lines,
+        ${o}.product_value::text AS "productValue", ${o}.delivery_fee::text AS "deliveryFee", ${o}.small_cart_fee::text AS "smallCartFee", ${o}.total::text AS total,
+        (SELECT h.reason_code FROM order_status_history h WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop') AS "rejectReason"`;
+
 /** C09 and C19: one of the Customer's orders as it was frozen, with the Owner's phone read now (ORD-8). */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string): Promise<OrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt"> & { placedAt: Date }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt",
         json_build_object('id', s.id, 'name', s.shop_name, 'phone', (SELECT a.phone FROM shop_members m JOIN accounts a ON a.id = m.account_id
           WHERE m.shop_id = s.id AND m.role = 'owner' ORDER BY a.id LIMIT 1)) AS shop,
-        json_build_object('label', o.address_label, 'flat', o.address_flat, 'areaLine', o.address_area_line, 'pincode', o.address_pincode) AS address,
-        (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
-            'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
-          FROM order_lines l WHERE l.order_id = o.id) AS lines,
-        o.product_value::text AS "productValue", o.delivery_fee::text AS "deliveryFee", o.small_cart_fee::text AS "smallCartFee", o.total::text AS total
+        ${frozenOrder("o")}
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId]);
   return row && { ...row, placedAt: row.placedAt.toISOString() };

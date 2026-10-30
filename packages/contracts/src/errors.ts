@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CartResponse } from "./cart";
 import { CatalogImportRowErrors } from "./catalog";
+import { ShortLine } from "./orders";
 import { LiveCheck } from "./shops";
 
 /**
@@ -72,6 +73,9 @@ import { LiveCheck } from "./shops";
  * - CART_CHANGED (409): the revision or total C07 showed is not the server's fresh quote, or the cart can't be ordered now; `cart` is the cart as it is now.
  * - OWN_SHOP (403): the account is Owner or Staff of this shop (ACC-9).
  * - ORDER_STATUS_CHANGED (409): the order is no longer in a status this move starts from.
+ * Answering an order (#425):
+ * - ORDER_EXPIRED (409): ORDER_ANSWER_SECONDS have passed since placement, so it can't be accepted or rejected.
+ * - NOT_ENOUGH_STOCK (409): a line no longer fits the stock left; `shortLines` names each one.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -115,6 +119,8 @@ export const ErrorCode = z.enum([
   "CART_CHANGED",
   "OWN_SHOP",
   "ORDER_STATUS_CHANGED",
+  "ORDER_EXPIRED",
+  "NOT_ENOUGH_STOCK",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -126,6 +132,7 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
  * `rowErrors` uses the same CatalogImportRowError shape as a preview response.
  * With SHOP_NOT_READY, `liveCheck` names what still blocks Live.
  * With CART_CHANGED from placing an order, `cart` is the cart as it is now.
+ * With NOT_ENOUGH_STOCK, `shortLines` names each line Accept can't fill.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
@@ -136,6 +143,7 @@ export const ErrorEnvelope = z.object({
     rowErrors: CatalogImportRowErrors.optional(),
     liveCheck: LiveCheck.optional(),
     cart: CartResponse.optional(),
+    shortLines: z.array(ShortLine).optional(),
   }).refine((error) => error.code !== "CATALOG_IMPORT_ROWS_INVALID" || error.rowErrors !== undefined),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

@@ -10,6 +10,7 @@ import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { OrderStatus } from "@ygo/contracts";
 import { connectDatabase } from "../src/db";
+import { stockOf } from "../src/listings";
 import { canMove } from "../src/orders";
 
 const rootUrl = inject("databaseUrl");
@@ -158,7 +159,8 @@ async function stocked() {
 
 /** Saves the cart and places it at the total it showed. */
 async function ordered(shopId: string, lines: Array<{ listingId: string; count: number }>, addressId: string, headers = customer) {
-  const cart = (await save(shopId, 0, lines, headers)).json() as { revision: number; quote: { total: string } };
+  const { revision } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers })).json() as { revision: number };
+  const cart = (await save(shopId, revision, lines, headers)).json() as { revision: number; quote: { total: string } };
   return place(shopId, { revision: cart.revision, total: cart.quote.total, addressId }, headers);
 }
 
@@ -178,7 +180,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
         { name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" },
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
-      productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99",
+      productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: other })).statusCode).toBe(404);
@@ -407,7 +409,209 @@ describe("Order transitions (#9)", () => {
     const roles = ["customer", "owner", "staff", "system"] as const;
     const allowed = OrderStatus.options.flatMap((from) => OrderStatus.options.flatMap((to) =>
       roles.filter((role) => canMove(from, to, role)).map((role) => `${from} → ${to} by ${role}`)));
-    expect(allowed).toEqual(["placed → cancelled_by_customer by customer"]);
+    expect(allowed).toEqual([
+      "placed → accepted by owner", "placed → accepted by staff", "placed → rejected_by_shop by owner", "placed → rejected_by_shop by staff",
+      "placed → cancelled_by_customer by customer",
+    ]);
+  });
+});
+
+const accept = (orderId: string, headers: Record<string, string>) => app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/accept`, headers });
+const reject = (orderId: string, headers: Record<string, string>, reason = "too_busy") =>
+  app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/reject`, headers, payload: { reason } });
+const at = (iso: string) => clock.set(new Date(iso));
+/** Stock left to sell, as C05, search, the cart and placement read it. */
+const left = async (listingId: string) =>
+  (await database.pool.query<{ left: string }>(`SELECT trim_scale(${stockOf("l")})::text AS left FROM shop_listings l WHERE l.id = $1`, [listingId])).rows[0]?.left;
+const history = async (orderId: string) => (await database.pool.query(
+  "SELECT from_status, to_status, actor_role, reason_code FROM order_status_history WHERE order_id = $1 AND from_status IS NOT NULL", [orderId])).rows;
+
+/** A Staff member of `shopId`; staff join shops by SQL until #58. */
+async function staffOf(shopId: string, email = "staff@example.com") {
+  const headers = await signIn("/v1/auth", email);
+  await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'staff' FROM accounts WHERE email = $2", [shopId, email]);
+  return headers;
+}
+
+describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
+  it("lets the Owner accept: the status moves, history records who, and the stock is held for C05 and the cart", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    await setStock(dal, "3");
+    const order = (await ordered(shopId, [{ listingId: dal, count: 2 }], home)).json() as { id: string };
+    // Placing holds nothing (ORD-6).
+    expect(await left(dal)).toBe("3");
+    at("2030-01-01T00:03:00.000Z");
+    const accepted = await accept(order.id, owner);
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toMatchObject({
+      id: order.id, number: 1001, status: "accepted", placedAt: "2030-01-01T00:00:00.000Z", expiresAt: null, now: "2030-01-01T00:03:00.000Z",
+      address: { flat: "Flat 4B" }, lines: [{ name: "Toor Dal", count: 2 }], total: "300.00", rejectReason: null,
+    });
+    expect(await history(order.id)).toEqual([{ from_status: "placed", to_status: "accepted", actor_role: "owner", reason_code: null }]);
+    expect(await left(dal)).toBe("1");
+    expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toMatchObject({ status: "accepted" });
+
+    // C05 and the cart see 1 kg left; the other Customer can't add a second.
+    const page = (await app.inject({ method: "GET", url: `/v1/shops/${shopId}?${here}`, headers: other })).json() as { groups: Array<{ products: Array<{ packs: Array<{ listingId: string; outOfStock: boolean }> }> }> };
+    expect(page.groups.flatMap((group) => group.products.flatMap((item) => item.packs)).find((pack) => pack.listingId === dal)).toMatchObject({ outOfStock: false });
+    expect((await save(shopId, 0, [{ listingId: dal, count: 2 }], other)).json()).toMatchObject({ lines: [{ listingId: dal, count: 1, left: 1 }] });
+    await accept(((await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string }).id, owner);
+    const empty = (await app.inject({ method: "GET", url: `/v1/shops/${shopId}?${here}`, headers: other })).json() as typeof page;
+    expect(empty.groups.flatMap((group) => group.products.flatMap((item) => item.packs)).find((pack) => pack.listingId === dal)).toMatchObject({ outOfStock: true });
+  });
+
+  it("lets Staff reject with a reason, which C19 shows, and holds no stock", async () => {
+    const { shopId, dal, home } = await stocked();
+    const staff = await staffOf(shopId);
+    const order = (await ordered(shopId, [{ listingId: dal, count: 2 }], home)).json() as { id: string };
+    expect((await reject(order.id, staff, "maybe")).statusCode).toBe(400);
+    const rejected = await reject(order.id, staff, "cannot_deliver");
+    expect(rejected.statusCode).toBe(200);
+    expect(rejected.json()).toMatchObject({ status: "rejected_by_shop", rejectReason: "cannot_deliver", expiresAt: null });
+    expect(await history(order.id)).toEqual([{ from_status: "placed", to_status: "rejected_by_shop", actor_role: "staff", reason_code: "cannot_deliver" }]);
+    expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json())
+      .toMatchObject({ status: "rejected_by_shop", rejectReason: "cannot_deliver" });
+    expect(await left(dal)).toBe("10");
+  });
+
+  it("answers only the shop's own Owner or Staff, even once the shop isn't Live", async () => {
+    const { shopId, dal, home } = await stocked();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const elsewhere = await shop("Other Stores", 600);
+    const otherStaff = await staffOf(elsewhere, "otherstaff@example.com");
+    for (const headers of [customer, other, otherStaff]) {
+      expect((await accept(order.id, headers)).statusCode).toBe(404);
+      expect((await reject(order.id, headers)).statusCode).toBe(404);
+      expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${order.id}`, headers })).statusCode).toBe(404);
+    }
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: other })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: otherStaff })).json()).toMatchObject({ new: [], accepted: [], doneToday: [] });
+    // No longer Live after the order came in: it still gets an answer (owner's answer 13).
+    await database.pool.query("UPDATE shops SET state = 'approved' WHERE id = $1", [shopId]);
+    expect((await accept(order.id, await staffOf(shopId))).statusCode).toBe(200);
+  });
+
+  it("refuses to answer an order that isn't placed any more", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const cancelled = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await cancel(cancelled.id);
+    const accepted = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(accepted.id, owner);
+    for (const id of [cancelled.id, accepted.id]) {
+      expect((await accept(id, owner)).json()).toEqual({ error: { code: "ORDER_STATUS_CHANGED" } });
+      expect((await reject(id, owner)).json()).toEqual({ error: { code: "ORDER_STATUS_CHANGED" } });
+    }
+    // The Customer can't cancel once it's accepted.
+    expect((await cancel(accepted.id)).json()).toEqual({ error: { code: "ORDER_STATUS_CHANGED" } });
+    expect(await left(dal)).toBe("9");
+  });
+
+  it("refuses Accept and Reject from 600 s after placement, in the API itself", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const late = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const inTime = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    at("2030-01-01T00:09:59.999Z");
+    expect((await accept(inTime.id, owner)).statusCode).toBe(200);
+    at("2030-01-01T00:10:00.000Z");
+    const expired = await accept(late.id, owner);
+    expect(expired.statusCode).toBe(409);
+    expect(expired.json()).toEqual({ error: { code: "ORDER_EXPIRED" } });
+    expect((await reject(late.id, owner)).json()).toEqual({ error: { code: "ORDER_EXPIRED" } });
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${late.id}`, headers: owner })).json())
+      .toMatchObject({ status: "placed", expiresAt: "2030-01-01T00:10:00.000Z", now: "2030-01-01T00:10:00.000Z" });
+  });
+
+  it("refuses a line that no longer fits the stock left, naming it, whole packs and parts alike", async () => {
+    const { shopId, dal, atta, owner, home } = await stocked();
+    const otherHome = await address("other@example.com");
+    await setStock(dal, "3");
+    await setStock(atta, "2");
+    // A whole-pack line, and a part line: the last 2 kg of a 5 kg pack (#377).
+    const first = (await ordered(shopId, [{ listingId: dal, count: 2 }], home)).json() as { id: string };
+    const second = (await ordered(shopId, [{ listingId: dal, count: 2 }, { listingId: atta, count: 1 }], otherHome, other)).json() as { id: string; lines: unknown[] };
+    expect(second.lines).toMatchObject([{ count: 2 }, { part: "2" }]);
+    expect((await accept(first.id, owner)).statusCode).toBe(200);
+    await setStock(atta, "1.5");
+    const short = await accept(second.id, owner);
+    expect(short.statusCode).toBe(409);
+    expect(short.json()).toEqual({ error: { code: "NOT_ENOUGH_STOCK", shortLines: [
+      { name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, available: "1" },
+      { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: "2", available: "1.5" },
+    ] } });
+    expect(await history(second.id)).toEqual([]);
+    // A listing switched off since placement doesn't block Accept; the shop can still reject the short one.
+    await database.pool.query("UPDATE shop_listings SET available = false WHERE id = $1", [dal]);
+    await setStock(dal, "4");
+    await setStock(atta, "2");
+    expect((await accept(second.id, owner)).statusCode).toBe(200);
+  });
+
+  it("lets only one of two Accepts racing for the last stock through", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await staffOf(shopId);
+    await setStock(dal, "1");
+    const one = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const two = (await ordered(shopId, [{ listingId: dal, count: 1 }], await address("other@example.com"), other)).json() as { id: string };
+    const hold = await database.pool.connect();
+    try {
+      // Holds the listing so both Accepts reach its lock before either checks stock.
+      await hold.query("BEGIN");
+      await hold.query("SELECT 1 FROM shop_listings WHERE id = $1 FOR UPDATE", [dal]);
+      const racing = [accept(one.id, owner), accept(two.id, staff)];
+      const waiting = () => database.pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'");
+      for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < 2; tries += 1) {
+        if (tries > 100) throw new Error("The Accepts never waited on the listing");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await hold.query("COMMIT");
+      const answers = await Promise.all(racing);
+      expect(answers.map((answer) => answer.statusCode).sort()).toEqual([200, 409]);
+      expect(answers.find((answer) => answer.statusCode === 409)?.json()).toMatchObject({ error: { code: "NOT_ENOUGH_STOCK", shortLines: [{ available: "0" }] } });
+    } finally { hold.release(); }
+    expect(await left(dal)).toBe("0");
+  });
+
+  it("holds stock only in the five statuses from Accept to the door, so cancel, reject and expiry give it back", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 4 }], home)).json() as { id: string };
+    await accept(order.id, owner);
+    const held: string[] = [];
+    for (const status of OrderStatus.options) {
+      await database.pool.query("UPDATE orders SET status = $2, status_changed_at = now() WHERE id = $1", [order.id, status]);
+      if (await left(dal) === "6") held.push(status);
+      else expect(await left(dal)).toBe("10");
+    }
+    expect(held).toEqual(["accepted", "preparing", "ready", "out_for_delivery", "arrived"]);
+  });
+
+  it("lists S04's New, Accepted and Done today, by the last status change in India time", async () => {
+    const { shopId, dal, atta, owner, home } = await stocked();
+    // 05:30 IST: placed and never answered, so past its 600 s by the time S04 opens.
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    at("2030-01-01T00:11:00.000Z");
+    const yesterday = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await cancel(yesterday.id);
+    // Its last change falls at 23:50 IST the day before.
+    await database.pool.query("UPDATE orders SET status_changed_at = '2029-12-31T18:20:00Z' WHERE id = $1", [yesterday.id]);
+    const cancelled = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await cancel(cancelled.id);
+    const accepted = (await ordered(shopId, [{ listingId: dal, count: 1 }, { listingId: atta, count: 1 }], home)).json() as { id: string };
+    await accept(accepted.id, owner);
+    const waiting = (await ordered(shopId, [{ listingId: dal, count: 3 }], home)).json() as { id: string; number: number };
+    at("2030-01-01T00:12:00.000Z");
+    const rejected = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await reject(rejected.id, owner);
+
+    at("2030-01-01T00:13:00.000Z");
+    const listed = (await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: owner })).json() as Record<string, Array<{ id: string }>>;
+    expect(listed).toMatchObject({ now: "2030-01-01T00:13:00.000Z" });
+    expect(listed.new).toEqual([{
+      id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:11:00.000Z", expiresAt: "2030-01-01T00:21:00.000Z",
+      itemCount: 1, total: "435.00", address: { flat: "Flat 4B", areaLine: "Kothrud" },
+    }]);
+    expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
+    expect(listed.doneToday?.map((row) => row.id)).toEqual([rejected.id, cancelled.id]);
   });
 });
 
