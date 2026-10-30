@@ -611,3 +611,16 @@ export const syncActions = pgTable("sync_actions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => [uniqueIndex("sync_actions_identity_idx").on(table.accountId, table.actionId),
   uniqueIndex("sync_actions_sequence_idx").on(table.accountId, table.deviceId, table.sequence)]);
+
+// Cursor revisions are allocated under the shop row lock, never from a sequence.
+export const stockSyncShops = pgTable("stock_sync_shops", {
+  shopId: uuid("shop_id").primaryKey().references(() => shops.id),
+  revision: bigint("revision", { mode: "bigint" }).notNull().default(sql`0`),
+});
+export const stockSyncItems = pgTable("stock_sync_items", {
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  packId: uuid("pack_id").notNull(),
+  revision: bigint("revision", { mode: "bigint" }).notNull(),
+  payload: jsonb("payload"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => [primaryKey({ columns: [table.shopId, table.packId] })]);

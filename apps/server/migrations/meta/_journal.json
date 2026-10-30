@@ -260,6 +260,13 @@
       "when": 1793371210458,
       "tag": "0036_suspended_stock_state",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793373090929,
+      "tag": "0037_stock_sync_cache",
+      "breakpoints": true
     }
   ]
 }

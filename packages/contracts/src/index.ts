@@ -239,4 +239,4 @@ export {
   ShopOrderSummary, ShopOrdersResponse, ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "./orders";
 
-export { ShopStockResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse } from "./sync";
+export { ShopStockResponse, StockCursor, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse } from "./sync";

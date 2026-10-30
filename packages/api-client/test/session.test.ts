@@ -1222,3 +1222,14 @@ it("reads linked shop Stock with authentication and validates its response", asy
   expect(await client.shopStock()).toEqual({ ok: true, data });
   expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/stock", auth: "Bearer a1" });
 });
+
+it("pulls authenticated Stock deltas with an encoded cursor and validates the response", async () => {
+  const id = "00000000-0000-4000-8000-000000000393";
+  const data = { shopId: id, state: "live", cursor: `${id}:2`, changes: [] };
+  const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, data));
+  await client.verifyCode(signIn);
+  expect(await client.syncChanges()).toEqual({ ok: true, data });
+  expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/sync/changes", auth: "Bearer a1" });
+  expect(await client.syncChanges(`${id}:1`)).toEqual({ ok: true, data });
+  expect(calls.at(-1)?.path).toBe(`/v1/sync/changes?since=${id}%3A1`);
+});

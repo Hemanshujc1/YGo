@@ -1,15 +1,57 @@
-import { ErrorEnvelope, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { applyOpeningStock } from "./shop-listings";
+import { applyOpeningStock, catalogSql } from "./shop-listings";
 
 type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number };
 
 export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds }: Options) {
   const auth = { pool, clock, keys: deriveKeys(secret) };
+  app.get("/v1/sync/changes", { schema: { querystring: SyncChangesQuery, response: {
+    200: SyncChangesResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope,
+  } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { since } = request.query as SyncChangesQuery;
+    return withTransaction(pool, async (client) => {
+      const { rows: [shop] } = await client.query<{ id: string; state: "live" | "suspended" }>(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
+        WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [who.accountId]);
+      if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (shop.state !== "live" && shop.state !== "suspended") return reply.code(409).send({ error: { code: "SHOP_LISTING_NOT_READY" } });
+      await client.query("INSERT INTO stock_sync_shops (shop_id) VALUES ($1) ON CONFLICT DO NOTHING", [shop.id]);
+      const { rows: [saved] } = await client.query<{ revision: string }>("SELECT revision FROM stock_sync_shops WHERE shop_id = $1", [shop.id]);
+      if (!saved) throw new Error("Missing Stock revision");
+      if (since && (!since.startsWith(`${shop.id}:`) || BigInt(since.split(":")[1] ?? "0") > BigInt(saved.revision))) return reply.code(400).send({ error: { code: "VALIDATION_FAILED" } });
+      // One statement snapshot: a writer committing later is picked up by the next pull.
+      const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, "outOfStock"
+        FROM (${catalogSql} AND sl.id IS NOT NULL) current_stock`, [shop.id]);
+      const previous = await client.query<{ packId: string; payload: ShopStockResponse["items"][number] | null }>('SELECT pack_id AS "packId", payload FROM stock_sync_items WHERE shop_id = $1', [shop.id]);
+      const current = new Map(rows.map((item) => [item.packId, item]));
+      const old = new Map(previous.rows.map((row) => [row.packId, row.payload]));
+      const removed = previous.rows.filter((row) => row.payload && !current.has(row.packId));
+      // jsonb key order is unspecified, so compare fields rather than its serialization.
+      const updates = rows.filter((item) => {
+        const was = old.get(item.packId);
+        return !was || Object.entries(item).some(([key, value]) => was[key as keyof typeof was] !== value);
+      });
+      let revision = BigInt(saved.revision);
+      if (updates.length || removed.length) {
+        revision++;
+        for (const item of updates) await client.query(`INSERT INTO stock_sync_items (shop_id, pack_id, revision, payload) VALUES ($1, $2, $3, $4)
+          ON CONFLICT (shop_id, pack_id) DO UPDATE SET revision = EXCLUDED.revision, payload = EXCLUDED.payload, deleted_at = NULL`, [shop.id, item.packId, revision.toString(), JSON.stringify(item)]);
+        for (const row of removed) await client.query("UPDATE stock_sync_items SET revision = $3, payload = NULL, deleted_at = $4 WHERE shop_id = $1 AND pack_id = $2", [shop.id, row.packId, revision.toString(), clock.now()]);
+        await client.query("UPDATE stock_sync_shops SET revision = $2 WHERE shop_id = $1", [shop.id, revision.toString()]);
+      }
+      const delta = await client.query<{ packId: string; item: ShopStockResponse["items"][number] | null; deletedAt: Date | null }>(`SELECT pack_id AS "packId", payload AS item, deleted_at AS "deletedAt" FROM stock_sync_items
+        WHERE shop_id = $1 AND revision > $2 ORDER BY revision, pack_id`, [shop.id, since?.split(":")[1] ?? "0"]);
+      await client.query("COMMIT");
+      return reply.send({ shopId: shop.id, state: shop.state, cursor: `${shop.id}:${revision}`, changes: delta.rows.map((row) => ({ ...row, deletedAt: row.deletedAt?.toISOString() ?? null })) });
+    });
+  });
+
   app.post("/v1/sync/actions", { schema: { body: SyncActionsBody, response: {
     200: SyncActionsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope,
   } } }, async (request, reply) => {

@@ -11,6 +11,15 @@ export const ShopStockResponse = z.strictObject({
     baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, outOfStock: z.boolean(),
   })),
 });
+export const StockCursor = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,18})$/);
+export const SyncChangesQuery = z.strictObject({ since: StockCursor.optional() });
+export type SyncChangesQuery = z.infer<typeof SyncChangesQuery>;
+export const SyncChangesResponse = z.strictObject({
+  shopId: z.uuid(), state: ShopStockResponse.shape.state, cursor: StockCursor,
+  changes: z.array(z.strictObject({ packId: z.uuid(), item: ShopStockResponse.shape.items.element.nullable(), deletedAt: z.iso.datetime().nullable() })
+    .refine((row) => row.item ? row.item.packId === row.packId && row.deletedAt === null : row.deletedAt !== null)),
+}).refine((page) => page.cursor.startsWith(`${page.shopId}:`));
+export type SyncChangesResponse = z.infer<typeof SyncChangesResponse>;
 export type ShopStockResponse = z.infer<typeof ShopStockResponse>;
 export const SyncAction = z.strictObject({
   id: z.uuid(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), shopId: z.uuid(),

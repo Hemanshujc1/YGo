@@ -1,5 +1,5 @@
 import {
-  ShopStockResponse,
+  ShopStockResponse, SyncChangesResponse,
   SyncActionsResponse,
   type SyncActionsBody,
   Account,
@@ -494,6 +494,11 @@ export function createApiClient({
     /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
     async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
+    },
+
+    /** Shop-scoped durable Stock delta; omit since for the complete projection. */
+    async syncChanges(since?: string): Promise<ApiResult<SyncChangesResponse>> {
+      return result(await signedIn("GET", `/v1/sync/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`), SyncChangesResponse);
     },
 
     /** Ordered outbox push; acknowledged replays return their original per-action results. */

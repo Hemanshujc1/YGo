@@ -22,3 +22,13 @@ it("accepts boolean flag results and keeps payloads strict", async () => {
     result: { listingId: id, outOfStock: false, recordedAt: action.createdAt }, clockSuspect: false }] }).success).toBe(true);
   expect(ShopStockResponse.safeParse({ shopId: id, state: "approved", items: [] }).success).toBe(false);
 });
+
+it("validates shop-scoped cursors and paired Stock rows/tombstones", async () => {
+  const { SyncChangesQuery, SyncChangesResponse } = await import("../src/sync");
+  const page = { shopId: id, state: "live", cursor: `${id}:1`, changes: [{ packId: id, item: null, deletedAt: action.createdAt }] };
+  expect(SyncChangesResponse.safeParse(page).success).toBe(true);
+  expect(SyncChangesResponse.safeParse({ ...page, cursor: `${id}:01` }).success).toBe(false);
+  expect(SyncChangesResponse.safeParse({ ...page, changes: [{ ...page.changes[0], deletedAt: null }] }).success).toBe(false);
+  expect(SyncChangesQuery.safeParse({ since: "2030-01-01" }).success).toBe(false);
+  expect(SyncChangesQuery.safeParse({ since: `${id}:0` }).success).toBe(true);
+});

@@ -25,10 +25,11 @@ vi.mock("react", () => ({
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
+vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
-vi.mock("../src/api", () => ({ session: { get: mock.get }, api: { shopStock: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
+vi.mock("../src/api", () => ({ session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open,
   legacyOpeningStock: { getAllKeys: () => [] } }));
 import StockScreen from "../src/app/stock";
@@ -42,7 +43,7 @@ function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   const element = node as { props: Record<string, unknown> };
   return [element, ...elements(element.props.children)];
 }
-async function settle() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
+async function settle() { for (let i = 0; i < 35; i++) await Promise.resolve(); }
 function press(label: string) {
   const element = elements(render()).find((node) => node.props.label === label);
   expect(element, label).toBeDefined();
@@ -63,7 +64,7 @@ describe("minimal Stock screen", () => {
     vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false;
     db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID);
     mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue);
-    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", items: [item] } });
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item, deletedAt: null }] } });
     mock.send.mockResolvedValue({ ok: false });
   });
   afterEach(() => db.close());
@@ -125,6 +126,54 @@ describe("minimal Stock screen", () => {
     mock.stock.mockImplementationOnce(async () => { switchAccount(); return { ok: false }; });
     press("Rice: Out of stock"); await settle();
     expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it("pulls other-device changes on manual refresh and keeps pending toggles over offline pulls", async () => {
+    render(); await settle();
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: { ...item, quantity: "9", outOfStock: true }, deletedAt: null }] } });
+    press("Retry sync"); await settle();
+    expect(mock.stock).toHaveBeenLastCalledWith(`${shopId}:1`);
+    expect(texts()).toContain("9 kg");
+    press("Rice: Out of stock"); await settle();
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
+    mock.stock.mockRejectedValue(new Error("offline"));
+    press("Retry sync"); await settle();
+    expect(texts()).toContain("9 kg");
+    expect(texts()).toContain("Couldn't refresh Stock. Showing saved stock; changes stay on this phone.");
+    expect(queue.count()).toBe(1);
+  });
+
+  it("keeps a removed pending row read-only, then exposes the retained refusal's support reference", async () => {
+    render(); await settle(); press("Rice: Out of stock"); await settle();
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: null, deletedAt: new Date().toISOString() }] } });
+    press("Retry sync"); await settle();
+    expect(texts()).toContain("No longer available · waiting to sync");
+    expect(elements(render()).some((node) => node.props.label === "Rice: Out of stock")).toBe(false);
+    const id = queue.batch(shopId).actions[0]?.id;
+    mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
+      actionId: action.id, sequence: action.sequence, status: "rejected", code: "NOT_FOUND", result: null, clockSuspect: false,
+    })) } }));
+    press("Retry sync"); await settle();
+    expect(texts().join(" ")).not.toContain("Rice");
+    expect(texts().join(" ")).toContain(id);
+    expect(queue.failureCount()).toBe(1);
+    expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
+  });
+
+  it("keeps the acknowledged switch when the following pull fails, then replaces replay echoes on an empty successful pull", async () => {
+    render(); await settle();
+    mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
+      actionId: action.id, sequence: action.sequence, status: "applied", code: null, result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false,
+    })) } }));
+    mock.stock.mockRejectedValue(new Error("pull offline"));
+    press("Rice: Out of stock"); await settle();
+    expect(queue.count()).toBe(0);
+    expect(texts()).toContain("Saved");
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
+    // Another phone restored false before the server projection changed; no delta is needed.
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } });
+    press("Retry sync"); await settle();
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
   });
 
 });
