@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type CartResponse, OrderStatus, type OrderResponse, RejectReason } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { createOrder, isFinal, placeOrder, type Timers, treatments } from "../src/lib/order";
+import { createOrder, isFinal, placeOrder, shownStatus, type Timers, treatments } from "../src/lib/order";
 import { strings } from "../src/strings";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
@@ -13,14 +13,14 @@ const order = (status: OrderStatus = "placed"): OrderResponse => ({
   shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
   address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null,
+  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
   quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
 };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "ORDER_STATUS_CHANGED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
+const refused = (code: "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
   ({ ok: false, status, code, ...more }) as ApiResult<never>;
 
 /** Timers the test runs by hand. */
@@ -152,6 +152,22 @@ describe("C09/C19 order (#427)", () => {
     expect(store.get()).toMatchObject({ refreshing: false, order: { status: "expired" } });
   });
 
+  it("stops on a placed order past its answer time, showing it as the shop not answering (#426)", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order(), clock.timers);
+    store.start();
+    const late = { ...order(), answerExpired: true };
+    server.reads.shift()?.(ok(late));
+    await settle();
+    expect(shownStatus(late)).toBe("expired");
+    expect(shownStatus(order())).toBe("placed");
+    expect(clock.pending.size).toBe(0);
+    store.stop();
+    store.start();
+    expect(server.reads).toHaveLength(0);
+  });
+
   it("opened with no order, shows loading, then a failure with Try again, keeping polling", async () => {
     const server = fakeServer();
     const clock = fakeTimers();
@@ -229,6 +245,23 @@ describe("C09/C19 order (#427)", () => {
     server.reads.shift()?.(ok(order("accepted")));
     await cancelling;
     expect(store.get().order?.status).toBe("accepted");
+  });
+
+  it("says the shop's time ran out when Cancel lands past it, and reads the order again (#426)", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order(), clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(order()));
+    await settle();
+    const cancelling = store.cancel();
+    server.cancels.shift()?.(refused("ORDER_EXPIRED", 409));
+    await settle();
+    expect(store.get().notice).toBe(strings.errors.ORDER_EXPIRED);
+    server.reads.shift()?.(ok({ ...order(), answerExpired: true }));
+    await cancelling;
+    expect(store.get().order?.answerExpired).toBe(true);
+    expect(clock.pending.size).toBe(0);
   });
 
   it("says Cancel didn't reach the server when offline, and keeps polling", async () => {

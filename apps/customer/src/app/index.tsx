@@ -176,14 +176,19 @@ export default function Home() {
       contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
     >
       <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
-      <Link href="/account" asChild>
-        <Pressable
-          accessibilityRole="button"
-          className="mt-4 min-h-12 items-center justify-center self-start rounded-button border border-border bg-surface px-4"
-        >
-          <Text className="text-secondary font-medium text-text">{strings.account.open}</Text>
-        </Pressable>
-      </Link>
+      {/* Orders sits beside Account until the tab bar (owner's answer 5 on #426). */}
+      <View className="mt-4 flex-row gap-2 self-start">
+        <Link href="/orders" asChild>
+          <Pressable accessibilityRole="button" className="min-h-12 items-center justify-center rounded-button border border-border bg-surface px-4">
+            <Text className="text-secondary font-medium text-text">{strings.orders.open}</Text>
+          </Pressable>
+        </Link>
+        <Link href="/account" asChild>
+          <Pressable accessibilityRole="button" className="min-h-12 items-center justify-center rounded-button border border-border bg-surface px-4">
+            <Text className="text-secondary font-medium text-text">{strings.account.open}</Text>
+          </Pressable>
+        </Link>
+      </View>
       <AreaLine />
       <Text className="mt-6 text-secondary text-muted">{strings.health}</Text>
       <Text className="mt-1 text-body text-text">{answer}</Text>

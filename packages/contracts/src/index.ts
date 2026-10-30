@@ -235,7 +235,7 @@ export {
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
 export {
-  ORDER_ANSWER_SECONDS, OrderLine, OrderParams, OrderResponse, OrderStatus, PlaceOrderBody, RejectOrderBody, RejectReason, ShopOrderResponse,
+  ORDER_ANSWER_SECONDS, OrderLine, OrderParams, OrderResponse, OrderStatus, OrderSummary, OrdersResponse, PlaceOrderBody, RejectOrderBody, RejectReason, ShopOrderResponse,
   ShopOrderSummary, ShopOrdersResponse, ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "./orders";
 

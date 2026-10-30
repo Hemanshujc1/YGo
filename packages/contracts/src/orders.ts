@@ -61,8 +61,26 @@ export const OrderResponse = z.strictObject({
   total: Amount,
   /** Why the shop rejected it, shown on C19 in the Customer's own words (owner's answer 3 on #425); null otherwise. */
   rejectReason: RejectReason.nullable(),
+  /**
+   * Still placed, but past ORDER_ANSWER_SECONDS by the server's clock: the shop can no longer answer. Until #57 moves
+   * such an order to Expired, C18 and C19 show "Shop did not answer" from this, and the status stays as stored (owner's answer 4 on #426).
+   */
+  answerExpired: z.boolean(),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;
+
+/** A row on C18 (#426). */
+export const OrderSummary = OrderResponse.pick({ id: true, number: true, status: true, placedAt: true, shop: true, total: true, answerExpired: true });
+export type OrderSummary = z.infer<typeof OrderSummary>;
+
+/**
+ * `GET /v1/orders`, C18's two groups (owner's answers on #426).
+ * - `active`: not final and not `answerExpired`. Those waiting on the Customer (awaiting_customer_confirm, arrived) first, then newest placed first.
+ * - `past`: final or `answerExpired`, newest placed first, at most the newest 50.
+ * Ties fall to the higher order number.
+ */
+export const OrdersResponse = z.strictObject({ active: z.array(OrderSummary), past: z.array(OrderSummary) });
+export type OrdersResponse = z.infer<typeof OrdersResponse>;
 
 /**
  * A placed order the shop hasn't answered expires this long after placement (ORD-2). Accept and Reject refuse
