@@ -38,20 +38,30 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     type Address = { pincode: string; latitude: number; longitude: number };
     const addressSql = `SELECT pincode, ST_Y(point::geometry) AS latitude, ST_X(point::geometry) AS longitude
       FROM saved_addresses WHERE id = $1 AND account_id = $2 AND point IS NOT NULL`;
-    const { rows: [address] } = await pool.query<Address>(addressSql, [addressId, who.accountId]);
-    const read = address && await savedCart(pool, who.accountId, shopId, false);
-    if (!address || !read) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-
-    // Priced first, holding no connection, as a cart save prices: the quote reads in parallel, which one
+    // The address and the cart as they are now, or undefined when either is gone.
+    const current = async () => {
+      const { rows: [address] } = await pool.query<Address>(addressSql, [addressId, who.accountId]);
+      const cart = address && await savedCart(pool, who.accountId, shopId, false);
+      return address && cart && { address, cart };
+    };
+    // Priced holding no connection, as a cart save prices: the quote reads in parallel, which one
     // transaction's connection can't. The shop must serve the address delivered to: its radius, both Areas, its hours (DSC-1).
-    const quote = async () => {
+    const quote = async ({ address, cart }: NonNullable<Awaited<ReturnType<typeof current>>>) => {
       const [serving] = await servingShops(pool, clock.now(), { pincode: address.pincode, latitude: address.latitude, longitude: address.longitude }, shopId);
       const version = await latestRateCardVersion(pool);
-      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, read.revision, read.lines) };
+      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines) };
     };
-    const { version, view, priced, packs } = await quote();
+    const first = await current();
+    if (!first) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const { address, cart: read } = first;
+    const { version, view, priced, packs } = await quote(first);
     if (view.reasons.some((reason) => reason.code === "OWN_SHOP")) return reply.code(403).send({ error: { code: "OWN_SHOP" } });
-    const changed = async () => reply.code(409).send({ error: { code: "CART_CHANGED", cart: (await quote()).view } });
+    // Something changed while placement waited on the locks: read the address and the cart again and answer with the cart as it is now.
+    const changed = async () => {
+      const now = await current();
+      if (!now) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      return reply.code(409).send({ error: { code: "CART_CHANGED", cart: (await quote(now)).view } });
+    };
     if (read.revision !== revision || !view.placeable || !priced || view.quote?.total !== total) {
       return reply.code(409).send({ error: { code: "CART_CHANGED", cart: view } });
     }

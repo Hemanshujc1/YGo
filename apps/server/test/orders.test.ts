@@ -243,6 +243,31 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect(await orderCount()).toBe(0);
   });
 
+  it("answers a cart saved while placement waits on its lock with that newer cart, not the one first read", async () => {
+    const { shopId, dal, atta, home } = await stocked();
+    const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
+    const edit = await database.pool.connect();
+    try {
+      await edit.query("BEGIN");
+      const { rows: [locked] } = await edit.query<{ id: string }>(
+        "SELECT carts.id FROM carts JOIN accounts ON accounts.id = carts.account_id WHERE accounts.email = 'customer@example.com' FOR UPDATE");
+      // Reads revision 1 and its total, then waits on the cart's lock.
+      const placing = place(shopId, { revision: 1, total: cart.quote.total, addressId: home });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // A save lands first, as the cart route writes one: 2 Atta in place of the Dal, at revision 2.
+      await edit.query("DELETE FROM cart_lines WHERE cart_id = $1", [locked?.id]);
+      await edit.query("INSERT INTO cart_lines (cart_id, listing_id, position, count) VALUES ($1, $2, 1, 2)", [locked?.id, atta]);
+      await edit.query("UPDATE carts SET revision = 2 WHERE id = $1", [locked?.id]);
+      await edit.query("COMMIT");
+      const changed = await placing;
+      expect(changed.statusCode).toBe(409);
+      expect(changed.json()).toMatchObject({ error: { code: "CART_CHANGED", cart: {
+        revision: 2, lines: [{ listingId: atta, count: 2, lineTotal: "399.98" }], quote: { total: "429.98" }, placeable: true,
+      } } });
+    } finally { edit.release(); }
+    expect(await orderCount()).toBe(0);
+  });
+
   it("refuses stock gone since the cart was saved, a closed or paused shop, and a cart that can't be ordered", async () => {
     const { shopId, dal, home } = await stocked();
     const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
