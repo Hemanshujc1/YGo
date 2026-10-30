@@ -22,6 +22,9 @@ import {
   CartResponse,
   OrderResponse,
   type PlaceOrderBody,
+  type RejectOrderBody,
+  ShopOrderResponse,
+  ShopOrdersResponse,
   type SaveCartBody,
   type FeedQuery,
   type SearchQuery,
@@ -471,6 +474,26 @@ export function createApiClient({
     /** Stock tools for the linked Owner or Staff member, after going Live. */
     async shopStock(): Promise<ApiResult<ShopStockResponse>> {
       return result(await signedIn("GET", "/v1/me/stock"), ShopStockResponse);
+    },
+
+    /** `GET /v1/me/shop-orders`: S04, the shop's New, Accepted and Done today orders (#425). */
+    async shopOrders(): Promise<ApiResult<ShopOrdersResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-orders"), ShopOrdersResponse);
+    },
+
+    /** `GET /v1/me/shop-orders/:id`: S05, one of the shop's orders. */
+    async shopOrder(id: string): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("GET", `/v1/me/shop-orders/${encodeURIComponent(id)}`), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/accept`: holds the stock (#425); NOT_ENOUGH_STOCK carries the short lines. */
+    async acceptOrder(id: string): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/accept`), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
+    async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
     },
 
     /** Ordered outbox push; acknowledged replays return their original per-action results. */

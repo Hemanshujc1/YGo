@@ -98,7 +98,7 @@ export default function Home() {
 
   if (application) {
     return (
-      <Plain stock={application.state === "live" || application.state === "suspended"} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+      <Plain stock={application.state === "live" || application.state === "suspended"} orders={application.state === "live" || application.state === "suspended"} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
         {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
@@ -171,7 +171,7 @@ function Waiting({ check }: { check: LiveCheck }) {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock = false }: { stock?: boolean; verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock = false, orders = false }: { stock?: boolean; orders?: boolean; verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
@@ -181,6 +181,12 @@ function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock 
       contentContainerClassName="grow justify-center gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
     >
+      {/* At the top, with no count (#431); a Suspended shop still answers its orders (owner's answer 13 on #425). */}
+      {orders && <Link href="/orders" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+          <Text className="text-body font-semibold text-on-primary">{strings.orders.open}</Text>
+        </Pressable>
+      </Link>}
       {children}
       {stock && <Link href="/stock" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">

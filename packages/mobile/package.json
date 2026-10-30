@@ -6,7 +6,9 @@
     ".": "./src/index.ts",
     "./google-sign-in-plugin": "./google-sign-in.config.js",
     "./address-at": "./src/address-at.ts",
-    "./pin-map": "./src/pin-map.tsx"
+    "./pin-map": "./src/pin-map.tsx",
+    "./pack-label": "./src/pack-label.ts",
+    "./poller": "./src/poller.ts"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
@@ -16,13 +18,16 @@
   "dependencies": {
     "@ygo/api-client": "workspace:*",
     "@ygo/contracts": "workspace:*",
+    "@ygo/format": "workspace:*",
     "@ygo/tokens": "workspace:*"
   },
   "peerDependencies": {
     "expo": "57.0.27",
     "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
+    "expo-router": "57.0.25",
     "expo-secure-store": "57.0.4",
+    "lucide-react-native": "1.57.0",
     "nativewind": "4.2.7",
     "react": "19.2.3",
     "react-native": "0.86.3",
@@ -42,7 +47,9 @@
     "expo": "57.0.27",
     "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
+    "expo-router": "57.0.25",
     "expo-secure-store": "57.0.4",
+    "lucide-react-native": "1.57.0",
     "nativewind": "4.2.7",
     "react": "19.2.3",
     "react-native": "0.86.3",

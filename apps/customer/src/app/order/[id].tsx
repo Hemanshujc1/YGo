@@ -1,17 +1,17 @@
-import type { OrderLine, OrderResponse, OrderStatus } from "@ygo/contracts";
+import type { OrderLine, OrderResponse } from "@ygo/contracts";
 import { formatTime } from "@ygo/format";
-import { Button, Confirm, Text } from "@ygo/mobile";
+import { Button, Confirm, StatusChip, Text } from "@ygo/mobile";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
-import { Bell, CircleArrowRight, CircleCheck, CircleX, Clock, Phone } from "../../components/icons";
+import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
 import { money } from "../../lib/money";
-import { treatments, type Treatment } from "../../lib/order";
+import { treatments } from "../../lib/order";
 import { addressLine } from "../../lib/saved-addresses";
 import { packLabel } from "../../lib/shop-page";
 import { useOrder } from "../../lib/use-order";
@@ -21,26 +21,6 @@ import { strings } from "../../strings";
 // Call the shop is in every state; Cancel is free until the shop answers (ORD-5, ORD-8).
 
 const words = strings.order;
-
-/** The five looks of design system section 6. */
-const looks: Record<Treatment, { box: string; text: string; icon: typeof Clock }> = {
-  needsYou: { box: "bg-accent", text: "text-on-accent", icon: Bell },
-  waiting: { box: "bg-info-subtle", text: "text-on-info-subtle", icon: Clock },
-  inProgress: { box: "bg-primary-subtle", text: "text-on-primary-subtle", icon: CircleArrowRight },
-  completed: { box: "bg-success-subtle", text: "text-on-success-subtle", icon: CircleCheck },
-  ended: { box: "border border-border-strong", text: "text-text", icon: CircleX },
-};
-
-function StatusChip({ status }: { status: OrderStatus }) {
-  const look = looks[treatments[status]];
-  const Icon = look.icon;
-  return (
-    <View className={`h-8 flex-row items-center gap-1.5 self-start rounded-full px-3 ${look.box}`}>
-      <Icon size={16} className={look.text} />
-      <Text className={`text-label font-medium ${look.text}`}>{words.statuses[status]}</Text>
-    </View>
-  );
-}
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 /** The check's path length, so the dash draws it from start to end. */
@@ -85,7 +65,7 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
     <View className="gap-4">
       {placed && order.status === "placed" && <PlacedMark />}
       <View className="gap-2">
-        <StatusChip status={order.status} />
+        <StatusChip word={words.statuses[order.status]} treatment={treatments[order.status]} />
         <Text className="text-secondary tabular-nums text-muted">{`${order.shop.name} · ${formatTime(order.placedAt)}`}</Text>
         {order.status === "placed" && <Text className="text-body text-text">{words.waiting}</Text>}
         {order.rejectReason && <Text className="text-body text-text">{words.rejectedBecause(words.rejectReasons[order.rejectReason])}</Text>}
