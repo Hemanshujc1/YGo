@@ -57,6 +57,8 @@ export const CartReason = z.discriminatedUnion("code", [
   z.strictObject({ code: z.literal("LINE_UNAVAILABLE") }),
   z.strictObject({ code: z.literal("BELOW_MINIMUM_CART"), shortfall: Amount }),
   z.strictObject({ code: z.literal("BELOW_CONTRIBUTION_FLOOR") }),
+  /** The account is Owner or Staff of this shop (ACC-9, #424). */
+  z.strictObject({ code: z.literal("OWN_SHOP") }),
 ]);
 export type CartReason = z.infer<typeof CartReason>;
 

@@ -7,6 +7,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   bigint,
   numeric,
   pgTable,
@@ -513,4 +514,81 @@ export const cartLines = pgTable("cart_lines", {
 }, (table) => [
   primaryKey({ columns: [table.cartId, table.listingId] }),
   check("cart_lines_count_valid", sql`${table.count} BETWEEN 1 AND 999`),
+]);
+
+const orderStatuses = sql.raw(`'placed', 'scheduled_pending_review', 'awaiting_customer_confirm', 'accepted', 'scheduled_confirmed',
+  'preparing', 'ready', 'out_for_delivery', 'arrived', 'delivered', 'picked_up', 'rejected_by_shop', 'expired', 'not_collected',
+  'cancelled_by_customer', 'cancelled_by_shop', 'delivery_failed'`);
+
+// An order (#424). Everything but its status is frozen at placement (MNY-7): a trigger refuses any other
+// change and any delete. The number comes from the identity's sequence, one series for all shops.
+export const orders = pgTable("orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  number: integer("number").notNull().generatedAlwaysAsIdentity({ startWith: 1001 }),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  status: text("status").notNull(),
+  placedAt: timestamp("placed_at", { withTimezone: true }).notNull(),
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull(),
+  // The saved address as it was at placement, so a later edit doesn't move the delivery.
+  addressLabel: text("address_label").notNull(),
+  addressFlat: text("address_flat").notNull(),
+  addressAreaLine: text("address_area_line"),
+  addressPincode: text("address_pincode").notNull(),
+  addressPoint: geographyPoint("address_point").notNull(),
+  productValue: numeric("product_value", { precision: 12, scale: 2 }).notNull(),
+  deliveryFee: numeric("delivery_fee", { precision: 12, scale: 2 }).notNull(),
+  smallCartFee: numeric("small_cart_fee", { precision: 12, scale: 2 }),
+  total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+  rateCardVersion: bigint("rate_card_version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version),
+  // The pricing engine's whole result: commission, shares and the floor, which the Customer never sees.
+  quote: jsonb("quote").notNull(),
+}, (table) => [
+  uniqueIndex("orders_number_idx").on(table.number),
+  index("orders_account_id_placed_at_idx").on(table.accountId, table.placedAt.desc()),
+  index("orders_shop_id_status_idx").on(table.shopId, table.status),
+  check("orders_status_valid", sql`${table.status} IN (${orderStatuses})`),
+  check("orders_address_label_valid", sql`${table.addressLabel} IN ('home', 'work', 'other')`),
+]);
+
+// A line as it was priced at placement. `stock_quantity` is what it takes from the listing's stock,
+// in the stock's unit: count × pack size, or the part bought (#377). Never changed or deleted.
+export const orderLines = pgTable("order_lines", {
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  position: integer("position").notNull(),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  name: text("name").notNull(),
+  brand: text("brand"),
+  baseUnit: text("base_unit").notNull(),
+  packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).notNull(),
+  count: integer("count").notNull(),
+  partQuantity: numeric("part_quantity", { precision: 12, scale: 3 }),
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
+  lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+  stockQuantity: numeric("stock_quantity", { precision: 12, scale: 3 }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.orderId, table.position] }),
+  index("order_lines_listing_id_idx").on(table.listingId),
+  check("order_lines_count_valid", sql`${table.count} BETWEEN 1 AND 999`),
+  check("order_lines_part_valid", sql`${table.partQuantity} IS NULL OR (${table.count} = 1 AND ${table.partQuantity} > 0)`),
+  check("order_lines_stock_valid", sql`${table.stockQuantity} = COALESCE(${table.partQuantity}, ${table.count} * ${table.packQuantity})`),
+]);
+
+// Every status change of an order (ORD-7), from "none → placed" on. Append-only.
+export const orderStatusHistory = pgTable("order_status_history", {
+  id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  actorId: uuid("actor_id").references(() => accounts.id),
+  actorRole: text("actor_role").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+  reasonCode: text("reason_code"),
+  // The phone's id for a move made offline, so a replay records it once; none yet.
+  clientId: uuid("client_id"),
+}, (table) => [
+  index("order_status_history_order_id_idx").on(table.orderId),
+  check("order_status_history_role_valid", sql`${table.actorRole} IN ('customer', 'owner', 'staff', 'system')`),
+  check("order_status_history_actor_valid", sql`(${table.actorRole} = 'system') = (${table.actorId} IS NULL)`),
+  check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
 ]);

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, CartResponse, type CartLine, type CartReason, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody } from "@ygo/contracts";
+import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { partOf, stockOf, visibleListings } from "../listings";
@@ -9,7 +9,7 @@ import { servingShops, type ServingShop } from "./feed";
 import { deliveredQuote, latestRateCardVersion } from "./price-simulator";
 
 type Line = { listingId: string; count: number };
-type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & {
+export type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & {
   categoryId: string; onSale: boolean; packsLeft: number; part: PartPack | null;
 };
 
@@ -17,7 +17,7 @@ type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quanti
 const leftOf = (pack: Pack) => pack.part ? 1 : pack.packsLeft;
 
 /** Each line's pack as it is now, or undefined for one this shop doesn't list; prices and stock are read, never sent. */
-async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[]): Promise<Array<Pack | undefined>> {
+export async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[]): Promise<Array<Pack | undefined>> {
   const { rows } = await client.query<Pack & { position: number }>(
     `SELECT entry.position::int AS position, l.id AS "listingId", product.name, product.brand, product.base_unit AS "baseUnit",
         trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
@@ -31,7 +31,7 @@ async function packsOf(client: Pool | PoolClient, shopId: string, lines: Line[])
   return lines.map((_, index) => rows.find((row) => row.position === index + 1));
 }
 
-async function savedCart(client: Pool | PoolClient, accountId: string, shopId: string, lock: boolean) {
+export async function savedCart(client: Pool | PoolClient, accountId: string, shopId: string, lock: boolean) {
   const { rows: [cart] } = await client.query<{ id: string; revision: number }>(
     `SELECT id, revision FROM carts WHERE account_id = $1 AND shop_id = $2${lock ? " FOR UPDATE" : ""}`, [accountId, shopId]);
   if (!cart) return undefined;
@@ -39,10 +39,13 @@ async function savedCart(client: Pool | PoolClient, accountId: string, shopId: s
   return { ...cart, lines: rows };
 }
 
-/** The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4). */
-async function cartView(
-  client: Pool, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], read?: Array<Pack | undefined>,
-): Promise<CartResponse> {
+/**
+ * The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4).
+ * Placing an order (#424) also keeps the engine's whole result and each line's pack.
+ */
+export async function pricedCart(
+  client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], read?: Array<Pack | undefined>,
+): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined> }> {
   const packs = read ?? await packsOf(client, shopId, saved);
   const lines: CartLine[] = saved.map((line, index) => {
     const pack = packs[index];
@@ -59,6 +62,7 @@ async function cartView(
 
   let delivering = Boolean(serving);
   let quote: CartResponse["quote"] = null;
+  let engine: Extract<DeliveredQuote, { status: "priced" }> | null = null;
   const priceReasons: CartReason[] = [];
   if (serving && orderable.length) {
     const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
@@ -67,6 +71,7 @@ async function cartView(
     // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
     if (priced.status === "incomplete") delivering = false;
     else {
+      engine = priced;
       orderable.forEach(({ line }, index) => { line.lineTotal = priced.lines[index]?.lineTotal ?? null; });
       quote = { productValue: priced.productValue, deliveryFee: priced.deliveryFee.amount, smallCartFee: priced.smallCartFee?.amount ?? null, total: priced.customerTotal };
       // The floor's shortfall is the platform's earnings, which the Customer never sees (owner's clarification 2 on #50).
@@ -74,6 +79,8 @@ async function cartView(
     }
   }
   const reasons: CartReason[] = [];
+  // ACC-9: an Owner or Staff member can't order from their own shop.
+  if ((await client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId])).rowCount) reasons.push({ code: "OWN_SHOP" });
   if (!delivering) reasons.push({ code: "NOT_DELIVERING" });
   else if (serving && !serving.open) reasons.push({ code: "SHOP_CLOSED", opensAt: serving.opensAt });
   if (orderable.length < lines.length) reasons.push({ code: "LINE_UNAVAILABLE" });
@@ -81,8 +88,10 @@ async function cartView(
   else quote = null;
 
   const name = serving?.name ?? (await client.query<{ name: string }>("SELECT shop_name AS name FROM shops WHERE id = $1", [shopId])).rows[0]?.name ?? "";
-  return { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons };
+  return { view: { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons }, priced: engine, packs };
 }
+
+const cartView = async (...args: Parameters<typeof pricedCart>) => (await pricedCart(...args)).view;
 
 export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
@@ -96,7 +105,7 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
     const [[serving], cart] = await Promise.all([
       servingShops(pool, clock.now(), request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false)]);
     if (!serving && !cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    return cartView(pool, shopId, serving, cart?.revision ?? 0, cart?.lines ?? []);
+    return cartView(pool, who.accountId, shopId, serving, cart?.revision ?? 0, cart?.lines ?? []);
   });
 
   // Saves the whole cart and answers with its new quote (CRT-2). Saves of one cart run one at a time,
@@ -138,6 +147,6 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
     });
     if (typeof saved === "string") return reply.code(saved === "NOT_FOUND" ? 404 : 409).send({ error: { code: saved } });
     // Priced after the commit, from the packs the save checked: the quote reads in parallel, which one transaction's connection can't.
-    return cartView(pool, shopId, serving, revision + 1, saved.held, saved.packs);
+    return cartView(pool, who.accountId, shopId, serving, revision + 1, saved.held, saved.packs);
   });
 }

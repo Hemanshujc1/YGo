@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CartResponse } from "./cart";
 import { CatalogImportRowErrors } from "./catalog";
 import { LiveCheck } from "./shops";
 
@@ -67,6 +68,10 @@ import { LiveCheck } from "./shops";
  * - HOLIDAY_OVERLAP (409): the dates overlap another of the shop's holidays.
  * - TOO_MANY_HOLIDAYS (409): the shop already has MAX_UPCOMING_HOLIDAYS not ended yet.
  * - Dates outside today to HOLIDAY_DAYS_AHEAD, or moving the start of a holiday already under way, use VALIDATION_FAILED.
+ * Placing an order (#424):
+ * - CART_CHANGED (409): the revision or total C07 showed is not the server's fresh quote, or the cart can't be ordered now; `cart` is the cart as it is now.
+ * - OWN_SHOP (403): the account is Owner or Staff of this shop (ACC-9).
+ * - ORDER_STATUS_CHANGED (409): the order is no longer in a status this move starts from.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -108,6 +113,8 @@ export const ErrorCode = z.enum([
   "TOO_MANY_HOLIDAYS",
   "SEARCH_TERM_IN_USE",
   "CART_CHANGED",
+  "OWN_SHOP",
+  "ORDER_STATUS_CHANGED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -118,6 +125,7 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
  * `conflicts` names each pincode another Area holds. With CATALOG_IMPORT_ROWS_INVALID,
  * `rowErrors` uses the same CatalogImportRowError shape as a preview response.
  * With SHOP_NOT_READY, `liveCheck` names what still blocks Live.
+ * With CART_CHANGED from placing an order, `cart` is the cart as it is now.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
@@ -127,6 +135,7 @@ export const ErrorEnvelope = z.object({
     draftId: z.uuid().optional(),
     rowErrors: CatalogImportRowErrors.optional(),
     liveCheck: LiveCheck.optional(),
+    cart: CartResponse.optional(),
   }).refine((error) => error.code !== "CATALOG_IMPORT_ROWS_INVALID" || error.rowErrors !== undefined),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

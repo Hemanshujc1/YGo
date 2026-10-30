@@ -417,5 +417,7 @@ export const strings = {
     TOO_MANY_HOLIDAYS: "You can have up to 20 holidays coming up. Remove one to add another.",
     SEARCH_TERM_IN_USE: "This search term already exists.",
     CART_CHANGED: "Your cart was changed. Check it and try again.",
+    OWN_SHOP: "You can't order from your own shop.",
+    ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
   } satisfies Record<ErrorCode, string>,
 };
