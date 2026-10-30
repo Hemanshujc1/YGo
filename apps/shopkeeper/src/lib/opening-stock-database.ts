@@ -8,7 +8,8 @@ import { openingStockQueue, type OpeningStockQueue } from "./opening-stock-queue
 
 // This is only the old queue's import source; new writes never go into MMKV.
 export const legacyOpeningStock = createMMKV({ id: "shop-opening-stock" });
-const opened = new Map<string, { active: boolean; promise: Promise<OpeningStockQueue>; close?: () => Promise<void> }>();
+type Opened = { active: boolean; promise: Promise<OpeningStockQueue>; close?: () => Promise<void>; closing?: Promise<void> };
+const opened = new Map<string, Opened>();
 const accessFlags = createMMKV({ id: "shop-offline-access" });
 const options = { keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
@@ -49,7 +50,7 @@ export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> 
   if (accessFlags.getString(`blocked:${accountId}`)) return Promise.reject(new Error("Offline cleanup is pending"));
   let current = opened.get(accountId);
   if (!current) {
-    const handle = { active: true, promise: null as unknown as Promise<OpeningStockQueue>, close: undefined as (() => Promise<void>) | undefined };
+    const handle: Opened = { active: true, promise: null as unknown as Promise<OpeningStockQueue> };
     handle.promise = open(accountId, handle).catch((error: unknown) => { if (opened.get(accountId) === handle) opened.delete(accountId); throw error; });
     opened.set(accountId, handle);
     current = handle;
@@ -61,10 +62,14 @@ export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> 
 export async function closeOpeningStock(accountId: string) {
   const handle = opened.get(accountId);
   if (!handle) return;
+  if (handle.closing) return handle.closing;
   handle.active = false;
-  await handle.promise.catch(() => undefined);
-  await handle.close?.();
-  if (opened.get(accountId) === handle) opened.delete(accountId);
+  handle.closing = (async () => {
+    await handle.promise.catch(() => undefined);
+    await handle.close?.();
+    if (opened.get(accountId) === handle) opened.delete(accountId);
+  })().catch((error: unknown) => { handle.closing = undefined; throw error; });
+  return handle.closing;
 }
 
 export const offlineStorage: AccessStorage = {

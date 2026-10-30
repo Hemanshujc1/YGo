@@ -19,6 +19,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
   let view: AccessView = { mode: "online" };
   let turn = 0;
   let saved: SavedAccess | null = null;
+  const erasing = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
   function show(next: AccessView) { view = next; for (const notify of listeners) notify(); }
   function usable(record: SavedAccess) { const age = now() - record.verifiedAt; return record.stockAllowed && age >= 0 && age < 72 * 3600_000; }
@@ -28,7 +29,9 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
   }
   async function erase(accountId: string, shopId: string, mine: number) {
     show({ mode: "erasing", accountId, shopId });
-    await storage.erase(accountId, shopId);
+    let work = erasing.get(accountId);
+    if (!work) { work = storage.erase(accountId, shopId).finally(() => erasing.delete(accountId)); erasing.set(accountId, work); }
+    await work;
     if (mine === turn) { saved = null; show({ mode: "ended", accountId }); }
   }
   return {
@@ -79,7 +82,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       }
     },
     async cleanup() {
-      if (view.mode !== "erasing" || !view.accountId || !storage.blocked(view.accountId)) return;
+      if (view.mode !== "erasing" || !view.accountId || !view.shopId) return;
       const mine = ++turn;
       if (view.accountId && view.shopId) await erase(view.accountId, view.shopId, mine).catch(() => undefined);
     },

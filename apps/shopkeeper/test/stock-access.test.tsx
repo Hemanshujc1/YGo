@@ -2,18 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccessView } from "../src/lib/offline-access";
 
 const mock = vi.hoisted(() => ({ view: {} as AccessView, path: "/", cursor: 0, hooks: [] as unknown[], effects: [] as (() => void)[],
-  cleanups: [] as (() => void)[], foreground: (_state: string) => {}, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn() }));
+  cleanups: [] as (() => void)[], foreground: (() => {}) as (state: string) => void, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn() }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++; if (!(index in mock.hooks)) mock.hooks[index] = initial;
     return [mock.hooks[index], (value: unknown) => { mock.hooks[index] = value; }];
   },
   useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get(),
-  useEffect: (effect: () => void | (() => void), deps: unknown[]) => {
+  useEffect: (effect: () => unknown, deps: unknown[]) => {
     const index = mock.cursor++, before = mock.hooks[index] as unknown[] | undefined;
     if (!before || deps.some((dep, i) => dep !== before[i])) {
       mock.hooks[index] = deps;
-      mock.effects.push(() => { const cleanup = effect(); if (cleanup) mock.cleanups.push(cleanup); });
+      mock.effects.push(() => { const cleanup = effect(); if (typeof cleanup === "function") mock.cleanups.push(cleanup as () => void); });
     }
   },
 }));

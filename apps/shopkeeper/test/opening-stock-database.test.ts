@@ -141,4 +141,13 @@ it("completes access erasure even when Stock has never created a database", asyn
   expect(native.drop).not.toHaveBeenCalled(); expect(offlineStorage.blocked(account)).toBeUndefined();
 });
 
+it("shares concurrent close requests and invalidates the handle before native close finishes", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  const queue = await openOpeningStock(account);
+  let finish!: () => void; native.close.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const first = closeOpeningStock(account), second = closeOpeningStock(account); await Promise.resolve(); await Promise.resolve();
+  expect(() => queue.count()).toThrow("unavailable"); expect(native.close).toHaveBeenCalledTimes(1);
+  finish(); await Promise.all([first, second]);
+});
+
 });

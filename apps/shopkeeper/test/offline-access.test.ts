@@ -72,6 +72,26 @@ describe("verified offline shop access", () => {
     const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
     await access.cleanup(); expect(storage.erase).not.toHaveBeenCalled();
   });
+  it("finishes cleanup after expiry and same-account relogin even when the original completion was stale", async () => {
+    const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
+    let finish!: () => void;
+    storage.erase = vi.fn(async () => { blocked = shopId; await new Promise<void>((resolve) => { finish = resolve; }); blocked = undefined; record = null; });
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "closed" } });
+    const original = access.verify(account); await Promise.resolve(); await Promise.resolve();
+    access.reset(); await access.verify(account); expect(access.get().mode).toBe("erasing");
+    finish(); await original; expect(access.get().mode).toBe("erasing");
+    storage.erase = vi.fn(async () => {});
+    await access.cleanup(); expect(access.get().mode).toBe("ended");
+  });
+  it("shares in-flight cleanup for the same account", async () => {
+    blocked = shopId;
+    const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
+    let finish!: () => void;
+    storage.erase = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const first = access.cleanup(), second = access.cleanup();
+    expect(storage.erase).toHaveBeenCalledTimes(1); finish(); await Promise.all([first, second]);
+    expect(access.get().mode).toBe("ended");
+  });
   it("can finish cleanup when identity metadata is already gone", async () => {
     blocked = shopId;
     const access = offlineAccess(storage, fetch, () => time);
