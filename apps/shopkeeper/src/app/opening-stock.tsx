@@ -4,12 +4,13 @@ import { Link } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "../api";
-import { clearOpeningStock, pendingOpeningStock, queueOpeningStock, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
+import { api, session } from "../api";
+import { type OpeningStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncQueuedOpeningStock } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
+import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
 
 const words = strings.shopSetup;
-type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; items: ShopListingCatalogItem[] };
+type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; queue: OpeningStockQueue; items: ShopListingCatalogItem[] };
 
 function clientId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
@@ -30,6 +31,8 @@ export default function OpeningStockScreen() {
 
   async function refresh() {
     setLoad({ kind: "loading" });
+    const identity = session.get();
+    if (!("account" in identity)) return;
     const [application, listings] = await Promise.all([
       api.shopApplication().catch(() => null),
       api.shopListings().catch(() => null),
@@ -47,12 +50,22 @@ export default function OpeningStockScreen() {
       return;
     }
     const shopId = application.data.application.id;
+    let queue: OpeningStockQueue;
+    try {
+      queue = await openOpeningStock(identity.account.id);
+      queue.importLegacy(shopId, legacyOpeningStock);
+    } catch {
+      setLoad({ kind: "failed", message: words.storageFailed });
+      return;
+    }
+    const now = session.get();
+    if (!("account" in now) || now.account.id !== identity.account.id) return;
     const items = listings.data.items.filter((item) => item.listing !== null);
-    setLoad({ kind: "loaded", shopId, items });
-    setQuantities(Object.fromEntries(items.map((item) => [item.packId, pendingOpeningStock(shopId, item.packId)?.quantity ?? ""])));
-    const syncResults = await Promise.all(items.filter((item) => pendingOpeningStock(shopId, item.packId) !== null).map(async (item) => ({
+    setLoad({ kind: "loaded", shopId, queue, items });
+    setQuantities(Object.fromEntries(items.map((item) => [item.packId, queue.pending(shopId, item.packId)?.quantity ?? ""])));
+    const syncResults = await Promise.all(items.filter((item) => queue.pending(shopId, item.packId) !== null).map(async (item) => ({
       item,
-      result: await syncQueuedOpeningStock(shopId, item.packId, (entry) => api.openingStock(item.packId, entry)),
+      result: await syncQueuedOpeningStock(queue, shopId, item.packId, (entry) => api.openingStock(item.packId, entry)).catch(() => ({ kind: "pending" as const, code: null })),
     })));
     setEditableQueued((current) => ({
       ...current,
@@ -63,7 +76,7 @@ export default function OpeningStockScreen() {
       ...Object.fromEntries(syncResults.filter(({ result }) => result.kind === "pending").map(({ item, result }) => [
         item.packId,
         result.kind !== "pending" ? "" : result.code === "OPENING_STOCK_ALREADY_RECORDED" || item.openingStockRecorded
-          ? `${words.stockConflict} ${pendingOpeningStock(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}.`
+          ? `${words.stockConflict} ${queue.pending(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}.`
           : result.code ? strings.errors[result.code] : words.saveOffline,
       ])),
     }));
@@ -87,7 +100,7 @@ export default function OpeningStockScreen() {
         ...current,
         ...Object.fromEntries(conflictItems.map((item) => [
           item.packId,
-          `${words.stockConflict} ${pendingOpeningStock(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}. ${words.stockStatusUnavailable}`,
+          `${words.stockConflict} ${queue.pending(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}. ${words.stockStatusUnavailable}`,
         ])),
       }));
     } else if (conflictRefresh.kind === "refreshed") {
@@ -101,14 +114,15 @@ export default function OpeningStockScreen() {
     }
     if (syncResults.some(({ result }) => result.kind === "synced")) {
       const updated = await api.shopListings().catch(() => null);
-      if (updated?.ok) setLoad({ kind: "loaded", shopId, items: updated.data.items.filter((item) => item.listing !== null) });
+      if (updated?.ok) setLoad({ kind: "loaded", shopId, queue, items: updated.data.items.filter((item) => item.listing !== null) });
     }
   }
 
   useEffect(() => { void refresh(); }, []);
 
   async function retryStockRefresh(item: ShopListingCatalogItem, shopId: string) {
-    if (refreshingStock) return;
+    if (refreshingStock || load.kind !== "loaded") return;
+    const queue = load.queue;
     setRefreshingStock(item.packId);
     const result = await refreshListingsAfterConflict(
       load.kind === "loaded" ? load.items : [],
@@ -120,7 +134,7 @@ export default function OpeningStockScreen() {
     setRefreshingStock(null);
     if (result.kind === "failed") return;
     setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
-    setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + (pendingOpeningStock(shopId, item.packId)?.quantity ?? "") + " " + item.baseUnit + "." }));
+    setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + (queue.pending(shopId, item.packId)?.quantity ?? "") + " " + item.baseUnit + "." }));
     setLoad((current) => current.kind === "loaded" && current.shopId === shopId
       ? { ...current, items: result.items }
       : current);
@@ -129,7 +143,8 @@ export default function OpeningStockScreen() {
   async function save(item: ShopListingCatalogItem) {
     if (load.kind !== "loaded" || saving) return;
     const shopId = load.shopId;
-    const queued = pendingOpeningStock(shopId, item.packId);
+    const queue = load.queue;
+    const queued = queue.pending(shopId, item.packId);
     const entry = OpeningStockBody.safeParse(queued && !editableQueued[item.packId]
       ? queued
       : { quantity: quantities[item.packId] ?? queued?.quantity, clientId: queued?.clientId ?? clientId() });
@@ -137,14 +152,22 @@ export default function OpeningStockScreen() {
       setMessage((current) => ({ ...current, [item.packId]: words.errors.quantity }));
       return;
     }
-    queueOpeningStock(shopId, item.packId, entry.data);
+    try {
+      queue.save(shopId, item.packId, entry.data);
+    } catch {
+      setMessage((current) => ({ ...current, [item.packId]: words.storageFailed }));
+      return;
+    }
     setEditableQueued((current) => ({ ...current, [item.packId]: false }));
     setSaving(item.packId);
     setMessage((current) => ({ ...current, [item.packId]: "" }));
     const answer = await api.openingStock(item.packId, entry.data).catch(() => null);
     setSaving(null);
     if (answer?.ok) {
-      clearOpeningStock(shopId, item.packId);
+      try { queue.clear(shopId, item.packId, entry.data); } catch {
+        setMessage((current) => ({ ...current, [item.packId]: words.storageFailed }));
+        return;
+      }
       setLoad((current) => current.kind === "loaded" ? {
         ...current,
         items: current.items.map((row) => row.packId === item.packId
@@ -183,12 +206,13 @@ export default function OpeningStockScreen() {
       <Text className="text-body text-muted">{words.quantity}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
       {load.kind === "failed" && <><Text className="text-body text-danger">{load.message}</Text><Button label={words.retry} onPress={() => void refresh()} variant="secondary" /></>}
+      {load.kind === "loaded" && load.queue.attentionCount() > 0 && <Text className="text-body text-warning">{words.stockNeedsAttention}</Text>}
       {load.kind === "loaded" && load.items.length === 0 && <>
         <Text className="text-body text-muted">{words.noListings}</Text>
         <Link href="/listings" asChild><Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3"><Text className="text-body font-semibold text-primary">{words.listings}</Text></Pressable></Link>
       </>}
       {load.kind === "loaded" && load.items.map((item) => {
-        const queued = pendingOpeningStock(load.shopId, item.packId);
+        const queued = load.queue.pending(load.shopId, item.packId);
         return <View key={item.packId} className="gap-3 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name} · {item.packQuantity} {item.baseUnit}</Text>
           <Text className="text-secondary text-muted">{item.openingStockRecorded ? `${words.saved} ${item.stock} ${item.baseUnit}` : `${words.quantity}: ${item.baseUnit}`}</Text>

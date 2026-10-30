@@ -165,6 +165,9 @@ export const strings = {
       refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },
     signOut: {
+      pending: (count: number) => `${count} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
+      checkFailed: "Couldn't check your saved stock. Try again before signing out.",
+      openStock: "Open Opening stock",
       title: "Sign out?",
       body: "Changes you haven't saved will be lost.",
       cancel: "Cancel",
@@ -349,6 +352,8 @@ export const strings = {
     searchEmpty: "No products match that name or barcode.",
     stockRecorded: "Opening stock recorded.",
     stockQueued: "Opening stock is waiting to sync.",
+    storageFailed: "Couldn't open or save your stock on this phone. Your saved entries have been kept. Try again.",
+    stockNeedsAttention: "Some saved opening-stock entries need attention. Contact support before signing out.",
     stockConflict: "This shop already has opening stock recorded. The queued amount was not recorded:",
     stockStatusUnavailable: "The recorded stock status could not be refreshed. Try again to check it.",
     errors: { onlinePrice: "Enter a valid price.", counterPrice: "Enter a valid price.", mrp: "Enter a valid price.", lowStockLevel: "Enter a valid quantity.", minimumOrderQuantity: "Enter a valid quantity.", quantityStep: "Enter a valid quantity.", quantity: "Enter a valid quantity.", quantityOptions: "Check the quantity-price options." },

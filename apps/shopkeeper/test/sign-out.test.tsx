@@ -1,0 +1,74 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mock = vi.hoisted(() => ({
+  state: [] as unknown[], cursor: 0, working: { current: false },
+  identity: { status: "signed-in", account: { id: "account-1" } },
+  count: vi.fn(), signOut: vi.fn(),
+}));
+vi.mock("react", () => ({
+  useRef: () => mock.working,
+  useState: (initial: unknown) => {
+    const index = mock.cursor++;
+    if (!(index in mock.state)) mock.state[index] = initial;
+    return [mock.state[index], (value: unknown) => { mock.state[index] = value; }];
+  },
+}));
+vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text" }));
+vi.mock("react-native", () => ({ View: "View" }));
+vi.mock("expo-router", () => ({ Link: "Link" }));
+vi.mock("../src/api", () => ({ session: { get: () => mock.identity, signOut: mock.signOut } }));
+vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
+vi.mock("../src/components/confirm", () => ({ Confirm: "Confirm" }));
+
+import { SignOut } from "../src/components/sign-out";
+
+function render() {
+  mock.cursor = 0;
+  return SignOut({ verifiedShopId: "shop-1" });
+}
+
+async function pressSignOut() {
+  const view = render();
+  view.props.children[0].props.onPress();
+  // The native persistence check runs before the sign-out promise settles.
+  await vi.waitFor(() => expect(mock.working.current).toBe(false));
+  return render();
+}
+
+describe("opening-stock sign-out guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks(); mock.state = []; mock.working.current = false;
+    mock.identity = { status: "signed-in", account: { id: "account-1" } };
+    mock.count.mockResolvedValue(0); mock.signOut.mockResolvedValue(true);
+  });
+
+  it("blocks sign-out with the pending count and a stock retry link", async () => {
+    mock.count.mockResolvedValue(2);
+    const view = await pressSignOut();
+    expect(mock.count).toHaveBeenCalledWith("account-1", "shop-1");
+    expect(mock.signOut).not.toHaveBeenCalled();
+    expect(view.props.children[1].props.children).toContain("2 stock entries");
+    expect(view.props.children[2].props.href).toBe("/opening-stock");
+  });
+
+  it("keeps the session when saved stock cannot be checked", async () => {
+    mock.count.mockRejectedValue(new Error("key unavailable"));
+    const view = await pressSignOut();
+    expect(mock.signOut).not.toHaveBeenCalled();
+    expect(view.props.children[1].props.children).toContain("Couldn't check");
+  });
+
+  it("signs out after the queue is confirmed empty", async () => {
+    await pressSignOut();
+    expect(mock.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("does not sign out an account that changed during the storage check", async () => {
+    mock.count.mockImplementation(async () => {
+      mock.identity = { status: "signed-in", account: { id: "account-2" } };
+      return 0;
+    });
+    await pressSignOut();
+    expect(mock.signOut).not.toHaveBeenCalled();
+  });
+});

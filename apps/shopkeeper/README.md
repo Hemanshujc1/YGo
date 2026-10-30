@@ -57,3 +57,11 @@ NativeWind classes over `@ygo/tokens` roles only, such as `bg-surface` and `text
 ## Google and Apple sign-in
 
 See [provider setup and device checks](../../docs/operations/social-sign-in.md). Both apps need a new native build after installing these sign-in modules.
+
+## Encrypted opening stock (#390)
+
+Rebuild the native app after pulling this change. `expo-sqlite` must have `useSQLCipher` enabled; the app checks `PRAGMA cipher_version` and refuses to open stock storage without it. Expo export checks JavaScript, not native encryption.
+
+Opening-stock entries now live in an account-scoped SQLCipher database, with each row scoped to its shop and pack. A 32-byte random key stays in this phone's SecureStore. The existing MMKV queue is imported only for the shop verified by the server; the old entry is removed after the encrypted transaction commits. Malformed or conflicting legacy entries are retained for attention. An unreadable or missing key never causes a database reset. Sign-out checks pending entries first and offers the Opening stock screen to retry.
+
+Native verification after rebuilding: save opening stock without a connection, kill/reopen the app and reconnect, then retry; expect the same opening quantity recorded once. A missing SQLCipher build must show the storage error. The actual encrypted file must refuse reads with ordinary SQLite or a wrong key, and reopen with its original key. Use synthetic data only, and never print or copy the key into logs. Cold launching the stock screen without connectivity and confirmed shop-unlink cleanup are subsequent #48 children.

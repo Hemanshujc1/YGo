@@ -98,7 +98,7 @@ export default function Home() {
 
   if (application) {
     return (
-      <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+      <Plain verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
         {liveCheck && <Waiting check={liveCheck} />}
@@ -132,7 +132,7 @@ export default function Home() {
   }
 
   return (
-    <Plain>
+    <Plain verifiedShopId={null}>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">
         {words.start.title}
       </Text>
@@ -170,7 +170,7 @@ function Waiting({ check }: { check: LiveCheck }) {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshing = false, onRefresh }: { children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+function Plain({ children, refreshing = false, onRefresh, verifiedShopId }: { verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
@@ -183,7 +183,7 @@ function Plain({ children, refreshing = false, onRefresh }: { children: ReactNod
       {children}
       <View className="mt-8 gap-8">
         <ThemePicker session={session} words={strings.theme} />
-        <SignOut />
+        <SignOut verifiedShopId={verifiedShopId} />
       </View>
     </ScrollView>
   );
