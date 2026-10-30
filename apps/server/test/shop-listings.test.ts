@@ -287,7 +287,7 @@ it("reopens the encrypted module's SQL queue and server after a committed respon
   const path = join(directory, "outbox.db");
   let db = new DatabaseSync(path);
   try {
-    let queue = openingStockQueue(adapter(db), randomUUID);
+    let queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
     const clientId = randomUUID();
     queue.save(actor.shopId, actor.packId, { quantity: "3", clientId });
     let address = await app.listen({ host: "127.0.0.1", port: 0 });
@@ -300,7 +300,7 @@ it("reopens the encrypted module's SQL queue and server after a committed respon
     expect(queue.count()).toBe(1);
     const before = queue.batch(actor.shopId);
     db.close(); await app.close();
-    db = new DatabaseSync(path); queue = openingStockQueue(adapter(db), randomUUID);
+    db = new DatabaseSync(path); queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
     expect(queue.batch(actor.shopId)).toMatchObject({ deviceId: before.deviceId, actions: before.actions });
     app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
     address = await app.listen({ host: "127.0.0.1", port: 0 });
