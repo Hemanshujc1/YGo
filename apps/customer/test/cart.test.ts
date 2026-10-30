@@ -10,7 +10,7 @@ const dal = "3f1c2b9a-0d4e-4b7a-8c61-2e5f9d8a7b02";
 
 const line = (listingId: string, count: number, more: Partial<CartLine> = {}): CartLine => ({
   listingId, name: listingId === atta ? "Atta" : "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "60",
-  count, state: "orderable", left: null, lineTotal: String(60 * count), ...more,
+  count, state: "orderable", part: null, left: null, lineTotal: String(60 * count), ...more,
 });
 const cart = (revision: number, lines: CartLine[], more: Partial<CartResponse> = {}): CartResponse => ({
   shop: { id: shopId, name: "Day Dairy" }, revision, lines,
@@ -122,6 +122,35 @@ describe("the cart store (#406)", () => {
     server.saves[1]?.answer(ok(cart(2, [line(atta, 2)])));
     await vi.advanceTimersByTimeAsync(0);
     expect(store.get()).toMatchObject({ saving: false, server: { revision: 2 }, lines: [{ listingId: atta, count: 2 }] });
+  });
+
+  it("ends with no line when a part is added and quickly removed, before or while its save is on its way (#377)", async () => {
+    const part = { quantity: "0.4", price: "16.00" };
+    // Remove inside the pause: the Add is never sent.
+    const quick = fakeServer();
+    const first = await loaded(quick, cart(0, []));
+    first.setCount(atta, 1);
+    first.setCount(atta, 0);
+    expect(first.get().lines).toEqual([]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(quick.saves.map((save) => save.body)).toEqual([{ revision: 0, lines: [] }]);
+    quick.saves[0]?.answer(ok(cart(1, [])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.get()).toMatchObject({ saving: false, lines: [] });
+
+    // Remove while the Add's save is on its way: its reply doesn't bring the part back, and the Remove is saved next.
+    const slow = fakeServer();
+    const second = await loaded(slow, cart(0, []));
+    second.setCount(atta, 1);
+    await vi.advanceTimersByTimeAsync(300);
+    second.setCount(atta, 0);
+    slow.saves[0]?.answer(ok(cart(1, [line(atta, 1, { part, left: 1, lineTotal: "16.00" })])));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(second.get()).toMatchObject({ saving: true, lines: [] });
+    expect(slow.saves[1]?.body).toEqual({ revision: 1, lines: [] });
+    slow.saves[1]?.answer(ok(cart(2, [])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second.get()).toMatchObject({ saving: false, server: { revision: 2 }, lines: [] });
   });
 
   it("takes the server's count where stock ends", async () => {

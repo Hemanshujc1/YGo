@@ -11,7 +11,7 @@ import { cartBarLabel, type Cart } from "../../lib/cart";
 import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
 import { money } from "../../lib/money";
-import { hoursLine, offLabel, packLabel, shopSections, weekRows } from "../../lib/shop-page";
+import { hoursLine, offLabel, packLabel, partLabel, shopSections, weekRows } from "../../lib/shop-page";
 import { useCart, usePack } from "../../lib/use-cart";
 import { strings } from "../../strings";
 
@@ -39,21 +39,29 @@ function Pack({ pack, baseUnit, first, cart }: { pack: ShopPagePack; baseUnit: S
           <View className="h-6 justify-center rounded-tag bg-sunken px-2">
             <Text className="text-small-label font-medium text-muted">{words.outOfStock}</Text>
           </View>
-        ) : (
+        ) : pack.part ? null : (
           off && (
             <View className="h-6 justify-center rounded-tag bg-success-subtle px-2">
               <Text className="text-small-label font-medium text-on-success-subtle">{off}</Text>
             </View>
           )
         )}
-        {pack.mrp && (
-          <Text accessibilityLabel={words.mrp(money(pack.mrp))} className="text-secondary tabular-nums text-muted line-through">
-            {money(pack.mrp)}
-          </Text>
+        {pack.part ? (
+          // What is left of the pack, priced in proportion with no MRP or percent off (owner's answer 4 on #377).
+          <Text className="text-label font-semibold tabular-nums text-text">{partLabel(pack.part, baseUnit)}</Text>
+        ) : (
+          <>
+            {pack.mrp && (
+              <Text accessibilityLabel={words.mrp(money(pack.mrp))} className="text-secondary tabular-nums text-muted line-through">
+                {money(pack.mrp)}
+              </Text>
+            )}
+            <Text className={`text-label font-semibold tabular-nums ${pack.outOfStock ? "text-muted" : "text-text"}`}>{money(pack.price)}</Text>
+          </>
         )}
-        <Text className={`text-label font-semibold tabular-nums ${pack.outOfStock ? "text-muted" : "text-text"}`}>{money(pack.price)}</Text>
-        {pack.outOfStock ? (
+        {pack.outOfStock || (pack.part && count > 0) ? (
           // Sold out after it was added: it stays in the cart until removed (owner's answer 9 on #50).
+          // A part is the whole remainder, so once added it can only be removed (owner's answer 5 on #377).
           count > 0 && <Button label={strings.cart.remove} onPress={() => cart.setCount(pack.listingId, 0)} variant="text" />
         ) : (
           <Stepper count={count} max={left} onChange={(next) => cart.setCount(pack.listingId, next)} />

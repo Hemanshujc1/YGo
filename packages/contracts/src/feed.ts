@@ -37,6 +37,17 @@ export type FeedResponse = z.infer<typeof FeedResponse>;
 export const ShopPageParams = z.strictObject({ id: z.uuid() });
 export type ShopPageParams = z.infer<typeof ShopPageParams>;
 
+/**
+ * What is left of a pack when it is less than one pack (#377): measured goods only, the whole remainder at a
+ * price in proportion to the pack's, with no MRP or percent off. Worked out by the server from stock, never sent by the phone.
+ */
+export const PartPack = z.strictObject({
+  /** The remainder in the product's base unit, such as "0.4" kg. */
+  quantity: z.string(),
+  price: ShopPrice,
+});
+export type PartPack = z.infer<typeof PartPack>;
+
 /** One pack the shop lists, priced online. */
 export const ShopPagePack = z.strictObject({
   listingId: z.uuid(),
@@ -46,8 +57,10 @@ export const ShopPagePack = z.strictObject({
   /** Both set only when the price is below the MRP; the percent has two decimals, as text like "7.69" (owner's answer 3 on #370, #411). */
   mrp: ShopPrice.nullable(),
   discountPercent: z.string().regex(/^(?:100|\d{1,2})\.\d{2}$/).nullable(),
-  /** Stock at or below zero: shown, never orderable (DSC-4, owner's answer 9 on #47). */
+  /** Not one pack left and no part on sale: shown, never orderable (DSC-4, owner's answer 9 on #47). */
   outOfStock: z.boolean(),
+  /** Set when less than one pack is left and that part is on sale (#377). */
+  part: PartPack.nullable(),
 });
 export type ShopPagePack = z.infer<typeof ShopPagePack>;
 
@@ -81,7 +94,7 @@ export type ShopPageResponse = z.infer<typeof ShopPageResponse>;
 export const SearchQuery = FeedQuery.extend({ q: z.string().trim().min(2).max(60) });
 export type SearchQuery = z.infer<typeof SearchQuery>;
 
-/** A matching product, in stock when any pack the shop lists has stock (owner's answer 3 on #398); no prices. */
+/** A matching product, in stock when any pack the shop lists has a whole pack or a part on sale (owner's answer 3 on #398, #377); no prices. */
 export const SearchProduct = z.strictObject({ id: z.uuid(), name: z.string(), brand: z.string().nullable(), inStock: z.boolean() });
 export type SearchProduct = z.infer<typeof SearchProduct>;
 

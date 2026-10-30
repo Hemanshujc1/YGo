@@ -10,7 +10,7 @@ import { feeText, reasonText, type CartView } from "../../lib/cart";
 import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
 import { money } from "../../lib/money";
-import { packLabel } from "../../lib/shop-page";
+import { packLabel, partLabel } from "../../lib/shop-page";
 import { useCart } from "../../lib/use-cart";
 import { strings } from "../../strings";
 
@@ -32,12 +32,18 @@ function Line({ line, count, saving, setCount }: { line: CartLine; count: number
         <View className="flex-1">
           <Text className="text-body font-semibold text-text">{line.name}</Text>
           <Text className="text-secondary tabular-nums text-muted">
-            {[line.brand, packLabel(line.quantity, line.baseUnit), money(line.price)].filter(Boolean).join(" · ")}
+            {[line.brand, packLabel(line.quantity, line.baseUnit), line.part ? partLabel(line.part, line.baseUnit) : money(line.price)]
+              .filter(Boolean).join(" · ")}
           </Text>
         </View>
         {orderable && (saving || !line.lineTotal ? pending : <Text className="text-label font-semibold tabular-nums text-text">{money(line.lineTotal)}</Text>)}
       </View>
-      {orderable ? (
+      {line.part ? (
+        // The whole remainder of a pack, set only on an orderable line: removed, never stepped (owner's answer 5 on #377).
+        <View className="items-end">
+          <Button label={words.remove} onPress={() => setCount(0)} variant="text" />
+        </View>
+      ) : orderable ? (
         <View className="items-end">
           <Stepper count={count} max={line.left} onChange={setCount} />
         </View>

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProductBaseUnit } from "./catalog";
+import { PartPack } from "./feed";
 import { ShopPrice } from "./fields";
 import { Amount, LineCount } from "./pricing";
 
@@ -28,8 +29,10 @@ export const CartLine = z.strictObject({
   quantity: z.string(),
   price: ShopPrice,
   count: LineCount,
-  /** `unavailable`: the shop no longer sells it; `outOfStock`: not one pack left. */
+  /** `unavailable`: the shop no longer sells it; `outOfStock`: not one pack left and no part on sale. */
   state: z.enum(["orderable", "outOfStock", "unavailable"]),
+  /** Set when less than one pack is left: the line is that whole remainder, count 1, priced at the part's price (#377). */
+  part: PartPack.nullable(),
   /** Packs left when the count has reached stock, so no more can be added; null otherwise. */
   left: z.number().int().positive().nullable(),
   /** From the pricing engine; null for a line that isn't priced. */
