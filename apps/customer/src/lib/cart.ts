@@ -57,6 +57,7 @@ export function reasonText(reason: CartReason, now: number): string {
     case "LINE_UNAVAILABLE": return words.lines;
     case "SHOP_CLOSED": return reason.opensAt ? words.closed(formatDayTime(reason.opensAt, now, strings.feed.tomorrow)) : words.closedNoTime;
     case "NOT_DELIVERING": return words.notDelivering;
+    case "OWN_SHOP": return words.ownShop;
   }
 }
 

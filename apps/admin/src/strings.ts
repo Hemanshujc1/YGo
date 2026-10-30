@@ -560,5 +560,7 @@ export const strings = {
     TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
     SEARCH_TERM_IN_USE: "This term is already in the list.",
     CART_CHANGED: "This cart changed elsewhere. Reload it and try again.",
+    OWN_SHOP: "An account can't order from its own shop.",
+    ORDER_STATUS_CHANGED: "This order changed. Reload it and try again.",
   } satisfies Record<ErrorCode, string>,
 };

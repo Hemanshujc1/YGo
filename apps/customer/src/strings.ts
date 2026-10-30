@@ -257,6 +257,7 @@ export const strings = {
       closed: (when: string) => `Shop is closed · opens ${when}`,
       closedNoTime: "Shop is closed",
       notDelivering: "This shop doesn't deliver to your location",
+      ownShop: "You can't order from your own shop",
     },
   },
   // C16 Search (#398): no prices on results (owner's answer 13 on #49).
@@ -313,5 +314,7 @@ export const strings = {
     TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
     SEARCH_TERM_IN_USE: "This search term already exists.",
     CART_CHANGED: "Your cart was changed. Check it and try again.",
+    OWN_SHOP: "You can't order from your own shop.",
+    ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
   } satisfies Record<ErrorCode, string>,
 };

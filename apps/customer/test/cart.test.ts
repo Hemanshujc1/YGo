@@ -68,6 +68,7 @@ describe("cart helpers (#406)", () => {
       reasonText({ code: "SHOP_CLOSED", opensAt: "2030-01-02T03:30:00.000Z" }, now),
       reasonText({ code: "SHOP_CLOSED", opensAt: null }, now),
       reasonText({ code: "NOT_DELIVERING" }, now),
+      reasonText({ code: "OWN_SHOP" }, now),
     ]).toEqual([
       "Add ₹40.50 more to order",
       "Add more items to order",
@@ -75,6 +76,7 @@ describe("cart helpers (#406)", () => {
       "Shop is closed · opens tomorrow 9:00 AM",
       "Shop is closed",
       "This shop doesn't deliver to your location",
+      "You can't order from your own shop",
     ]);
     expect([feeText("0"), feeText("20.00"), feeText("19.50")]).toEqual(["Free", "₹20", "₹19.50"]);
   });
