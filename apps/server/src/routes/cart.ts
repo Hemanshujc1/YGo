@@ -32,11 +32,14 @@ export async function packsOf(client: Pool | PoolClient, shopId: string, lines: 
 }
 
 export async function savedCart(client: Pool | PoolClient, accountId: string, shopId: string, lock: boolean) {
-  const { rows: [cart] } = await client.query<{ id: string; revision: number }>(
-    `SELECT id, revision FROM carts WHERE account_id = $1 AND shop_id = $2${lock ? " FOR UPDATE" : ""}`, [accountId, shopId]);
-  if (!cart) return undefined;
-  const { rows } = await client.query<Line>(`SELECT listing_id AS "listingId", count FROM cart_lines WHERE cart_id = $1 ORDER BY position`, [cart.id]);
-  return { ...cart, lines: rows };
+  // A save holds the cart's lock while it writes, so once locked the read below can't land halfway through one.
+  if (lock) await client.query("SELECT 1 FROM carts WHERE account_id = $1 AND shop_id = $2 FOR UPDATE", [accountId, shopId]);
+  // One statement, so the revision and its lines come from one snapshot even unlocked.
+  const { rows: [cart] } = await client.query<{ id: string; revision: number; lines: Line[] }>(
+    `SELECT id, revision, (SELECT COALESCE(json_agg(json_build_object('listingId', l.listing_id, 'count', l.count) ORDER BY l.position), '[]')
+       FROM cart_lines l WHERE l.cart_id = c.id) AS lines
+     FROM carts c WHERE account_id = $1 AND shop_id = $2`, [accountId, shopId]);
+  return cart;
 }
 
 /**

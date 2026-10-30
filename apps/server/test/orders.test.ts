@@ -268,6 +268,34 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect(await orderCount()).toBe(0);
   });
 
+  it("reads a cart's revision and lines from one snapshot, so a save landing between them can't mix the two", async () => {
+    const { shopId, dal, atta, home } = await stocked();
+    const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
+    const edit = await database.pool.connect();
+    try {
+      await edit.query("BEGIN");
+      // Holds back any read of the lines, but not of the cart row, while a save writes revision 2 with 2 Atta.
+      await edit.query("LOCK TABLE cart_lines IN ACCESS EXCLUSIVE MODE");
+      const { rows: [saved] } = await edit.query<{ id: string }>(
+        "SELECT carts.id FROM carts JOIN accounts ON accounts.id = carts.account_id WHERE accounts.email = 'customer@example.com'");
+      await edit.query("DELETE FROM cart_lines WHERE cart_id = $1", [saved?.id]);
+      await edit.query("INSERT INTO cart_lines (cart_id, listing_id, position, count) VALUES ($1, $2, 1, 2)", [saved?.id, atta]);
+      await edit.query("UPDATE carts SET revision = 2 WHERE id = $1", [saved?.id]);
+      const placing = place(shopId, { revision: 1, total: cart.quote.total, addressId: home });
+      const waiting = () => database.pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'");
+      for (let tries = 0; ((await waiting()).rows[0]?.n ?? 0) < 1; tries += 1) {
+        if (tries > 100) throw new Error("Placement never waited on the lines");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await edit.query("COMMIT");
+      expect((await placing).json()).toMatchObject({ error: { code: "CART_CHANGED", cart: {
+        revision: 2, lines: [{ listingId: atta, count: 2 }], quote: { total: "429.98" },
+      } } });
+    } finally { edit.release(); }
+    expect(await orderCount()).toBe(0);
+  });
+
   it("refuses stock gone since the cart was saved, a closed or paused shop, and a cart that can't be ordered", async () => {
     const { shopId, dal, home } = await stocked();
     const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
