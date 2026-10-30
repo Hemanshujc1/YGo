@@ -1,5 +1,5 @@
 import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
-import { formatMoney, formatPrice } from "@ygo/format";
+import { formatMoney } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { memo, useCallback, useMemo, useState } from "react";
@@ -24,7 +24,6 @@ type Params = { id: string; pincode: string; latitude: string; longitude: string
 
 const words = strings.shop;
 const money = (amount: string) => formatMoney(Number(amount));
-const price = (amount: string) => formatPrice(Number(amount));
 
 function Pack({ pack, baseUnit, first }: { pack: ShopPagePack; baseUnit: ShopPageProduct["baseUnit"]; first: boolean }) {
   const off = offLabel(pack);
@@ -44,11 +43,11 @@ function Pack({ pack, baseUnit, first }: { pack: ShopPagePack; baseUnit: ShopPag
           )
         )}
         {pack.mrp && (
-          <Text accessibilityLabel={words.mrp(price(pack.mrp))} className="text-secondary tabular-nums text-muted line-through">
-            {price(pack.mrp)}
+          <Text accessibilityLabel={words.mrp(money(pack.mrp))} className="text-secondary tabular-nums text-muted line-through">
+            {money(pack.mrp)}
           </Text>
         )}
-        <Text className={`text-label font-semibold tabular-nums ${pack.outOfStock ? "text-muted" : "text-text"}`}>{price(pack.price)}</Text>
+        <Text className={`text-label font-semibold tabular-nums ${pack.outOfStock ? "text-muted" : "text-text"}`}>{money(pack.price)}</Text>
       </View>
     </View>
   );

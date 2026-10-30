@@ -330,7 +330,7 @@ Shop reports in the Shopkeeper app: sales today and this week split online and c
 | Q-1 | Runs on a 2 GB Android 10 phone and on iOS 16.4. Phone, portrait only |
 | Q-2 | English only, with every piece of text held outside the code so Hindi is a later translation |
 | Q-3 | Light and dark themes. Bills and receipts stay light |
-| Q-4 | Indian number grouping, two decimals on every money amount, dd/mm/yyyy, 12-hour time, India time |
+| Q-4 | Indian number grouping, no trailing zero on any money amount (₹60, ₹59.50), dd/mm/yyyy, 12-hour time, India time |
 | Q-5 | Readable text contrast and 48 dp tap targets in both themes. No claim of full accessibility conformance |
 | Q-6 | The same order with the same rules always produces the same total, and every total reconciles to the weekly statement to the paisa |
 | Q-7 | An older installed app keeps working after a server update, or is told plainly to update |

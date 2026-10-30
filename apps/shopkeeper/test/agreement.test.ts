@@ -6,11 +6,13 @@ const rule = { formula: "percentage", fixedAmount: null, percentage: "10", minim
 describe("commissionText", () => {
   it("words each formula, with its bounds and base", () => {
     expect(commissionText(rule)).toBe("10% of each item line");
-    expect(commissionText({ ...rule, formula: "fixed", fixedAmount: "12", percentage: null })).toBe("₹12.00 on each item line");
+    expect(commissionText({ ...rule, formula: "fixed", fixedAmount: "12", percentage: null })).toBe("₹12 on each item line");
     expect(commissionText({ ...rule, formula: "higher_of", fixedAmount: "5", minimum: "2", maximum: "50.5" }))
-      .toBe("₹5.00 or 10% of each item line, whichever is higher, at least ₹2.00, at most ₹50.50");
+      .toBe("₹5 or 10% of each item line, whichever is higher, at least ₹2, at most ₹50.50");
     expect(commissionText({ ...rule, formula: "fixed_plus_percentage", fixedAmount: "1", percentage: "2.5", base: "after_shop_discount" }))
-      .toBe("₹1.00 plus 2.5% of each item line after your discount");
+      .toBe("₹1 plus 2.5% of each item line after your discount");
+    expect(commissionText({ ...rule, percentage: "10.00" })).toBe("10% of each item line");
+    expect(commissionText({ ...rule, percentage: "12.50" })).toBe("12.5% of each item line");
   });
 });
 
@@ -27,10 +29,10 @@ describe("rateCardLines", () => {
     });
     expect(lines.map(({ label, value }) => `${label}: ${value}`)).toEqual([
       "Commission: 10% of each item line",
-      "Delivery fee: ₹30.00 on each order. YGo keeps 20%, your shop 80%.",
-      "Least YGo earns on a delivered order: ₹0.00",
-      "Minimum order: ₹100.00",
-      "Pickup: The customer pays ₹0.00. Your shop pays ₹5.00. YGo earns at least ₹3.00 on a pickup order.",
+      "Delivery fee: ₹30 on each order. YGo keeps 20%, your shop 80%.",
+      "Least YGo earns on a delivered order: ₹0",
+      "Minimum order: ₹100",
+      "Pickup: The customer pays ₹0. Your shop pays ₹5. YGo earns at least ₹3 on a pickup order.",
       "Time to pay a weekly statement: 7 days",
     ]);
   });

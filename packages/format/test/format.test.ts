@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPrice, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, trimDecimal, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -7,14 +7,17 @@ function expectIndianFormats() {
     expect(formatNumber(1_234.5)).toBe("1,234.5");
   });
 
-  it("shows every money amount as rupees with two decimals", () => {
-    expect(formatMoney(125_000)).toBe("₹1,25,000.00");
-    expect(formatMoney(20.5)).toBe("₹20.50");
-    expect(formatMoney(-20)).toBe("−₹20.00");
+  it("shows money without .00 for whole rupees and with two digits for paise (#413)", () => {
+    expect([formatMoney(125_000), formatMoney(60), formatMoney(0), formatMoney(20.5), formatMoney(59.05), formatMoney(-20), formatMoney(-20.5), formatMoney(10n)])
+      .toEqual(["₹1,25,000", "₹60", "₹0", "₹20.50", "₹59.05", "−₹20", "−₹20.50", "₹10"]);
+    expect(formatMoney(12_345_678_901_234_567_891n)).toBe("₹1,23,45,67,89,01,23,45,67,891");
   });
 
-  it("shows a shelf price without .00 for whole rupees (#411)", () => {
-    expect([formatPrice(60), formatPrice(59.5), formatPrice(1250)]).toEqual(["₹60", "₹59.50", "₹1,250"]);
+  it("rounds to paise before dropping .00 and never shows a negative zero", () => {
+    expect([formatMoney(59.999), formatMoney(0.004), formatMoney(-0.001), formatMoney(-0), formatMoney(59.995), formatMoney(19.994)])
+      .toEqual(["₹60", "₹0", "₹0", "₹0", "₹60", "₹19.99"]);
+    expect([formatMoney(1.005), formatMoney(-1.005), formatMoney(-59.995), formatMoney(-0.004), formatMoney(-19.995)])
+      .toEqual(["₹1.01", "−₹1.01", "−₹60", "₹0", "−₹20"]);
   });
 
   it("shows dates and 12-hour times in India", () => {
@@ -102,5 +105,11 @@ describe("phone numbers", () => {
     expect(formatPhone("+91987654321")).toBe("+91987654321");
     expect(formatPhone("+915876543210")).toBe("+915876543210");
     expect(formatPhone("")).toBe("");
+  });
+});
+
+describe("trimDecimal", () => {
+  it("cuts trailing zeros without rounding (#413)", () => {
+    expect(["10.00", "12.50", "12.3456", "10.0004", "100", "0.00", "7.69"].map(trimDecimal)).toEqual(["10", "12.5", "12.3456", "10.0004", "100", "0", "7.69"]);
   });
 });

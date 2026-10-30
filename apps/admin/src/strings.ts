@@ -1,4 +1,5 @@
 import type { ErrorCode } from "@ygo/contracts";
+import { trimDecimal } from "@ygo/format";
 
 const invalidReason = "Give a reason (up to 500 characters).";
 
@@ -125,7 +126,7 @@ export const strings = {
   rateCardPreviewSeparator: " · ",
   rateCardPreviewValues: {
     off: "Off",
-    percentage: (value: string) => `${value}%`,
+    percentage: (value: string) => `${trimDecimal(value)}%`,
     fixed: (amount: string) => `Fixed ${amount}`,
     fixedPlusPercentage: (amount: string, percentage: string) => `${amount} + ${percentage}`,
     higherOf: (amount: string, percentage: string) => `Higher of ${amount} or ${percentage}`,

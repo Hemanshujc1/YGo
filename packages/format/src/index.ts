@@ -29,16 +29,25 @@ const indianTime = new Intl.DateTimeFormat(locale, {
 
 export const formatNumber = (value: number | bigint) => indianNumber.format(value);
 
+// A decimal string without its trailing zeros ("10.00" -> "10", "12.3450" -> "12.345"). It only cuts text,
+// so a rate such as "12.3456" is never rounded (ADR-0004), unlike formatNumber, which keeps three digits.
+export const trimDecimal = (text: string) => (text.includes(".") ? text.replace(/\.?0+$/, "") : text);
+
 // Only format() is used: Hermes on iOS has no NumberFormat.formatToParts.
 
 // The only hyphen in a rupee amount is its sign, shown as a true minus.
 // Android puts a space after ₹ and iOS does not; the design system has none.
-export const formatMoney = (value: number | bigint) =>
-  indianMoney.format(value).replace("-", "−").replace(/₹\s/, "₹");
+const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "₹");
 
-// A shelf price: ₹60 for whole rupees, ₹59.50 otherwise (#411).
-export const formatPrice = (value: number) =>
-  Number.isInteger(value) ? indianWholeMoney.format(value).replace(/₹\s/, "₹") : formatMoney(value);
+// Never a trailing zero (#413): ₹60 for whole rupees, ₹59.50 with paise. The amount is rounded to
+// paise first, half away from zero on both signs (59.995 and -59.995 both reach 60). toPrecision(15)
+// drops binary noise first, so 1.005 * 100 = 100.49999999999999 still rounds to 101. "+ 0" turns a
+// rounded -0 into 0 so no "−₹0" appears. A bigint is whole rupees already.
+export const formatMoney = (value: number | bigint) => {
+  if (typeof value === "bigint") return tidyMoney(indianWholeMoney.format(value));
+  const paise = Math.sign(value) * Math.round(Number((Math.abs(value) * 100).toPrecision(15)));
+  return tidyMoney(paise % 100 === 0 ? indianWholeMoney.format(paise / 100 + 0) : indianMoney.format(paise / 100));
+};
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 

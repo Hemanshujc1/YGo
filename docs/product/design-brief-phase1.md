@@ -112,7 +112,7 @@ There is no tagline.
   - Later Hindi: Noto Sans Devanagari as the companion. Line heights must leave room for its taller marks.
   - No second display family, and no brand typeface until issue #27 closes.
 - **Spacing, radius, elevation, icon set and sizes.**
-- **Formats** (`Q-4`): Indian digit grouping (₹1,25,000.00), two decimals on every money amount, dd/mm/yyyy, 12-hour time.
+- **Formats** (`Q-4`): Indian digit grouping (₹1,25,000), no trailing zero on any amount (₹60, ₹59.50 with paise), dd/mm/yyyy, 12-hour time.
 - **Text length.** All text lives outside the code (`Q-2`). Leave room for Hindi strings that run longer than the English.
 - **Bills and receipts stay light in dark theme** (`Q-3`). They are shared as PDFs.
 
