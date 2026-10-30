@@ -116,6 +116,13 @@ async function product(shopId: string, categoryId: string, productName: string, 
   return { productId, listings };
 }
 
+/** Sets a listing's stock by rewriting its movements, which the trigger otherwise keeps append-only. */
+async function setStock(listingId: string | undefined, quantity: string) {
+  await database.pool.query("ALTER TABLE stock_movements DISABLE TRIGGER stock_movements_no_update_delete");
+  await database.pool.query("UPDATE stock_movements SET quantity = $2 WHERE listing_id = $1", [listingId, quantity]);
+  await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
+}
+
 const here = "pincode=411038&latitude=18.5&longitude=73.8";
 const read = (shopId: string, headers: Record<string, string> = customer, query = here) =>
   app.inject({ method: "GET", url: `/v1/carts/${shopId}?${query}`, headers });
@@ -201,13 +208,11 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     expect((await save(shopId, 0, [{ listingId: atta, count: 4 }], other)).json()).toMatchObject({ lines: [{ count: 4, left: 4 }] });
 
     // Stock falls to 1 pack: the count shown follows it.
-    await database.pool.query("ALTER TABLE stock_movements DISABLE TRIGGER stock_movements_no_update_delete");
-    await database.pool.query("UPDATE stock_movements SET quantity = 5 WHERE listing_id = $1", [atta]);
+    await setStock(atta, "5");
     expect((await read(shopId)).json()).toMatchObject({ lines: [{ count: 1 }, { count: 1, left: 1, lineTotal: "199.99" }], quote: { productValue: "334.99" } });
 
     // None left: the line stays, unpriced, and the cart can't be ordered until it's removed (CRT-4).
-    await database.pool.query("UPDATE stock_movements SET quantity = 0 WHERE listing_id = $1", [atta]);
-    await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
+    await setStock(atta, "0");
     expect((await read(shopId)).json()).toMatchObject({
       revision: 1, lines: [{ count: 1, state: "orderable" }, { count: 4, state: "outOfStock", part: null, left: null, lineTotal: null }],
       quote: { productValue: "135.00" }, placeable: false, reasons: [{ code: "LINE_UNAVAILABLE" }],
@@ -230,11 +235,6 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
 
   it("sells what is left of a measured pack as one line at a proportional price, and follows stock (#377)", async () => {
     const { shopId, dal, atta } = await stocked();
-    const setStock = async (listingId: string | undefined, quantity: string) => {
-      await database.pool.query("ALTER TABLE stock_movements DISABLE TRIGGER stock_movements_no_update_delete");
-      await database.pool.query("UPDATE stock_movements SET quantity = $2 WHERE listing_id = $1", [listingId, quantity]);
-      await database.pool.query("ALTER TABLE stock_movements ENABLE TRIGGER stock_movements_no_update_delete");
-    };
     // 2 kg of a 5 kg ₹199.99 pack: ₹79.996, half-up to ₹80.00. A count above 1 is held at 1, and no more can be added.
     await setStock(atta, "2");
     expect((await save(shopId, 0, [{ listingId: dal, count: 1 }, { listingId: atta, count: 3 }])).json()).toMatchObject({
@@ -263,6 +263,17 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
     const someone = await signIn("/v1/auth", "fourth@example.com");
     expect((await save(shopId, 0, [{ listingId: eggs, count: 1 }], someone)).statusCode).toBe(404);
     expect((await save(shopId, 0, [{ listingId: tea, count: 1 }], someone)).statusCode).toBe(404);
+
+    // A saved count above 1 is only held at the part while stock is short: it stays saved, so a restock brings
+    // back as many whole packs as stock allows, up to that count (the same rule as whole packs, answer 9 on #50).
+    await setStock(atta, "20");
+    expect((await save(shopId, 0, [{ listingId: atta, count: 3 }], other)).json()).toMatchObject({ lines: [{ count: 3, part: null }] });
+    await setStock(atta, "2");
+    expect((await read(shopId, other)).json()).toMatchObject({ lines: [{ count: 1, part: { quantity: "2", price: "80.00" }, lineTotal: "80.00" }] });
+    await setStock(atta, "12");
+    expect((await read(shopId, other)).json()).toMatchObject({ lines: [{ count: 2, part: null, left: 2, lineTotal: "399.98" }] });
+    await setStock(atta, "20");
+    expect((await read(shopId, other)).json()).toMatchObject({ lines: [{ count: 3, part: null, left: null, lineTotal: "599.97" }] });
 
     // The phone can't name a part's quantity or price.
     for (const line of [{ listingId: atta, count: 1, part: { quantity: "5", price: "1" } }, { listingId: atta, count: 1, quantity: "5" }]) {

@@ -37,7 +37,6 @@ export type FeedResponse = z.infer<typeof FeedResponse>;
 export const ShopPageParams = z.strictObject({ id: z.uuid() });
 export type ShopPageParams = z.infer<typeof ShopPageParams>;
 
-/** One pack the shop lists, priced online. */
 /**
  * What is left of a pack when it is less than one pack (#377): measured goods only, the whole remainder at a
  * price in proportion to the pack's, with no MRP or percent off. Worked out by the server from stock, never sent by the phone.
@@ -49,6 +48,7 @@ export const PartPack = z.strictObject({
 });
 export type PartPack = z.infer<typeof PartPack>;
 
+/** One pack the shop lists, priced online. */
 export const ShopPagePack = z.strictObject({
   listingId: z.uuid(),
   /** The pack size in the product's base unit, such as "0.5" kg or "12" each. */

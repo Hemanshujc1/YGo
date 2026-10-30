@@ -32,14 +32,14 @@ function Line({ line, count, saving, setCount }: { line: CartLine; count: number
         <View className="flex-1">
           <Text className="text-body font-semibold text-text">{line.name}</Text>
           <Text className="text-secondary tabular-nums text-muted">
-            {[line.brand, packLabel(line.quantity, line.baseUnit), orderable && line.part ? partLabel(line.part, line.baseUnit) : money(line.price)]
+            {[line.brand, packLabel(line.quantity, line.baseUnit), line.part ? partLabel(line.part, line.baseUnit) : money(line.price)]
               .filter(Boolean).join(" · ")}
           </Text>
         </View>
         {orderable && (saving || !line.lineTotal ? pending : <Text className="text-label font-semibold tabular-nums text-text">{money(line.lineTotal)}</Text>)}
       </View>
-      {orderable && line.part ? (
-        // The whole remainder of a pack: removed, never stepped (owner's answer 5 on #377).
+      {line.part ? (
+        // The whole remainder of a pack, set only on an orderable line: removed, never stepped (owner's answer 5 on #377).
         <View className="items-end">
           <Button label={words.remove} onPress={() => setCount(0)} variant="text" />
         </View>
