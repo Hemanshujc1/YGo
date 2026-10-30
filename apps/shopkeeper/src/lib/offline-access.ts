@@ -79,6 +79,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       }
     },
     async cleanup() {
+      if (view.mode !== "erasing" || !view.accountId || !storage.blocked(view.accountId)) return;
       const mine = ++turn;
       if (view.accountId && view.shopId) await erase(view.accountId, view.shopId, mine).catch(() => undefined);
     },

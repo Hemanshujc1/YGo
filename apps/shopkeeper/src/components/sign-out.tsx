@@ -13,7 +13,7 @@ const words = strings.application.signOut;
  * With changes not yet saved it asks first.
  */
 export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: { unsaved?: boolean; disabled?: boolean; verifiedShopId?: string | null }) {
-  const [failedWarning, setFailedWarning] = useState<string | null>(null);
+  const [failedWarning, setFailedWarning] = useState<{ accountId: string; epoch: number } | null>(null);
   const [asking, setAsking] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -21,7 +21,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<false | "opening" | "stock">(false);
 
-  async function signOut(acceptedAccount: string | null = null) {
+  async function signOut(accepted: { accountId: string; epoch: number } | null = null) {
     if (working.current) return;
     const before = session.get();
     if (!("account" in before)) return;
@@ -40,7 +40,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
         setPending(counts.stockPending ? "stock" : "opening");
         return;
       }
-      if (counts.failed > 0 && acceptedAccount !== before.account.id) { setFailedWarning(before.account.id); setAsking(true); return; }
+      if (counts.failed > 0 && (accepted?.accountId !== before.account.id || accepted.epoch !== epoch)) { setFailedWarning({ accountId: before.account.id, epoch }); setAsking(true); return; }
       await session.signOut();
     } catch {
       const current = session.get();

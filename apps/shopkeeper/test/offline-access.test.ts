@@ -68,6 +68,10 @@ describe("verified offline shop access", () => {
     const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
     expect(storage.erase).toHaveBeenCalledWith(account.id, "unlinked"); expect(access.get().mode).toBe("ended");
   });
+  it("ignores an old cleanup button once access is verified for a new session", async () => {
+    const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
+    await access.cleanup(); expect(storage.erase).not.toHaveBeenCalled();
+  });
   it("can finish cleanup when identity metadata is already gone", async () => {
     blocked = shopId;
     const access = offlineAccess(storage, fetch, () => time);

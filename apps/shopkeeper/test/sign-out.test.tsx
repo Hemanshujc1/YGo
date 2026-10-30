@@ -93,6 +93,12 @@ describe("opening-stock sign-out guard", () => {
     expect(mock.signOut).not.toHaveBeenCalled();
   });
 
+  it("does not reuse a failure warning from an earlier login of the same account", async () => {
+    mock.count.mockResolvedValue({ pending: 0, failed: 1 }); const view = await pressSignOut();
+    mock.epoch++; view.props.children[3].props.onConfirm();
+    await vi.waitFor(() => expect(mock.working.current).toBe(false)); expect(mock.signOut).not.toHaveBeenCalled();
+  });
+
   it("signs out after the queue is confirmed empty", async () => {
     await pressSignOut();
     expect(mock.signOut).toHaveBeenCalledOnce();
