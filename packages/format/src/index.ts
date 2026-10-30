@@ -36,11 +36,12 @@ export const formatNumber = (value: number | bigint) => indianNumber.format(valu
 const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "₹");
 
 // Never a trailing zero (#413): ₹60 for whole rupees, ₹59.50 with paise. The amount is rounded to
-// paise first, so 59.999 shows ₹60, and "+ 0" turns a rounded -0 into 0 so no "−₹0" appears.
-// A bigint is whole rupees already.
+// paise first, half away from zero on both signs (59.995 and -59.995 both reach 60). toPrecision(15)
+// drops binary noise first, so 1.005 * 100 = 100.49999999999999 still rounds to 101. "+ 0" turns a
+// rounded -0 into 0 so no "−₹0" appears. A bigint is whole rupees already.
 export const formatMoney = (value: number | bigint) => {
   if (typeof value === "bigint") return tidyMoney(indianWholeMoney.format(value));
-  const paise = Math.round(value * 100);
+  const paise = Math.sign(value) * Math.round(Number((Math.abs(value) * 100).toPrecision(15)));
   return tidyMoney(paise % 100 === 0 ? indianWholeMoney.format(paise / 100 + 0) : indianMoney.format(paise / 100));
 };
 

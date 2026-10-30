@@ -16,6 +16,8 @@ function expectIndianFormats() {
   it("rounds to paise before dropping .00 and never shows a negative zero", () => {
     expect([formatMoney(59.999), formatMoney(0.004), formatMoney(-0.001), formatMoney(-0), formatMoney(59.995), formatMoney(19.994)])
       .toEqual(["₹60", "₹0", "₹0", "₹0", "₹60", "₹19.99"]);
+    expect([formatMoney(1.005), formatMoney(-1.005), formatMoney(-59.995), formatMoney(-0.004), formatMoney(-19.995)])
+      .toEqual(["₹1.01", "−₹1.01", "−₹60", "₹0", "−₹20"]);
   });
 
   it("shows dates and 12-hour times in India", () => {
