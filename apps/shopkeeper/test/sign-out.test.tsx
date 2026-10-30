@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   state: [] as unknown[], cursor: 0, working: { current: false },
   identity: { status: "signed-in", account: { id: "account-1" } },
-  count: vi.fn(), signOut: vi.fn(),
+  epoch: 0, count: vi.fn(), signOut: vi.fn(),
 }));
 vi.mock("react", () => ({
   useRef: () => mock.working,
@@ -16,7 +16,7 @@ vi.mock("react", () => ({
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", Text: "Text" }));
 vi.mock("react-native", () => ({ View: "View" }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
-vi.mock("../src/api", () => ({ session: { get: () => mock.identity, signOut: mock.signOut } }));
+vi.mock("../src/api", () => ({ accountEpoch: () => mock.epoch, session: { get: () => mock.identity, signOut: mock.signOut } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
 
 import { SignOut } from "../src/components/sign-out";
@@ -36,7 +36,7 @@ async function pressSignOut() {
 
 describe("opening-stock sign-out guard", () => {
   beforeEach(() => {
-    vi.clearAllMocks(); mock.state = []; mock.working.current = false;
+    vi.clearAllMocks(); mock.epoch = 0; mock.state = []; mock.working.current = false;
     mock.identity = { status: "signed-in", account: { id: "account-1" } };
     mock.count.mockResolvedValue({ pending: 0, failed: 0 }); mock.signOut.mockResolvedValue(true);
   });
@@ -65,6 +65,11 @@ describe("opening-stock sign-out guard", () => {
     const view = await pressSignOut();
     expect(mock.signOut).not.toHaveBeenCalled();
     expect(view.props.children[1]).toBeNull();
+  });
+
+  it("ignores a storage check from an earlier login of the same account", async () => {
+    mock.count.mockImplementation(async () => { mock.epoch++; return { pending: 0, failed: 0 }; });
+    await pressSignOut(); expect(mock.signOut).not.toHaveBeenCalled();
   });
 
   it("warns before signing out with acknowledged failures, then checks pending work again", async () => {

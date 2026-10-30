@@ -2,7 +2,7 @@ import { Button, Confirm, Text } from "@ygo/mobile";
 import { useRef, useState } from "react";
 import { Link } from "expo-router";
 import { View } from "react-native";
-import { session } from "../api";
+import { accountEpoch, session } from "../api";
 import { strings } from "../strings";
 import { openingStockBeforeSignOut } from "../lib/opening-stock-database";
 
@@ -25,6 +25,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
     if (working.current) return;
     const before = session.get();
     if (!("account" in before)) return;
+    const epoch = accountEpoch();
     working.current = true;
     setAsking(false);
     setSigningOut(true);
@@ -33,7 +34,7 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
     try {
       const counts = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
       const current = session.get();
-      if (!("account" in current) || current.account.id !== before.account.id) return;
+      if (!("account" in current) || current.account.id !== before.account.id || epoch !== accountEpoch()) return;
       if (counts.pending > 0) {
         setMessage(words.pending(counts.pending));
         setPending(counts.stockPending ? "stock" : "opening");
@@ -43,11 +44,11 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
       await session.signOut();
     } catch {
       const current = session.get();
-      if ("account" in current && current.account.id === before.account.id) setMessage(words.checkFailed);
+      if ("account" in current && current.account.id === before.account.id && epoch === accountEpoch()) setMessage(words.checkFailed);
     } finally {
       working.current = false;
       const current = session.get();
-      if ("account" in current && current.account.id === before.account.id) setSigningOut(false);
+      if ("account" in current && current.account.id === before.account.id && epoch === accountEpoch()) setSigningOut(false);
     }
   }
 

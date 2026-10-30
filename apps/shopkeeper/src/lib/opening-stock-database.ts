@@ -1,16 +1,18 @@
 import { getRandomBytesAsync, randomUUID } from "expo-crypto";
 import { File } from "expo-file-system";
-import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, getItemAsync, setItemAsync } from "expo-secure-store";
-import { defaultDatabaseDirectory, openDatabaseAsync } from "expo-sqlite";
+import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, deleteItemAsync, getItemAsync, setItemAsync } from "expo-secure-store";
+import { defaultDatabaseDirectory, deleteDatabaseAsync, openDatabaseAsync } from "expo-sqlite";
 import { createMMKV } from "react-native-mmkv";
+import { readSavedAccess, type AccessStorage } from "./offline-access";
 import { openingStockQueue, type OpeningStockQueue } from "./opening-stock-queue";
 
 // This is only the old queue's import source; new writes never go into MMKV.
 export const legacyOpeningStock = createMMKV({ id: "shop-opening-stock" });
-const opened = new Map<string, Promise<OpeningStockQueue>>();
+const opened = new Map<string, { active: boolean; promise: Promise<OpeningStockQueue>; close?: () => Promise<void> }>();
+const accessFlags = createMMKV({ id: "shop-offline-access" });
 const options = { keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
-async function open(accountId: string): Promise<OpeningStockQueue> {
+async function open(accountId: string, handle: { active: boolean; close?: () => Promise<void> }): Promise<OpeningStockQueue> {
   const name = `opening-stock-${accountId}.db`;
   const keyName = `opening-stock-${accountId}`;
   let key = await getItemAsync(keyName, options);
@@ -27,21 +29,63 @@ async function open(accountId: string): Promise<OpeningStockQueue> {
     if (!cipher?.cipher_version) throw new Error("Rebuild Shopkeeper with SQLCipher enabled");
     // Only the validated, locally generated hexadecimal key is interpolated.
     await db.execAsync(`PRAGMA key = "x'${key}'";`);
-    return openingStockQueue(db, randomUUID);
+    handle.close = () => db.closeAsync();
+    const guarded = new Proxy(db, { get(target, key) {
+      const value = Reflect.get(target, key) as unknown;
+      return typeof value === "function" ? (...args: unknown[]) => {
+        if (!handle.active || accessFlags.getString(`blocked:${accountId}`)) throw new Error("Offline database is unavailable");
+        return (value as (...args: unknown[]) => unknown).apply(target, args);
+      } : value;
+    } });
+    return openingStockQueue(guarded, randomUUID);
   } catch (error) {
     await db.closeAsync();
+    handle.close = undefined;
     throw error;
   }
 }
 
 export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> {
+  if (accessFlags.getString(`blocked:${accountId}`)) return Promise.reject(new Error("Offline cleanup is pending"));
   let current = opened.get(accountId);
   if (!current) {
-    current = open(accountId).catch((error: unknown) => { opened.delete(accountId); throw error; });
-    opened.set(accountId, current);
+    const handle = { active: true, promise: null as unknown as Promise<OpeningStockQueue>, close: undefined as (() => Promise<void>) | undefined };
+    handle.promise = open(accountId, handle).catch((error: unknown) => { if (opened.get(accountId) === handle) opened.delete(accountId); throw error; });
+    opened.set(accountId, handle);
+    current = handle;
   }
-  return current;
+  return current.promise;
 }
+
+/** Invalidate synchronously before awaiting native close or a late sync response. */
+export async function closeOpeningStock(accountId: string) {
+  const handle = opened.get(accountId);
+  if (!handle) return;
+  handle.active = false;
+  await handle.promise.catch(() => undefined);
+  await handle.close?.();
+  if (opened.get(accountId) === handle) opened.delete(accountId);
+}
+
+export const offlineStorage: AccessStorage = {
+  hasData: (id) => new File(defaultDatabaseDirectory, `opening-stock-${id}.db`).exists,
+  active: () => accessFlags.getString("account"),
+  select: (id) => { accessFlags.set("account", id); },
+  forget: () => { accessFlags.remove("account"); },
+  blocked: (id) => accessFlags.getString(`blocked:${id}`),
+  read: async (id) => readSavedAccess(await getItemAsync(`stock-access-${id}`, options)),
+  save: (record) => setItemAsync(`stock-access-${record.account.id}`, JSON.stringify(record), options),
+  async erase(id, shopId) {
+    accessFlags.set(`blocked:${id}`, shopId);
+    await closeOpeningStock(id);
+    await deleteDatabaseAsync(`opening-stock-${id}.db`);
+    await deleteItemAsync(`opening-stock-${id}`, options);
+    for (const key of legacyOpeningStock.getAllKeys()) if (key.startsWith(`opening:${shopId}:`)) legacyOpeningStock.remove(key);
+    await deleteItemAsync(`stock-access-${id}`, options);
+    accessFlags.remove(`blocked:${id}`);
+    if (accessFlags.getString("account") === id) accessFlags.remove("account");
+  },
+};
 
 /** Undefined means the shop lookup failed; null means the server confirmed no shop. */
 export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number; stockPending?: number }> {

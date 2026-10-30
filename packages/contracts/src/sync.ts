@@ -2,6 +2,10 @@ import { z } from "zod";
 import { PackQuantity } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
+/** Explicit access result: only an authenticated absence/closure ends cached access. */
+export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: z.enum(["draft", "submitted", "under_review", "approved", "live", "suspended", "closed"]).nullable() }).refine((value) => (value.shopId === null) === (value.state === null));
+export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
+
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });
 export const StockFlagPayload = z.strictObject({ packId: z.uuid(), outOfStock: z.boolean() });
 export const StockFlagResponse = z.strictObject({ listingId: z.uuid(), outOfStock: z.boolean(), recordedAt: z.iso.datetime() });

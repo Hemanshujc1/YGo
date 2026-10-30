@@ -5,7 +5,7 @@ import { Link } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, session, supportEmail } from "../api";
+import { accountEpoch, api, session, supportEmail } from "../api";
 import { type OpeningStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncOpeningStockBatch } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
 import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
@@ -14,7 +14,7 @@ import { stockLine } from "../lib/stock-line";
 import { isCurrentAccount } from "../lib/account";
 
 const words = strings.shopSetup;
-type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; queue: OpeningStockQueue; items: ShopListingCatalogItem[]; accountId: string };
+type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; queue: OpeningStockQueue; items: ShopListingCatalogItem[]; epoch: number; accountId: string };
 
 
 function clientId(): string {
@@ -38,11 +38,12 @@ export default function OpeningStockScreen() {
     setLoad({ kind: "loading" });
     const identity = session.get();
     if (!("account" in identity)) return;
+    const epoch = accountEpoch();
     const [application, listings] = await Promise.all([
       api.shopApplication().catch(() => null),
       api.shopListings().catch(() => null),
     ]);
-    if (!isCurrentAccount(identity.account.id)) return;
+    if (!isCurrentAccount(identity.account.id, epoch)) return;
     if (!application?.ok) {
       setLoad({ kind: "failed", message: application ? strings.errors[application.code] : words.loadFailed });
       return;
@@ -59,26 +60,26 @@ export default function OpeningStockScreen() {
     let queue: OpeningStockQueue;
     try {
       queue = await openOpeningStock(identity.account.id);
-      if (!isCurrentAccount(identity.account.id)) return;
+      if (!isCurrentAccount(identity.account.id, epoch)) return;
       queue.importLegacy(shopId, legacyOpeningStock);
     } catch {
-      if (!isCurrentAccount(identity.account.id)) return;
+      if (!isCurrentAccount(identity.account.id, epoch)) return;
       setLoad({ kind: "failed", message: words.storageFailed });
       return;
     }
     const items = listings.data.items.filter((item) => item.listing !== null);
-    setLoad({ kind: "loaded", accountId: identity.account.id, shopId, queue, items });
+    setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue, items });
     setQuantities(Object.fromEntries(items.map((item) => [item.packId, queue.pending(shopId, item.packId)?.quantity ?? ""])));
     const pendingBefore = new Map(items.map((item) => [item.packId, queue.pending(shopId, item.packId)]));
-    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body));
-    if (!isCurrentAccount(identity.account.id)) return;
+    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body), () => isCurrentAccount(identity.account.id, epoch));
+    if (!isCurrentAccount(identity.account.id, epoch)) return;
     const syncResults = items.filter((item) => pendingBefore.get(item.packId)).map((item) => {
       const result = response?.results.find((row) => row.actionId === pendingBefore.get(item.packId)?.clientId);
       const failed = queue.failed(shopId, item.packId);
       return { item, result: result?.status === "applied" ? { kind: "synced" as const }
         : { kind: "pending" as const, code: ErrorCode.safeParse(failed?.code ?? result?.code).success ? (failed?.code ?? result?.code) as ErrorCode : null } };
     });
-    if (!isCurrentAccount(identity.account.id)) return;
+    if (!isCurrentAccount(identity.account.id, epoch)) return;
     setEditableQueued((current) => ({
       ...current,
       ...Object.fromEntries(syncResults.filter(({ item, result }) => !item.openingStockRecorded && result.kind === "pending" && result.code === "VALIDATION_FAILED").map(({ item }) => [item.packId, true])),
@@ -103,7 +104,7 @@ export default function OpeningStockScreen() {
         return updated?.ok ? updated.data.items.filter((row) => row.listing !== null) : null;
       },
     );
-    if (!isCurrentAccount(identity.account.id)) return;
+    if (!isCurrentAccount(identity.account.id, epoch)) return;
     if (conflictRefresh.kind === "failed") {
       setStockRefreshFailed((current) => ({
         ...current,
@@ -127,8 +128,8 @@ export default function OpeningStockScreen() {
     }
     if (response?.results.some((result) => result.status === "applied")) {
       const updated = await api.shopListings().catch(() => null);
-      if (!isCurrentAccount(identity.account.id)) return;
-      if (updated?.ok) setLoad({ kind: "loaded", accountId: identity.account.id, shopId, queue, items: updated.data.items.filter((item) => item.listing !== null) });
+      if (!isCurrentAccount(identity.account.id, epoch)) return;
+      if (updated?.ok) setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue, items: updated.data.items.filter((item) => item.listing !== null) });
     }
   }
 
@@ -136,8 +137,8 @@ export default function OpeningStockScreen() {
 
   async function retryStockRefresh(item: ShopListingCatalogItem, shopId: string) {
     if (refreshingStock || load.kind !== "loaded") return;
-    const accountId = load.accountId;
-    if (!isCurrentAccount(accountId)) return;
+    const accountId = load.accountId, epoch = load.epoch;
+    if (!isCurrentAccount(accountId, epoch)) return;
     const queue = load.queue;
     setRefreshingStock(item.packId);
     const result = await refreshListingsAfterConflict(
@@ -147,7 +148,7 @@ export default function OpeningStockScreen() {
         return answer?.ok ? answer.data.items.filter((row) => row.listing !== null) : null;
       },
     );
-    if (!isCurrentAccount(accountId)) return;
+    if (!isCurrentAccount(accountId, epoch)) return;
     setRefreshingStock(null);
     if (result.kind === "failed") return;
     setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
@@ -160,8 +161,8 @@ export default function OpeningStockScreen() {
   async function save(item: ShopListingCatalogItem) {
     if (load.kind !== "loaded" || saving) return;
     const shopId = load.shopId;
-    const accountId = load.accountId;
-    if (!isCurrentAccount(accountId)) return;
+    const accountId = load.accountId, epoch = load.epoch;
+    if (!isCurrentAccount(accountId, epoch)) return;
     const queue = load.queue;
     const queued = queue.pending(shopId, item.packId);
     const entry = OpeningStockBody.safeParse(queued && !queue.failed(shopId, item.packId) && !editableQueued[item.packId]
@@ -180,8 +181,8 @@ export default function OpeningStockScreen() {
     setEditableQueued((current) => ({ ...current, [item.packId]: false }));
     setSaving(item.packId);
     setMessage((current) => ({ ...current, [item.packId]: "" }));
-    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body));
-    if (!isCurrentAccount(accountId)) return;
+    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body), () => isCurrentAccount(accountId, epoch));
+    if (!isCurrentAccount(accountId, epoch)) return;
     setSaving(null);
     const result = response?.results.find((row) => row.actionId === entry.data.clientId);
     const code = ErrorCode.safeParse(result?.code);
@@ -203,7 +204,7 @@ export default function OpeningStockScreen() {
     if (answer?.code === "OPENING_STOCK_ALREADY_RECORDED") {
       setMessage((current) => ({ ...current, [item.packId]: `${words.stockConflict} ${entry.data.quantity} ${item.baseUnit}.` }));
       const updated = await api.shopListings().catch(() => null);
-      if (!isCurrentAccount(accountId)) return;
+      if (!isCurrentAccount(accountId, epoch)) return;
       if (updated?.ok) {
         const refreshedItems = updated.data.items.filter((row) => row.listing !== null);
         setLoad((current) => current.kind === "loaded" && current.shopId === shopId
@@ -224,7 +225,7 @@ export default function OpeningStockScreen() {
   }
 
   function recover(sourcePack: string, targetPack: string, quantity: string, chosen: OpeningStockBody | null): string | null {
-    if (load.kind !== "loaded" || !isCurrentAccount(load.accountId)) return words.storageFailed;
+    if (load.kind !== "loaded" || !isCurrentAccount(load.accountId, load.epoch)) return words.storageFailed;
     if (!load.items.some((item) => item.packId === targetPack && !item.openingStockRecorded)) return words.loadFailed;
     const entry = OpeningStockBody.safeParse(chosen ?? { quantity, clientId: clientId() });
     if (!entry.success) return words.errors.quantity;

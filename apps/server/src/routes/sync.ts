@@ -1,4 +1,4 @@
-import { ErrorEnvelope, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
@@ -10,6 +10,14 @@ type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number
 
 export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds }: Options) {
   const auth = { pool, clock, keys: deriveKeys(secret) };
+  app.get("/v1/sync/access", { schema: { response: { 200: SyncAccessResponse, 401: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { rows: [shop] } = await pool.query(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
+      WHERE m.account_id = $1 AND m.role IN ('owner', 'staff')`, [who.accountId]);
+    return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null });
+  });
+
   app.get("/v1/sync/changes", { schema: { querystring: SyncChangesQuery, response: {
     200: SyncChangesResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope,
   } } }, async (request, reply) => {

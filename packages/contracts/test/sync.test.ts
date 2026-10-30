@@ -32,3 +32,11 @@ it("validates shop-scoped cursors and paired Stock rows/tombstones", async () =>
   expect(SyncChangesQuery.safeParse({ since: "2030-01-01" }).success).toBe(false);
   expect(SyncChangesQuery.safeParse({ since: `${id}:0` }).success).toBe(true);
 });
+
+it("requires paired shop identity/state for the explicit access check", async () => {
+  const { SyncAccessResponse } = await import("../src/sync");
+  for (const state of ["live", "suspended", "approved", "closed"]) expect(SyncAccessResponse.safeParse({ shopId: id, state }).success).toBe(true);
+  expect(SyncAccessResponse.safeParse({ shopId: null, state: null }).success).toBe(true);
+  expect(SyncAccessResponse.safeParse({ shopId: null, state: "closed" }).success).toBe(false);
+  expect(SyncAccessResponse.safeParse({ shopId: id, state: null }).success).toBe(false);
+});

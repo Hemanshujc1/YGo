@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter } from "./stock-database-fixture";
 
 const native = vi.hoisted(() => ({
-  secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false,
+  secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false, flags: new Map<string, string | boolean>(), delete: vi.fn(), drop: vi.fn(),
   cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(),
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
 vi.mock("expo-file-system", () => ({ File: class { get exists() { return native.exists; } } }));
-vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set }));
-vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open }));
-vi.mock("react-native-mmkv", () => ({ createMMKV: () => ({
+vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set, deleteItemAsync: native.delete }));
+vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open, deleteDatabaseAsync: native.drop }));
+vi.mock("react-native-mmkv", () => ({ createMMKV: ({ id }: { id: string }) => id === "shop-offline-access" ? { getString: (key: string) => native.flags.get(key), getBoolean: (key: string) => native.flags.get(key), set: (key: string, value: string | boolean) => native.flags.set(key, value), remove: (key: string) => native.flags.delete(key) } : ({
   getAllKeys: () => [...native.legacy.keys()], getString: (key: string) => native.legacy.get(key), remove: (key: string) => native.legacy.delete(key),
 }) }));
 
@@ -22,7 +22,8 @@ const entry = { quantity: "2", clientId: "00000000-0000-4000-8000-000000000004" 
 describe("opening-stock native boundary", () => {
   const databases: DatabaseSync[] = [];
   beforeEach(() => {
-    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.exists = false; native.cipher = "4.0";
+    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.flags.clear();
+    native.delete.mockImplementation(async (key: string) => { native.secrets.delete(key); }); native.drop.mockResolvedValue(undefined); native.exists = false; native.cipher = "4.0";
     native.get.mockImplementation(async (key: string) => native.secrets.get(key) ?? null);
     native.set.mockImplementation(async (key: string, value: string) => { native.secrets.set(key, value); });
     native.random.mockResolvedValue(new Uint8Array(32).fill(7));
@@ -95,6 +96,35 @@ it("counts durable manual flags before sign-out without reading another account'
   queue.saveFlag(shop, pack, true);
   expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 1, failed: 0, stockPending: 1 });
   expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
+});
+
+
+it("invalidates handles and erases the account database/key even while actions and a response remain pending", async () => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  const { syncOpeningStockBatch } = await import("../src/lib/opening-stock-queue");
+  const queue = await openOpeningStock(account); queue.saveFlag(shop, pack, true);
+  let answer!: (value: { ok: true; data: { results: [] } }) => void;
+  const flight = syncOpeningStockBatch(queue, shop, () => new Promise((resolve) => { answer = resolve; }));
+  native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
+  await offlineStorage.erase(account, shop);
+  answer({ ok: true, data: { results: [] } }); expect(await flight).toBeNull();
+  expect(() => queue.count()).toThrow("unavailable");
+  expect(native.close).toHaveBeenCalled(); expect(native.drop).toHaveBeenCalledWith(`opening-stock-${account}.db`);
+  expect(native.delete).toHaveBeenCalledWith(`opening-stock-${account}`, { keychainAccessible: 1 });
+  expect(native.legacy.size).toBe(0);
+});
+
+it.each(["file", "key"])("keeps the durable block through %s deletion failure and retries after a module restart", async (failure) => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  (failure === "file" ? native.drop : native.delete).mockRejectedValueOnce(new Error("busy"));
+  await expect(offlineStorage.erase(account, shop)).rejects.toThrow("busy");
+  vi.resetModules();
+  const restarted = await import("../src/lib/opening-stock-database");
+  expect(restarted.offlineStorage.blocked(account)).toBe(shop);
+  await expect(restarted.openOpeningStock(account)).rejects.toThrow("cleanup");
+  await restarted.offlineStorage.erase(account, shop);
+  expect(restarted.offlineStorage.blocked(account)).toBeUndefined();
 });
 
 });
