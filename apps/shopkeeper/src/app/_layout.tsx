@@ -1,5 +1,5 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
-import { Slot } from "expo-router";
+import { Navigator, Slot } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { StockAccess } from "../components/stock-access";
 import { SignOut } from "../components/sign-out";
@@ -34,7 +34,7 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
-        <StockAccess><Slot /></StockAccess>
+        <Navigator><StockAccess><Slot /></StockAccess></Navigator>
       </SessionGate>
     </AppShell>
   );

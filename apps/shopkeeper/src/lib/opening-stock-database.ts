@@ -78,7 +78,8 @@ export const offlineStorage: AccessStorage = {
   async erase(id, shopId) {
     accessFlags.set(`blocked:${id}`, shopId);
     await closeOpeningStock(id);
-    await deleteDatabaseAsync(`opening-stock-${id}.db`);
+    const name = `opening-stock-${id}.db`;
+    if (new File(defaultDatabaseDirectory, name).exists) await deleteDatabaseAsync(name);
     await deleteItemAsync(`opening-stock-${id}`, options);
     for (const key of legacyOpeningStock.getAllKeys()) if (key.startsWith(`opening:${shopId}:`)) legacyOpeningStock.remove(key);
     await deleteItemAsync(`stock-access-${id}`, options);
@@ -92,6 +93,8 @@ export async function openingStockBeforeSignOut(accountId: string, verifiedShopI
   if (verifiedShopId === undefined && legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"))) {
     throw new Error("Verify the shop before checking legacy opening stock");
   }
+  if (!opened.has(accountId) && !new File(defaultDatabaseDirectory, `opening-stock-${accountId}.db`).exists
+    && !legacyOpeningStock.getAllKeys().some((key) => verifiedShopId && key.startsWith(`opening:${verifiedShopId}:`))) return { pending: 0, failed: 0 };
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
   return { pending: queue.count(), failed: queue.failureCount(), ...(queue.flagCount() > 0 ? { stockPending: queue.flagCount() } : {}) };
