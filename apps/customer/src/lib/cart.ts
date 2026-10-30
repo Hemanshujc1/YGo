@@ -117,9 +117,12 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let sending = false;
   let loads = 0;
+  /** Set when the account signs out or changes: nothing more is sent, and no reply is shown. */
+  let stopped = false;
   const listeners = new Set<() => void>();
 
   const set = (next: Partial<CartView>) => {
+    if (stopped) return;
     view = { ...view, ...next };
     for (const listener of listeners) listener();
   };
@@ -133,14 +136,14 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
 
   async function send(): Promise<void> {
     timer = undefined;
-    if (sending || !query) return;
+    if (sending || !query || stopped) return;
     sending = true;
     // A load already on its way is older than this save.
     loads += 1;
     let reloads = 0;
     try {
       // Stops while a tap waits for its pause; that tap's timer sends next.
-      while (edits.size && !timer) {
+      while (edits.size && !timer && !stopped) {
         const place = query;
         const { body, sent } = nextSave(view.server, edits);
         const answer: Answer = await client.saveCart(shopId, place, body).catch(() => "offline" as const);
@@ -177,7 +180,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
   const load = async (place: FeedQuery) => {
     query = place;
     // A save running brings the cart back with its reply.
-    if (sending) return;
+    if (sending || stopped) return;
     const ticket = ++loads;
     if (!view.server) set({ status: "loading", message: null });
     const answer: Answer = await client.cart(shopId, place).catch(() => "offline" as const);
@@ -203,6 +206,7 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
 
     /** One pack's count from a tap; saved after `delay` with every tap since. */
     setCount(listingId: string, count: number) {
+      if (stopped) return;
       edits.set(listingId, Math.max(count, 0));
       set({ lines: rebase(view.server?.lines ?? [], edits), saving: true, message: null, notice: null });
       if (timer) clearTimeout(timer);
@@ -212,6 +216,14 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
     /** Try again after a failed load or save: reads the cart, then sends any unanswered taps. */
     retry() {
       if (query) void load(query);
+    },
+
+    /** Drops unsent taps and ignores replies still on their way, for a sign-out or another account (#406). */
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      edits.clear();
     },
   };
 }

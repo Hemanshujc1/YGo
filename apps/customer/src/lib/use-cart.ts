@@ -1,11 +1,23 @@
 import type { FeedQuery } from "@ygo/contracts";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useSyncExternalStore } from "react";
-import { api } from "../api";
+import { api, session } from "../api";
 import { createCart, stockLeft, type Cart } from "./cart";
 
-// One cart per shop for the app's life, so C05 and C07 show the same counts (#406). The server holds the cart.
+// One cart per shop, so C05 and C07 show the same counts (#406). The server holds the cart.
 const carts = new Map<string, Cart>();
+
+// The carts belong to one account: a sign-out or another account drops them, with any unsent taps,
+// so a save waiting for its pause can't carry one account's taps under the next one's sign-in.
+let owner: string | undefined;
+session.subscribe(() => {
+  const state = session.get();
+  const account = "account" in state ? state.account.id : undefined;
+  if (account === owner) return;
+  owner = account;
+  for (const cart of carts.values()) cart.stop();
+  carts.clear();
+});
 
 function cartFor(shopId: string): Cart {
   let cart = carts.get(shopId);

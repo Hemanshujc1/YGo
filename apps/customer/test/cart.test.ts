@@ -162,6 +162,26 @@ describe("the cart store (#406)", () => {
     expect(server.saves).toHaveLength(1);
   });
 
+  it("keeps a pack added while the reload after a refused save is on its way, and saves it", async () => {
+    const server = fakeServer();
+    const store = await loaded(server, cart(1, [line(atta, 1)]));
+    store.setCount(dal, 1);
+    await vi.advanceTimersByTimeAsync(300);
+    server.saves[0]?.answer(refused("NOT_FOUND", 404));
+    await vi.advanceTimersByTimeAsync(0);
+    // The reload is pending; the Customer adds another pack.
+    const ghee = "3f1c2b9a-0d4e-4b7a-8c61-2e5f9d8a7b03";
+    store.setCount(ghee, 2);
+    server.loads.shift()?.(ok(cart(1, [line(atta, 1)])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get().lines).toEqual([{ listingId: atta, count: 1 }, { listingId: ghee, count: 2 }]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.saves[1]?.body).toEqual({ revision: 1, lines: [{ listingId: atta, count: 1 }, { listingId: ghee, count: 2 }] });
+    server.saves[1]?.answer(ok(cart(2, [line(atta, 1), line(ghee, 2)])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get()).toMatchObject({ saving: false, lines: [{ listingId: atta, count: 1 }, { listingId: ghee, count: 2 }] });
+  });
+
   it("adds the good pack when two are added together and only one is refused", async () => {
     const server = fakeServer();
     const store = await loaded(server, cart(0, []));
@@ -220,6 +240,28 @@ describe("the cart store (#406)", () => {
     first.loads.shift()?.({ ok: false, status: 500, code: "INTERNAL" });
     await vi.advanceTimersByTimeAsync(0);
     expect(fresh.get()).toMatchObject({ status: "failed", message: "Something went wrong on the server." });
+  });
+
+  it("sends nothing and shows no reply once stopped for a sign-out or another account", async () => {
+    const server = fakeServer();
+    const store = await loaded(server, cart(1, [line(atta, 1)]));
+    store.setCount(atta, 2);
+    store.stop();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.saves).toHaveLength(0);
+
+    const other = fakeServer();
+    const sending = await loaded(other, cart(1, [line(atta, 1)]));
+    sending.setCount(atta, 3);
+    await vi.advanceTimersByTimeAsync(300);
+    sending.stop();
+    other.saves[0]?.answer(ok(cart(2, [line(atta, 3)])));
+    await vi.advanceTimersByTimeAsync(0);
+    sending.setCount(dal, 1);
+    void sending.load(place);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(sending.get().server?.revision).toBe(1);
+    expect([other.saves.length, other.loads.length]).toEqual([1, 0]);
   });
 
   it("shows no cart when there is none and the shop can't deliver here", async () => {
