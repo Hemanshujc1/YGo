@@ -1,11 +1,12 @@
 import { Text } from "@ygo/mobile";
 import { router } from "expo-router";
+import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { strings } from "../strings";
 import { ChevronLeft } from "./icons";
 
-/** A screen's title, after a Back button when there is a screen to go back to (C23, C15). */
-export function TopBar({ title }: { title: string }) {
+/** A screen's title, after a Back button when there is a screen to go back to (C23, C15), and an action at the end (C19's Call the shop). */
+export function TopBar({ title, action }: { title: string; action?: ReactNode }) {
   const back = router.canGoBack();
   return (
     <View className="min-h-14 flex-row items-center gap-1 p-1">
@@ -25,6 +26,7 @@ export function TopBar({ title }: { title: string }) {
       >
         {title}
       </Text>
+      {action}
     </View>
   );
 }

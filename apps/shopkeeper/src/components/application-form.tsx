@@ -1,6 +1,6 @@
 import { type AddressPoint, type SendShopApplicationBody, type ShopApplication, ShopEntityType } from "@ygo/contracts";
 import { formatNumber, formatPhone } from "@ygo/format";
-import { Button, edgeClass, FieldMessage, findPlace, type Locator, Text, ThemePicker } from "@ygo/mobile";
+import { Button, Confirm, edgeClass, FieldMessage, findPlace, Text, ThemePicker, type Locator } from "@ygo/mobile";
 import { addressAt } from "@ygo/mobile/address-at";
 import { PinMap } from "@ygo/mobile/pin-map";
 import * as Location from "expo-location";
@@ -23,7 +23,6 @@ import {
   typedFrom,
 } from "../lib/application-form";
 import { strings } from "../strings";
-import { Confirm } from "./confirm";
 import { MapPin, Minus, Plus } from "./icons";
 import { MapPicker } from "./map-picker";
 import { SignOut } from "./sign-out";

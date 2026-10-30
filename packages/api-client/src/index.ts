@@ -17,6 +17,8 @@ import {
   SearchResponse,
   ShopPageResponse,
   CartResponse,
+  OrderResponse,
+  type PlaceOrderBody,
   type SaveCartBody,
   type FeedQuery,
   type SearchQuery,
@@ -374,6 +376,21 @@ export function createApiClient({
       return result(await signedIn("PUT", `/v1/carts/${encodeURIComponent(shopId)}?${query}`, body), CartResponse);
     },
 
+    /** `POST /v1/carts/:shopId/order`: places the cart for delivery to a saved address (#424); CART_CHANGED carries the cart as it is now. */
+    async placeOrder(shopId: string, body: PlaceOrderBody): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/carts/${encodeURIComponent(shopId)}/order`, body), OrderResponse);
+    },
+
+    /** `GET /v1/orders/:id`: C09 and C19, one of the Customer's orders. */
+    async order(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("GET", `/v1/orders/${encodeURIComponent(id)}`), OrderResponse);
+    },
+
+    /** `POST /v1/orders/:id/cancel`: free while the shop hasn't answered (ORD-5); ORDER_STATUS_CHANGED once it has. */
+    async cancelOrder(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel`), OrderResponse);
+    },
+
     /** `GET /v1/search`: C16, the shops that can serve this place matching the typed text, each with up to 5 matching products (DSC-3). */
     async search({ pincode, latitude, longitude, q }: SearchQuery): Promise<ApiResult<SearchResponse>> {
       const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude), q });
@@ -385,9 +402,10 @@ export function createApiClient({
       return empty(await signedIn("POST", "/v1/waitlist", body));
     },
 
-    /** `GET /v1/me/addresses`: the account's saved addresses, newest first. */
-    async savedAddresses(): Promise<ApiResult<SavedAddressesResponse>> {
-      return result(await signedIn("GET", "/v1/me/addresses"), SavedAddressesResponse);
+    /** `GET /v1/me/addresses`: the account's saved addresses, newest first; with a shop, only those with a pin it delivers to (#427). */
+    async savedAddresses(shopId?: string): Promise<ApiResult<SavedAddressesResponse>> {
+      const query = shopId ? `?${new URLSearchParams({ shopId })}` : "";
+      return result(await signedIn("GET", `/v1/me/addresses${query}`), SavedAddressesResponse);
     },
 
     /** `POST /v1/me/addresses`: saves a confirmed place. A new Home or Work replaces the old one. */

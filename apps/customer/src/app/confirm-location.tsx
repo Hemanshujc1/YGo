@@ -1,7 +1,7 @@
 import { AddressLabel, AddressPoint } from "@ygo/contracts";
 import { Button, edgeClass, FieldMessage, Text, useSession } from "@ygo/mobile";
 import { PinMap, type PinMapHandle } from "@ygo/mobile/pin-map";
-import { useLocalSearchParams, useNavigation } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -45,7 +45,8 @@ const lookupFailed = {
  * pincode (Android with location refused), the map opens at that pincode and
  * the pincode stays as typed, as the phone can't read the spot then (#373,
  * owner's answers 1–5). Opened for a saved address with no pin, it shows that
- * address's flat and label and puts the pin on it (answer 6).
+ * address's flat and label and puts the pin on it (answer 6). Opened from
+ * C07's Add address, it returns to the cart (#427).
  */
 export default function ConfirmLocation() {
   const insets = useSafeAreaInsets();
@@ -58,6 +59,8 @@ export default function ConfirmLocation() {
     addressId?: string;
     flat?: string;
     label?: string;
+    /** Opened from C07's Add address: after Confirm it goes back to the cart (#427, owner's answer 4). */
+    back?: string;
   }>();
   const [start] = useState(() => {
     const point = AddressPoint.safeParse({ latitude: Number(params.latitude), longitude: Number(params.longitude) });
@@ -154,7 +157,7 @@ export default function ConfirmLocation() {
     working.current = false;
     setSaving(false);
     // Any failure stays here with its message; nothing is chosen and nothing retries by itself.
-    if (done.kind === "done") return goHome(navigation);
+    if (done.kind === "done") return params.back ? router.back() : goHome(navigation);
     setProblem(done);
   }
 

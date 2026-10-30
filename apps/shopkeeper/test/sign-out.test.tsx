@@ -13,12 +13,11 @@ vi.mock("react", () => ({
     return [mock.state[index], (value: unknown) => { mock.state[index] = value; }];
   },
 }));
-vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text" }));
+vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", Text: "Text" }));
 vi.mock("react-native", () => ({ View: "View" }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({ session: { get: () => mock.identity, signOut: mock.signOut } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
-vi.mock("../src/components/confirm", () => ({ Confirm: "Confirm" }));
 
 import { SignOut } from "../src/components/sign-out";
 

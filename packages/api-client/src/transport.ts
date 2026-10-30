@@ -20,6 +20,8 @@ interface ApiFailure {
   rowErrors?: ErrorEnvelope["error"]["rowErrors"];
   /** With SHOP_NOT_READY: what still blocks Live. */
   liveCheck?: ErrorEnvelope["error"]["liveCheck"];
+  /** With CART_CHANGED from placing an order: the cart as it is now (#424). */
+  cart?: ErrorEnvelope["error"]["cart"];
 }
 
 export interface Answer {
@@ -90,8 +92,8 @@ export function createTransport({ baseUrl, fetch: fetchFn, timeoutMs = 10_000, a
     const envelope = ErrorEnvelope.safeParse(body);
     if (!envelope.success) return { ok: false, status, code: "INTERNAL" };
     if (envelope.data.error.code === "UPDATE_REQUIRED") onUpdateRequired?.();
-    const { code, fields, conflicts, rowErrors, liveCheck } = envelope.data.error;
-    return { ok: false, status, code, fields, conflicts, rowErrors, liveCheck };
+    const { code, fields, conflicts, rowErrors, liveCheck, cart } = envelope.data.error;
+    return { ok: false, status, code, fields, conflicts, rowErrors, liveCheck, cart };
   }
 
   function result<T>(answer: Answer, schema: Schema<T>): ApiResult<T> {

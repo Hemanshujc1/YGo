@@ -1,11 +1,10 @@
-import { Button, Text } from "@ygo/mobile";
+import { Button, Confirm, Text } from "@ygo/mobile";
 import { useRef, useState } from "react";
 import { Link } from "expo-router";
 import { View } from "react-native";
 import { session } from "../api";
 import { strings } from "../strings";
 import { openingStockBeforeSignOut } from "../lib/opening-stock-database";
-import { Confirm } from "./confirm";
 
 const words = strings.application.signOut;
 

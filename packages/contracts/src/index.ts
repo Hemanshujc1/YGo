@@ -135,6 +135,7 @@ export {
   SaveAddressBody,
   SavedAddress,
   SavedAddressParams,
+  SavedAddressesQuery,
   SavedAddressesResponse,
 } from "./addresses";
 export {

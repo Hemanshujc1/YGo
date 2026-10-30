@@ -217,6 +217,13 @@ export function createCart(client: Client, shopId: string, delay = cartDelay) {
       timer = setTimeout(() => void send(), delay);
     },
 
+    /** The cart a refused placement answered with (CART_CHANGED, #427): shown as a fresh read is. */
+    adopt(fresh: CartResponse) {
+      if (sending || stopped) return;
+      loads += 1;
+      show(fresh);
+    },
+
     /** Try again after a failed load or save: reads the cart, then sends any unanswered taps. */
     retry() {
       if (query) void load(query);

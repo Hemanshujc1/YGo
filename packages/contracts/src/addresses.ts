@@ -51,6 +51,13 @@ export const SavedAddress = z.strictObject({
 });
 export type SavedAddress = z.infer<typeof SavedAddress>;
 
+/**
+ * `GET /v1/me/addresses?shopId=`: with a shop, only the addresses with a pin it delivers to now,
+ * for C07's Deliver to (#427, owner's answer 1).
+ */
+export const SavedAddressesQuery = z.strictObject({ shopId: z.uuid().optional() });
+export type SavedAddressesQuery = z.infer<typeof SavedAddressesQuery>;
+
 /** The server sends the newest first. */
 export const SavedAddressesResponse = z.strictObject({ addresses: z.array(SavedAddress) });
 export type SavedAddressesResponse = z.infer<typeof SavedAddressesResponse>;
