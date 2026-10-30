@@ -374,7 +374,8 @@ describe("Stock flags share the durable FIFO", () => {
     try {
       const queue = openingStockQueue(adapter(db), randomUUID);
       queue.saveFlag(shopId, packId, true);
-      const batch = queue.batch(shopId), first = batch.actions[0]!;
+      const batch = queue.batch(shopId), first = batch.actions[0];
+      if (!first) throw new Error("Missing saved flag");
       queue.acknowledge(batch, { results: [{ actionId: first.id, sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] });
       expect(queue.count()).toBe(0); expect(queue.failureCount()).toBe(1); expect(queue.batch(shopId).actions).toEqual([]);
       expect(queue.flag(shopId, packId)?.result?.code).toBe("ACTION_TOO_OLD");

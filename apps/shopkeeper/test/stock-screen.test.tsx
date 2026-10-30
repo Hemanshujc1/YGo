@@ -87,12 +87,12 @@ describe("minimal Stock screen", () => {
       actionId: action.id, sequence: action.sequence, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false,
     })) } }));
     press("Rice: Out of stock"); await settle();
-    const rejected = queue.flag(shopId, packId)!.action.id;
+    const rejected = queue.flag(shopId, packId)?.action.id;
     expect(texts().join(" ")).toContain(rejected);
     expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
     // The card's retry retries the refused value using a fresh action ID.
-    const retry = elements(render()).filter((node) => node.props.label === "Retry sync").at(-1)!;
-    (retry.props.onPress as () => void)(); await settle();
+    const retry = elements(render()).filter((node) => node.props.label === "Retry sync").at(-1);
+    (retry?.props.onPress as () => void)(); await settle();
     expect(queue.flag(shopId, packId)?.action.id).not.toBe(rejected);
     expect(queue.failureCount()).toBe(2);
   });
