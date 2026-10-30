@@ -1,3 +1,4 @@
+import { formatNumber } from "@ygo/format";
 import type { ErrorCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
@@ -165,7 +166,7 @@ export const strings = {
       refreshFailed: "Couldn't refresh. Check your connection and pull down again.",
     },
     signOut: {
-      pending: (count: number) => `${count} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
+      pending: (count: number) => `${formatNumber(count)} stock entries are waiting to sync. Open Opening stock and retry before signing out.`,
       checkFailed: "Couldn't check your saved stock. Try again before signing out.",
       openStock: "Open Opening stock",
       title: "Sign out?",
