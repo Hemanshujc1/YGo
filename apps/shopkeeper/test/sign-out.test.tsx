@@ -58,7 +58,26 @@ describe("opening-stock sign-out guard", () => {
     expect(view.props.children[1].props.children).toContain("Couldn't check");
   });
 
+  it("does not show an old storage error after the account changes", async () => {
+    mock.count.mockImplementation(async () => {
+      mock.identity = { status: "signed-in", account: { id: "account-2" } };
+      throw new Error("old account storage");
+    });
+    const view = await pressSignOut();
+    expect(mock.signOut).not.toHaveBeenCalled();
+    expect(view.props.children[1]).toBeNull();
+  });
+
   it("signs out after the queue is confirmed empty", async () => {
+    await pressSignOut();
+    expect(mock.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a refreshed session object for the same account", async () => {
+    mock.count.mockImplementation(async () => {
+      mock.identity = { status: "signed-in", account: { id: "account-1" } };
+      return 0;
+    });
     await pressSignOut();
     expect(mock.signOut).toHaveBeenCalledOnce();
   });

@@ -6,6 +6,7 @@ export function adapter(db: DatabaseSync): Parameters<typeof openingStockQueue>[
   return {
     execSync: (sql: string) => db.exec(sql),
     runSync: (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).run(...args),
+    getAllSync: (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).all(...args),
     getFirstSync: (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) ?? null,
     withTransactionSync: (work: () => void) => {
       db.exec("BEGIN");

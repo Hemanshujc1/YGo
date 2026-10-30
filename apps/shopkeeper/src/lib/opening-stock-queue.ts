@@ -1,7 +1,7 @@
 import { OpeningStockBody, type ErrorCode, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-type Database = Pick<SQLiteDatabase, "execSync" | "getFirstSync" | "runSync" | "withTransactionSync">;
+type Database = Pick<SQLiteDatabase, "execSync" | "getAllSync" | "getFirstSync" | "runSync" | "withTransactionSync">;
 type Legacy = { getAllKeys(): string[]; getString(key: string): string | undefined; remove(key: string): boolean };
 
 function parse(raw: string): OpeningStockEntry | null {
@@ -16,12 +16,23 @@ export function openingStockQueue(db: Database) {
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 1) throw new Error("Opening stock database needs a newer app");
+  if (version > 2) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
       CREATE TABLE opening_stock_held (source_key TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL);
       PRAGMA user_version = 1;`);
+  });
+
+  if (version < 2) db.withTransactionSync(() => {
+    db.execSync(`ALTER TABLE opening_stock_held RENAME TO opening_stock_held_v1;
+      CREATE TABLE opening_stock_held (source_key TEXT NOT NULL, payload TEXT NOT NULL,
+        PRIMARY KEY (source_key, payload));
+      INSERT INTO opening_stock_held SELECT source_key, payload FROM opening_stock_held_v1;
+      DROP TABLE opening_stock_held_v1;
+      CREATE TABLE opening_stock_recovered (source_key TEXT NOT NULL, payload TEXT NOT NULL,
+        replacement TEXT NOT NULL, PRIMARY KEY (source_key, payload));
+      PRAGMA user_version = 2;`);
   });
 
   return {
@@ -34,6 +45,10 @@ export function openingStockQueue(db: Database) {
         const entry = parse(raw);
         const packId = key.slice(prefix.length);
         db.withTransactionSync(() => {
+          // An interrupted removal must not promote an already-held version into the
+          // active queue, even if the original active version has since synced.
+          if (db.getFirstSync(`SELECT 1 FROM opening_stock_held WHERE source_key = ? AND payload = ?
+            UNION ALL SELECT 1 FROM opening_stock_recovered WHERE source_key = ? AND payload = ?`, key, raw, key, raw)) return;
           const existing = db.getFirstSync<{ payload: string }>("SELECT payload FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, packId);
           const saved = existing && parse(existing.payload);
           if (entry && (!existing || (saved?.clientId === entry.clientId && saved.quantity === entry.quantity))) {
@@ -41,13 +56,36 @@ export function openingStockQueue(db: Database) {
           } else {
             // Preserve malformed/conflicting legacy bytes for attention, never send them.
             db.runSync("INSERT OR IGNORE INTO opening_stock_held VALUES (?, ?)", key, raw);
-            const held = db.getFirstSync<{ payload: string }>("SELECT payload FROM opening_stock_held WHERE source_key = ?", key);
-            if (held?.payload !== raw) throw new Error("Legacy opening stock changed during import");
           }
         });
         // A failed removal can safely retry: both inserts are idempotent.
-        legacy.remove(key);
+        if (legacy.getString(key) === raw) legacy.remove(key);
       }
+    },
+    heldPacks(shopId: string): string[] {
+      const prefix = `opening:${shopId}:`;
+      return db.getAllSync<{ source_key: string }>("SELECT DISTINCT source_key FROM opening_stock_held WHERE source_key LIKE ?", `${prefix}%`)
+        .map((row) => row.source_key.slice(prefix.length));
+    },
+    versions(shopId: string, packId: string) {
+      return db.getAllSync<{ payload: string }>(`SELECT payload FROM opening_stock WHERE shop_id = ? AND pack_id = ?
+        UNION SELECT payload FROM opening_stock_held WHERE source_key = ?`, shopId, packId, `opening:${shopId}:${packId}`)
+        .map(({ payload }) => ({ payload, entry: parse(payload) }));
+    },
+    recover(shopId: string, sourcePack: string, targetPack: string, entry: OpeningStockEntry) {
+      const checked = OpeningStockBody.parse(entry);
+      const sourceKey = `opening:${shopId}:${sourcePack}`;
+      db.withTransactionSync(() => {
+        if (!db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", sourceKey)) throw new Error("No held opening stock");
+        if (sourcePack !== targetPack && (db.getFirstSync("SELECT 1 FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, targetPack)
+          || db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${targetPack}`))) throw new Error("Target stock needs attention");
+        const replacement = JSON.stringify({ packId: targetPack, ...checked });
+        db.runSync(`INSERT OR IGNORE INTO opening_stock_recovered SELECT source_key, payload, ? FROM opening_stock_held WHERE source_key = ?`, replacement, sourceKey);
+        db.runSync(`INSERT OR IGNORE INTO opening_stock_recovered SELECT ?, payload, ? FROM opening_stock WHERE shop_id = ? AND pack_id = ?`, sourceKey, replacement, shopId, sourcePack);
+        db.runSync("DELETE FROM opening_stock_held WHERE source_key = ?", sourceKey);
+        db.runSync("DELETE FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, sourcePack);
+        db.runSync("INSERT INTO opening_stock VALUES (?, ?, ?)", shopId, targetPack, JSON.stringify(checked));
+      });
     },
     pending(shopId: string, packId: string): OpeningStockEntry | null {
       const row = db.getFirstSync<{ payload: string }>("SELECT payload FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, packId);

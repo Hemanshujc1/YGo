@@ -32,7 +32,8 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
     setPending(false);
     try {
       const count = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
-      if (session.get() !== before) return;
+      const current = session.get();
+      if (!("account" in current) || current.account.id !== before.account.id) return;
       if (count > 0) {
         setMessage(words.pending(count));
         setPending(true);
@@ -40,10 +41,12 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
       }
       await session.signOut();
     } catch {
-      setMessage(words.checkFailed);
+      const current = session.get();
+      if ("account" in current && current.account.id === before.account.id) setMessage(words.checkFailed);
     } finally {
       working.current = false;
-      setSigningOut(false);
+      const current = session.get();
+      if ("account" in current && current.account.id === before.account.id) setSigningOut(false);
     }
   }
 

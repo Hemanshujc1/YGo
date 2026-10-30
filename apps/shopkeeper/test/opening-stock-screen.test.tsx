@@ -2,18 +2,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
   get: vi.fn(), open: vi.fn(), importLegacy: vi.fn(), set: vi.fn(),
-  application: vi.fn(), listings: vi.fn(),
+  application: vi.fn(), listings: vi.fn(), opening: vi.fn(), pending: vi.fn(),
+  save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(),
+  state: [] as unknown[], cursor: 0, mounted: false,
 }));
 vi.mock("react", () => ({
-  useState: (initial: unknown) => [initial, mock.set],
-  useEffect: (effect: () => void) => effect(),
+  useState: (initial: unknown) => {
+    const index = mock.cursor++;
+    if (!(index in mock.state)) mock.state[index] = initial;
+    return [mock.state[index], (value: unknown) => {
+      mock.set(value);
+      mock.state[index] = typeof value === "function" ? value(mock.state[index]) : value;
+    }];
+  },
+  useEffect: (effect: () => void) => { if (!mock.mounted) { mock.mounted = true; effect(); } },
 }));
-vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text" }));
+vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text", SupportEmail: "SupportEmail" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({
-  session: { get: mock.get }, api: { shopApplication: mock.application, shopListings: mock.listings },
+  session: { get: mock.get }, supportEmail: "help@example.com",
+  api: { shopApplication: mock.application, shopListings: mock.listings, openingStock: mock.opening },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({
   openOpeningStock: mock.open, legacyOpeningStock: {},
@@ -21,23 +31,142 @@ vi.mock("../src/lib/opening-stock-database", () => ({
 
 import OpeningStockScreen from "../src/app/opening-stock";
 
+const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
+const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: {}, openingStockRecorded: false, stock: "0" };
+const listings = { ok: true, data: { items: [item] } };
+const queue = { importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
+function render() { mock.cursor = 0; return OpeningStockScreen(); }
+async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); }
+function switchAccount() {
+  mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-2" } });
+  mock.set.mockClear();
+}
+// Search rendered native elements, including nested mapped cards and fragments.
+function elements(node: unknown): Array<{ type?: unknown; props: Record<string, unknown> }> {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!node || typeof node !== "object" || !("props" in node)) return [];
+  const element = node as { type?: unknown; props: Record<string, unknown> };
+  return [element, ...elements(element.props.children)];
+}
+function press(label: string) {
+  const button = elements(render()).find((element) => element.props.label === label);
+  expect(button, label).toBeDefined();
+  (button?.props.onPress as () => void)();
+}
+
 describe("opening-stock account boundary", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks(); mock.state = []; mock.cursor = 0; mock.mounted = false;
+    mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-1" } });
     mock.application.mockResolvedValue({ ok: true, data: { application: { id: "shop-1" } } });
-    mock.listings.mockResolvedValue({ ok: true, data: { items: [] } });
+    mock.listings.mockResolvedValue(listings);
+    mock.open.mockResolvedValue(queue);
+    mock.pending.mockReturnValue(null); mock.attentionCount.mockReturnValue(0); mock.heldPacks.mockReturnValue([]); mock.versions.mockReturnValue([{ payload: JSON.stringify(entry), entry }, { payload: "broken bytes", entry: null }]);
   });
 
   it("does not import legacy work when the account changes while its database opens", async () => {
-    mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-1" } });
-    mock.open.mockImplementation(async () => {
-      mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-2" } });
-      return { importLegacy: mock.importLegacy };
-    });
-    OpeningStockScreen();
-    await vi.waitFor(() => expect(mock.get).toHaveBeenCalledTimes(2));
+    mock.open.mockImplementation(async () => { switchAccount(); return queue; });
+    render(); await settle();
     expect(mock.open).toHaveBeenCalledWith("account-1");
     expect(mock.importLegacy).not.toHaveBeenCalled();
-    expect(mock.set).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "loaded" }));
+    expect(mock.set).not.toHaveBeenCalled();
   });
+
+  it("ignores listing errors from a previous account", async () => {
+    mock.listings.mockImplementation(async () => { switchAccount(); throw new Error("offline"); });
+    render(); await settle();
+    expect(mock.open).not.toHaveBeenCalled(); expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it("ignores database errors from a previous account", async () => {
+    mock.open.mockImplementation(async () => { switchAccount(); throw new Error("key"); });
+    render(); await settle();
+    expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it("ignores startup sync results after the account changes", async () => {
+    mock.pending.mockReturnValue(entry);
+    mock.opening.mockImplementation(async () => { switchAccount(); return { ok: false, code: "VALIDATION_FAILED" }; });
+    render(); await settle();
+    expect(mock.opening).toHaveBeenCalledOnce(); expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("ignores a startup listing refresh after sync (success=%s)", async (success) => {
+    mock.pending.mockReturnValue(entry);
+    mock.opening.mockResolvedValue(success ? { ok: true } : { ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.listings.mockResolvedValueOnce(listings).mockImplementationOnce(async () => { switchAccount(); return listings; });
+    render(); await settle();
+    expect(mock.listings).toHaveBeenCalledTimes(2); expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("ignores a save response after switching accounts (success=%s)", async (success) => {
+    render(); await settle();
+    mock.pending.mockReturnValue(entry);
+    mock.opening.mockImplementation(async () => { switchAccount(); return success ? { ok: true, data: { quantity: "2.5" } } : { ok: false, code: "VALIDATION_FAILED" }; });
+    press("Save opening stock"); await settle();
+    expect(mock.save).toHaveBeenCalledOnce(); expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it("ignores a listing refresh after a save conflict when the account changes", async () => {
+    render(); await settle(); mock.pending.mockReturnValue(entry);
+    mock.opening.mockResolvedValue({ ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.listings.mockImplementation(async () => { switchAccount(); return listings; });
+    press("Save opening stock"); await settle();
+    expect(mock.set).not.toHaveBeenCalled();
+  });
+
+  it("ignores a manual conflict-refresh result after the account changes", async () => {
+    mock.pending.mockReturnValue(entry);
+    mock.opening.mockResolvedValue({ ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.listings.mockResolvedValueOnce(listings).mockResolvedValueOnce({ ok: false, code: "UNAVAILABLE" });
+    render(); await settle();
+    mock.listings.mockImplementation(async () => { switchAccount(); return listings; });
+    press("Try again"); await settle();
+    expect(mock.set).not.toHaveBeenCalled();
+  });
+  it("requires recovery before automatically syncing a conflicting active version", async () => {
+    mock.heldPacks.mockReturnValue([item.packId]); mock.pending.mockReturnValue(entry);
+    render(); await settle();
+    expect(mock.opening).not.toHaveBeenCalled();
+    expect(elements(render()).find((node) => node.props.label === "Save opening stock")?.props.disabled).toBe(true);
+  });
+
+  it("queues a valid recovery and keeps invalid or failed corrections visible", async () => {
+    mock.heldPacks.mockReturnValue([item.packId]);
+    render(); await settle();
+    const recovery = elements(render()).find((node) => node.props.packId === item.packId);
+    const recover = recovery?.props.onRecover as (pack: string, quantity: string, chosen: typeof entry | null) => string | null;
+    expect(recover(item.packId, "bad", null)).toContain("valid quantity");
+    expect(mock.recover).not.toHaveBeenCalled();
+    mock.recover.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(recover(item.packId, entry.quantity, entry)).toContain("Couldn't open or save");
+    expect(recover(item.packId, entry.quantity, entry)).toBeNull();
+    expect(mock.recover).toHaveBeenLastCalledWith("shop-1", item.packId, item.packId, entry);
+    switchAccount();
+    expect(recover(item.packId, entry.quantity, entry)).toContain("Couldn't open or save");
+    expect(mock.recover).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows original bytes and support, and allows choosing or correcting a saved version", async () => {
+    mock.heldPacks.mockReturnValue([item.packId]);
+    render(); await settle();
+    const node = elements(render()).find((element) => element.props.packId === item.packId);
+    const Recovery = node?.type as (props: Record<string, unknown>) => unknown;
+    mock.state = [];
+    const recover = vi.fn().mockReturnValue(null);
+    function form() {
+      mock.cursor = 0;
+      return Recovery({ ...node?.props, onRecover: recover });
+    }
+    const initial = elements(form());
+    expect(initial.some((node) => node.props.children === "broken bytes" && node.props.selectable)).toBe(true);
+    expect(initial.some((node) => node.props.address === "help@example.com")).toBe(true);
+    (initial.find((node) => node.props.label === "Use saved quantity 2.5")?.props.onPress as () => void)();
+    (elements(form()).find((node) => node.props.label === "Keep recovered quantity")?.props.onPress as () => void)();
+    expect(recover).toHaveBeenLastCalledWith(item.packId, "2.5", entry);
+    (elements(form()).find((node) => node.props.accessibilityLabel === "Recovered quantity in base units")?.props.onChangeText as (value: string) => void)("7");
+    (elements(form()).find((node) => node.props.label === "Keep recovered quantity")?.props.onPress as () => void)();
+    expect(recover).toHaveBeenLastCalledWith(item.packId, "7", null);
+  });
+
 });
