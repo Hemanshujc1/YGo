@@ -1,4 +1,6 @@
 import {
+  SyncActionsResponse,
+  type SyncActionsBody,
   Account,
   ErrorEnvelope,
   HealthResponse,
@@ -465,6 +467,10 @@ export function createApiClient({
       return result(await signedIn("PUT", `/v1/me/shop-listings/${encodeURIComponent(packId)}`, body), ShopListingsResponse.shape.items.element);
     },
 
+    /** Ordered outbox push; acknowledged replays return their original per-action results. */
+    async syncActions(body: SyncActionsBody): Promise<ApiResult<SyncActionsResponse>> {
+      return result(await signedIn("POST", "/v1/sync/actions", body), SyncActionsResponse);
+    },
     /** `POST /v1/me/shop-listings/:packId/opening-stock`: append the first stock movement; clientId makes offline retries safe. */
     async openingStock(packId: string, body: OpeningStockInput): Promise<ApiResult<OpeningStockResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-listings/${encodeURIComponent(packId)}/opening-stock`, body), OpeningStockResponse);

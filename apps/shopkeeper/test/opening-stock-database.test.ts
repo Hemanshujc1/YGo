@@ -6,7 +6,7 @@ const native = vi.hoisted(() => ({
   secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false,
   cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(),
 }));
-vi.mock("expo-crypto", () => ({ getRandomBytesAsync: native.random }));
+vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
 vi.mock("expo-file-system", () => ({ File: class { get exists() { return native.exists; } } }));
 vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set }));
 vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open }));

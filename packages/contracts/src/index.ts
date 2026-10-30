@@ -235,3 +235,5 @@ export {
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
 export { OrderLine, OrderParams, OrderResponse, OrderStatus, PlaceOrderBody, TERMINAL_ORDER_STATUSES } from "./orders";
+
+export { OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse } from "./sync";

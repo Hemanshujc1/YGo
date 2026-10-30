@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   get: vi.fn(), open: vi.fn(), importLegacy: vi.fn(), set: vi.fn(),
   application: vi.fn(), listings: vi.fn(), opening: vi.fn(), pending: vi.fn(),
-  save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(),
+  failed: vi.fn(), batch: vi.fn(), attempted: vi.fn(), acknowledge: vi.fn(), save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(),
   state: [] as unknown[], cursor: 0, mounted: false,
 }));
 vi.mock("react", () => ({
@@ -23,7 +23,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({
   session: { get: mock.get }, supportEmail: "help@example.com",
-  api: { shopApplication: mock.application, shopListings: mock.listings, openingStock: mock.opening },
+  api: { shopApplication: mock.application, shopListings: mock.listings, syncActions: mock.opening },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({
   openOpeningStock: mock.open, legacyOpeningStock: {},
@@ -34,7 +34,7 @@ import OpeningStockScreen from "../src/app/opening-stock";
 const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
 const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: {}, openingStockRecorded: false, stock: "0" };
 const listings = { ok: true, data: { items: [item] } };
-const queue = { importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
+const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
 function render() { mock.cursor = 0; return OpeningStockScreen(); }
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); }
 function switchAccount() {
@@ -61,6 +61,8 @@ describe("opening-stock account boundary", () => {
     mock.application.mockResolvedValue({ ok: true, data: { application: { id: "shop-1" } } });
     mock.listings.mockResolvedValue(listings);
     mock.open.mockResolvedValue(queue);
+    mock.failed.mockReturnValue(null);
+    mock.batch.mockImplementation(() => ({ deviceId: "device", sentAt: new Date().toISOString(), actions: mock.heldPacks().length || !mock.pending() ? [] : [{ id: entry.clientId, sequence: 1 }] }));
     mock.pending.mockReturnValue(null); mock.attentionCount.mockReturnValue(0); mock.heldPacks.mockReturnValue([]); mock.versions.mockReturnValue([{ payload: JSON.stringify(entry), entry }, { payload: "broken bytes", entry: null }]);
   });
 
@@ -93,7 +95,7 @@ describe("opening-stock account boundary", () => {
 
   it.each([true, false])("ignores a startup listing refresh after sync (success=%s)", async (success) => {
     mock.pending.mockReturnValue(entry);
-    mock.opening.mockResolvedValue(success ? { ok: true } : { ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.opening.mockResolvedValue(success ? { ok: true, data: { results: [{ actionId: entry.clientId, sequence: 1, status: "applied", code: null, result: { listingId: entry.clientId, quantity: "2.5", recordedAt: new Date().toISOString() }, clockSuspect: false }] } } : { ok: true, data: { results: [{ actionId: entry.clientId, sequence: 1, status: "rejected", code: "OPENING_STOCK_ALREADY_RECORDED", result: null, clockSuspect: false }] } });
     mock.listings.mockResolvedValueOnce(listings).mockImplementationOnce(async () => { switchAccount(); return listings; });
     render(); await settle();
     expect(mock.listings).toHaveBeenCalledTimes(2); expect(mock.set).not.toHaveBeenCalled();
@@ -109,7 +111,7 @@ describe("opening-stock account boundary", () => {
 
   it("ignores a listing refresh after a save conflict when the account changes", async () => {
     render(); await settle(); mock.pending.mockReturnValue(entry);
-    mock.opening.mockResolvedValue({ ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.opening.mockResolvedValue({ ok: true, data: { results: [{ actionId: entry.clientId, sequence: 1, status: "rejected", code: "OPENING_STOCK_ALREADY_RECORDED", result: null, clockSuspect: false }] } });
     mock.listings.mockImplementation(async () => { switchAccount(); return listings; });
     press("Save opening stock"); await settle();
     expect(mock.set).not.toHaveBeenCalled();
@@ -117,7 +119,7 @@ describe("opening-stock account boundary", () => {
 
   it("ignores a manual conflict-refresh result after the account changes", async () => {
     mock.pending.mockReturnValue(entry);
-    mock.opening.mockResolvedValue({ ok: false, code: "OPENING_STOCK_ALREADY_RECORDED" });
+    mock.opening.mockResolvedValue({ ok: true, data: { results: [{ actionId: entry.clientId, sequence: 1, status: "rejected", code: "OPENING_STOCK_ALREADY_RECORDED", result: null, clockSuspect: false }] } });
     mock.listings.mockResolvedValueOnce(listings).mockResolvedValueOnce({ ok: false, code: "UNAVAILABLE" });
     render(); await settle();
     mock.listings.mockImplementation(async () => { switchAccount(); return listings; });

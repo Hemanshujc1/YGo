@@ -1,4 +1,4 @@
-import { getRandomBytesAsync } from "expo-crypto";
+import { getRandomBytesAsync, randomUUID } from "expo-crypto";
 import { File } from "expo-file-system";
 import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, getItemAsync, setItemAsync } from "expo-secure-store";
 import { defaultDatabaseDirectory, openDatabaseAsync } from "expo-sqlite";
@@ -27,7 +27,7 @@ async function open(accountId: string): Promise<OpeningStockQueue> {
     if (!cipher?.cipher_version) throw new Error("Rebuild Shopkeeper with SQLCipher enabled");
     // Only the validated, locally generated hexadecimal key is interpolated.
     await db.execAsync(`PRAGMA key = "x'${key}'";`);
-    return openingStockQueue(db);
+    return openingStockQueue(db, randomUUID);
   } catch (error) {
     await db.closeAsync();
     throw error;
@@ -51,4 +51,8 @@ export async function openingStockBeforeSignOut(accountId: string, verifiedShopI
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
   return queue.count();
+}
+
+export async function openingStockFailuresBeforeSignOut(accountId: string): Promise<number> {
+  return (await openOpeningStock(accountId)).failureCount();
 }

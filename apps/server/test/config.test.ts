@@ -92,3 +92,10 @@ describe("visit photo configuration", () => {
     expect(() => loadConfig({ ...base, VISIT_PHOTO_BUCKET: "images", PRODUCT_IMAGE_BUCKET: "images", PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com" })).toThrow("must be separate");
   });
 });
+
+it("configures the sync age and clock-skew bounds", () => {
+  const env = { ...database, MAILER: "mailpit", MAIL_FROM: "test@example.com", MAILPIT_URL: "http://localhost:8025" };
+  expect(loadConfig(env)).toMatchObject({ SYNC_MAX_AGE_SECONDS: 604800, SYNC_CLOCK_SKEW_SECONDS: 300 });
+  expect(loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "60", SYNC_CLOCK_SKEW_SECONDS: "30" })).toMatchObject({ SYNC_MAX_AGE_SECONDS: 60, SYNC_CLOCK_SKEW_SECONDS: 30 });
+  expect(() => loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "0" })).toThrow();
+});

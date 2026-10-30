@@ -1182,3 +1182,14 @@ describe("ACC-1 provider sessions", () => {
     await expect(h.client.verifyIdentity(identity)).rejects.toThrow("Keychain unavailable");
   });
 });
+
+it("pushes ordered actions with authentication and validates per-action results", async () => {
+  const id = "00000000-0000-4000-8000-000000000391";
+  const body = { deviceId: id, sentAt: "2030-01-01T00:00:00.000Z", actions: [{ id, sequence: 1, shopId: id,
+    type: "opening_stock", payload: { packId: id, quantity: "2" }, createdAt: "2030-01-01T00:00:00.000Z", clockSuspect: false }] };
+  const data = { results: [{ actionId: id, sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] };
+  const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, data));
+  await client.verifyCode(signIn);
+  expect(await client.syncActions(body)).toEqual({ ok: true, data });
+  expect(calls.at(-1)).toEqual({ method: "POST", path: "/v1/sync/actions", auth: "Bearer a1", body });
+});
