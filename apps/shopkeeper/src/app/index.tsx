@@ -181,6 +181,11 @@ function Plain({ children, refreshing = false, onRefresh, verifiedShopId }: { ve
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
     >
       {children}
+      <Link href="/stock" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+          <Text className="text-body font-semibold text-primary">{strings.stock.title}</Text>
+        </Pressable>
+      </Link>
       <View className="mt-8 gap-8">
         <ThemePicker session={session} words={strings.theme} />
         <SignOut verifiedShopId={verifiedShopId} />

@@ -410,3 +410,15 @@ describe("Order transitions (#9)", () => {
     expect(allowed).toEqual(["placed → cancelled_by_customer by customer"]);
   });
 });
+
+it("refuses placement after a manual flag without changing stock, and permits it once cleared", async () => {
+  const { shopId, dal, home } = await stocked();
+  const cart = (await save(shopId, 0, [{ listingId: dal, count: 2 }])).json();
+  await database.pool.query("UPDATE shop_listings SET out_of_stock = true WHERE id = $1", [dal]);
+  const refused = await place(shopId, { revision: 1, total: cart.quote.total, addressId: home });
+  expect(refused.json()).toMatchObject({ error: { code: "CART_CHANGED", cart: { placeable: false, lines: [{ state: "outOfStock" }] } } });
+  expect(await orderCount()).toBe(0);
+  await database.pool.query("UPDATE shop_listings SET out_of_stock = false WHERE id = $1", [dal]);
+  expect((await place(shopId, { revision: 1, total: cart.quote.total, addressId: home })).statusCode).toBe(201);
+  expect((await database.pool.query("SELECT sum(quantity)::text AS quantity FROM stock_movements WHERE listing_id = $1", [dal])).rows[0]?.quantity).toBe("10.000");
+});

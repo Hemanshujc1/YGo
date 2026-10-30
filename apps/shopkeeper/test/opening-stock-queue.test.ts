@@ -68,7 +68,7 @@ describe("opening-stock durability", () => {
       db = new DatabaseSync(filename);
       const queue = openingStockQueue(adapter(db), randomUUID);
       expect(queue.pending(shopId, packId)).toEqual(entry);
-      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
       db.close();
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
@@ -243,7 +243,7 @@ describe("opening-stock durability", () => {
     const db = new DatabaseSync(":memory:");
     try {
       openingStockQueue(adapter(db), randomUUID).save(shopId, packId, entry);
-      db.exec("PRAGMA user_version = 4");
+      db.exec("PRAGMA user_version = 5");
       expect(() => openingStockQueue(adapter(db), randomUUID)).toThrow("newer app");
       expect(db.prepare("SELECT payload FROM opening_stock").get()?.payload).toBe(JSON.stringify(entry));
     } finally { db.close(); }
@@ -341,4 +341,62 @@ describe("durable ordered action records", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(db.prepare("SELECT attempts, last_attempt_at FROM opening_stock_actions").get()).toMatchObject({ attempts: 1, last_attempt_at: expect.any(String) });
   });
+});
+
+
+describe("Stock flags share the durable FIFO", () => {
+  it("reopens rapid opposite toggles with distinct IDs, after older opening stock", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ygo-flag-"));
+    const path = join(directory, "stock.db");
+    let db = new DatabaseSync(path);
+    try {
+      let queue = openingStockQueue(adapter(db), randomUUID);
+      queue.save(shopId, packId, entry);
+      queue.saveFlag(shopId, packId, true); queue.saveFlag(shopId, packId, false);
+      const before = queue.batch(shopId);
+      expect(before.actions.map((action) => [action.sequence, action.type])).toEqual([[1, "opening_stock"], [2, "stock_flag"], [3, "stock_flag"]]);
+      expect(new Set(before.actions.map((action) => action.id)).size).toBe(3);
+      expect(queue.count()).toBe(3); expect(queue.flagCount()).toBe(2);
+      db.close(); db = new DatabaseSync(path); queue = openingStockQueue(adapter(db), randomUUID);
+      expect(queue.batch(shopId).actions).toEqual(before.actions);
+      queue.attempted(before);
+      queue.acknowledge(before, { results: before.actions.map((action) => ({ actionId: action.id, sequence: action.sequence, status: "applied", code: null, clockSuspect: false,
+        result: action.type === "opening_stock" ? { listingId: packId, quantity: "2.5", recordedAt: new Date().toISOString() }
+          : { listingId: packId, outOfStock: action.sequence === 2, recordedAt: new Date().toISOString() } })) });
+      expect(queue.count()).toBe(0); expect(queue.flag(shopId, packId)?.status).toBe("applied");
+      expect(queue.flag("other-shop", packId)).toBeNull();
+      expect(db.prepare("SELECT count(*) AS n FROM opening_stock_actions").get()?.n).toBe(3);
+    } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("retains rejected originals and makes a new ID for a correction; later independent flags can apply", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID);
+      queue.saveFlag(shopId, packId, true);
+      const batch = queue.batch(shopId), first = batch.actions[0]!;
+      queue.acknowledge(batch, { results: [{ actionId: first.id, sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] });
+      expect(queue.count()).toBe(0); expect(queue.failureCount()).toBe(1); expect(queue.batch(shopId).actions).toEqual([]);
+      expect(queue.flag(shopId, packId)?.result?.code).toBe("ACTION_TOO_OLD");
+      queue.saveFlag(shopId, packId, true);
+      expect(queue.flag(shopId, packId)?.action.id).not.toBe(first.id);
+      expect(queue.batch(shopId).actions[0]?.sequence).toBe(2);
+      expect(db.prepare("SELECT status FROM opening_stock_actions WHERE id = ?").get(first.id)?.status).toBe("rejected");
+    } finally { db.close(); }
+  });
+});
+
+it("blocks new flags at configurable count/time limits while retaining the original actions", () => {
+  const db = new DatabaseSync(":memory:");
+  let now = new Date("2030-01-01T00:00:00Z");
+  try {
+    const queue = openingStockQueue(adapter(db), randomUUID, () => now, { maxActions: 2, maxAgeHours: 1 });
+    expect(queue.saveFlag(shopId, packId, true)).toBeNull();
+    now = new Date("2030-01-01T01:00:00Z");
+    expect(queue.saveFlag(shopId, packId, false)).toBe("queueExpired");
+    now = new Date("2030-01-01T00:30:00Z");
+    expect(queue.saveFlag(shopId, packId, false)).toBeNull();
+    expect(queue.saveFlag(shopId, packId, true)).toBe("queueFull");
+    expect(queue.batch(shopId).actions).toHaveLength(2);
+  } finally { db.close(); }
 });

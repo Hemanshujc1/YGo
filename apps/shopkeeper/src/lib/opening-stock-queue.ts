@@ -1,4 +1,4 @@
-import { SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
+import { StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 type Database = Pick<SQLiteDatabase, "execSync" | "getAllSync" | "getFirstSync" | "runSync" | "withTransactionSync">;
@@ -12,11 +12,11 @@ function parse(raw: string): OpeningStockEntry | null {
 }
 
 /** One account's encrypted database; shop and pack remain part of each key. */
-export function openingStockQueue(db: Database, newId: () => string, now = () => new Date()) {
+export function openingStockQueue(db: Database, newId: () => string, now = () => new Date(), limits = { maxActions: 500, maxAgeHours: 72 }) {
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 3) throw new Error("Opening stock database needs a newer app");
+  if (version > 4) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
@@ -47,6 +47,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     db.runSync("UPDATE opening_stock SET created_at = ?", now().toISOString());
   });
 
+  if (version < 4) db.withTransactionSync(() => db.execSync("PRAGMA user_version = 4;"));
+
   function failed(shopId: string, packId: string): SyncActionResult | null {
     const row = db.getFirstSync<{ result: string }>(`SELECT a.result FROM opening_stock_actions a JOIN opening_stock o
       ON o.shop_id = a.shop_id AND o.pack_id = a.pack_id AND json_extract(o.payload, '$.clientId') = a.id
@@ -55,6 +57,31 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   }
 
   return {
+    flag(shopId: string, packId: string): { action: SyncAction; status: string; result: SyncActionResult | null } | null {
+      const row = db.getFirstSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
+        WHERE shop_id = ? AND pack_id = ? AND json_extract(action, '$.type') = 'stock_flag' ORDER BY sequence DESC LIMIT 1`, shopId, packId);
+      return row ? { action: JSON.parse(row.action) as SyncAction, status: row.status, result: row.result ? JSON.parse(row.result) as SyncActionResult : null } : null;
+    },
+    saveFlag(shopId: string, packId: string, outOfStock: boolean) {
+      const payload = StockFlagPayload.parse({ packId, outOfStock });
+      // Enrol older opening stock before allocating this change's sequence.
+      this.batch(shopId);
+      if (this.count() >= limits.maxActions) return "queueFull" as const;
+      const oldest = db.getFirstSync<{ created_at: string }>("SELECT json_extract(action, '$.createdAt') AS created_at FROM opening_stock_actions WHERE status = 'pending' ORDER BY sequence LIMIT 1");
+      if (oldest && now().getTime() - Date.parse(oldest.created_at) >= limits.maxAgeHours * 3600_000) return "queueExpired" as const;
+      db.withTransactionSync(() => {
+        const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
+        if (!device) throw new Error("Missing sync device");
+        const action: SyncAction = { id: newId(), sequence: device.sequence + 1, shopId, type: "stock_flag", payload,
+          createdAt: now().toISOString(), clockSuspect: false };
+        db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
+        db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
+      });
+      return null;
+    },
+    flagCount(): number {
+      return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'stock_flag'")?.count ?? 0;
+    },
     failed,
     failureCount(): number {
       return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'rejected'")?.count ?? 0;
@@ -181,7 +208,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     count(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')) + (SELECT count(*) FROM opening_stock_held) AS count");
       if (!row) throw new Error("Could not count opening stock");
-      return row.count;
+      return row.count + this.flagCount();
     },
     attentionCount(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_held");

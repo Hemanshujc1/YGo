@@ -23,7 +23,7 @@ export async function packsOf(client: Pool | PoolClient, shopId: string, lines: 
         trim_scale(pack.quantity)::text AS quantity, l.online_price::text AS price, product.category_id AS "categoryId",
         EXISTS (SELECT 1 FROM ${visibleListings} AND listing.id = l.id) AS "onSale",
         -- Capped at 1000, one above the largest count, so a count of 999 is never shown as the last packs left.
-        LEAST(GREATEST(floor(${stockOf("l")} / pack.quantity), 0), 1000)::int AS "packsLeft", ${partOf("l")} AS part
+        CASE WHEN l.out_of_stock THEN 0 ELSE LEAST(GREATEST(floor(${stockOf("l")} / pack.quantity), 0), 1000)::int END AS "packsLeft", ${partOf("l")} AS part
       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)
       JOIN shop_listings l ON l.id = (entry.line->>'listingId')::uuid AND l.shop_id = $1
       JOIN packs pack ON pack.id = l.pack_id

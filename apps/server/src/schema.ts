@@ -314,6 +314,7 @@ export const shopListings = pgTable("shop_listings", {
   mrp: numeric("mrp", { precision: 12, scale: 2 }).notNull(),
   lowStockLevel: numeric("low_stock_level", { precision: 12, scale: 3 }).notNull().default("0"),
   available: boolean("available").notNull().default(true),
+  outOfStock: boolean("out_of_stock").notNull().default(false),
   minimumOrderQuantity: numeric("minimum_order_quantity", { precision: 12, scale: 3 }),
   quantityStep: numeric("quantity_step", { precision: 12, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

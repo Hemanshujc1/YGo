@@ -1,0 +1,1 @@
+ALTER TABLE "shop_listings" ADD COLUMN "out_of_stock" boolean DEFAULT false NOT NULL;

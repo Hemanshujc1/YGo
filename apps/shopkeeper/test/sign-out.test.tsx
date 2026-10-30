@@ -110,4 +110,12 @@ describe("opening-stock sign-out guard", () => {
     await pressSignOut();
     expect(mock.signOut).not.toHaveBeenCalled();
   });
+
+it("blocks sign-out for pending manual flags and links to Stock", async () => {
+  mock.count.mockResolvedValue({ pending: 2, failed: 0, stockPending: 2 });
+  const view = await pressSignOut();
+  expect(mock.signOut).not.toHaveBeenCalled();
+  expect(view.props.children[2].props.href).toBe("/stock");
+});
+
 });

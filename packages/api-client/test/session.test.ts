@@ -1193,3 +1193,11 @@ it("pushes ordered actions with authentication and validates per-action results"
   expect(await client.syncActions(body)).toEqual({ ok: true, data });
   expect(calls.at(-1)).toEqual({ method: "POST", path: "/v1/sync/actions", auth: "Bearer a1", body });
 });
+
+it("reads linked shop Stock with authentication and validates its response", async () => {
+  const data = { shopId: "00000000-0000-4000-8000-000000000392", state: "suspended", items: [] };
+  const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, data));
+  await client.verifyCode({ email: "a@example.com", code: "123456" });
+  expect(await client.shopStock()).toEqual({ ok: true, data });
+  expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/stock", auth: "Bearer a1" });
+});

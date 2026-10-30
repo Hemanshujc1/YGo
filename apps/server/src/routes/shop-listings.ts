@@ -7,6 +7,7 @@ import {
   SaveShopListingBody,
   ShopListingParams,
   ShopListingsResponse,
+  ShopStockResponse,
   type ShopListingCatalogItem,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -20,7 +21,7 @@ type CatalogRow = {
   classification: ShopListingCatalogItem["classification"]; packQuantity: string; barcode: string | null;
   listingId: string | null; onlinePrice: string | null; counterPrice: string | null; mrp: string | null;
   lowStockLevel: string | null; available: boolean | null; minimumOrderQuantity: string | null; quantityStep: string | null;
-  stock: string; openingStockRecorded: boolean;
+  stock: string; openingStockRecorded: boolean; outOfStock: boolean;
 };
 
 async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | undefined> {
@@ -68,7 +69,7 @@ function projectCatalogItem(
 const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name, p.brand,
   p.base_unit AS "baseUnit", p.classification, pk.quantity AS "packQuantity", pk.barcode,
   sl.id AS "listingId", sl.online_price AS "onlinePrice", sl.counter_price AS "counterPrice",
-  sl.mrp, sl.low_stock_level AS "lowStockLevel", sl.available,
+  sl.out_of_stock AS "outOfStock", sl.mrp, sl.low_stock_level AS "lowStockLevel", sl.available,
   sl.minimum_order_quantity AS "minimumOrderQuantity", sl.quantity_step AS "quantityStep",
   COALESCE(stock.quantity, '0') AS stock, COALESCE(stock.opening_recorded, false) AS "openingStockRecorded"
   FROM packs pk JOIN master_products p ON p.id = pk.product_id
@@ -119,6 +120,22 @@ return { status: 201, result: { listingId: row.id, quantity: movement.quantity, 
 export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, secret }: Auth): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
+
+  app.get("/v1/me/stock", { schema: { response: { 200: ShopStockResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    return withTransaction(pool, async (client) => {
+      const { rows: [shop] } = await client.query<Shop>(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
+        WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [who.accountId]);
+      if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (shop.state !== "live" && shop.state !== "suspended") return notReady(reply);
+      const { rows } = await client.query<CatalogRow>(`${catalogSql} AND sl.id IS NOT NULL ORDER BY lower(p.name), pk.quantity`, [shop.id]);
+      return reply.send({ shopId: shop.id, state: shop.state, items: rows.map((row) => ({
+        listingId: row.listingId, packId: row.packId, name: row.name, packQuantity: row.packQuantity,
+        baseUnit: row.baseUnit, quantity: row.stock, outOfStock: row.outOfStock,
+      })) });
+    });
+  });
 
   app.get("/v1/me/shop-listings", { schema: { response: { 200: ShopListingsResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
