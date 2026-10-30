@@ -1,3 +1,4 @@
+import { stockCache } from "./stock-cache";
 import { StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import type { SQLiteDatabase } from "expo-sqlite";
 
@@ -16,7 +17,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 4) throw new Error("Opening stock database needs a newer app");
+  if (version > 5) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
@@ -49,6 +50,10 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 
   if (version < 4) db.withTransactionSync(() => db.execSync("PRAGMA user_version = 4;"));
 
+  if (version < 5) db.withTransactionSync(() => db.execSync(`CREATE TABLE stock_cache_shops (shop_id TEXT PRIMARY KEY, cursor TEXT NOT NULL, state TEXT NOT NULL);
+    CREATE TABLE stock_cache_items (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL, deleted_at TEXT,
+      PRIMARY KEY (shop_id, pack_id)); PRAGMA user_version = 5;`));
+
   function failed(shopId: string, packId: string): SyncActionResult | null {
     const row = db.getFirstSync<{ result: string }>(`SELECT a.result FROM opening_stock_actions a JOIN opening_stock o
       ON o.shop_id = a.shop_id AND o.pack_id = a.pack_id AND json_extract(o.payload, '$.clientId') = a.id
@@ -57,6 +62,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   }
 
   return {
+    cache: stockCache(db),
     flag(shopId: string, packId: string): { action: SyncAction; status: string; result: SyncActionResult | null } | null {
       const row = db.getFirstSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
         WHERE shop_id = ? AND pack_id = ? AND json_extract(action, '$.type') = 'stock_flag' ORDER BY sequence DESC LIMIT 1`, shopId, packId);

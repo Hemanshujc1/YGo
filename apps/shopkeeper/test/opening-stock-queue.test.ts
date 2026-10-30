@@ -68,7 +68,7 @@ describe("opening-stock durability", () => {
       db = new DatabaseSync(filename);
       const queue = openingStockQueue(adapter(db), randomUUID);
       expect(queue.pending(shopId, packId)).toEqual(entry);
-      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
       db.close();
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
@@ -243,7 +243,7 @@ describe("opening-stock durability", () => {
     const db = new DatabaseSync(":memory:");
     try {
       openingStockQueue(adapter(db), randomUUID).save(shopId, packId, entry);
-      db.exec("PRAGMA user_version = 5");
+      db.exec("PRAGMA user_version = 6");
       expect(() => openingStockQueue(adapter(db), randomUUID)).toThrow("newer app");
       expect(db.prepare("SELECT payload FROM opening_stock").get()?.payload).toBe(JSON.stringify(entry));
     } finally { db.close(); }

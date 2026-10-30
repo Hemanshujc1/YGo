@@ -374,3 +374,126 @@ describe("manual Stock flags (#392)", () => {
     expect((await read()).statusCode).toBe(404);
   });
 });
+
+describe("durable Stock cursor", () => {
+  async function listed() {
+    const actor = await shop("live");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    return actor;
+  }
+  const pull = (headers: { authorization: string }, since?: string) => app.inject({ method: "GET", url: `/v1/sync/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`, headers });
+  it("returns first load, unchanged delta, metadata/stock/flag updates, and replayable lost responses", async () => {
+    const actor = await listed();
+    const first = await pull(actor.headers);
+    expect(first.statusCode).toBe(200);
+    const initial = first.json();
+    expect(initial.changes).toHaveLength(1);
+    expect(initial.changes[0].item).toMatchObject({ packId: actor.packId, quantity: "0", outOfStock: false });
+    expect((await pull(actor.headers, initial.cursor)).json()).toMatchObject({ cursor: initial.cursor, changes: [] });
+    await database.pool.query("UPDATE master_products SET name = 'Updated rice' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock`, headers: actor.headers, payload: { quantity: "7", clientId: randomUUID() } });
+    await database.pool.query("UPDATE shop_listings SET out_of_stock = true WHERE shop_id = $1", [actor.shopId]);
+    const changed = (await pull(actor.headers, initial.cursor)).json();
+    expect(changed.changes[0].item).toMatchObject({ name: "Updated rice", quantity: "7.000", outOfStock: true });
+    // The caller lost this page: retry the old cursor after a server restart.
+    await app.close();
+    app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+    expect((await pull(actor.headers, initial.cursor)).json()).toEqual(changed);
+    expect((await pull(actor.headers, changed.cursor)).json().changes).toEqual([]);
+  });
+  it.each(["pack", "product", "published", "category", "parent"])("returns a durable tombstone for %s removal and supports reactivation", async (kind) => {
+    const actor = await listed();
+    const before = (await pull(actor.headers)).json();
+    const category = await database.pool.query("SELECT p.category_id AS id, p.id AS product FROM master_products p JOIN packs pk ON pk.product_id = p.id WHERE pk.id = $1", [actor.packId]);
+    const { id: categoryId, product } = category.rows[0];
+    if (kind === "parent") {
+      const parent = (await database.pool.query("INSERT INTO categories (name) VALUES ('Parent') RETURNING id")).rows[0].id;
+      await database.pool.query("UPDATE categories SET parent_id = $2 WHERE id = $1", [categoryId, parent]);
+      await database.pool.query("UPDATE categories SET active = false WHERE id = $1", [parent]);
+    } else if (kind === "pack") await database.pool.query("UPDATE packs SET active = false WHERE id = $1", [actor.packId]);
+    else if (kind === "product") await database.pool.query("UPDATE master_products SET active = false WHERE id = $1", [product]);
+    else if (kind === "published") await database.pool.query("UPDATE master_products SET published = false WHERE id = $1", [product]);
+    else if (kind === "category") await database.pool.query("UPDATE categories SET active = false WHERE id = $1", [categoryId]);
+    const removed = (await pull(actor.headers, before.cursor)).json();
+    expect(removed.changes).toEqual([{ packId: actor.packId, item: null, deletedAt: clock.now().toISOString() }]);
+    expect((await pull(actor.headers, before.cursor)).json()).toEqual(removed);
+    await database.pool.query("UPDATE packs SET active = true WHERE id = $1", [actor.packId]);
+    await database.pool.query("UPDATE master_products SET active = true, published = true WHERE id = $1", [product]);
+    await database.pool.query("UPDATE categories SET active = true WHERE id = $1 OR id = (SELECT parent_id FROM categories WHERE id = $1)", [categoryId]);
+    const restored = (await pull(actor.headers, removed.cursor)).json();
+    expect(restored.changes[0]).toMatchObject({ packId: actor.packId, deletedAt: null, item: { packId: actor.packId } });
+  });
+  it("scopes cursors to verified shop access and supports Staff and Suspended shops", async () => {
+    const actor = await listed(), other = await shop("live", "other@example.com");
+    const first = (await pull(actor.headers)).json();
+    expect((await pull(other.headers, first.cursor)).statusCode).toBe(400);
+    expect((await pull(actor.headers, `${actor.shopId}:999`)).statusCode).toBe(400);
+    expect((await pull(actor.headers, "invalid")).statusCode).toBe(400);
+    const staff = await owner("staff@example.com");
+    await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    expect((await pull(staff.headers)).json()).toEqual(first);
+    await database.pool.query("UPDATE shops SET state = 'suspended' WHERE id = $1", [actor.shopId]);
+    expect((await pull(staff.headers, first.cursor)).json().state).toBe("suspended");
+    await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [staff.id]);
+    expect((await pull(staff.headers, first.cursor)).statusCode).toBe(404);
+    await database.pool.query("UPDATE shops SET state = 'approved' WHERE id = $1", [actor.shopId]);
+    expect((await pull(actor.headers)).statusCode).toBe(409);
+    expect((await app.inject({ method: "GET", url: "/v1/sync/changes" })).statusCode).toBe(401);
+  });
+  it("does not skip a catalog commit crossing a cursor boundary, and serializes competing pulls", async () => {
+    const actor = await listed();
+    const initial = (await pull(actor.headers)).json();
+    const writer = await database.pool.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query("UPDATE master_products SET name = 'Late commit' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);
+      await database.pool.query("UPDATE shop_listings SET out_of_stock = true WHERE shop_id = $1", [actor.shopId]);
+      const earlier = (await pull(actor.headers, initial.cursor)).json();
+      expect(earlier.changes[0].item).toMatchObject({ outOfStock: true });
+      expect(earlier.changes[0].item.name).not.toBe("Late commit");
+      await writer.query("COMMIT");
+      const [a, b] = await Promise.all([pull(actor.headers, earlier.cursor), pull(actor.headers, earlier.cursor)]);
+      expect(a.json()).toEqual(b.json());
+      expect(a.json().changes[0].item.name).toBe("Late commit");
+      expect((await pull(actor.headers, a.json().cursor)).json().changes).toEqual([]);
+    } finally { await writer.query("ROLLBACK"); writer.release(); }
+  });
+});
+
+it("keeps real-server pulls atomic across SQLite restart, disk interruption and pending writes", async () => {
+  const { openingStockQueue } = await import(new URL("../../shopkeeper/src/lib/opening-stock-queue.ts", import.meta.url).href);
+  const { adapter } = await import(new URL("../../shopkeeper/test/stock-database-fixture.ts", import.meta.url).href);
+  const actor = await shop("live");
+  await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+  const directory = mkdtempSync(join(tmpdir(), "ygo-pull-")), filename = join(directory, "stock.db");
+  let db = new DatabaseSync(filename);
+  try {
+    let queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
+    const pull = async (since?: string) => (await app.inject({ method: "GET", url: `/v1/sync/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`, headers: actor.headers })).json();
+    queue.cache.apply(await pull());
+    const cursor = queue.cache.cursor(actor.shopId);
+    queue.saveFlag(actor.shopId, actor.packId, true);
+    const original = queue.batch(actor.shopId).actions[0];
+    await database.pool.query("UPDATE master_products SET name = 'New name' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);
+    const page = await pull(cursor);
+    db.exec("CREATE TRIGGER interrupted BEFORE UPDATE ON stock_cache_shops BEGIN SELECT RAISE(ABORT, 'interrupted'); END");
+    expect(() => queue.cache.apply(page, cursor)).toThrow("interrupted");
+    expect(queue.cache.cursor(actor.shopId)).toBe(cursor);
+    db.close(); db = new DatabaseSync(filename); queue = openingStockQueue(adapter(db), randomUUID, () => clock.now());
+    db.exec("DROP TRIGGER interrupted");
+    queue.cache.apply(await pull(queue.cache.cursor(actor.shopId)), cursor);
+    expect(queue.cache.read(actor.shopId)?.items[0]?.name).toBe("New name");
+    expect(queue.flag(actor.shopId, actor.packId)?.action).toEqual(original);
+    const batch = queue.batch(actor.shopId);
+    const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers, payload: batch });
+    queue.acknowledge(batch, response.json());
+    const next = queue.cache.cursor(actor.shopId);
+    queue.cache.apply(await pull(next), next);
+    expect(queue.cache.read(actor.shopId)?.items[0]?.outOfStock).toBe(true);
+    expect(queue.count()).toBe(0);
+    await database.pool.query("UPDATE packs SET active = false WHERE id = $1", [actor.packId]);
+    const last = queue.cache.cursor(actor.shopId);
+    queue.cache.apply(await pull(last), last);
+    expect(queue.cache.read(actor.shopId)?.items).toEqual([]);
+  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});

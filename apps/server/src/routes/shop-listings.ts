@@ -66,7 +66,7 @@ function projectCatalogItem(
   };
 }
 
-const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name, p.brand,
+export const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name, p.brand,
   p.base_unit AS "baseUnit", p.classification, pk.quantity AS "packQuantity", pk.barcode,
   sl.id AS "listingId", sl.online_price AS "onlinePrice", sl.counter_price AS "counterPrice",
   sl.out_of_stock AS "outOfStock", sl.mrp, sl.low_stock_level AS "lowStockLevel", sl.available,

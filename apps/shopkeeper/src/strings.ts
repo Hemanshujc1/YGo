@@ -178,6 +178,8 @@ export const strings = {
   },
   // S19 (#362). The agreement's wording is version AGREEMENT_VERSION in @ygo/contracts: change both together.
   stock: {
+    unavailable: "No longer available · waiting to sync",
+    refreshFailed: "Couldn't refresh Stock. Showing saved stock; changes stay on this phone.",
     title: "Stock", back: "Back", outOfStock: "Out of stock", empty: "No listed packs yet.",
     pending: "Saved on this phone · waiting to sync", saved: "Saved", retry: "Retry sync", loadFailed: "Couldn't load Stock. Try again online.",
     storageFailed: "Couldn't save on this phone. Try again before leaving this screen.",
