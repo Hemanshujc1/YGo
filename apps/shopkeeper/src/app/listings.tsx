@@ -1,4 +1,5 @@
 import { invalidFields, SaveShopListingBody, type SaveShopListingBody as SaveBody, type ShopListingCatalogItem } from "@ygo/contracts";
+import { formatMoney } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { useEffect, useState } from "react";
@@ -106,7 +107,7 @@ export default function ListingsScreen() {
         {visible.map((item) => <Pressable key={item.packId} onPress={() => choose(item)} className="gap-1 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name}{item.brand ? ` · ${item.brand}` : ""}</Text>
           <Text className="text-secondary text-muted">{item.packQuantity} {item.baseUnit} {item.barcode ? `· ${item.barcode}` : ""}</Text>
-          <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ₹${item.listing.onlinePrice}` : words.chooseProduct}</Text>
+          <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ${formatMoney(Number(item.listing.onlinePrice))}` : words.chooseProduct}</Text>
         </Pressable>)}
       </>}
       {load.kind === "loaded" && selected && <>

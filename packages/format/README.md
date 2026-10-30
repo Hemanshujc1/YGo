@@ -4,7 +4,7 @@ How every client displays money, numbers, dates, times and phone numbers (ADR-00
 
 | Item | Format |
 | --- | --- |
-| Money | ₹1,25,000.00: Indian digit grouping, two decimals on every amount |
+| Money | ₹1,25,000: Indian digit grouping; no ".00" on whole rupees (₹60), paise keep two digits (₹59.50); `formatMoneyFixed` keeps two decimals for Admin and bills |
 | Date | 13/10/2026 |
 | Time | 2:05 PM, 12-hour |
 | Date and time | 13/10/2026, 2:05 PM |

@@ -1,5 +1,5 @@
 import type { RateCardKey, RateCardValues } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
+import { formatMoney, formatNumber } from "@ygo/format";
 import { strings } from "../strings";
 
 type Commission = NonNullable<RateCardValues["commission"]>;
@@ -8,7 +8,7 @@ type Split = NonNullable<RateCardValues["deliveryFee"]>["split"];
 const words = strings.agreement;
 // Display only: the server keeps every amount exact, and this only shows it (ADR-0004).
 const money = (amount: string) => formatMoney(Number(amount));
-const percent = (value: string) => `${value}%`;
+const percent = (value: string) => `${formatNumber(Number(value))}%`;
 const split = (shares: Split) => words.split(percent(shares.platformPercentage), percent(shares.shopPercentage));
 
 /** A commission rule in words, such as "10% of each item line, at least ₹2". */

@@ -11,6 +11,8 @@ describe("commissionText", () => {
       .toBe("₹5 or 10% of each item line, whichever is higher, at least ₹2, at most ₹50.50");
     expect(commissionText({ ...rule, formula: "fixed_plus_percentage", fixedAmount: "1", percentage: "2.5", base: "after_shop_discount" }))
       .toBe("₹1 plus 2.5% of each item line after your discount");
+    expect(commissionText({ ...rule, percentage: "10.00" })).toBe("10% of each item line");
+    expect(commissionText({ ...rule, percentage: "12.50" })).toBe("12.5% of each item line");
   });
 });
 
