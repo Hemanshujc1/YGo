@@ -46,7 +46,9 @@ export async function savedCart(client: Pool | PoolClient, accountId: string, sh
 export async function pricedCart(
   client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], read?: Array<Pack | undefined>,
 ): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined> }> {
-  const packs = read ?? await packsOf(client, shopId, saved);
+  // ACC-9: an Owner or Staff member can't order from their own shop. Read alongside the packs.
+  const [member, packs] = await Promise.all([
+    client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId]), read ?? packsOf(client, shopId, saved)]);
   const lines: CartLine[] = saved.map((line, index) => {
     const pack = packs[index];
     if (!pack) throw new Error("A saved cart line lost its listing");
@@ -79,8 +81,7 @@ export async function pricedCart(
     }
   }
   const reasons: CartReason[] = [];
-  // ACC-9: an Owner or Staff member can't order from their own shop.
-  if ((await client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId])).rowCount) reasons.push({ code: "OWN_SHOP" });
+  if (member.rowCount) reasons.push({ code: "OWN_SHOP" });
   if (!delivering) reasons.push({ code: "NOT_DELIVERING" });
   else if (serving && !serving.open) reasons.push({ code: "SHOP_CLOSED", opensAt: serving.opensAt });
   if (orderable.length < lines.length) reasons.push({ code: "LINE_UNAVAILABLE" });

@@ -5,8 +5,9 @@ import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { moveOrder, recordStatus } from "../orders";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { pricedCart, savedCart } from "./cart";
+import { packsOf, pricedCart, savedCart } from "./cart";
 import { servingShops } from "./feed";
+import { latestRateCardVersion } from "./price-simulator";
 
 /** C09 and C19: one of the Customer's orders as it was frozen, with the Owner's phone read now (ORD-8). */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string): Promise<OrderResponse | undefined> {
@@ -34,24 +35,38 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     if (!who) return reply;
     const { shopId } = request.params as CartParams;
     const { revision, total, addressId } = request.body as PlaceOrderBody;
-    if ((await pool.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [who.accountId, shopId])).rowCount) {
-      return reply.code(403).send({ error: { code: "OWN_SHOP" } });
+    type Address = { pincode: string; latitude: number; longitude: number };
+    const addressSql = `SELECT pincode, ST_Y(point::geometry) AS latitude, ST_X(point::geometry) AS longitude
+      FROM saved_addresses WHERE id = $1 AND account_id = $2 AND point IS NOT NULL`;
+    const { rows: [address] } = await pool.query<Address>(addressSql, [addressId, who.accountId]);
+    const read = address && await savedCart(pool, who.accountId, shopId, false);
+    if (!address || !read) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+
+    // Priced first, holding no connection, as a cart save prices: the quote reads in parallel, which one
+    // transaction's connection can't. The shop must serve the address delivered to: its radius, both Areas, its hours (DSC-1).
+    const quote = async () => {
+      const [serving] = await servingShops(pool, clock.now(), { pincode: address.pincode, latitude: address.latitude, longitude: address.longitude }, shopId);
+      const version = await latestRateCardVersion(pool);
+      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, read.revision, read.lines) };
+    };
+    const { version, view, priced, packs } = await quote();
+    if (view.reasons.some((reason) => reason.code === "OWN_SHOP")) return reply.code(403).send({ error: { code: "OWN_SHOP" } });
+    const changed = async () => reply.code(409).send({ error: { code: "CART_CHANGED", cart: (await quote()).view } });
+    if (read.revision !== revision || !view.placeable || !priced || view.quote?.total !== total) {
+      return reply.code(409).send({ error: { code: "CART_CHANGED", cart: view } });
     }
-    const now = clock.now();
+
     const placed = await withTransaction(pool, async (client) => {
-      // The address can't be edited, nor the cart saved, until the order is in.
-      const { rows: [address] } = await client.query<{ pincode: string; latitude: number; longitude: number }>(
-        `SELECT pincode, ST_Y(point::geometry) AS latitude, ST_X(point::geometry) AS longitude
-         FROM saved_addresses WHERE id = $1 AND account_id = $2 AND point IS NOT NULL FOR SHARE`, [addressId, who.accountId]);
-      const cart = address && await savedCart(client, who.accountId, shopId, true);
-      if (!address || !cart) return "NOT_FOUND";
-      // A price edit waits for these locks, so the prices quoted below are the ones frozen.
-      await client.query("SELECT 1 FROM shop_listings WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE", [cart.lines.map((line) => line.listingId)]);
-      // The shop must serve the address delivered to: its radius, both Areas, its hours (DSC-1).
-      const [serving] = await servingShops(pool, now, { pincode: address.pincode, latitude: address.latitude, longitude: address.longitude }, shopId);
-      // Read outside the transaction, as a cart save prices: the quote reads in parallel. The locks above keep it current.
-      const { view, priced } = await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines);
-      if (cart.revision !== revision || !view.placeable || !priced || view.quote?.total !== total) return { changed: view };
+      // Under these locks nothing priced above can change until the order is in: the address, the cart, and each
+      // listing's price and stock (a price edit waits on FOR SHARE). Each is read again, one query at a time.
+      const { rows: [locked] } = await client.query<Address>(`${addressSql} FOR SHARE`, [addressId, who.accountId]);
+      const cart = await savedCart(client, who.accountId, shopId, true);
+      await client.query("SELECT 1 FROM shop_listings WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE", [read.lines.map((line) => line.listingId)]);
+      if (JSON.stringify(locked) !== JSON.stringify(address) || cart?.revision !== read.revision
+        || JSON.stringify(await packsOf(client, shopId, read.lines)) !== JSON.stringify(packs)
+        || await latestRateCardVersion(client) !== version) return "CHANGED";
+      // Read after the locks, so a wait on them doesn't stamp an earlier time.
+      const now = clock.now();
 
       const { rows: [order] } = await client.query<{ id: string }>(
         `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_area_line,
@@ -69,13 +84,12 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
            COALESCE((line->'part'->>'quantity')::numeric, (line->>'count')::int * (line->>'quantity')::numeric)
          FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`, [order.id, JSON.stringify(view.lines)]);
       await recordStatus(client, order.id, null, "placed", { id: who.accountId, role: "customer" }, now);
-      await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [cart.id]);
-      await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [cart.id, now]);
+      await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [read.id]);
+      await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [read.id, now]);
       await client.query("COMMIT");
       return { id: order.id };
     });
-    if (placed === "NOT_FOUND") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    if ("changed" in placed) return reply.code(409).send({ error: { code: "CART_CHANGED", cart: placed.changed } });
+    if (placed === "CHANGED") return changed();
     return reply.code(201).send(await orderView(pool, placed.id, who.accountId));
   });
 

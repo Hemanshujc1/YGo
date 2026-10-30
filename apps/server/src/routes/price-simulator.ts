@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import {
   type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey,
   SimulatorListingsParams, SimulatorListingsResponse, type SimulatorListing,
@@ -17,7 +17,7 @@ const ORDER_KEYS: RateCardKey[] = ["deliveryFee", "smallCartFee", "deliveredCont
  * The latest published rate-card version, so every card a quote reads comes from the same one.
  * Before any card exists there is nothing to pin, and the reads may see a first card published meanwhile.
  */
-export async function latestRateCardVersion(pool: Pool): Promise<string | undefined> {
+export async function latestRateCardVersion(pool: Pool | PoolClient): Promise<string | undefined> {
   const { rows: [latest] } = await pool.query<{ version: string }>("SELECT COALESCE(MAX(version), 0) AS version FROM rate_card_versions");
   return latest?.version === "0" ? undefined : latest?.version;
 }

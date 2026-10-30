@@ -227,6 +227,22 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect((await place(shopId, { revision: 2, total: "310.00", addressId: home })).statusCode).toBe(201);
   });
 
+  it("checks the cart again under its locks, so a price edit landing while the order is placed refuses it", async () => {
+    const { shopId, dal, home } = await stocked();
+    const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
+    const edit = await database.pool.connect();
+    try {
+      await edit.query("BEGIN");
+      await edit.query("UPDATE shop_listings SET online_price = 140 WHERE id = $1", [dal]);
+      // Priced at the old price; then waits on the listing's lock until the edit commits.
+      const placing = place(shopId, { revision: 1, total: cart.quote.total, addressId: home });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await edit.query("COMMIT");
+      expect((await placing).json()).toMatchObject({ error: { code: "CART_CHANGED", cart: { quote: { total: "185.00" } } } });
+    } finally { edit.release(); }
+    expect(await orderCount()).toBe(0);
+  });
+
   it("refuses stock gone since the cart was saved, a closed or paused shop, and a cart that can't be ordered", async () => {
     const { shopId, dal, home } = await stocked();
     const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { quote: { total: string } };
@@ -234,6 +250,10 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect((await place(shopId, { revision: 1, total: cart.quote.total, addressId: home })).json())
       .toMatchObject({ error: { code: "CART_CHANGED", cart: { placeable: false, reasons: [{ code: "LINE_UNAVAILABLE" }] } } });
     await setStock(dal, "10");
+    await database.pool.query("UPDATE shops SET open_override = false, open_override_until = '2030-01-01T06:00:00Z' WHERE id = $1", [shopId]);
+    expect((await place(shopId, { revision: 1, total: cart.quote.total, addressId: home })).json())
+      .toMatchObject({ error: { code: "CART_CHANGED", cart: { placeable: false, reasons: [{ code: "SHOP_CLOSED" }] } } });
+    await database.pool.query("UPDATE shops SET open_override = NULL, open_override_until = NULL WHERE id = $1", [shopId]);
     await database.pool.query("UPDATE areas SET paused = true WHERE name = 'Paud Road'");
     expect((await place(shopId, { revision: 1, total: cart.quote.total, addressId: home })).json())
       .toMatchObject({ error: { code: "CART_CHANGED", cart: { placeable: false, reasons: [{ code: "NOT_DELIVERING" }] } } });
