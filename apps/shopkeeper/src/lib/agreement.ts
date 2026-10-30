@@ -11,7 +11,7 @@ const money = (amount: string) => formatMoney(Number(amount));
 const percent = (value: string) => `${value}%`;
 const split = (shares: Split) => words.split(percent(shares.platformPercentage), percent(shares.shopPercentage));
 
-/** A commission rule in words, such as "10% of each item line, at least ₹2.00". */
+/** A commission rule in words, such as "10% of each item line, at least ₹2". */
 export function commissionText(rule: Commission): string {
   const fixed = money(rule.fixedAmount ?? "0");
   const share = percent(rule.percentage ?? "0");

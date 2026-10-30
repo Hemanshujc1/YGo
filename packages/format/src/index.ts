@@ -33,12 +33,14 @@ export const formatNumber = (value: number | bigint) => indianNumber.format(valu
 
 // The only hyphen in a rupee amount is its sign, shown as a true minus.
 // Android puts a space after ₹ and iOS does not; the design system has none.
-export const formatMoney = (value: number | bigint) =>
-  indianMoney.format(value).replace("-", "−").replace(/₹\s/, "₹");
+const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "₹");
 
-// A shelf price: ₹60 for whole rupees, ₹59.50 otherwise (#411).
-export const formatPrice = (value: number) =>
-  Number.isInteger(value) ? indianWholeMoney.format(value).replace(/₹\s/, "₹") : formatMoney(value);
+// Always two decimals (₹60.00), for Admin and for bills and other columns of amounts that line up (#413).
+export const formatMoneyFixed = (value: number | bigint) => tidyMoney(indianMoney.format(value));
+
+// The rule everywhere else: ₹60 for whole rupees, ₹59.50 with paise, never ".00" (#413).
+export const formatMoney = (value: number | bigint) =>
+  Number.isInteger(Number(value)) ? tidyMoney(indianWholeMoney.format(value)) : formatMoneyFixed(value);
 
 export const formatDate = (value: Date | string | number) => indianDate.format(new Date(value));
 

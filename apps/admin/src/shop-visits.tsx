@@ -3,7 +3,7 @@ import {
   ShopVisitDate, ShopVisitNotes, indiaToday, type ShopApplication, type ShopOnboarding,
   type ShopVisitChecks as ShopVisitChecksContract,
 } from "@ygo/contracts";
-import { formatDate, formatDateTime, formatMoney } from "@ygo/format";
+import { formatDate, formatDateTime, formatMoneyFixed } from "@ygo/format";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createAdminApiClient } from "@ygo/api-client";
 import { strings } from "./strings";
@@ -226,7 +226,7 @@ export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; appl
           <button disabled={feeBusy} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{feeBusy ? strings.saving : strings.saveFee}</button>
         </form>
         {onboarding.fees.length === 0 ? <p className="mt-4 text-muted">{strings.noFees}</p> : <ol className="mt-4 divide-y divide-border">{onboarding.fees.map((fee) => <li key={fee.id} className="py-3 first:pt-0">
-          <p className="font-medium">{fee.status === "paid" ? strings.feePayment(formatMoney(Number(fee.amount)), formatDate(`${fee.paymentDate}T00:00:00Z`), fee.reference) : strings.feeWaiverReason(fee.reason)}</p>
+          <p className="font-medium">{fee.status === "paid" ? strings.feePayment(formatMoneyFixed(Number(fee.amount)), formatDate(`${fee.paymentDate}T00:00:00Z`), fee.reference) : strings.feeWaiverReason(fee.reason)}</p>
           <p className="text-muted">{strings.feeRecordedAt(formatDateTime(fee.recordedAt))} · {strings.feeRecordedBy(fee.actorId)}</p>
           {fee.status === "paid" && fee.reason && <p>{fee.reason}</p>}
         </li>)}</ol>}

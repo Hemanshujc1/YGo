@@ -140,12 +140,13 @@ Rules:
 
 | Item | Format |
 |---|---|
-| Money | ₹1,25,000.00, Indian digit grouping, two decimals on every amount |
-| Discount | −₹20.00 |
+| Money | ₹1,25,000 and ₹60, Indian digit grouping. A whole-rupee amount never shows ".00"; an amount with paise shows two digits (₹59.50, never ₹59.5). Admin, bills and other columns of amounts that must line up show two decimals (₹60.00), through `formatMoneyFixed` (#413) |
+| Percent and number | 10%, 7.69%, 5 kg, 1.5 kg: no trailing zeros ("10%", not "10.00%"); the percent off shows two decimals only when it has them |
+| Discount | −₹20 |
 | Date | 13/10/2026 |
 | Time | 2:05 PM (12-hour, India time) |
 | Date and time | 13/10/2026, 2:05 PM |
-| Quantity | 250 g · 1.5 kg · 2 × ₹6.00 |
+| Quantity | 250 g · 1.5 kg · 2 × ₹6 |
 | Phone | 98765 43210 |
 | Bill reference | K7Q2-0F3A, or "Number pending" |
 
@@ -180,7 +181,7 @@ Variants: primary, secondary, destructive, destructive outline, text. States: de
 
 - **Error state:** the button stays, its label becomes the retry, and one line below says what failed. Example: "Could not reach the server. Your order is not placed yet."
 - Buttons size to their label and never truncate.
-- Primary buttons that commit money show the amount: "Place order · ₹482.00".
+- Primary buttons that commit money show the amount: "Place order · ₹482".
 
 ### Inputs
 

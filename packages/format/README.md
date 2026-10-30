@@ -12,6 +12,8 @@ How every client displays money, numbers, dates, times and phone numbers (ADR-00
 
 Everything is stored in UTC and displayed in Asia/Kolkata only. The full list is in section 3 of `docs/design/design-system.md`.
 
-Use `formatNumber`, `formatMoney`, `formatDate`, `formatTime`, `formatDateTime` and `formatPhone` rather than constructing an `Intl` formatter in an app. Dates accept a `Date`, an ISO string or a UTC epoch value. Money formatting is display only; it does no arithmetic. `formatPhone` takes a number as `Phone` in `@ygo/contracts` stores it (`+919876543210`); any other value shows unchanged.
+Money and numbers never show a trailing zero (#413): `formatMoney` gives ₹60 for whole rupees and ₹59.50 with paise, and percentages and quantities go through `formatNumber` ("10%", "1.5 kg"). `formatMoneyFixed` always shows two decimals (₹60.00) and is only for Admin, bills and columns of amounts that must line up.
+
+Use `formatNumber`, `formatMoney`, `formatMoneyFixed`, `formatDate`, `formatTime`, `formatDateTime` and `formatPhone` rather than constructing an `Intl` formatter in an app. Dates accept a `Date`, an ISO string or a UTC epoch value. Money formatting is display only; it does no arithmetic. `formatPhone` takes a number as `Phone` in `@ygo/contracts` stores it (`+919876543210`); any other value shows unchanged.
 
 The server imports this package, so it stays runtime-agnostic: no UI or React dependency (ADR-0007).

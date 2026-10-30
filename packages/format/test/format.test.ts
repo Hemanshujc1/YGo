@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatPrice, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatMoneyFixed, formatNumber, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -7,14 +7,13 @@ function expectIndianFormats() {
     expect(formatNumber(1_234.5)).toBe("1,234.5");
   });
 
-  it("shows every money amount as rupees with two decimals", () => {
-    expect(formatMoney(125_000)).toBe("₹1,25,000.00");
-    expect(formatMoney(20.5)).toBe("₹20.50");
-    expect(formatMoney(-20)).toBe("−₹20.00");
+  it("shows money without .00 for whole rupees and with two digits for paise (#413)", () => {
+    expect([formatMoney(125_000), formatMoney(60), formatMoney(0), formatMoney(20.5), formatMoney(59.05), formatMoney(-20), formatMoney(-20.5), formatMoney(10n)])
+      .toEqual(["₹1,25,000", "₹60", "₹0", "₹20.50", "₹59.05", "−₹20", "−₹20.50", "₹10"]);
   });
 
-  it("shows a shelf price without .00 for whole rupees (#411)", () => {
-    expect([formatPrice(60), formatPrice(59.5), formatPrice(1250)]).toEqual(["₹60", "₹59.50", "₹1,250"]);
+  it("shows fixed money with two decimals for Admin and columns of amounts", () => {
+    expect([formatMoneyFixed(125_000), formatMoneyFixed(20.5), formatMoneyFixed(-20)]).toEqual(["₹1,25,000.00", "₹20.50", "−₹20.00"]);
   });
 
   it("shows dates and 12-hour times in India", () => {
