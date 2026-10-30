@@ -292,7 +292,7 @@ export const strings = {
   applicationsIntro: "Review submitted shop applications and correct their details.",
   noApplications: "No shop applications yet.",
   shopName: "Shop name",
-  applicationState: { draft: "Draft", submitted: "Submitted", under_review: "Under Review", approved: "Approved", live: "Live", suspended: "Suspended" },
+  applicationState: { draft: "Draft", submitted: "Submitted", under_review: "Under Review", approved: "Approved", live: "Live", suspended: "Suspended", closed: "Closed" },
   applicationReview: "Shop application",
   owner: "Owner",
   ownerEmail: "Owner email",

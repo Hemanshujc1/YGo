@@ -24,7 +24,7 @@ import {
  */
 
 /** Admin moves an Approved shop to Live (#363). Suspended and Closed join when a shop can reach them. */
-export const ShopState = z.enum(["draft", "submitted", "under_review", "approved", "live", "suspended"]);
+export const ShopState = z.enum(["draft", "submitted", "under_review", "approved", "live", "suspended", "closed"]);
 export type ShopState = z.infer<typeof ShopState>;
 
 /** The ONB-3 fields; the Owner's phone and email come from the account. */

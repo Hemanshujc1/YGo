@@ -745,15 +745,16 @@ describe("Admin web", () => {
     expect(screen.getByText(strings.noProductMatches)).toBeTruthy();
   });
 
-  it("lists applications with their states and opens the review", async () => {
+  it.each(["submitted", "closed"] as const)("lists %s applications with their states and opens the record", async (state) => {
+    const shown = { ...application, state };
     const { api } = setup("/applications", {
-      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [application] } }),
-      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shown] } }),
+      getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: shown }),
       getShopOnboarding: vi.fn().mockResolvedValue({ ok: true, data: { visits: [], fees: [], ownerPhoneState: "unverified", ownerEmailConfirmedAt: null } }),
     });
     await screen.findByRole("heading", { name: strings.applications });
     expect(screen.getByText(application.shopName)).toBeTruthy();
-    expect(screen.getByText(strings.applicationState.submitted)).toBeTruthy();
+    expect(screen.getByText(strings.applicationState[state])).toBeTruthy();
     expect(screen.getByText(application.areaName)).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: application.shopName }));
     await screen.findByRole("heading", { name: application.shopName });
