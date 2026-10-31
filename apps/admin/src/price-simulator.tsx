@@ -3,7 +3,7 @@ import {
   PriceSimulatorBody, type DeliveredQuote, type PriceSimulatorResponse, type RateCardKey, type RateCardScope,
   type RateCardValues as Values, type SimulatorListing,
 } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
+import { formatMoney, trimDecimal } from "@ygo/format";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLoaderData } from "react-router";
 import { RateCardFields, rateCardIssues, type FieldIssue } from "./components/rate-card-fields";
@@ -25,12 +25,12 @@ const money = (amount: string) => formatMoney(Number(amount));
 
 function rows(listings: SimulatorListing[]): Row[] {
   return listings.flatMap((listing) => {
-    const label = `${listing.name}${listing.brand ? ` · ${listing.brand}` : ""} · ${listing.packQuantity} ${text.units[listing.baseUnit]}`;
+    const label = `${listing.name}${listing.brand ? ` · ${listing.brand}` : ""} · ${trimDecimal(listing.packQuantity)} ${text.units[listing.baseUnit]}`;
     return [
       { key: `listing:${listing.listingId}`, line: { listingId: listing.listingId }, label, price: listing.onlinePrice },
       ...listing.quantityOptions.map((option) => ({
         key: `option:${option.id}`, line: { quantityOptionId: option.id },
-        label: `${label} · ${option.name} (${option.quantity} ${text.units[listing.baseUnit]})`, price: option.price,
+        label: `${label} · ${option.name} (${trimDecimal(option.quantity)} ${text.units[listing.baseUnit]})`, price: option.price,
       })),
     ];
   });

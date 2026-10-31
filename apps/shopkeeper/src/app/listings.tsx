@@ -1,5 +1,5 @@
 import { invalidFields, SaveShopListingBody, type SaveShopListingBody as SaveBody, type ShopListingCatalogItem } from "@ygo/contracts";
-import { formatMoney } from "@ygo/format";
+import { formatMoney, trimDecimal } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { useEffect, useState } from "react";
@@ -22,10 +22,10 @@ const emptyForm: Form = { onlinePrice: "", counterPrice: "", mrp: "", lowStockLe
 function formFor(item: ShopListingCatalogItem): Form {
   const listing = item.listing;
   return listing ? {
-    onlinePrice: listing.onlinePrice, counterPrice: listing.counterPrice, mrp: listing.mrp,
-    lowStockLevel: listing.lowStockLevel, available: listing.available,
-    minimumOrderQuantity: listing.minimumOrderQuantity ?? "", quantityStep: listing.quantityStep ?? "",
-    quantityOptions: listing.quantityOptions.map(({ name, quantity, price }) => ({ name, quantity, price })),
+    onlinePrice: trimDecimal(listing.onlinePrice), counterPrice: trimDecimal(listing.counterPrice), mrp: trimDecimal(listing.mrp),
+    lowStockLevel: trimDecimal(listing.lowStockLevel), available: listing.available,
+    minimumOrderQuantity: trimDecimal(listing.minimumOrderQuantity ?? ""), quantityStep: trimDecimal(listing.quantityStep ?? ""),
+    quantityOptions: listing.quantityOptions.map(({ name, quantity, price }) => ({ name, quantity: trimDecimal(quantity), price: trimDecimal(price) })),
   } : emptyForm;
 }
 
@@ -107,7 +107,7 @@ export default function ListingsScreen() {
         {visible.length === 0 && <Text className="text-body text-muted">{search ? words.searchEmpty : words.noItems}</Text>}
         {visible.map((item) => <Pressable key={item.packId} onPress={() => choose(item)} className="gap-1 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name}{item.brand ? ` · ${item.brand}` : ""}</Text>
-          <Text className="text-secondary text-muted">{item.packQuantity} {item.baseUnit} {item.barcode ? `· ${item.barcode}` : ""}</Text>
+          <Text className="text-secondary text-muted">{trimDecimal(item.packQuantity)} {item.baseUnit} {item.barcode ? `· ${item.barcode}` : ""}</Text>
           <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ${formatMoney(Number(item.listing.onlinePrice))}` : words.chooseProduct}</Text>
           {item.listing && <Text className="text-secondary text-muted">{stockLine(item.stock, item.held, item.baseUnit)}</Text>}
         </Pressable>)}
@@ -149,6 +149,6 @@ export default function ListingsScreen() {
 function Field({ label, value, onChange, error = false, keyboardType = "decimal-pad" }: { label: string; value: string; onChange: (value: string) => void; error?: boolean; keyboardType?: "decimal-pad" | "default" }) {
   return <View className="gap-1">
     <Text className="text-secondary font-semibold text-text">{label}</Text>
-    <TextInput accessibilityLabel={label} keyboardType={keyboardType} value={value} onChangeText={onChange} className={`h-[52px] rounded-input border bg-surface px-3 text-body text-text ${error ? "border-danger" : "border-border"}`} />
+    <TextInput accessibilityLabel={label} keyboardType={keyboardType} value={value} onChangeText={onChange} onBlur={keyboardType === "decimal-pad" ? () => onChange(trimDecimal(value)) : undefined} className={`h-[52px] rounded-input border bg-surface px-3 text-body text-text ${error ? "border-danger" : "border-border"}`} />
   </View>;
 }

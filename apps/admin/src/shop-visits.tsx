@@ -3,7 +3,7 @@ import {
   ShopVisitDate, ShopVisitNotes, indiaToday, type ShopApplication, type ShopOnboarding,
   type ShopVisitChecks as ShopVisitChecksContract,
 } from "@ygo/contracts";
-import { formatDate, formatDateTime, formatMoney } from "@ygo/format";
+import { formatDate, formatDateTime, formatMoney, trimDecimal } from "@ygo/format";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createAdminApiClient } from "@ygo/api-client";
 import { strings } from "./strings";
@@ -216,7 +216,7 @@ export function ShopVisitAndFeePanel({ api, application }: { api: AdminApi; appl
               <option value="waived">{strings.feeWaived}</option><option value="paid" disabled={onboarding.fees.length === 0}>{strings.feePaid}</option>
             </select>{onboarding.fees.length === 0 && <p className="mt-1 text-muted">{strings.feePilotWaiverHint}</p>}{feeErrors.status && <p role="alert" className="mt-1 text-danger">{feeErrors.status}</p>}</div>
           {feeStatus === "paid" && <>
-            <div><label htmlFor="fee-amount" className="mb-2 block font-medium">{strings.feeAmount}</label><input id="fee-amount" inputMode="decimal" value={feeAmount} onChange={(event) => setFeeAmount(event.target.value)} className="h-10 rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.amount && <p role="alert" className="mt-1 text-danger">{feeErrors.amount}</p>}</div>
+            <div><label htmlFor="fee-amount" className="mb-2 block font-medium">{strings.feeAmount}</label><input id="fee-amount" inputMode="decimal" value={feeAmount} onChange={(event) => setFeeAmount(event.target.value)} onBlur={() => setFeeAmount(trimDecimal(feeAmount))} className="h-10 rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.amount && <p role="alert" className="mt-1 text-danger">{feeErrors.amount}</p>}</div>
             <div><label htmlFor="fee-date" className="mb-2 block font-medium">{strings.paymentDate}</label><input id="fee-date" type="date" max={indiaToday()} value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="h-10 rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.paymentDate && <p role="alert" className="mt-1 text-danger">{feeErrors.paymentDate}</p>}</div>
             <div><label htmlFor="fee-reference" className="mb-2 block font-medium">{strings.paymentReference}</label><input id="fee-reference" value={reference} onChange={(event) => setReference(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />{feeErrors.reference && <p role="alert" className="mt-1 text-danger">{feeErrors.reference}</p>}</div>
           </>}

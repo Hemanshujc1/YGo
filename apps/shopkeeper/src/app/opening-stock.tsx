@@ -71,7 +71,7 @@ export default function OpeningStockScreen() {
     }
     const items = listings.data.items.filter((item) => item.listing !== null);
     setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue, items });
-    setQuantities(Object.fromEntries(items.map((item) => [item.packId, queue.pending(shopId, item.packId)?.quantity ?? ""])));
+    setQuantities(Object.fromEntries(items.map((item) => [item.packId, trimDecimal(queue.pending(shopId, item.packId)?.quantity ?? "")])));
     const pendingBefore = new Map(items.map((item) => [item.packId, queue.pending(shopId, item.packId)]));
     const response = await stockSync.run();
     if (!isCurrentAccount(identity.account.id, epoch)) return;
@@ -91,7 +91,7 @@ export default function OpeningStockScreen() {
       ...Object.fromEntries(syncResults.filter(({ result }) => result.kind === "pending").map(({ item, result }) => [
         item.packId,
         result.kind !== "pending" ? "" : result.code === "OPENING_STOCK_ALREADY_RECORDED" || item.openingStockRecorded
-          ? `${words.stockConflict} ${queue.pending(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}.`
+          ? `${words.stockConflict} ${trimDecimal(queue.pending(shopId, item.packId)?.quantity ?? "")} ${item.baseUnit}.`
           : result.code ? strings.errors[result.code] : words.saveOffline,
       ])),
     }));
@@ -116,7 +116,7 @@ export default function OpeningStockScreen() {
         ...current,
         ...Object.fromEntries(conflictItems.map((item) => [
           item.packId,
-          `${words.stockConflict} ${queue.pending(shopId, item.packId)?.quantity ?? ""} ${item.baseUnit}. ${words.stockStatusUnavailable}`,
+          `${words.stockConflict} ${trimDecimal(queue.pending(shopId, item.packId)?.quantity ?? "")} ${item.baseUnit}. ${words.stockStatusUnavailable}`,
         ])),
       }));
     } else if (conflictRefresh.kind === "refreshed") {
@@ -154,7 +154,7 @@ export default function OpeningStockScreen() {
     setRefreshingStock(null);
     if (result.kind === "failed") return;
     setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
-    setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + (queue.pending(shopId, item.packId)?.quantity ?? "") + " " + item.baseUnit + "." }));
+    setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + trimDecimal(queue.pending(shopId, item.packId)?.quantity ?? "") + " " + item.baseUnit + "." }));
     setLoad((current) => current.kind === "loaded" && current.shopId === shopId
       ? { ...current, items: result.items }
       : current);
@@ -208,7 +208,7 @@ export default function OpeningStockScreen() {
     }
     if (answer?.ok) return;
     if (answer?.code === "OPENING_STOCK_ALREADY_RECORDED") {
-      setMessage((current) => ({ ...current, [item.packId]: `${words.stockConflict} ${entry.data.quantity} ${item.baseUnit}.` }));
+      setMessage((current) => ({ ...current, [item.packId]: `${words.stockConflict} ${trimDecimal(entry.data.quantity)} ${item.baseUnit}.` }));
       const updated = await api.shopListings().catch(() => null);
       if (!isCurrentAccount(accountId, epoch)) return;
       if (updated?.ok) {
@@ -219,7 +219,7 @@ export default function OpeningStockScreen() {
         setStockRefreshFailed((current) => ({ ...current, [item.packId]: false }));
       } else {
         setStockRefreshFailed((current) => ({ ...current, [item.packId]: true }));
-        setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + entry.data.quantity + " " + item.baseUnit + ". " + words.stockStatusUnavailable }));
+        setMessage((current) => ({ ...current, [item.packId]: words.stockConflict + " " + trimDecimal(entry.data.quantity) + " " + item.baseUnit + ". " + words.stockStatusUnavailable }));
       }
       return;
     }
@@ -260,10 +260,10 @@ export default function OpeningStockScreen() {
         const queued = load.queue.pending(load.shopId, item.packId);
         const failure = load.queue.failed(load.shopId, item.packId);
         return <View key={item.packId} className="gap-3 rounded-card border border-border bg-surface p-4">
-          <Text className="text-body font-semibold text-text">{item.name} · {item.packQuantity} {item.baseUnit}</Text>
+          <Text className="text-body font-semibold text-text">{item.name} · {trimDecimal(item.packQuantity)} {item.baseUnit}</Text>
           <Text className="text-secondary text-muted">{item.openingStockRecorded ? `${words.saved} ${stockLine(item.stock, item.held, item.baseUnit)}` : `${words.quantity}: ${item.baseUnit}`}</Text>
           {!item.openingStockRecorded && <>
-          <TextInput accessibilityLabel={`${words.quantity} ${item.name}`} editable={!queued || !!failure || editableQueued[item.packId]} keyboardType="decimal-pad" value={queued && !failure && !editableQueued[item.packId] ? queued.quantity : quantities[item.packId] ?? queued?.quantity ?? ""} onChangeText={(value) => setQuantities((current) => ({ ...current, [item.packId]: value }))} className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
+          <TextInput accessibilityLabel={`${words.quantity} ${item.name}`} editable={!queued || !!failure || editableQueued[item.packId]} keyboardType="decimal-pad" value={queued && !failure && !editableQueued[item.packId] ? trimDecimal(queued.quantity) : quantities[item.packId] ?? trimDecimal(queued?.quantity ?? "")} onChangeText={(value) => setQuantities((current) => ({ ...current, [item.packId]: value }))} onBlur={() => setQuantities((current) => ({ ...current, [item.packId]: trimDecimal(current[item.packId] ?? "") }))} className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
             {queued && (!message[item.packId] || message[item.packId] === words.saveOffline) && <Text className="text-secondary text-pending">{words.stockQueued}</Text>}
             <Button label={words.saveStock} onPress={() => void save(item)} busy={saving === item.packId} disabled={load.queue.heldPacks(load.shopId).includes(item.packId)} />
           </>}
@@ -297,7 +297,7 @@ function OpeningStockRecovery({ shopId, packId, queue, items, onRecover }: {
     <Text className="text-body text-text">{words.product}</Text>
     {available.map((item) => <Button key={item.packId} label={`${target === item.packId ? "✓ " : ""}${item.name} · ${trimDecimal(item.packQuantity)} ${item.baseUnit}`} variant="secondary" onPress={() => { setTarget(item.packId); setChosen(null); }} />)}
     <Text className="text-body text-text">{words.quantity}</Text>
-    <TextInput accessibilityLabel={words.quantity} value={quantity} keyboardType="decimal-pad" onChangeText={(value) => { setQuantity(value); setChosen(null); }} className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
+    <TextInput accessibilityLabel={words.quantity} value={quantity} keyboardType="decimal-pad" onChangeText={(value) => { setQuantity(value); setChosen(null); }} onBlur={() => setQuantity(trimDecimal(quantity))} className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
     <Button label={words.save} disabled={!target} onPress={() => setError(onRecover(target, quantity, chosen))} />
     {error && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{error}</Text>}
     <Text className="text-secondary text-muted">{words.support}</Text>
