@@ -1,6 +1,7 @@
 import { stockCache } from "./stock-cache";
 import { OFFLINE_LIMITS } from "./offline-limits";
-import { OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
+import { OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
+import type { ApiResult } from "@ygo/api-client";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 type Database = Pick<SQLiteDatabase, "execSync" | "getAllSync" | "getFirstSync" | "runSync" | "withTransactionSync">;
@@ -327,6 +328,13 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
 export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "held"; quantity?: string; outOfStock?: boolean;
   code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null };
+
+// The shop's listed packs, or null when the server can't be reached or refuses (#464). The client is
+// passed in because the app's api module already imports this file.
+export async function fetchListedItems(client: { shopListings(): Promise<ApiResult<ShopListingsResponse>> }): Promise<ShopListingCatalogItem[] | null> {
+  const answer = await client.shopListings().catch(() => null);
+  return answer?.ok ? answer.data.items.filter((item) => item.listing !== null) : null;
+}
 
 export function replaceListingsFromRefresh<T extends { packId: string }>(current: T[], refreshed: T[]): T[] {
   const refreshedByPack = new Map(refreshed.map((item) => [item.packId, item]));
