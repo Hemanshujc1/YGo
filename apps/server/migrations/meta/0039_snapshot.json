@@ -1,5 +1,5 @@
 {
-  "id": "c887612b-bcec-41ad-b9ad-ad3138380d0d",
+  "id": "4b10e153-6070-46fd-8c36-473694f00f0d",
   "prevId": "c7c3a401-fcd6-4cfd-859f-d3b19d537641",
   "version": "7",
   "dialect": "postgresql",
@@ -3356,6 +3356,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "target_quantity": {
+          "name": "target_quantity",
+          "type": "numeric(12, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3422,6 +3428,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "stock_movements_target_valid": {
+          "name": "stock_movements_target_valid",
+          "value": "(\"stock_movements\".\"kind\" = 'opening_correction') = (\"stock_movements\".\"target_quantity\" IS NOT NULL) AND \"stock_movements\".\"target_quantity\" >= 0"
+        },
         "stock_movements_kind_valid": {
           "name": "stock_movements_kind_valid",
           "value": "\"stock_movements\".\"kind\" IN ('opening', 'opening_correction')"

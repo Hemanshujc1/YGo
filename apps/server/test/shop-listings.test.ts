@@ -714,4 +714,25 @@ describe("opening-stock correction sync (#452)", () => {
       payload: { deviceId: randomUUID(), sentAt: clock.now().toISOString(), actions: [action(1, "opening_stock_correction", "1")] } });
     expect(refused.statusCode).toBe(404);
   });
+
+  it("judges a retry by its stored target when two corrections share one batch", async () => {
+    const actor = await shop("live");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const action = (sequence: number, type: string, quantity: string) => ({ id: randomUUID(), sequence, shopId: actor.shopId, type,
+      payload: { packId: actor.packId, quantity }, createdAt: clock.now().toISOString(), clockSuspect: false });
+    const [opening, first, second] = [action(1, "opening_stock", "10"), action(2, "opening_stock_correction", "7"), action(3, "opening_stock_correction", "9")];
+    const sent = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers,
+      payload: { deviceId: randomUUID(), sentAt: clock.now().toISOString(), actions: [opening, first, second] } });
+    expect(sent.json().results.map((row: { status: string }) => row.status)).toEqual(["applied", "applied", "applied"]);
+    const stamps = await database.pool.query("SELECT DISTINCT created_at FROM stock_movements");
+    expect(stamps.rows).toHaveLength(1);
+    const retry = (id: string, quantity: string) => app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock-correction`,
+      headers: actor.headers, payload: { quantity, clientId: id } });
+    expect((await retry(first.id, "7")).statusCode).toBe(200);
+    expect((await retry(second.id, "9")).statusCode).toBe(200);
+    expect((await retry(first.id, "9")).statusCode).toBe(400);
+    expect((await retry(second.id, "7")).statusCode).toBe(400);
+    expect((await database.pool.query("SELECT quantity::text, target_quantity::text AS target FROM stock_movements WHERE kind = 'opening_correction' ORDER BY target_quantity")).rows)
+      .toEqual([{ quantity: "-3.000", target: "7.000" }, { quantity: "2.000", target: "9.000" }]);
+  });
 });

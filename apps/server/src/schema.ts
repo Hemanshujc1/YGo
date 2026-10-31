@@ -345,8 +345,11 @@ export const stockMovements = pgTable("stock_movements", {
   clientId: uuid("client_id").notNull(),
   kind: text("kind").notNull(),
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  // The total a correction asked for, so a retry is judged by it and not by timestamps (#452).
+  targetQuantity: numeric("target_quantity", { precision: 12, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction') = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
   check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction')`),
   check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} = 'opening_correction') AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),

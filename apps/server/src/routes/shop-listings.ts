@@ -141,12 +141,9 @@ export async function applyOpeningStockCorrection(client: PoolClient, accountId:
   const openingTotal = () => client.query<{ recorded: boolean; total: string }>(
     `SELECT COALESCE(bool_or(kind = 'opening'), false) AS recorded, COALESCE(sum(quantity), 0)::text AS total
      FROM stock_movements WHERE listing_id = $1 AND kind IN ('opening', 'opening_correction')`, [row.id]).then((answer) => answer.rows[0]);
-  const same = await client.query<{ kind: string; actorId: string; createdAt: Date; target: string }>(
-    `SELECT m.kind, m.actor_id AS "actorId", m.created_at AS "createdAt",
-       (SELECT COALESCE(sum(o.quantity), 0)::text FROM stock_movements o WHERE o.listing_id = m.listing_id
-         AND o.kind IN ('opening', 'opening_correction')
-         AND (o.created_at < m.created_at OR o.id = m.id OR (o.created_at = m.created_at AND o.kind = 'opening'))) AS target
-     FROM stock_movements m WHERE m.listing_id = $1 AND m.client_id = $2`, [row.id, body.clientId]);
+  const same = await client.query<{ kind: string; actorId: string; createdAt: Date; target: string | null }>(
+    `SELECT kind, actor_id AS "actorId", created_at AS "createdAt", target_quantity::text AS target
+     FROM stock_movements WHERE listing_id = $1 AND client_id = $2`, [row.id, body.clientId]);
   if (same.rows[0]) {
     const saved = same.rows[0];
     if (saved.kind !== "opening_correction" || saved.actorId !== accountId) return { code: "VALIDATION_FAILED" };
@@ -158,8 +155,8 @@ export async function applyOpeningStockCorrection(client: PoolClient, accountId:
   const before = await openingTotal();
   if (!before?.recorded) return { code: "OPENING_STOCK_NOT_RECORDED" };
   const inserted = await client.query<{ createdAt: Date }>(
-    `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
-     VALUES ($1, $2, $3, 'opening_correction', $4::numeric - $5::numeric) RETURNING created_at AS "createdAt"`,
+    `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity, target_quantity)
+     VALUES ($1, $2, $3, 'opening_correction', $4::numeric - $5::numeric, $4::numeric) RETURNING created_at AS "createdAt"`,
     [row.id, accountId, body.clientId, body.quantity, before.total],
   );
   const movement = inserted.rows[0];
