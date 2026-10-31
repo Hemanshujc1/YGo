@@ -26,6 +26,7 @@ export {
   AddressFlat,
   AdminActionReason,
   AreaName,
+  BillAmount,
   CalendarDate,
   Email,
   FssaiNumber,

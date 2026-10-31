@@ -1,5 +1,5 @@
 {
-  "id": "506bc14d-5b7c-44da-befe-cf0ab2570bb3",
+  "id": "0dbbd970-d213-492c-b8f9-827a9a57d43e",
   "prevId": "4b10e153-6070-46fd-8c36-473694f00f0d",
   "version": "7",
   "dialect": "postgresql",
@@ -788,6 +788,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "reference_clash": {
+          "name": "reference_clash",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "number": {
           "name": "number",
           "type": "integer",
@@ -800,23 +807,29 @@
           "primaryKey": false,
           "notNull": false
         },
+        "invalid_payload": {
+          "name": "invalid_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "payment": {
           "name": "payment",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "total": {
           "name": "total",
           "type": "numeric(20, 2)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "checked_total": {
           "name": "checked_total",
           "type": "numeric(20, 2)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "total_mismatch": {
           "name": "total_mismatch",
@@ -824,7 +837,7 @@
           "primaryKey": false,
           "notNull": true,
           "generated": {
-            "as": "total <> checked_total",
+            "as": "COALESCE(total <> checked_total, false)",
             "type": "stored"
           }
         },
@@ -907,7 +920,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"counter_bills\".\"held_reason\" IS DISTINCT FROM 'reference_taken'",
+          "where": "NOT \"counter_bills\".\"reference_clash\"",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -934,7 +947,11 @@
       "checkConstraints": {
         "counter_bills_held_valid": {
           "name": "counter_bills_held_valid",
-          "value": "(\"counter_bills\".\"number\" IS NULL) = (\"counter_bills\".\"held_reason\" IS NOT NULL) AND \"counter_bills\".\"number\" > 0\n    AND \"counter_bills\".\"held_reason\" IN ('reference_taken', 'not_listed', 'too_old')"
+          "value": "(\"counter_bills\".\"number\" IS NULL) = (\"counter_bills\".\"held_reason\" IS NOT NULL) AND \"counter_bills\".\"number\" > 0\n    AND \"counter_bills\".\"held_reason\" IN ('reference_taken', 'not_listed', 'too_old', 'invalid')"
+        },
+        "counter_bills_recorded_valid": {
+          "name": "counter_bills_recorded_valid",
+          "value": "(\"counter_bills\".\"held_reason\" IS NOT DISTINCT FROM 'invalid') = (\"counter_bills\".\"invalid_payload\" IS NOT NULL)\n    AND (\"counter_bills\".\"invalid_payload\" IS NULL) = (\"counter_bills\".\"payment\" IS NOT NULL AND \"counter_bills\".\"total\" IS NOT NULL AND \"counter_bills\".\"checked_total\" IS NOT NULL)"
         },
         "counter_bills_payment_valid": {
           "name": "counter_bills_payment_valid",

@@ -1,4 +1,4 @@
-import { CounterBillPayload, ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
@@ -121,13 +121,13 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
           }
         } else if (action.type === "counter_bill") {
           // Owner or Staff; refused before Live and once Closed, while Suspended still bills (ONB-4, ONB-7, DEL-11).
-          const bill = CounterBillPayload.safeParse(action.payload);
-          if (!bill.success) result.code = "VALIDATION_FAILED";
-          else if (shop.rows[0].state !== "live" && shop.rows[0].state !== "suspended") result.code = "SHOP_NOT_BILLING";
+          if (shop.rows[0].state !== "live" && shop.rows[0].state !== "suspended") result.code = "SHOP_NOT_BILLING";
           else {
-            result.status = "applied";
-            result.result = await applyCounterBill(client, { accountId: who.accountId, shopId: action.shopId, actionId: action.id, madeAt: action.createdAt,
-              receivedAt: now, tooOld: now.getTime() - Date.parse(action.createdAt) > maxAgeSeconds * 1000, clockSuspect }, bill.data);
+            // Age is how long the bill waited on the phone, read on the phone's own clock, so a wrong clock only flags it (BIL-5).
+            const bill = await applyCounterBill(client, { accountId: who.accountId, shopId: action.shopId, actionId: action.id, madeAt: action.createdAt,
+              receivedAt: now, tooOld: Date.parse(body.sentAt) - Date.parse(action.createdAt) > maxAgeSeconds * 1000, clockSuspect }, action.payload);
+            if ("code" in bill) result.code = bill.code;
+            else { result.status = "applied"; result.result = bill.result; }
           }
         } else if (shop.rows[0].role !== "owner") result.code = "NOT_FOUND";
         else if (!openingTypes.has(action.type) || !payload.success) result.code = "VALIDATION_FAILED";

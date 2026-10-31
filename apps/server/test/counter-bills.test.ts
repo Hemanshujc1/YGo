@@ -75,7 +75,7 @@ async function shop(state = "live") {
   const bill = (lines: Line[], overrides: Record<string, unknown> = {}) => ({ id: randomUUID(), shopId, type: "counter_bill",
     payload: { lines, total: "0", payment: "cash" }, createdAt: clock.now().toISOString(), clockSuspect: false, ...overrides });
   /** Sends actions from one device, numbering any action that has no sequence yet. */
-  const send = async (actions: Array<ReturnType<typeof bill> & { sequence?: number }>, device = "phone", headers = owner.headers) => {
+  const send = async (actions: Array<ReturnType<typeof bill> & { sequence?: number }>, device = "phone", headers = owner.headers, sentAt = clock.now().toISOString()) => {
     const deviceId = `00000000-0000-4000-8000-${device === "phone" ? "000000000001" : "000000000002"}`;
     const numbered = actions.map((action) => {
       if (action.sequence) return action;
@@ -83,7 +83,7 @@ async function shop(state = "live") {
       sequences.set(device, sequence);
       return Object.assign(action, { sequence });
     });
-    const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers, payload: { deviceId, sentAt: clock.now().toISOString(), actions: numbered } });
+    const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers, payload: { deviceId, sentAt, actions: numbered } });
     expect(response.statusCode).toBe(200);
     return SyncActionsResponse.parse(response.json()).results;
   };
@@ -141,8 +141,8 @@ describe("counter bill sync (#51)", () => {
       ...await send([sale(), bill(line, { payload: { lines: line, total: "21", payment: "card" } })], "tablet", staff.headers),
       ...await send([sale()]),
     ].map((row) => [row.status, row.code, row.result && "number" in row.result ? row.result.number : null]);
-    expect(numbers).toEqual([["applied", null, 1], ["applied", null, null], ["applied", null, 2], ["rejected", "VALIDATION_FAILED", null], ["applied", null, 3]]);
-    expect(await count("counter_bills")).toBe(4);
+    expect(numbers).toEqual([["applied", null, 1], ["applied", null, null], ["applied", null, 2], ["applied", null, null], ["applied", null, 3]]);
+    expect(await count("counter_bills")).toBe(5);
     expect((await database.pool.query("SELECT last_number FROM counter_bill_numbers")).rows).toEqual([{ last_number: 3 }]);
   });
 
@@ -159,9 +159,45 @@ describe("counter bill sync (#51)", () => {
     expect(await stock(rice)).toBe("8.000");
     expect((await send([second]))[0]).toEqual(held);
     expect((await send([bill(line, { payload })]))[0]?.result).toMatchObject({ number: 2 });
-    expect((await database.pool.query("SELECT client_id, number, held_reason FROM counter_bills WHERE reference = '0F3A-91BC' ORDER BY number NULLS LAST")).rows).toEqual([
-      { client_id: first.id, number: 1, held_reason: null }, { client_id: second.id, number: null, held_reason: "reference_taken" },
+    // A clashing bill that is also past the limit keeps that reason too.
+    const late = bill(line, { id: "0f3a91bc-2222-4000-8000-000000000003", createdAt: "2029-12-20T00:00:00.000Z", payload });
+    expect((await send([late]))[0]?.result).toMatchObject({ number: null, heldReason: "too_old" });
+    expect((await database.pool.query("SELECT client_id, number, held_reason, reference_clash FROM counter_bills WHERE reference = '0F3A-91BC' ORDER BY client_id")).rows).toEqual([
+      { client_id: first.id, number: 1, held_reason: null, reference_clash: false },
+      { client_id: second.id, number: null, held_reason: "reference_taken", reference_clash: true },
+      { client_id: late.id, number: null, held_reason: "too_old", reference_clash: true },
     ]);
+    // Admin can still number the clashing bill later, from the shop's counter.
+    await database.pool.query("UPDATE counter_bill_numbers SET last_number = 3");
+    await database.pool.query("UPDATE counter_bills SET number = 3, held_reason = NULL WHERE client_id = $1", [second.id]);
+  });
+
+  it("answers a reused action id from another account with a conflict, recording nothing", async () => {
+    const { shopId, pack, bill, send, count } = await shop();
+    const staff = await account("staff@example.com");
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [staff.id, shopId]);
+    const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
+    const entry = bill(line, { payload: { lines: line, total: "21", payment: "cash" } });
+    await send([entry]);
+    expect((await send([{ ...entry, sequence: 1 }], "tablet", staff.headers))[0]).toMatchObject({ status: "rejected", code: "ACTION_CONFLICT", result: null });
+    expect(await count("counter_bills")).toBe(1);
+  });
+
+  it("numbers a bill from a phone whose clock is days behind, flagging the clock only", async () => {
+    const { pack, bill, send } = await shop();
+    const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
+    const behind = "2029-12-20T00:00:00.000Z";
+    const [result] = await send([bill(line, { createdAt: behind, payload: { lines: line, total: "21", payment: "cash" } })], "phone", undefined, behind);
+    expect(result).toMatchObject({ clockSuspect: true, result: { number: 1, heldReason: null } });
+  });
+
+  it("keeps a bill the server cannot read as held, with what the phone sent", async () => {
+    const { pack, bill, send, count } = await shop();
+    const line = { packId: await pack(), count: 1, unitPrice: "21" };
+    const payload = { lines: [line, line], total: "42", payment: "cash" };
+    expect((await send([bill([line], { payload })]))[0]).toMatchObject({ status: "applied", result: { number: null, heldReason: "invalid", totalMismatch: false } });
+    expect((await database.pool.query("SELECT invalid_payload, payment, total FROM counter_bills")).rows).toEqual([{ invalid_payload: payload, payment: null, total: null }]);
+    expect(await count("counter_bill_lines")).toBe(0);
   });
 
   it("holds a bill with a pack off the shop's list or older than the limit, recording its lines", async () => {
@@ -207,7 +243,7 @@ describe("counter bill sync (#51)", () => {
     expect(await count("counter_bills")).toBe(0);
   });
 
-  it("keeps a bill as recorded: only a held bill's number may be given later", async () => {
+  it("keeps a bill as recorded: only a held bill may take the counter's next number", async () => {
     const { pack, bill, send } = await shop();
     const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
     await send([bill(line, { payload: { lines: line, total: "21", payment: "cash" } }), bill(line, { createdAt: "2029-12-01T00:00:00.000Z", payload: { lines: line, total: "21", payment: "cash" } })]);
@@ -215,6 +251,9 @@ describe("counter bill sync (#51)", () => {
       "UPDATE counter_bill_lines SET count = 9", "DELETE FROM counter_bill_lines", "TRUNCATE counter_bills CASCADE"]) {
       await expect(database.pool.query(statement)).rejects.toThrow(/refused/);
     }
+    // A held bill takes only the counter's next number, so Admin raises the counter first.
+    await expect(database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL WHERE held_reason = 'too_old'")).rejects.toThrow(/refused/);
+    await database.pool.query("UPDATE counter_bill_numbers SET last_number = 2");
     await database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL WHERE held_reason = 'too_old'");
     expect((await database.pool.query("SELECT number FROM counter_bills ORDER BY number")).rows).toEqual([{ number: 1 }, { number: 2 }]);
   });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShopState } from "./shops";
-import { PackQuantity, ShopPrice } from "./fields";
+import { BillAmount, PackQuantity, ShopPrice } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
 /** Explicit access result: only an authenticated absence/closure ends cached access. */
@@ -33,13 +33,13 @@ export type ShopStockResponse = z.infer<typeof ShopStockResponse>;
 export const CounterBillLine = z.strictObject({ packId: z.uuid(), count: z.number().int().positive().max(9999), unitPrice: ShopPrice });
 export const CounterBillPayload = z.strictObject({
   lines: z.array(CounterBillLine).min(1).max(100).refine((lines) => new Set(lines.map((line) => line.packId)).size === lines.length),
-  total: z.string().regex(/^(?:0|[1-9]\d{0,14})(?:\.\d{1,2})?$/),
+  total: BillAmount,
   payment: z.enum(["cash", "upi"]),
 });
 export type CounterBillLine = z.infer<typeof CounterBillLine>;
 export type CounterBillPayload = z.infer<typeof CounterBillPayload>;
 /** Why the server kept a bill without a number; Admin resolves it (BIL-5). */
-export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old"]);
+export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old", "invalid"]);
 export const CounterBillResponse = z.strictObject({
   billId: z.uuid(), reference: z.string().regex(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: z.number().int().positive().nullable(),
   heldReason: CounterBillHeldReason.nullable(), totalMismatch: z.boolean(), recordedAt: z.iso.datetime(),

@@ -357,7 +357,7 @@ export const stockMovements = pgTable("stock_movements", {
 ]);
 
 // Counter bills (#51, BIL-5, BIL-9). The bill as the phone recorded it, kept even when held. A sale's
-// `sale` stock movements share the bill's `client_id`. Triggers allow only resolving a held bill.
+// `sale` stock movements share the bill's `client_id`. Triggers allow only numbering a held bill.
 export const counterBills = pgTable("counter_bills", {
   id: uuid("id").primaryKey().defaultRandom(),
   shopId: uuid("shop_id").notNull().references(() => shops.id),
@@ -365,23 +365,29 @@ export const counterBills = pgTable("counter_bills", {
   // The sync action's id; the reference is made from it on the phone.
   clientId: uuid("client_id").notNull(),
   reference: text("reference").notNull(),
+  // Another bill of the shop already had this reference when this one arrived. Stays true once numbered.
+  referenceClash: boolean("reference_clash").notNull().default(false),
   number: integer("number"),
   heldReason: text("held_reason"),
-  payment: text("payment").notNull(),
+  // A payload the server could not read is kept whole, in place of the columns below (BIL-5).
+  invalidPayload: jsonb("invalid_payload"),
+  payment: text("payment"),
   // The phone's total is the total on record; the server's own sum sits beside it for Admin.
-  total: numeric("total", { precision: 20, scale: 2 }).notNull(),
-  checkedTotal: numeric("checked_total", { precision: 20, scale: 2 }).notNull(),
-  totalMismatch: boolean("total_mismatch").notNull().generatedAlwaysAs(sql`total <> checked_total`),
+  total: numeric("total", { precision: 20, scale: 2 }),
+  checkedTotal: numeric("checked_total", { precision: 20, scale: 2 }),
+  totalMismatch: boolean("total_mismatch").notNull().generatedAlwaysAs(sql`COALESCE(total <> checked_total, false)`),
   clockSuspect: boolean("clock_suspect").notNull(),
   madeAt: timestamp("made_at", { withTimezone: true }).notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
 }, (table) => [
   uniqueIndex("counter_bills_client_id_idx").on(table.shopId, table.clientId),
   uniqueIndex("counter_bills_number_idx").on(table.shopId, table.number),
-  // A colliding reference is kept as a held bill outside this index (BIL-5).
-  uniqueIndex("counter_bills_reference_idx").on(table.shopId, table.reference).where(sql`${table.heldReason} IS DISTINCT FROM 'reference_taken'`),
+  // A clashing reference is kept as a second, held bill outside this index (BIL-5).
+  uniqueIndex("counter_bills_reference_idx").on(table.shopId, table.reference).where(sql`NOT ${table.referenceClash}`),
   check("counter_bills_held_valid", sql`(${table.number} IS NULL) = (${table.heldReason} IS NOT NULL) AND ${table.number} > 0
-    AND ${table.heldReason} IN ('reference_taken', 'not_listed', 'too_old')`),
+    AND ${table.heldReason} IN ('reference_taken', 'not_listed', 'too_old', 'invalid')`),
+  check("counter_bills_recorded_valid", sql`(${table.heldReason} IS NOT DISTINCT FROM 'invalid') = (${table.invalidPayload} IS NOT NULL)
+    AND (${table.invalidPayload} IS NULL) = (${table.payment} IS NOT NULL AND ${table.total} IS NOT NULL AND ${table.checkedTotal} IS NOT NULL)`),
   check("counter_bills_payment_valid", sql`${table.payment} IN ('cash', 'upi')`),
   check("counter_bills_reference_valid", sql`${table.reference} ~ '^[0-9A-F]{4}-[0-9A-F]{4}$'`),
   check("counter_bills_total_valid", sql`${table.total} >= 0 AND ${table.checkedTotal} >= 0`),

@@ -131,6 +131,9 @@ export const PackBarcode = z.string().regex(/^(?:\d{8}|\d{12}|\d{13})$/);
 /** A non-negative rupee price with at most two decimals (CAT-1, ADR-0002). */
 export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
 
+/** A bill total in rupees with at most two decimals (whole paise), up to 15 rupee digits (#51). */
+export const BillAmount = z.string().regex(/^(?:0|[1-9]\d{0,14})(?:\.\d{1,2})?$/);
+
 /** PostgreSQL's bigint ceiling; rate-card versions are bigint identities (#355). */
 const RATE_CARD_VERSION_MAX = 9_223_372_036_854_775_807n;
 
