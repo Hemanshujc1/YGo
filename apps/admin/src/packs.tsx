@@ -1,5 +1,6 @@
 import { createAdminApiClient } from "@ygo/api-client";
 import { AdminActionReason, CreatePackBody, EditPackBody, type MasterProduct, type Pack } from "@ygo/contracts";
+import { trimDecimal } from "@ygo/format";
 import { useEffect, useState, type FormEvent } from "react";
 import { ReasonDialog } from "./components/reason-dialog";
 import { fieldMessages } from "./lib/field-messages";
@@ -39,7 +40,7 @@ export function Packs({ api, product, onBack }: { api: AdminApi; product: Master
 
   function openForm(pack: Pack | null) {
     setEditing(pack);
-    setQuantity(pack?.quantity ?? "");
+    setQuantity(trimDecimal(pack?.quantity ?? ""));
     setBarcode(pack?.barcode ?? "");
     setErrors({});
     setError("");
@@ -125,7 +126,7 @@ export function Packs({ api, product, onBack }: { api: AdminApi; product: Master
         <h2 className="text-body font-semibold">{editing ? strings.editPackTitle : strings.newPack}</h2>
         <form onSubmit={(event) => void save(event)} className="mt-6 space-y-4" noValidate>
           <div><label htmlFor="pack-quantity" className="mb-2 block font-medium">{strings.packQuantity(product.baseUnit)}</label>
-            <input id="pack-quantity" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />
+            <input id="pack-quantity" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} onBlur={() => setQuantity(trimDecimal(quantity))} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />
             {errors.quantity && <p role="alert" className="mt-1 text-secondary text-danger">{errors.quantity}</p>}</div>
           <div><label htmlFor="pack-barcode" className="mb-2 block font-medium">{strings.packBarcode}</label>
             <input id="pack-barcode" inputMode="numeric" value={barcode} onChange={(event) => setBarcode(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />
@@ -137,14 +138,14 @@ export function Packs({ api, product, onBack }: { api: AdminApi; product: Master
         </form>
       </section> : <section className="rounded-xl border border-border bg-surface p-6">
         {packs.length === 0 ? <p className="text-muted">{strings.noPacks}</p> : <ul>{packs.map((pack) => <li key={pack.id} className="flex flex-wrap items-center justify-between gap-4 border-t border-border py-4">
-          <div><p className="font-medium">{pack.quantity} {product.baseUnit}</p>
+          <div><p className="font-medium">{trimDecimal(pack.quantity)} {product.baseUnit}</p>
             <p className="text-secondary text-muted">{pack.barcode ?? strings.noBarcode} · {pack.active ? strings.packActive : strings.packInactive}</p></div>
-          <div className="flex gap-2"><button disabled={busy} onClick={() => openForm(pack)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{strings.editPack(pack.quantity)}</button>
+          <div className="flex gap-2"><button disabled={busy} onClick={() => openForm(pack)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{strings.editPack(trimDecimal(pack.quantity))}</button>
             <button disabled={busy} onClick={() => pack.active ? (setDeactivating(pack), setErrors({}), setError("")) : void changeActive(pack, true)} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">
-              {pack.active ? strings.deactivatePack(pack.quantity) : strings.reactivatePack(pack.quantity)}</button></div>
+              {pack.active ? strings.deactivatePack(trimDecimal(pack.quantity)) : strings.reactivatePack(trimDecimal(pack.quantity))}</button></div>
         </li>)}</ul>}
       </section>}
-    {deactivating && <ReasonDialog title={strings.deactivatePackTitle(deactivating.quantity)} confirmLabel={strings.confirmDeactivatePack} danger busy={busy}
+    {deactivating && <ReasonDialog title={strings.deactivatePackTitle(trimDecimal(deactivating.quantity))} confirmLabel={strings.confirmDeactivatePack} danger busy={busy}
       reasonError={errors.reason} error={error} onConfirm={deactivate} onCancel={() => { setDeactivating(null); setErrors({}); setError(""); }} />}
   </>;
 }

@@ -76,6 +76,17 @@ describe("opening-stock account boundary", () => {
     expect(elements(render()).map((node) => node.props.children)).toContain("Saved. 1 kg left · 2 kg held for orders");
   });
 
+  it("shows pack sizes and typed amounts without trailing zeros (#451)", async () => {
+    mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...item, packQuantity: "1.000" }] } });
+    render(); await settle();
+    expect(elements(render()).map((node) => [node.props.children].flat().join(""))).toContain("Rice · 1 kg");
+    const box = () => elements(render()).filter((node) => node.type === "TextInput")[0]?.props ?? {};
+    (box().onChangeText as (value: string) => void)("2.500");
+    expect(box().value).toBe("2.500");
+    (box().onBlur as () => void)();
+    expect(box().value).toBe("2.5");
+  });
+
   it("does not import legacy work when the account changes while its database opens", async () => {
     mock.open.mockImplementation(async () => { switchAccount(); return queue; });
     render(); await settle();
