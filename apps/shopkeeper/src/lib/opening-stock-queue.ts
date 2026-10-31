@@ -262,9 +262,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       };
       const columns = "a.id, a.shop_id, a.pack_id, a.action, a.result";
       const refused = db.getAllSync<Raw>(`SELECT ${columns}, a.acknowledged_at AS at FROM opening_stock_actions a WHERE ${openRefusal} ORDER BY a.sequence`).map(row);
-      const held = db.getAllSync<{ source_key: string; payload: string }>("SELECT source_key, payload FROM opening_stock_held ORDER BY rowid").map(({ source_key, payload }): QueueRow => {
+      const held = db.getAllSync<{ id: number; source_key: string; payload: string }>("SELECT rowid AS id, source_key, payload FROM opening_stock_held ORDER BY rowid").map(({ id, source_key, payload }): QueueRow => {
         const [, shopId = "", packId = ""] = source_key.split(":");
-        return { id: source_key, shopId, packId, type: "held", quantity: parse(payload)?.quantity, code: null, at: null, label: label(shopId, packId) };
+        return { id: `held:${id}`, shopId, packId, type: "held", quantity: parse(payload)?.quantity, code: null, at: null, label: label(shopId, packId) };
       });
       const queued = db.getAllSync<Raw>(`SELECT ${columns}, json_extract(a.action, '$.createdAt') AS at FROM opening_stock_actions a WHERE a.status = 'pending' ORDER BY a.sequence`).map(row);
       // Never hide work saved on the phone, even before it is queued.
