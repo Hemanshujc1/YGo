@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter, legacy } from "./stock-database-fixture";
 
-import { openingStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncOpeningStockBatch } from "../src/lib/opening-stock-queue";
+import { fetchListedItems, openingStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncOpeningStockBatch } from "../src/lib/opening-stock-queue";
 
 const shopId = "00000000-0000-4000-8000-000000000001";
 const packId = "00000000-0000-4000-8000-000000000002";
@@ -96,6 +96,14 @@ describe("offline opening stock", () => {
     expect(await refreshListingsForQueuedConflicts(current, [{ packId }], async () => refreshed)).toEqual({ kind: "refreshed", items: refreshed, packIds: [packId] });
     expect(replaceListingsFromRefresh(current, refreshed)).toEqual(refreshed);
     expect(queue.pending(shopId, packId)).toEqual(entry);
+  });
+
+  it("fetches only the listed packs, and null when the server is unreachable or refuses (#464)", async () => {
+    const listed = { packId, listing: { id: packId } }, unlisted = { packId: shopId, listing: null };
+    const client = (answer: () => Promise<unknown>) => ({ shopListings: answer }) as Parameters<typeof fetchListedItems>[0];
+    expect(await fetchListedItems(client(async () => ({ ok: true, data: { items: [listed, unlisted] } })))).toEqual([listed]);
+    expect(await fetchListedItems(client(async () => ({ ok: false, code: "SHOP_NOT_FOUND" })))).toBeNull();
+    expect(await fetchListedItems(client(async () => { throw new Error("offline"); }))).toBeNull();
   });
 
 });

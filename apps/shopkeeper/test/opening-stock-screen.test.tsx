@@ -53,11 +53,13 @@ function switchAccount() {
   mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-2" } });
   mock.set.mockClear();
 }
-// Search rendered native elements, including nested mapped cards and fragments.
+// Search rendered native elements, including nested mapped cards, fragments and the Attention lines (#464).
+// Recovery stays one element: its tests press its props directly.
 function elements(node: unknown): Array<{ type?: unknown; props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
   const element = node as { type?: unknown; props: Record<string, unknown> };
+  if (typeof element.type === "function" && element.type.name === "Attention") return elements((element.type as (props: unknown) => unknown)(element.props));
   return [element, ...elements(element.props.children)];
 }
 function press(label: string) {
@@ -84,6 +86,17 @@ describe("opening-stock account boundary", () => {
     mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...item, openingStockRecorded: true, stock: "1.000", held: "2.000" }] } });
     render(); await settle();
     expect(elements(render()).map((node) => node.props.children)).toContain("Saved. 1 kg left · 2 kg held for orders");
+  });
+
+  it("shows a refused first count with its support reference, like a refused correction (#464)", async () => {
+    mock.pending.mockReturnValue(entry);
+    mock.failed.mockReturnValue({ actionId: entry.clientId, sequence: 1, status: "rejected", code: "VALIDATION_FAILED", result: null, clockSuspect: false });
+    mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [] });
+    render(); await settle();
+    const texts = elements(render()).map((node) => [node.props.children].flat().join(""));
+    expect(texts).toContain(strings.shopSetup.syncAttention);
+    expect(texts).toContain(`Support reference: ${entry.clientId}`);
+    expect(texts).not.toContain(entry.clientId);
   });
 
   describe("correcting a recorded count (#452)", () => {
