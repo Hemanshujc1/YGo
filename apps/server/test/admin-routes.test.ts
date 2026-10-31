@@ -1533,7 +1533,8 @@ describe("Catalog CSV import preview", () => {
     for (let i = 0; i < 11; i++) {
       const file: ZipInputFile = { filename: `p${i}.png`, size, crc, compression: 8 };
       zip.add(file);
-      file.ondata?.(null, compressed, true);
+      if (!file.ondata) throw new Error("fflate did not take the ZIP entry");
+      file.ondata(null, compressed, true);
     }
     zip.end();
     // Each photo has its row, so only the total size can reject the ZIP.
