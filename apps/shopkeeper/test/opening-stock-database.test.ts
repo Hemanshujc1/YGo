@@ -4,7 +4,7 @@ import { adapter } from "./stock-database-fixture";
 
 const native = vi.hoisted(() => ({
   secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false, files: new Set<string>(), flags: new Map<string, string | boolean>(), delete: vi.fn(), drop: vi.fn(),
-  cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(),
+  cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(), beforeTransaction: undefined as (() => void) | undefined,
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
 vi.mock("expo-file-system", () => ({ File: class { constructor(_directory: string, private name: string) {} get exists() { return native.exists || native.files.has(this.name); } } }));
@@ -22,7 +22,7 @@ const entry = { quantity: "2", clientId: "00000000-0000-4000-8000-000000000004" 
 describe("opening-stock native boundary", () => {
   const databases: DatabaseSync[] = [];
   beforeEach(async () => {
-    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.flags.clear(); native.files.clear();
+    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.flags.clear(); native.files.clear(); native.beforeTransaction = undefined;
     native.delete.mockImplementation(async (key: string) => { native.secrets.delete(key); }); native.drop.mockImplementation(async (name: string) => { if (!native.files.delete(name)) throw new Error("DatabaseNotFoundException"); }); native.exists = false; native.cipher = "4.0";
     native.get.mockImplementation(async (key: string) => native.secrets.get(key) ?? null);
     native.set.mockImplementation(async (key: string, value: string) => { native.secrets.set(key, value); });
@@ -31,7 +31,11 @@ describe("opening-stock native boundary", () => {
     native.open.mockImplementation(async (name: string) => {
       native.files.add(name);
       const db = new DatabaseSync(":memory:"); databases.push(db);
-      return { ...adapter(db), getFirstAsync: async () => native.cipher ? { cipher_version: native.cipher } : null, execAsync: native.exec, closeAsync: native.close };
+      const adapted = adapter(db);
+      return { ...adapted, withTransactionSync: (work: () => void) => {
+        const hook = native.beforeTransaction; native.beforeTransaction = undefined; hook?.();
+        adapted.withTransactionSync(work);
+      }, getFirstAsync: async () => native.cipher ? { cipher_version: native.cipher } : null, execAsync: native.exec, closeAsync: native.close };
     });
     await import("../src/lib/opening-stock-database");
   });
@@ -92,6 +96,13 @@ describe("opening-stock native boundary", () => {
     expect(native.legacy.size).toBe(1);
   });
 
+  it("keeps legacy records protected when access confirms no current shop", async () => {
+    native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
+    const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
+    await expect(openingStockBeforeSignOut(account, null)).rejects.toThrow("Verify the shop");
+    expect(native.legacy.size).toBe(1);
+  });
+
 it("counts durable manual flags before sign-out without reading another account's database", async () => {
   const { openOpeningStock, openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
   const queue = await openOpeningStock(account);
@@ -129,6 +140,17 @@ it.each(["file", "key"])("keeps the durable block through %s deletion failure an
   expect(restarted.offlineStorage.blocked(account)).toBeUndefined();
 });
 
+it("keeps cleanup blocked until a failed native close can be retried", async () => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  native.close.mockRejectedValueOnce(new Error("native close busy"));
+  await expect(offlineStorage.erase(account, shop)).rejects.toThrow("native close busy");
+  expect(offlineStorage.blocked(account)).toBe(shop);
+  await expect(openOpeningStock(account)).rejects.toThrow("cleanup");
+  await offlineStorage.erase(account, shop);
+  expect(offlineStorage.blocked(account)).toBeUndefined();
+});
+
 it("does not recreate a key or database when signing out after completed erasure", async () => {
   const { offlineStorage, openingStockBeforeSignOut, openOpeningStock } = await import("../src/lib/opening-stock-database");
   await openOpeningStock(account); await offlineStorage.erase(account, shop);
@@ -149,6 +171,27 @@ it("shares concurrent close requests and invalidates the handle before native cl
   const first = closeOpeningStock(account), second = closeOpeningStock(account); await Promise.resolve(); await Promise.resolve();
   expect(() => queue.count()).toThrow("unavailable"); expect(native.close).toHaveBeenCalledTimes(1);
   finish(); await Promise.all([first, second]);
+});
+
+it("recovers from a native close failure before reopening the encrypted database", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  native.close.mockRejectedValueOnce(new Error("native close busy"));
+  await expect(closeOpeningStock(account)).rejects.toThrow("native close busy");
+  const reopened = await openOpeningStock(account);
+  expect(reopened).toBeDefined();
+  expect(native.close).toHaveBeenCalledTimes(2);
+  expect(native.open).toHaveBeenCalledTimes(2);
+});
+
+it("aborts a queued database transaction when account invalidation lands before its writes", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  const queue = await openOpeningStock(account);
+  native.beforeTransaction = () => { void closeOpeningStock(account); };
+  // Invalidation lands after the transaction call begins but before the
+  // transaction callback's guarded database writes.
+  expect(() => queue.saveFlag(shop, pack, true)).toThrow("unavailable");
+  await closeOpeningStock(account);
 });
 
 });

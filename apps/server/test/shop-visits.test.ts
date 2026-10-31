@@ -83,6 +83,16 @@ async function count(table: "shop_visits" | "visit_photos" | "visit_photo_upload
 }
 
 describe("Admin visit and fee routes", () => {
+  it("keeps Closed shops out of new onboarding visit, upload and fee operations", async () => {
+    const { id } = await shop("closed");
+    expect((await upload(id)).statusCode).toBe(404);
+    expect((await visit(id, randomUUID())).statusCode).toBe(404);
+    expect((await saveFee(id)).statusCode).toBe(404);
+    expect(await count("visit_photo_uploads")).toBe(0);
+    expect(await count("shop_visits")).toBe(0);
+    expect(await count("onboarding_fees")).toBe(0);
+  });
+
   it("refuses every endpoint without an Admin web session before storage calls", async () => {
     const { id } = await shop();
     const mobile = await signIn("owner@example.com", true);

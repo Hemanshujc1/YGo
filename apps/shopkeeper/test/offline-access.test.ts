@@ -113,6 +113,17 @@ describe("verified offline shop access", () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId: null, state: null } }); await access.verify(account);
     expect(storage.erase).toHaveBeenCalledWith(account.id, shopId);
   });
+  it("preserves a still-valid Stock lease when the same shop returns Approved", async () => {
+    const access = offlineAccess(storage, fetch, () => time);
+    await access.verify(account);
+    const original = record;
+    if (!original) throw new Error("Expected a saved Stock lease");
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved" } });
+    await access.verify(account);
+    expect(record).toEqual(original);
+    expect(access.get()).toMatchObject({ mode: "offline", shopId, expiresAt: original.verifiedAt + 72 * 3600_000 });
+    expect(access.allowed(account.id, shopId)).toBe(true);
+  });
   it("drops late verification and restore results after sign-out/account replacement", async () => {
     const access = offlineAccess(storage, fetch, () => time); await access.verify(account);
     let finish!: (answer: unknown) => void;

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   state: [] as unknown[], cursor: 0, working: { current: false },
   identity: { status: "signed-in", account: { id: "account-1" } },
-  epoch: 0, count: vi.fn(), signOut: vi.fn(),
+  epoch: 0, count: vi.fn(), signOut: vi.fn(), verify: vi.fn(), accessView: {} as { shopId?: string | null; mode: string; accountId?: string },
 }));
 vi.mock("react", () => ({
   useRef: () => mock.working,
@@ -16,14 +16,14 @@ vi.mock("react", () => ({
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", Text: "Text" }));
 vi.mock("react-native", () => ({ View: "View" }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
-vi.mock("../src/api", () => ({ accountEpoch: () => mock.epoch, session: { get: () => mock.identity, signOut: mock.signOut } }));
+vi.mock("../src/api", () => ({ accountEpoch: () => mock.epoch, access: { verify: mock.verify, get: () => mock.accessView }, session: { get: () => mock.identity, signOut: mock.signOut } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
 
 import { SignOut } from "../src/components/sign-out";
 
 function render() {
   mock.cursor = 0;
-  return SignOut({ verifiedShopId: "shop-1" });
+  return SignOut({});
 }
 
 async function pressSignOut() {
@@ -38,6 +38,8 @@ describe("opening-stock sign-out guard", () => {
   beforeEach(() => {
     vi.clearAllMocks(); mock.epoch = 0; mock.state = []; mock.working.current = false;
     mock.identity = { status: "signed-in", account: { id: "account-1" } };
+    mock.accessView = { shopId: "shop-1", mode: "offline" };
+    mock.verify.mockResolvedValue({ shopId: "shop-1", state: "live" });
     mock.count.mockResolvedValue({ pending: 0, failed: 0 }); mock.signOut.mockResolvedValue(true);
   });
 
@@ -45,6 +47,7 @@ describe("opening-stock sign-out guard", () => {
     mock.count.mockResolvedValue({ pending: 2, failed: 0 });
     const view = await pressSignOut();
     expect(mock.count).toHaveBeenCalledWith("account-1", "shop-1");
+    expect(mock.verify).toHaveBeenCalledOnce();
     expect(mock.signOut).not.toHaveBeenCalled();
     expect(view.props.children[1].props.children).toContain("2 stock entries");
     expect(view.props.children[2].props.href).toBe("/opening-stock");
@@ -101,6 +104,14 @@ describe("opening-stock sign-out guard", () => {
 
   it("signs out after the queue is confirmed empty", async () => {
     await pressSignOut();
+    expect(mock.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("uses a confirmed unlinked result to safely include legacy records in the same guard", async () => {
+    mock.verify.mockResolvedValue({ shopId: null, state: null });
+    mock.accessView = { mode: "online", accountId: "account-1" };
+    await pressSignOut();
+    expect(mock.count).toHaveBeenCalledWith("account-1", null);
     expect(mock.signOut).toHaveBeenCalledOnce();
   });
 

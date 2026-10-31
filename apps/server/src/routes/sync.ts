@@ -13,9 +13,14 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
   app.get("/v1/sync/access", { schema: { response: { 200: SyncAccessResponse, 401: ErrorEnvelope } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const { rows: [shop] } = await pool.query(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
-      WHERE m.account_id = $1 AND m.role IN ('owner', 'staff')`, [who.accountId]);
-    return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null });
+    return withTransaction(pool, async (client) => {
+      // Match the shop row lock used by Stock and lifecycle writes, and lock the
+      // membership row so a concurrent unlink cannot race a positive answer.
+      const { rows: [shop] } = await client.query(`SELECT s.id, s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
+        WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR SHARE OF s, m`, [who.accountId]);
+      await client.query("COMMIT");
+      return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null });
+    });
   });
 
   app.get("/v1/sync/changes", { schema: { querystring: SyncChangesQuery, response: {

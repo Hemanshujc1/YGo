@@ -47,37 +47,47 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       cached(record);
       return record.account;
     },
-    async verify(account: Account) {
-      if (view.mode === "signing-out") return;
+    async verify(account: Account): Promise<SyncAccessResponse | null> {
+      if (view.mode === "signing-out") return null;
       const mine = ++turn;
       const blockedShop = storage.blocked(account.id);
-      if (blockedShop) { show({ mode: "erasing", accountId: account.id, shopId: blockedShop }); return; }
+      if (blockedShop) { show({ mode: "erasing", accountId: account.id, shopId: blockedShop }); return null; }
       const record = await storage.read(account.id);
-      if (mine !== turn) return;
+      if (mine !== turn) return null;
       if (record && record.account.id !== account.id) throw new Error("Saved account does not match");
       saved = record;
       let answer: ApiResult<SyncAccessResponse>;
       try { answer = await fetchAccess(); } catch {
         if (mine === turn) { if (record) cached(record); else show({ mode: "online", accountId: account.id }); }
-        return;
+        return null;
       }
-      if (mine !== turn) return;
-      if (!answer.ok) { if (record) cached(record); return; }
+      if (mine !== turn) return null;
+      if (!answer.ok) { if (record) cached(record); return null; }
       const { shopId, state } = answer.data;
       if (state === "closed" || (record && shopId !== record.shopId) || (!record && storage.hasData(account.id) && !shopId)) {
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
-        return;
+        return null;
       }
       if (shopId) {
         const stockAllowed = state === "live" || state === "suspended";
+        // Approved does not confirm unlink or closure. Keep a still-valid
+        // Live/Suspended lease until its original deadline.
+        if (!stockAllowed && state === "approved" && record?.stockAllowed && usable(record)) {
+          storage.select(account.id);
+          saved = record;
+          show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + 72 * 3600_000 });
+          return answer.data;
+        }
         const next = { account, shopId, verifiedAt: now(), stockAllowed };
         await storage.save(next);
-        if (mine !== turn) return;
+        if (mine !== turn) return null;
         storage.select(account.id);
         saved = next;
         show({ mode: "online", accountId: account.id, ...(stockAllowed ? { shopId, expiresAt: next.verifiedAt + 72 * 3600_000 } : {}) });
+        return answer.data;
       } else {
         if (mine === turn) show({ mode: "online", accountId: account.id });
+        return answer.data;
       }
     },
     async cleanup() {

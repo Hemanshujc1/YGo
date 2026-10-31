@@ -47,12 +47,17 @@ describe("offline Stock entry boundary", () => {
   it("offers saved Stock, retry and guarded sign-out while blocking online-only routes", async () => {
     const tree = await ready(); expect(tree).not.toBe("protected screen");
     expect(elements(tree).find((node) => node.props.href === "/stock")).toBeDefined();
-    expect(elements(tree).find((node) => node.type === "SignOut")?.props.verifiedShopId).toBe("shop");
+    expect(elements(tree).find((node) => node.type === "SignOut")).toBeDefined();
     mock.path = "/stock"; expect(render()).toBe("protected screen");
     mock.path = "/orders"; expect(render()).not.toBe("protected screen");
     const retry = elements(render()).find((node) => node.props.label === "Retry connection");
     (retry?.props.onPress as () => void)(); expect(mock.verify).toHaveBeenCalledTimes(2);
     mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
+  });
+  it("keeps accessible cached Stock visible while background verification is pending", () => {
+    mock.path = "/stock";
+    mock.verify.mockReturnValue(new Promise(() => {}));
+    expect(render()).toBe("protected screen");
   });
   it("hides Stock at the deadline and checks a foreground clock rollback without syncing", async () => {
     mock.path = "/stock"; await ready();
@@ -66,7 +71,7 @@ describe("offline Stock entry boundary", () => {
     (elements(tree).find((node) => node.props.label === "Retry cleanup")?.props.onPress as () => void)();
     expect(mock.cleanup).toHaveBeenCalled(); expect(elements(tree).some((node) => node.props.address === "help@example.com")).toBe(true);
     mock.view = { mode: "ended", accountId: "account" }; tree = render();
-    expect(elements(tree).find((node) => node.type === "SignOut")?.props.verifiedShopId).toBeNull();
+    expect(elements(tree).find((node) => node.type === "SignOut")).toBeDefined();
   });
   it("keeps online tools hidden when encrypted access storage cannot be checked", async () => {
     mock.view = { mode: "online", accountId: "account", shopId: "shop" };

@@ -28,8 +28,8 @@ function fee(row: OnboardingFee): OnboardingFee {
 }
 
 /** Lock the sent shop before its owner, matching the existing shop write order. */
-async function shop(client: PoolClient, id: string) {
-  const found = await client.query("SELECT 1 FROM shops WHERE id = $1 AND state <> 'draft' FOR UPDATE", [id]);
+async function shop(client: PoolClient, id: string, includeClosed = false) {
+  const found = await client.query(`SELECT 1 FROM shops WHERE id = $1 AND state <> 'draft'${includeClosed ? "" : " AND state <> 'closed'"} FOR UPDATE`, [id]);
   return Boolean(found.rowCount);
 }
 
@@ -111,7 +111,7 @@ export function registerShopVisitRoutes(app: FastifyInstance, { pool, clock, sec
     if (!who) return reply;
     const { id, visitId } = request.params as { id: string; visitId: string };
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
-      if (!await shop(client, id)) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (!await shop(client, id, true)) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       const result = await client.query<{ object_key: string }>(`SELECT p.object_key FROM visit_photos p
         JOIN shop_visits v ON v.id = p.visit_id WHERE v.shop_id = $1 AND v.id = $2 FOR SHARE OF p`, [id, visitId]);
       const photo = result.rows[0];

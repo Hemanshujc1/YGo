@@ -49,6 +49,11 @@ async function open(accountId: string, handle: { active: boolean; close?: () => 
 export function openOpeningStock(accountId: string): Promise<OpeningStockQueue> {
   if (accessFlags.getString(`blocked:${accountId}`)) return Promise.reject(new Error("Offline cleanup is pending"));
   let current = opened.get(accountId);
+  if (current && !current.active) {
+    // A prior native close can fail. Retry it before returning an unusable
+    // queue or opening a second connection to the same encrypted file.
+    return closeOpeningStock(accountId).then(() => openOpeningStock(accountId));
+  }
   if (!current) {
     const handle: Opened = { active: true, promise: null as unknown as Promise<OpeningStockQueue> };
     handle.promise = open(accountId, handle).catch((error: unknown) => { if (opened.get(accountId) === handle) opened.delete(accountId); throw error; });
@@ -95,7 +100,8 @@ export const offlineStorage: AccessStorage = {
 
 /** Undefined means the shop lookup failed; null means the server confirmed no shop. */
 export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number; stockPending?: number }> {
-  if (verifiedShopId === undefined && legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"))) {
+  const hasLegacy = legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"));
+  if (hasLegacy && !verifiedShopId) {
     throw new Error("Verify the shop before checking legacy opening stock");
   }
   if (!opened.has(accountId) && !new File(defaultDatabaseDirectory, `opening-stock-${accountId}.db`).exists
