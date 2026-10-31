@@ -4,7 +4,7 @@ import { Button, SupportEmail, Text } from "@ygo/mobile";
 import { Cloud } from "../components/icons";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, session, supportEmail } from "../api";
 import { SyncStatus } from "../components/sync-status";
@@ -100,7 +100,7 @@ export default function StockScreen() {
 
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}>
-      <Link href="/" className="py-3 text-body text-primary">{words.back}</Link>
+      <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator className="text-primary" />}
       {load.kind === "failed" && <>
@@ -144,7 +144,7 @@ export default function StockScreen() {
           <Text selectable className="text-secondary text-danger">{words.failed(id)}</Text>
           <SupportEmail address={supportEmail} className="text-secondary" />
         </View>)}
-        <Link href="/opening-stock" className="py-3 text-body text-primary">{words.opening}</Link>
+        <Link href="/opening-stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.opening}</Text></Pressable></Link>
       </>}
     </ScrollView>
   );

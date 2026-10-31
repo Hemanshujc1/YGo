@@ -3,7 +3,7 @@ import { formatTime, trimDecimal } from "@ygo/format";
 import { Button, SupportEmail, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session, supportEmail } from "../api";
 import { isCurrentAccount } from "../lib/account";
@@ -62,9 +62,9 @@ export default function SyncScreen() {
         <Text className="text-secondary text-danger">{row.type === "held" ? words.held : code.success ? words.reasons[code.data] : words.reasons.VALIDATION_FAILED}</Text>
         {row.type !== "held" && <Text selectable className="text-secondary text-muted">{words.reference(row.id)}</Text>}
         {/* Offline, Opening stock is closed (#394). */}
-        {row.type === "stock_flag" ? <Link href="/stock" className="py-3 text-body text-primary">{words.fixStock}</Link>
+        {row.type === "stock_flag" ? <Link href="/stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.fixStock}</Text></Pressable></Link>
           : view.mode === "offline" ? <Text className="text-secondary text-muted">{words.fixOnline}</Text>
-          : <Link href="/opening-stock" className="py-3 text-body text-primary">{words.fixOpening}</Link>}
+          : <Link href="/opening-stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.fixOpening}</Text></Pressable></Link>}
       </>}
     </View>;
   }
@@ -72,7 +72,7 @@ export default function SyncScreen() {
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}>
       {/* Offline, only Stock and this screen open (#394). */}
-      <Link href={view.mode === "offline" ? "/stock" : "/"} className="py-3 text-body text-primary">{words.back}</Link>
+      <Link href={view.mode === "offline" ? "/stock" : "/"} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {data === null && <ActivityIndicator className="text-primary" />}
       {data === "failed" && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{words.loadFailed}</Text>}

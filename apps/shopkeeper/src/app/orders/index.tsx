@@ -47,7 +47,7 @@ export default function OrdersScreen() {
       contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
       refreshControl={<RefreshControl refreshing={view.refreshing} onRefresh={() => void orders.refresh()} progressViewOffset={insets.top} />}
     >
-      <Link href="/" className="py-3 text-body text-primary">{words.back}</Link>
+      <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {view.status === "loading" && (
         <View className="min-h-12 flex-row items-center gap-2">

@@ -1,7 +1,7 @@
 import { Button, SupportEmail, Text, useSession } from "@ygo/mobile";
 import { Link, usePathname } from "expo-router";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
-import { AppState, ScrollView } from "react-native";
+import { AppState, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, session, supportEmail } from "../api";
 import { strings } from "../strings";
@@ -50,7 +50,7 @@ export function StockAccess({ children }: { children: ReactNode }) {
   return <ScrollView className="flex-1 bg-bg" contentContainerClassName="grow justify-center gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}>
     <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
     <Text className="text-body text-pending">{view.mode === "signing-out" ? strings.offlineAccess.signingOut : failed ? strings.stock.storageFailed : view.mode === "expired" ? words.expired : view.mode === "erasing" ? words.erasing : view.mode === "ended" ? words.ended : words.body}</Text>
-    {!checking && view.mode === "offline" && <Link href="/stock" className="py-3 text-body text-primary">{strings.stock.title}</Link>}
+    {!checking && view.mode === "offline" && <Link href="/stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{strings.stock.title}</Text></Pressable></Link>}
     <Button label={view.mode === "erasing" ? words.cleanup : words.retry} busy={checking || view.mode === "signing-out"} variant="secondary" onPress={() => { if (view.mode === "erasing") void access.cleanup(); else void verify(); }} />
     <SignOut disabled={view.mode === "erasing" || view.mode === "signing-out" || checking} />
     <SupportEmail address={supportEmail} className="text-secondary" />
