@@ -8,7 +8,7 @@ export const StockFlagResponse = z.strictObject({ listingId: z.uuid(), outOfStoc
 export const ShopStockResponse = z.strictObject({
   shopId: z.uuid(), state: z.enum(["live", "suspended"]), items: z.array(z.strictObject({
     listingId: z.uuid(), packId: z.uuid(), name: z.string(), packQuantity: PackQuantity,
-    baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, outOfStock: z.boolean(),
+    baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, held: BaseUnitQuantity, outOfStock: z.boolean(),
   })),
 });
 export const StockCursor = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,18})$/);

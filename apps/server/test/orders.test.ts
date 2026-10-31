@@ -615,6 +615,70 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
   });
 });
 
+type StockItem = { listingId: string; quantity: string; held: string };
+/** What the shop sees of a listing on Listings, Stock and the Stock sync after `since`. */
+async function shopSees(listingId: string, owner: Record<string, string>, since?: string) {
+  const listings = (await app.inject({ method: "GET", url: "/v1/me/shop-listings", headers: owner })).json() as {
+    items: Array<{ stock: string; held: string; listing: { id: string } | null }> };
+  const stock = (await app.inject({ method: "GET", url: "/v1/me/stock", headers: owner })).json() as { items: StockItem[] };
+  const sync = (await app.inject({ method: "GET", url: `/v1/sync/changes${since ? `?since=${since}` : ""}`, headers: owner })).json() as {
+    cursor: string; changes: Array<{ item: StockItem | null }> };
+  const listed = listings.items.find((item) => item.listing?.id === listingId);
+  const counted = stock.items.find((item) => item.listingId === listingId);
+  return {
+    listings: { stock: listed?.stock, held: listed?.held },
+    stock: { quantity: counted?.quantity, held: counted?.held },
+    sync: sync.changes.flatMap((change) => change.item?.listingId === listingId ? [{ quantity: change.item.quantity, held: change.item.held }] : []),
+    cursor: sync.cursor,
+  };
+}
+
+describe("Shopkeeper sees stock left after accepted orders, with the held amount (#436)", () => {
+  it("lowers the shop's figure by what an accepted order holds, the figure Customers get, and holds nothing for rejected or cancelled orders", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    await setStock(dal, "3");
+    const first = await shopSees(dal, owner);
+    expect(first).toMatchObject({ listings: { stock: "3.000", held: "0" }, stock: { quantity: "3.000", held: "0" }, sync: [{ quantity: "3.000", held: "0" }] });
+
+    const kept = (await ordered(shopId, [{ listingId: dal, count: 2 }], home)).json() as { id: string };
+    const rejected = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const cancelled = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    expect((await accept(kept.id, owner)).statusCode).toBe(200);
+    expect((await reject(rejected.id, owner)).statusCode).toBe(200);
+    expect((await cancel(cancelled.id)).statusCode).toBe(200);
+
+    // The next pull resends the item, so the phone's saved Stock picks up the hold.
+    expect(await shopSees(dal, owner, first.cursor)).toMatchObject({
+      listings: { stock: "1.000", held: "2.000" }, stock: { quantity: "1.000", held: "2.000" }, sync: [{ quantity: "1.000", held: "2.000" }],
+    });
+    expect(await left(dal)).toBe("1");
+    // Opening stock still records what's on hand.
+    expect((await database.pool.query("SELECT kind, quantity FROM stock_movements WHERE listing_id = $1", [dal])).rows).toEqual([{ kind: "opening", quantity: "3.000" }]);
+  });
+
+  it("gives the stock back when an accepted order leaves the holding statuses", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 4 }], home)).json() as { id: string };
+    await accept(order.id, owner);
+    const holding = await shopSees(dal, owner);
+    expect(holding.listings).toEqual({ stock: "6.000", held: "4.000" });
+    // No route moves an accepted order on yet (#56), so set the status as one will.
+    await database.pool.query("UPDATE orders SET status = 'cancelled_by_shop' WHERE id = $1", [order.id]);
+    expect(await shopSees(dal, owner, holding.cursor)).toMatchObject({
+      listings: { stock: "10.000", held: "0" }, stock: { quantity: "10.000", held: "0" }, sync: [{ quantity: "10.000", held: "0" }],
+    });
+  });
+
+  it("resends a Stock item saved before #436, which has no held amount, on the next pull, then only on a change", async () => {
+    const { dal, owner } = await stocked();
+    const { cursor } = await shopSees(dal, owner);
+    await database.pool.query("UPDATE stock_sync_items SET payload = payload - 'held'");
+    const refreshed = await shopSees(dal, owner, cursor);
+    expect(refreshed.sync).toEqual([{ quantity: "10.000", held: "0" }]);
+    expect((await shopSees(dal, owner, refreshed.cursor)).sync).toEqual([]);
+  });
+});
+
 describe("Customer's order list (#426, ORD-1)", () => {
   const list = (headers: Record<string, string> = customer) => app.inject({ method: "GET", url: "/v1/orders", headers });
   const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);

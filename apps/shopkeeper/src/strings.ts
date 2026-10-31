@@ -176,6 +176,11 @@ export const strings = {
       cancel: "Cancel",
     },
   },
+  // Listings, Stock and Opening stock (#436): what's left after accepted orders, and what they hold.
+  stockLine: {
+    left: (amount: string) => `${amount} left`,
+    held: (amount: string) => `${amount} held for orders`,
+  },
   // S19 (#362). The agreement's wording is version AGREEMENT_VERSION in @ygo/contracts: change both together.
   stock: {
     unavailable: "No longer available · waiting to sync",

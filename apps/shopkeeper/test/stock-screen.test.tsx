@@ -35,7 +35,7 @@ vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.ope
 import StockScreen from "../src/app/stock";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
-const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", outOfStock: false };
+const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false };
 function render() { mock.cursor = 0; return StockScreen(); }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -75,7 +75,7 @@ describe("minimal Stock screen", () => {
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
     press("Rice: Out of stock"); await settle();
     expect(queue.batch(shopId).actions.map((action) => action.payload)).toEqual([{ packId, outOfStock: true }, { packId, outOfStock: false }]);
-    expect(texts()).toContain("7 kg");
+    expect(texts()).toContain("7 kg left");
   });
 
   it("shows Saved after retry acknowledgement and exposes retained failures with support and fresh-ID retry", async () => {
@@ -130,15 +130,15 @@ describe("minimal Stock screen", () => {
 
   it("pulls other-device changes on manual refresh and keeps pending toggles over offline pulls", async () => {
     render(); await settle();
-    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: { ...item, quantity: "9", outOfStock: true }, deletedAt: null }] } });
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: { ...item, quantity: "9", held: "2.000", outOfStock: true }, deletedAt: null }] } });
     press("Retry sync"); await settle();
     expect(mock.stock).toHaveBeenLastCalledWith(`${shopId}:1`);
-    expect(texts()).toContain("9 kg");
+    expect(texts()).toContain("9 kg left · 2 kg held for orders");
     press("Rice: Out of stock"); await settle();
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
     mock.stock.mockRejectedValue(new Error("offline"));
     press("Retry sync"); await settle();
-    expect(texts()).toContain("9 kg");
+    expect(texts()).toContain("9 kg left · 2 kg held for orders");
     expect(texts()).toContain("Couldn't refresh Stock. Showing saved stock; changes stay on this phone.");
     expect(queue.count()).toBe(1);
   });

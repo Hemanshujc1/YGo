@@ -5,7 +5,7 @@ import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 import type { SyncChangesResponse } from "@ygo/contracts";
 const shopId = randomUUID(), packId = randomUUID();
-const item = { listingId: randomUUID(), packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", outOfStock: false };
+const item = { listingId: randomUUID(), packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
 const page = (revision: number, changes: SyncChangesResponse["changes"] = [{ packId, item, deletedAt: null }]): SyncChangesResponse => ({ shopId, state: "live", cursor: `${shopId}:${revision}`, changes });
 let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
 beforeEach(() => { db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID); });
@@ -53,4 +53,11 @@ it("upgrades v4 without changing queued originals", () => {
   expect(queue.batch(shopId)).toMatchObject({ deviceId: original.deviceId, actions: original.actions });
   expect(queue.cache.cursor(shopId)).toBeUndefined();
   expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+});
+it("reads a Stock item saved before #436 without held, then the next pull adds it", () => {
+  queue.cache.apply(page(1));
+  db.prepare("UPDATE stock_cache_items SET payload = json_remove(payload, '$.held')").run();
+  expect(queue.cache.read(shopId)?.items[0]?.held).toBeUndefined();
+  queue.cache.apply(page(2, [{ packId, item: { ...item, quantity: "5", held: "2" }, deletedAt: null }]), `${shopId}:1`);
+  expect(queue.cache.read(shopId)?.items).toEqual([{ ...item, quantity: "5", held: "2" }]);
 });

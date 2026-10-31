@@ -35,7 +35,10 @@ export const ShopListingCatalogItem = z.strictObject({
   packQuantity: PackQuantity,
   barcode: z.string().nullable(),
   listing: ShopListingSettings.nullable(),
+  /** Left to sell: on hand less what accepted orders hold (#436). */
   stock: SignedBaseUnitQuantity,
+  /** What accepted orders hold, "0" when none. */
+  held: BaseUnitQuantity,
   openingStockRecorded: z.boolean(),
 });
 
