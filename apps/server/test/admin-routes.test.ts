@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import sharp from "sharp";
-import { zipSync } from "fflate";
+import { deflateRawSync, crc32 } from "node:zlib";
+import { Zip, zipSync, type ZipInputFile } from "fflate";
 import { CATALOG_IMPORT_CSV_FIELDS, CATALOG_IMPORT_FILE_LIMITS } from "@ygo/contracts";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
@@ -1525,8 +1526,20 @@ describe("Catalog CSV import preview", () => {
 
   it("rejects ZIP entries above the total expanded image byte limit", async () => {
     const headers = await token();
-    const entries = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`p${i}.png`, Buffer.alloc(CATALOG_IMPORT_FILE_LIMITS.imageBytes)]));
-    expect((await preview(headers, csv([row()]), entries)).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
+    // fflate's own compressor takes seconds on 110 MB (#461): compress the zeros once with Node's zlib and reuse them for all 11 files.
+    const size = CATALOG_IMPORT_FILE_LIMITS.imageBytes, zeros = Buffer.alloc(size), compressed = deflateRawSync(zeros), crc = crc32(zeros);
+    const chunks: Uint8Array[] = [];
+    const zip = new Zip((error, chunk) => { if (error) throw error; chunks.push(chunk); });
+    for (let i = 0; i < 11; i++) {
+      const file: ZipInputFile = { filename: `p${i}.png`, size, crc, compression: 8 };
+      zip.add(file);
+      if (!file.ondata) throw new Error("fflate did not take the ZIP entry");
+      file.ondata(null, compressed, true);
+    }
+    zip.end();
+    // Each photo has its row, so only the total size can reject the ZIP.
+    const rows = Array.from({ length: 11 }, (_, i) => row({ productCode: `p${i}`, name: `Product ${i}` }));
+    expect((await preview(headers, csv(rows), {}, { zip: Buffer.concat(chunks) })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["imagesZip"] } });
     expect(productImagePuts).toEqual([]);
   });
 
