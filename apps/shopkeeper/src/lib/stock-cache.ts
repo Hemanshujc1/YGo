@@ -2,7 +2,8 @@ import { SyncChangesResponse, type SyncActionResult, type ShopStockResponse } fr
 import type { SQLiteDatabase } from "expo-sqlite";
 
 type Database = Pick<SQLiteDatabase, "getFirstSync" | "getAllSync" | "runSync" | "withTransactionSync">;
-type Item = ShopStockResponse["items"][number] & { unavailable?: boolean };
+// A payload saved before #436 has no `held`; the first pull after it resends every item with one.
+type Item = Omit<ShopStockResponse["items"][number], "held"> & { held?: string; unavailable?: boolean };
 
 /** Read projection only: queued originals live in the separate outbox. */
 export function stockCache(db: Database) {

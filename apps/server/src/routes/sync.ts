@@ -26,7 +26,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       if (!saved) throw new Error("Missing Stock revision");
       if (since && (!since.startsWith(`${shop.id}:`) || BigInt(since.split(":")[1] ?? "0") > BigInt(saved.revision))) return reply.code(400).send({ error: { code: "VALIDATION_FAILED" } });
       // One statement snapshot: a writer committing later is picked up by the next pull.
-      const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, "outOfStock"
+      const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, held, "outOfStock"
         FROM (${catalogSql} AND sl.id IS NOT NULL) current_stock`, [shop.id]);
       const previous = await client.query<{ packId: string; payload: ShopStockResponse["items"][number] | null }>('SELECT pack_id AS "packId", payload FROM stock_sync_items WHERE shop_id = $1', [shop.id]);
       const current = new Map(rows.map((item) => [item.packId, item]));

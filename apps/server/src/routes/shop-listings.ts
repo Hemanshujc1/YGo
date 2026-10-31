@@ -12,6 +12,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
+import { heldOf, stockOf } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
 type Shop = { id: string; state: string };
@@ -21,7 +22,7 @@ type CatalogRow = {
   classification: ShopListingCatalogItem["classification"]; packQuantity: string; barcode: string | null;
   listingId: string | null; onlinePrice: string | null; counterPrice: string | null; mrp: string | null;
   lowStockLevel: string | null; available: boolean | null; minimumOrderQuantity: string | null; quantityStep: string | null;
-  stock: string; openingStockRecorded: boolean; outOfStock: boolean;
+  stock: string; held: string; openingStockRecorded: boolean; outOfStock: boolean;
 };
 
 async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | undefined> {
@@ -53,7 +54,7 @@ function projectCatalogItem(
   return {
     packId: row.packId, productId: row.productId, name: row.name, brand: row.brand,
     baseUnit: row.baseUnit, classification: row.classification, packQuantity: row.packQuantity,
-    barcode: row.barcode, stock: row.stock, openingStockRecorded: row.openingStockRecorded,
+    barcode: row.barcode, stock: row.stock, held: row.held, openingStockRecorded: row.openingStockRecorded,
     listing: row.listingId === null ? null : {
       id: row.listingId,
       onlinePrice: requiredListingValue(row.onlinePrice, "online price"),
@@ -71,12 +72,13 @@ export const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name
   sl.id AS "listingId", sl.online_price AS "onlinePrice", sl.counter_price AS "counterPrice",
   sl.out_of_stock AS "outOfStock", sl.mrp, sl.low_stock_level AS "lowStockLevel", sl.available,
   sl.minimum_order_quantity AS "minimumOrderQuantity", sl.quantity_step AS "quantityStep",
-  COALESCE(stock.quantity, '0') AS stock, COALESCE(stock.opening_recorded, false) AS "openingStockRecorded"
+  ${stockOf("sl")}::text AS stock, ${heldOf("sl")}::text AS held,
+  COALESCE(stock.opening_recorded, false) AS "openingStockRecorded"
   FROM packs pk JOIN master_products p ON p.id = pk.product_id
   JOIN categories c ON c.id = p.category_id
   LEFT JOIN categories parent ON parent.id = c.parent_id
   LEFT JOIN shop_listings sl ON sl.pack_id = pk.id AND sl.shop_id = $1
-  LEFT JOIN LATERAL (SELECT sum(sm.quantity) AS quantity, bool_or(sm.kind = 'opening') AS opening_recorded
+  LEFT JOIN LATERAL (SELECT bool_or(sm.kind = 'opening') AS opening_recorded
     FROM stock_movements sm WHERE sm.listing_id = sl.id) stock ON true
   WHERE pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)
   `;
@@ -132,7 +134,7 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       const { rows } = await client.query<CatalogRow>(`${catalogSql} AND sl.id IS NOT NULL ORDER BY lower(p.name), pk.quantity`, [shop.id]);
       return reply.send({ shopId: shop.id, state: shop.state, items: rows.map((row) => ({
         listingId: row.listingId, packId: row.packId, name: row.name, packQuantity: row.packQuantity,
-        baseUnit: row.baseUnit, quantity: row.stock, outOfStock: row.outOfStock,
+        baseUnit: row.baseUnit, quantity: row.stock, held: row.held, outOfStock: row.outOfStock,
       })) });
     });
   });

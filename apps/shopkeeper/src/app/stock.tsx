@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session, supportEmail } from "../api";
 import { Toggle } from "../components/toggle";
 import { isCurrentAccount } from "../lib/account";
+import { stockLine } from "../lib/stock-line";
 import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
 import { type OpeningStockQueue, syncOpeningStockBatch } from "../lib/opening-stock-queue";
 import { strings } from "../strings";
@@ -118,7 +119,7 @@ export default function StockScreen() {
           const desired = flag && flag.status !== "applied" ? StockFlagPayload.parse(flag.action.payload).outOfStock : item.outOfStock;
           return <View key={item.packId} className="gap-2 rounded-card border border-border bg-surface p-4">
             <Text className="text-headline font-semibold text-text">{item.name} · {trimDecimal(item.packQuantity)} {item.baseUnit}</Text>
-            <Text className="text-secondary text-muted">{trimDecimal(item.quantity)} {item.baseUnit}</Text>
+            <Text className="text-secondary text-muted">{stockLine(item.quantity, item.held, item.baseUnit)}</Text>
             <View className="flex-row items-center justify-between gap-4">
               <Text className="text-body text-text">{words.outOfStock}</Text>
               {item.unavailable ? <Text className="text-body text-muted">{words.unavailable}</Text> : <Toggle on={desired} busy={false} label={`${item.name}: ${words.outOfStock}`} onPress={() => {

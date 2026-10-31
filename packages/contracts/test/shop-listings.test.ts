@@ -37,11 +37,13 @@ describe("shop listing contracts", () => {
     const response = {
       items: [{
         packId: id, productId: id, name: "Rice", brand: null, baseUnit: "kg", classification: "measured",
-        packQuantity: "1", barcode: null, stock: "0", openingStockRecorded: false, listing: null,
+        packQuantity: "1", barcode: null, stock: "0", held: "0", openingStockRecorded: false, listing: null,
       }],
     };
     expect(ShopListingsResponse.parse(response)).toEqual(response);
     expect(ShopListingsResponse.safeParse({ items: [{ ...response.items[0], stock: "not-a-quantity" }] }).success).toBe(false);
     expect(ShopListingsResponse.parse({ items: [{ ...response.items[0], stock: "-0.250" }] }).items[0]?.stock).toBe("-0.250");
+    // What accepted orders hold is never negative (#436).
+    expect(ShopListingsResponse.safeParse({ items: [{ ...response.items[0], held: "-1" }] }).success).toBe(false);
   });
 });

@@ -16,16 +16,25 @@ export const visibleListings = `shop_listings listing
 /** The statuses whose lines hold stock, as SQL text. */
 const holding = STOCK_HOLDING_ORDER_STATUSES.map((status) => `'${status}'`).join(", ");
 
+/** A listing's stock on hand in base units: every stock movement added up, 0 with none. `listing` is the alias the query gives `shop_listings`. */
+const onHandOf = (listing: string) =>
+  `COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = ${listing}.id), 0)`;
+
 /**
- * A listing's stock left to sell in base units (CAT-4): what is on hand, less what accepted orders hold (#425).
- * 0 with no movements; `listing` is the alias the query gives `shop_listings`. Nothing writes a movement for a
- * hold, so an order leaving those statuses (rejected, cancelled, expired) gives its stock back by itself.
- * It starts from the shop's orders in those statuses (`orders_shop_id_status_idx`), a handful, so it doesn't grow with order history.
+ * What accepted orders hold of a listing, in base units (#425, #436): its lines on the shop's orders in the
+ * STOCK_HOLDING_ORDER_STATUSES. Nothing writes a movement for a hold, so an order leaving those statuses
+ * (rejected, cancelled, expired) gives its stock back by itself. It starts from the shop's orders in those
+ * statuses (`orders_shop_id_status_idx`), a handful, so it doesn't grow with order history.
  */
-export const stockOf = (listing: string) =>
-  `(COALESCE((SELECT sum(movement.quantity) FROM stock_movements movement WHERE movement.listing_id = ${listing}.id), 0)
-    - COALESCE((SELECT sum(held.stock_quantity) FROM orders holder JOIN order_lines held ON held.order_id = holder.id
-      WHERE holder.shop_id = ${listing}.shop_id AND holder.status IN (${holding}) AND held.listing_id = ${listing}.id), 0))`;
+export const heldOf = (listing: string) =>
+  `COALESCE((SELECT sum(held.stock_quantity) FROM orders holder JOIN order_lines held ON held.order_id = holder.id
+      WHERE holder.shop_id = ${listing}.shop_id AND holder.status IN (${holding}) AND held.listing_id = ${listing}.id), 0)`;
+
+/**
+ * A listing's stock left to sell in base units (CAT-4): on hand less what accepted orders hold. The one rule
+ * for both sides: Customers' availability (C05, search, cart, Accept) and the shop's listings and Stock (#436).
+ */
+export const stockOf = (listing: string) => `(${onHandOf(listing)} - ${heldOf(listing)})`;
 
 /**
  * The part of a pack on sale when less than one pack is left (#377), as jsonb `{quantity, price}`, or NULL.

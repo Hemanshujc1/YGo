@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
+import { stockLine } from "../lib/stock-line";
 import { strings } from "../strings";
 
 const words = strings.shopSetup;
@@ -108,6 +109,7 @@ export default function ListingsScreen() {
           <Text className="text-body font-semibold text-text">{item.name}{item.brand ? ` · ${item.brand}` : ""}</Text>
           <Text className="text-secondary text-muted">{item.packQuantity} {item.baseUnit} {item.barcode ? `· ${item.barcode}` : ""}</Text>
           <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ${formatMoney(Number(item.listing.onlinePrice))}` : words.chooseProduct}</Text>
+          {item.listing && <Text className="text-secondary text-muted">{stockLine(item.stock, item.held, item.baseUnit)}</Text>}
         </Pressable>)}
       </>}
       {load.kind === "loaded" && selected && <>
