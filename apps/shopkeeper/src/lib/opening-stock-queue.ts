@@ -59,11 +59,13 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   if (version < 6) db.withTransactionSync(() => db.execSync(`ALTER TABLE opening_stock_actions ADD COLUMN acknowledged_at TEXT;
     CREATE INDEX IF NOT EXISTS opening_stock_actions_pack ON opening_stock_actions (shop_id, pack_id, sequence); PRAGMA user_version = 6;`));
 
-  // A refusal stays open until a newer change of the same kind to the same pack is accepted.
+  // A refusal stays open until a newer change of the same kind to the same pack is accepted. A refused
+  // correction closes as soon as a newer correction is queued, even offline, as on Opening stock (#460).
   // "Already recorded" is settled: the server holds opening stock for that pack and refuses
   // any other, and Opening stock shows it as recorded.
   const openRefusal = `a.status = 'rejected' AND json_extract(a.result, '$.code') IS NOT 'OPENING_STOCK_ALREADY_RECORDED' AND NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
-    AND json_extract(n.action, '$.type') = json_extract(a.action, '$.type') AND n.sequence > a.sequence AND n.status = 'applied')`;
+    AND json_extract(n.action, '$.type') = json_extract(a.action, '$.type') AND n.sequence > a.sequence
+    AND (n.status = 'applied' OR json_extract(n.action, '$.type') = 'opening_stock_correction'))`;
   // Opening stock saved on the phone but not yet given a place in the ordered queue.
   const unqueued = "NOT EXISTS (SELECT 1 FROM opening_stock_actions q WHERE q.id = json_extract(o.payload, '$.clientId'))";
 
@@ -132,10 +134,16 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       });
       return { id };
     },
-    /** The corrected total still waiting to sync for a pack, or null. */
-    correctionWaiting(shopId: string, packId: string): string | null {
-      return db.getFirstSync<{ quantity: string }>(`SELECT json_extract(action, '$.payload.quantity') AS quantity FROM opening_stock_actions
-        WHERE shop_id = ? AND pack_id = ? AND status = 'pending' AND json_extract(action, '$.type') = 'opening_stock_correction' ORDER BY sequence DESC LIMIT 1`, shopId, packId)?.quantity ?? null;
+    /**
+     * Each pack's latest correction in the shop, by pack. Actions sync in order, so only the latest can still be waiting,
+     * and a refusal stops showing on Opening stock once a newer correction is queued (#460).
+     */
+    corrections(shopId: string): Record<string, { id: string; status: string; quantity: string; code: string | null }> {
+      return Object.fromEntries(db.getAllSync<{ pack_id: string; id: string; status: string; quantity: string; code: string | null }>(`SELECT a.pack_id, a.id, a.status,
+        json_extract(a.action, '$.payload.quantity') AS quantity, json_extract(a.result, '$.code') AS code FROM opening_stock_actions a
+        WHERE a.shop_id = ? AND json_extract(a.action, '$.type') = 'opening_stock_correction' AND a.sequence = (SELECT max(n.sequence) FROM opening_stock_actions n
+          WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id AND json_extract(n.action, '$.type') = 'opening_stock_correction')`, shopId)
+        .map(({ pack_id, ...correction }) => [pack_id, correction]));
     },
     flagCount(): number {
       return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'stock_flag'")?.count ?? 0;
@@ -283,7 +291,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         const action = JSON.parse(raw.action) as SyncAction;
         const payload = action.payload as { quantity?: string; outOfStock?: boolean };
         const result = raw.result ? JSON.parse(raw.result) as SyncActionResult : null;
-        return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type === "stock_flag" ? "stock_flag" : "opening_stock",
+        return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type === "stock_flag" || action.type === "opening_stock_correction" ? action.type : "opening_stock",
           quantity: payload.quantity, outOfStock: payload.outOfStock, code: result?.code ?? null, at: raw.at, label: label(raw.shop_id, raw.pack_id) };
       };
       const columns = "a.id, a.shop_id, a.pack_id, a.action, a.result";
@@ -302,10 +310,11 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       return { attention: [...held, ...refused], waiting: [...queued, ...saved], synced };
     },
     count(): number {
-      const row = db.getFirstSync<{ count: number }>("SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')) + (SELECT count(*) FROM opening_stock_held) AS count");
+      const row = db.getFirstSync<{ count: number }>(`SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected'))
+        + (SELECT count(*) FROM opening_stock_held)
+        + (SELECT count(*) FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN ('stock_flag', 'opening_stock_correction')) AS count`);
       if (!row) throw new Error("Could not count opening stock");
-      const corrections = db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'opening_stock_correction'");
-      return row.count + this.flagCount() + (corrections?.count ?? 0);
+      return row.count;
     },
     attentionCount(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_held");
@@ -316,7 +325,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 }
 
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
-export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "stock_flag" | "held"; quantity?: string; outOfStock?: boolean;
+export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "held"; quantity?: string; outOfStock?: boolean;
   code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null };
 
 export function replaceListingsFromRefresh<T extends { packId: string }>(current: T[], refreshed: T[]): T[] {

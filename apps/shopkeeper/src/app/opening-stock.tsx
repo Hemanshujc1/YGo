@@ -1,4 +1,4 @@
-import { ErrorCode, OpeningStockBody, type ShopListingCatalogItem } from "@ygo/contracts";
+import { ErrorCode, OpeningStockBody, type ShopListingCatalogItem, SyncActionCode } from "@ygo/contracts";
 import { trimDecimal } from "@ygo/format";
 import { Button, SupportEmail, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
@@ -129,7 +129,8 @@ export default function OpeningStockScreen() {
         ...Object.fromEntries(conflictRefresh.packIds.map((packId) => [packId, false])),
       }));
     }
-    if (response?.results.some((result) => result.status === "applied")) {
+    // Corrections the pass applied are fetched by the sync listener below.
+    if (syncResults.some(({ result }) => result.kind === "synced")) {
       const updated = await api.shopListings().catch(() => null);
       if (!isCurrentAccount(identity.account.id, epoch)) return;
       if (updated?.ok) setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue, items: updated.data.items.filter((item) => item.listing !== null) });
@@ -137,6 +138,35 @@ export default function OpeningStockScreen() {
   }
 
   useEffect(() => { void refresh(); }, []);
+
+  // Passes the loop runs on its own redraw this screen too (#460). Once a pack's latest correction stops
+  // waiting, its totals and the Correct pre-fill come from the server again: a failed fetch tries again
+  // after the next pass, and only the latest fetch is kept.
+  const loaded = load.kind === "loaded" ? load : null;
+  useEffect(() => {
+    if (!loaded) return;
+    const { queue, shopId, accountId, epoch } = loaded;
+    const key = (row: { id: string; status: string }) => `${row.id}:${row.status}`;
+    let before: Set<string>, stale = false, asked = 0;
+    try { before = new Set(Object.values(queue.corrections(shopId)).map(key)); } catch { return; }
+    return stockSync.subscribe(() => {
+      if (stockSync.get().running || !isCurrentAccount(accountId, epoch)) return;
+      let now: ReturnType<OpeningStockQueue["corrections"]>;
+      try { now = queue.corrections(shopId); } catch { return; }
+      const changed = Object.values(now).filter((row) => !before.has(key(row)));
+      before = new Set(Object.values(now).map(key));
+      if (changed.length) setLoad((current) => current.kind === "loaded" ? { ...current } : current);
+      stale ||= changed.some((row) => row.status !== "pending");
+      if (!stale) return;
+      const ticket = ++asked;
+      void api.shopListings().catch(() => null).then((updated) => {
+        if (ticket !== asked || !updated?.ok || !isCurrentAccount(accountId, epoch)) return;
+        stale = false;
+        const refreshed = updated.data.items.filter((row) => row.listing !== null);
+        setLoad((current) => current.kind === "loaded" && current.shopId === shopId ? { ...current, items: replaceListingsFromRefresh(current.items, refreshed) } : current);
+      });
+    });
+  }, [loaded?.queue, loaded?.shopId, loaded?.accountId, loaded?.epoch]);
 
   async function retryStockRefresh(item: ShopListingCatalogItem, shopId: string) {
     if (refreshingStock || load.kind !== "loaded") return;
@@ -186,23 +216,11 @@ export default function OpeningStockScreen() {
     const response = await stockSync.run();
     if (!isCurrentAccount(accountId, epoch)) return;
     setSaving(null);
+    // The sync listener fetches the new totals; a refusal shows from the queue on the card.
     const result = response?.results.find((row) => row.actionId === queued.id);
-    if (result?.status === "applied" && result.result) {
-      const updated = await api.shopListings().catch(() => null);
-      if (!isCurrentAccount(accountId, epoch)) return;
-      if (updated?.ok) {
-        const refreshedItems = updated.data.items.filter((row) => row.listing !== null);
-        setLoad((current) => current.kind === "loaded" && current.shopId === shopId
-          ? { ...current, items: replaceListingsFromRefresh(current.items, refreshedItems) }
-          : current);
-      }
-      setMessage((current) => ({ ...current, [item.packId]: words.correctionRecorded }));
-      return;
-    }
-    const code = ErrorCode.safeParse(result?.code);
     setMessage((current) => ({
       ...current,
-      [item.packId]: result?.status === "rejected" ? (code.success ? strings.errors[code.data] : words.syncAttention) : words.saveOffline,
+      [item.packId]: result?.status === "applied" ? words.correctionRecorded : result?.status === "rejected" ? "" : words.saveOffline,
     }));
   }
 
@@ -242,15 +260,17 @@ export default function OpeningStockScreen() {
       : result?.status === "rejected" && code.success ? { ok: false as const, code: code.data } : null;
     const applied = new Map(response?.results.flatMap((row) => row.status === "applied" && row.result && "quantity" in row.result ? [[row.result.listingId, row.result] as const] : []));
     if (applied.size > 0) {
+      // Only a first count is what's left, since nothing sold before it. A correction in the same batch
+      // answers with the opening total, so the sync listener fetches that pack instead (#460).
       setLoad((current) => current.kind === "loaded" ? {
         ...current,
         items: current.items.map((row) => {
-          const saved = row.listing && applied.get(row.listing.id);
+          const saved = !row.openingStockRecorded && row.listing && applied.get(row.listing.id);
           return saved ? { ...row, stock: saved.quantity, openingStockRecorded: true } : row;
         }),
       } : current);
       setMessage((current) => ({ ...current, ...Object.fromEntries(load.items
-        .filter((row) => row.listing && applied.has(row.listing.id)).map((row) => [row.packId, words.stockRecorded])) }));
+        .filter((row) => !row.openingStockRecorded && row.listing && applied.has(row.listing.id)).map((row) => [row.packId, words.stockRecorded])) }));
     }
     if (answer?.ok) return;
     if (answer?.code === "OPENING_STOCK_ALREADY_RECORDED") {
@@ -302,8 +322,9 @@ export default function OpeningStockScreen() {
         <Text className="text-body text-muted">{words.noListings}</Text>
         <Link href="/listings" asChild><Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3"><Text className="text-body font-semibold text-primary">{words.listings}</Text></Pressable></Link>
       </>}
-      {load.kind === "loaded" && load.items.map((item) => {
+      {load.kind === "loaded" && (() => { const corrections = load.queue.corrections(load.shopId); return load.items.map((item) => {
         const queued = load.queue.pending(load.shopId, item.packId);
+        const correction = corrections[item.packId];
         const failure = load.queue.failed(load.shopId, item.packId);
         return <View key={item.packId} className="gap-3 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name} · {trimDecimal(item.packQuantity)} {item.baseUnit}</Text>
@@ -321,16 +342,20 @@ export default function OpeningStockScreen() {
             <Button label={words.saveCorrection} onPress={() => void saveCorrection(item)} busy={saving === item.packId} />
             <Button label={words.cancelCorrection} variant="secondary" onPress={() => setCorrecting((current) => ({ ...current, [item.packId]: false }))} />
           </> : <Button label={words.correct} variant="secondary" onPress={() => {
-            setQuantities((current) => ({ ...current, [item.packId]: trimDecimal(item.openingStock) }));
+            setQuantities((current) => ({ ...current, [item.packId]: trimDecimal(correction?.status === "pending" ? correction.quantity : item.openingStock) }));
             setCorrecting((current) => ({ ...current, [item.packId]: true }));
           }} />)}
-          {(() => { const waiting = load.queue.correctionWaiting(load.shopId, item.packId);
-            return waiting && <Text className="text-secondary text-pending">{words.correctionQueued(trimDecimal(waiting), item.baseUnit)}</Text>; })()}
+          {correction?.status === "pending" && <Text className="text-secondary text-pending">{words.correctionQueued(trimDecimal(correction.quantity), item.baseUnit)}</Text>}
+          {correction?.status === "rejected" && <>
+            <Text className="text-secondary text-danger">{words.correctionFailed(trimDecimal(correction.quantity), item.baseUnit, strings.sync.reasons[SyncActionCode.safeParse(correction.code).data ?? "VALIDATION_FAILED"])}</Text>
+            <Text selectable className="text-secondary text-muted">{strings.sync.reference(correction.id)}</Text>
+            <SupportEmail address={supportEmail} className="text-secondary" />
+          </>}
           {failure && <><Text className="text-secondary text-danger">{words.syncAttention}</Text><Text selectable className="text-secondary text-muted">{queued?.clientId}</Text><SupportEmail address={supportEmail} className="text-secondary" /></>}
           {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-pending" : message[item.packId] === words.stockRecorded || message[item.packId] === words.correctionRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
           {stockRefreshFailed[item.packId] && <Button label={words.retry} onPress={() => void retryStockRefresh(item, load.shopId)} busy={refreshingStock === item.packId} variant="secondary" />}
         </View>;
-      })}
+      }); })()}
     </ScrollView>
   );
 }

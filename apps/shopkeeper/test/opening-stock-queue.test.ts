@@ -37,14 +37,35 @@ describe("offline opening stock", () => {
     const first = queue.saveCorrection(shopId, packId, "2");
     const second = queue.saveCorrection(shopId, packId, "1.5");
     expect(first).toEqual({ id: expect.any(String) });
-    expect(queue.correctionWaiting(shopId, packId)).toBe("1.5");
-    expect(queue.correctionWaiting(shopId, "00000000-0000-4000-8000-000000000004")).toBeNull();
+    expect(queue.corrections(shopId)).toEqual({ [packId]: { id: (second as { id: string }).id, status: "pending", quantity: "1.5", code: null } });
+    expect(queue.corrections("00000000-0000-4000-8000-000000000004")).toEqual({});
     const batch = queue.batch(shopId);
     expect(batch.actions.map((action) => [action.type, action.sequence])).toEqual([["opening_stock", 1], ["opening_stock_correction", 2], ["opening_stock_correction", 3]]);
     expect(batch.actions.map((action) => action.id)).toEqual([entry.clientId, (first as { id: string }).id, (second as { id: string }).id]);
     acknowledge(queue, batch);
-    expect(queue.correctionWaiting(shopId, packId)).toBeNull();
+    expect(queue.corrections(shopId)[packId]?.status).toBe("applied");
     expect(queue.count()).toBe(0);
+  });
+
+  it("shows a refused correction, on Opening stock, S08 and the badge, until a newer one is queued (#460)", () => {
+    queue.saveCorrection(shopId, packId, "4");
+    const batch = queue.batch(shopId);
+    queue.acknowledge(batch, { results: batch.actions.map((action) => ({ actionId: action.id, sequence: action.sequence,
+      status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false })) });
+    expect(queue.corrections(shopId)[packId]).toMatchObject({ id: batch.actions[0]?.id, status: "rejected", quantity: "4", code: "ACTION_TOO_OLD" });
+    expect(queue.overview(new Date(0)).attention).toMatchObject([{ type: "opening_stock_correction", quantity: "4", code: "ACTION_TOO_OLD" }]);
+    expect(queue.failureCount()).toBe(1);
+    // Still offline: the newer correction alone clears the card's refusal.
+    queue.saveCorrection(shopId, packId, "5");
+    expect(queue.corrections(shopId)[packId]).toMatchObject({ status: "pending", quantity: "5" });
+    expect(queue.overview(new Date(0))).toMatchObject({ attention: [], waiting: [{ type: "opening_stock_correction", quantity: "5" }] });
+    expect(queue.failureCount()).toBe(0);
+    // A refused newer correction takes the old one's place.
+    const next = queue.batch(shopId);
+    queue.acknowledge(next, { results: next.actions.map((action) => ({ actionId: action.id, sequence: action.sequence,
+      status: "rejected", code: "NOT_FOUND", result: null, clockSuspect: false })) });
+    expect(queue.overview(new Date(0)).attention).toMatchObject([{ type: "opening_stock_correction", quantity: "5", code: "NOT_FOUND" }]);
+    expect(queue.failureCount()).toBe(1);
   });
 
   it("counts a correction against the offline limit and refuses a malformed total", () => {

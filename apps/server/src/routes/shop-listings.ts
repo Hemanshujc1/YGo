@@ -138,30 +138,30 @@ export async function applyOpeningStockCorrection(client: PoolClient, accountId:
   const row = listing.rows[0];
   if (!row) return { code: "NOT_FOUND" };
   if (row.baseUnit === "each" && !isWholeBaseUnitQuantity(body.quantity)) return { code: "VALIDATION_FAILED" };
-  const openingTotal = () => client.query<{ recorded: boolean; total: string }>(
-    `SELECT COALESCE(bool_or(kind = 'opening'), false) AS recorded, COALESCE(sum(quantity), 0)::text AS total
-     FROM stock_movements WHERE listing_id = $1 AND kind IN ('opening', 'opening_correction')`, [row.id]).then((answer) => answer.rows[0]);
   const same = await client.query<{ kind: string; actorId: string; createdAt: Date; target: string | null }>(
     `SELECT kind, actor_id AS "actorId", created_at AS "createdAt", target_quantity::text AS target
      FROM stock_movements WHERE listing_id = $1 AND client_id = $2`, [row.id, body.clientId]);
   if (same.rows[0]) {
     const saved = same.rows[0];
-    if (saved.kind !== "opening_correction" || saved.actorId !== accountId) return { code: "VALIDATION_FAILED" };
+    // Only a correction row has a target (stock_movements_target_valid).
+    if (saved.kind !== "opening_correction" || saved.target === null || saved.actorId !== accountId) return { code: "VALIDATION_FAILED" };
     // The same id with another total is a different request, never a retry.
     if (Number(saved.target) !== Number(body.quantity)) return { code: "VALIDATION_FAILED" };
-    // A retry of an applied correction answers with the opening total as it stands now.
-    return { status: 200, result: { listingId: row.id, quantity: (await openingTotal())?.total ?? "0", recordedAt: saved.createdAt.toISOString() } };
+    // A retry answers with the total it set, like its first answer, even after later corrections (#460).
+    return { status: 200, result: { listingId: row.id, quantity: saved.target, recordedAt: saved.createdAt.toISOString() } };
   }
-  const before = await openingTotal();
+  const { rows: [before] } = await client.query<{ recorded: boolean; total: string }>(
+    `SELECT COALESCE(bool_or(kind = 'opening'), false) AS recorded, COALESCE(sum(quantity), 0)::text AS total
+     FROM stock_movements WHERE listing_id = $1 AND kind IN ('opening', 'opening_correction')`, [row.id]);
   if (!before?.recorded) return { code: "OPENING_STOCK_NOT_RECORDED" };
-  const inserted = await client.query<{ createdAt: Date }>(
+  const inserted = await client.query<{ target: string; createdAt: Date }>(
     `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity, target_quantity)
-     VALUES ($1, $2, $3, 'opening_correction', $4::numeric - $5::numeric, $4::numeric) RETURNING created_at AS "createdAt"`,
+     VALUES ($1, $2, $3, 'opening_correction', $4::numeric - $5::numeric, $4::numeric) RETURNING target_quantity::text AS target, created_at AS "createdAt"`,
     [row.id, accountId, body.clientId, body.quantity, before.total],
   );
   const movement = inserted.rows[0];
   if (!movement) throw new Error("Opening stock correction insert returned no row");
-  return { status: 201, result: { listingId: row.id, quantity: (await openingTotal())?.total ?? "0", recordedAt: movement.createdAt.toISOString() } };
+  return { status: 201, result: { listingId: row.id, quantity: movement.target, recordedAt: movement.createdAt.toISOString() } };
 }
 
 export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, secret }: Auth): void {
