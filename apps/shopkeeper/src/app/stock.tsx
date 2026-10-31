@@ -46,6 +46,7 @@ export default function StockScreen() {
 
   // Pulling the list down is the manual sync; the spinner stays until the pass ends.
   async function pull() {
+    if (pulling) return;
     setPulling(true);
     try { await stockSync.retryNow(); } finally { setPulling(false); }
   }

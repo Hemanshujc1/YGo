@@ -33,6 +33,7 @@ vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.acc
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open,
   legacyOpeningStock: { getAllKeys: () => [] } }));
 import StockScreen from "../src/app/stock";
+import { stockSync } from "../src/lib/stock-sync";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
 const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
@@ -212,5 +213,28 @@ describe("minimal Stock screen", () => {
     mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } });
     press("Retry sync"); await settle();
     expect(elements(render()).some((node) => node.props.label === "Retry sync")).toBe(false);
+  });
+
+  it("shows Retry sync after a halted pass and the button runs the manual retry", async () => {
+    render(); await settle();
+    mock.stock.mockResolvedValue({ ok: false, status: 403, code: "FORBIDDEN" });
+    pull(); await settle();
+    expect(stockSync.get().outcome).toBe("halt");
+    const retryNow = vi.spyOn(stockSync, "retryNow");
+    press("Retry sync"); await settle();
+    expect(retryNow).toHaveBeenCalledOnce();
+  });
+
+  it("runs one pass for repeated pulls and a pull during a running pass", async () => {
+    render(); await settle();
+    let finish: (value: unknown) => void = () => undefined;
+    mock.stock.mockClear();
+    mock.stock.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    pull(); pull(); pull(); await settle();
+    expect(mock.stock).toHaveBeenCalledOnce();
+    expect(stockSync.get().running).toBe(true);
+    finish({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } }); await settle();
+    expect(stockSync.get().running).toBe(false);
+    expect(elements(render()).find((node) => node.props.refreshControl)?.props.refreshControl).toMatchObject({ props: { refreshing: false } });
   });
 });
