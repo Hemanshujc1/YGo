@@ -9,6 +9,8 @@ declare module "vitest" {
   export interface ProvidedContext {
     /** The fresh, migrated database this run's tests use. */
     databaseUrl: string;
+    /** The migrated database every test database is copied from; nothing connects to it. */
+    templateDatabase: string;
   }
 }
 
@@ -28,11 +30,22 @@ async function withClient<T>(url: URL, work: (client: pg.Client) => Promise<T>):
   }
 }
 
-/** One database per test run, created with the migrations applied and dropped at the end. */
+/**
+ * Migrates one template database per run. Each test then copies it
+ * (`createTestDatabase`) in place of running every migration again; the run's
+ * own database is a copy too.
+ */
 export default async function setup(project: TestProject) {
-  const name = `ygo_test_${randomUUID().replaceAll("-", "")}`;
+  const id = randomUUID().replaceAll("-", "");
+  const template = `ygo_template_${id}`;
+  const name = `ygo_test_${id}`;
+  const teardown = () =>
+    withClient(serverUrl, async (admin) => {
+      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await admin.query(`DROP DATABASE IF EXISTS ${template} WITH (FORCE)`);
+    });
   try {
-    await withClient(serverUrl, (admin) => admin.query(`CREATE DATABASE ${name}`));
+    await withClient(serverUrl, (admin) => admin.query(`CREATE DATABASE ${template}`));
   } catch (err) {
     const { code, message } = err as { code?: string; message?: string };
     const down = code === "ECONNREFUSED" || code === "ENOTFOUND" || /timeout/i.test(message ?? "");
@@ -45,24 +58,23 @@ export default async function setup(project: TestProject) {
     );
   }
 
-  const url = new URL(serverUrl);
-  url.pathname = `/${name}`;
-  const teardown = () =>
-    withClient(serverUrl, (admin) => admin.query(`DROP DATABASE ${name} WITH (FORCE)`));
-
   try {
-    await withClient(url, (client) =>
+    const templateUrl = new URL(serverUrl);
+    templateUrl.pathname = `/${template}`;
+    await withClient(templateUrl, (client) =>
       migrate(drizzle({ client }), {
         migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
       }),
     );
+    await withClient(serverUrl, (admin) => admin.query(`CREATE DATABASE ${name} TEMPLATE ${template}`));
   } catch (err) {
     await teardown();
     throw err;
   }
 
+  const url = new URL(serverUrl);
+  url.pathname = `/${name}`;
   project.provide("databaseUrl", url.href);
-  return async () => {
-    await teardown();
-  };
+  project.provide("templateDatabase", template);
+  return teardown;
 }

@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
@@ -9,6 +6,7 @@ import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase, withTransaction } from "../src/db";
+import { createTestDatabase } from "./test-database";
 
 const rootUrl = inject("databaseUrl");
 const secret = "01234567890123456789012345678901";
@@ -20,18 +18,7 @@ let app: ReturnType<typeof buildApp>;
 
 beforeEach(async () => {
   name = `ygo_shops_${randomUUID().replaceAll("-", "")}`;
-  const root = new pg.Client({ connectionString: rootUrl });
-  await root.connect();
-  try { await root.query(`CREATE DATABASE ${name}`); } finally { await root.end(); }
-  const url = new URL(rootUrl);
-  url.pathname = `/${name}`;
-  const migrationClient = new pg.Client({ connectionString: url.href });
-  try {
-    await migrationClient.connect();
-    await migrate(drizzle({ client: migrationClient }), {
-      migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
-    });
-  } finally { await migrationClient.end(); }
+  const url = await createTestDatabase(name);
   database = connectDatabase(url.href);
   await bootstrapAdmin(database.pool, { email: "admin@example.com", name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));

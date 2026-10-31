@@ -4,9 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
@@ -15,6 +12,7 @@ import { buildApp } from "../src/app";
 import { BOOTSTRAP_REASON, bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 import { accessToken, deriveKeys } from "../src/tokens";
+import { createTestDatabase } from "./test-database";
 
 const run = promisify(execFile);
 const databaseUrl = inject("databaseUrl");
@@ -34,25 +32,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   isolatedDatabaseName = `ygo_admin_${randomUUID().replaceAll("-", "")}`;
-  const root = new pg.Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
-  await root.connect();
-  try {
-    await root.query(`CREATE DATABASE ${isolatedDatabaseName}`);
-  } finally {
-    await root.end();
-  }
-  const url = new URL(databaseUrl);
-  url.pathname = `/${isolatedDatabaseName}`;
-  isolatedDatabaseUrl = url.href;
-  const migrationClient = new pg.Client({ connectionString: isolatedDatabaseUrl, connectionTimeoutMillis: 5_000 });
-  try {
-    await migrationClient.connect();
-    await migrate(drizzle({ client: migrationClient }), {
-      migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
-    });
-  } finally {
-    await migrationClient.end();
-  }
+  isolatedDatabaseUrl = (await createTestDatabase(isolatedDatabaseName)).href;
   isolatedDatabase = connectDatabase(isolatedDatabaseUrl);
 });
 afterEach(async () => {
