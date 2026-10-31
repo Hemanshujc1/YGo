@@ -6,6 +6,8 @@ import { withTransaction } from "../db";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { applyOpeningStock, applyOpeningStockCorrection, catalogSql } from "./shop-listings";
 
+const openingTypes = new Set(["opening_stock", "opening_stock_correction"]);
+
 type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number };
 
 export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds }: Options) {
@@ -84,7 +86,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
         // Access is checked even for replays; neither an ID nor a device grants shop access.
         const shop = await client.query<{ state: string; role: string }>(`SELECT s.state, m.role FROM shops s JOIN shop_members m ON m.shop_id = s.id
           WHERE s.id = $1 AND m.account_id = $2 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [action.shopId, who.accountId]);
-        if (!shop.rows[0] || ((action.type === "opening_stock" || action.type === "opening_stock_correction") && shop.rows[0].role !== "owner")) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        if (!shop.rows[0] || (openingTypes.has(action.type) && shop.rows[0].role !== "owner")) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         const clockSuspect = action.clockSuspect || Math.abs(now.getTime() - Date.parse(body.sentAt)) > clockSkewSeconds * 1000
           || Date.parse(action.createdAt) > Date.parse(body.sentAt) + clockSkewSeconds * 1000;
         const result: SyncActionResult = { actionId: action.id, sequence: action.sequence, status: "retry", code: null, result: null, clockSuspect };
@@ -117,7 +119,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
             }
           }
         } else if (shop.rows[0].role !== "owner") result.code = "NOT_FOUND";
-        else if ((action.type !== "opening_stock" && action.type !== "opening_stock_correction") || !payload.success) result.code = "VALIDATION_FAILED";
+        else if (!openingTypes.has(action.type) || !payload.success) result.code = "VALIDATION_FAILED";
         else if (shop.rows[0].state !== "approved" && shop.rows[0].state !== "live") result.code = "SHOP_LISTING_NOT_READY";
         else {
           // A legacy endpoint's lost response remains replayable even after the age bound.

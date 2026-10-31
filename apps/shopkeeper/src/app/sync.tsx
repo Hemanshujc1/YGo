@@ -52,7 +52,7 @@ export default function SyncScreen() {
   function card(row: QueueRow, section: keyof Data["overview"]) {
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
-    const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : words.opening(amount ?? "");
+    const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");
     const code = SyncActionCode.safeParse(row.code);
     return <View key={row.id} className="gap-1 rounded-card border border-border bg-surface p-4">
       <Text className="text-headline font-semibold text-text">{label ? `${label.name} · ${trimDecimal(label.packQuantity)} ${label.baseUnit}` : words.unknownProduct}</Text>

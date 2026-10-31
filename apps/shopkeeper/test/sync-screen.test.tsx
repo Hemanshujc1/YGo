@@ -78,6 +78,16 @@ describe("S08 Waiting to sync (#395)", () => {
     expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
   });
 
+  it("names a correction as one and sends a refused one to Opening stock (#460)", async () => {
+    queue.saveCorrection(shopId, dal, "4");
+    const batch = queue.batch(shopId);
+    queue.acknowledge(batch, { results: [{ actionId: batch.actions[0]?.id ?? "", sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] });
+    render(); await settle();
+    expect(texts()).toContain("Needs attention · 1");
+    expect(texts()).toContain("Opening stock correction to 4 kg");
+    expect(linkTo("Fix in Opening stock")).toBe("/opening-stock");
+  });
+
   it("says changes stay on the phone after a failed pass, retries on request, and goes back to Stock offline", async () => {
     mock.status = { running: false, outcome: "retry", failures: 2 }; mock.view = { mode: "offline" };
     render(); await settle();

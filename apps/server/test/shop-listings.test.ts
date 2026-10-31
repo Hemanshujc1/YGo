@@ -728,7 +728,11 @@ describe("opening-stock correction sync (#452)", () => {
     expect(stamps.rows).toHaveLength(1);
     const retry = (id: string, quantity: string) => app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock-correction`,
       headers: actor.headers, payload: { quantity, clientId: id } });
-    expect((await retry(first.id, "7")).statusCode).toBe(200);
+    expect(sent.json().results.slice(1).map((row: { result: { quantity: string } }) => row.result.quantity)).toEqual(["7.000", "9.000"]);
+    // A retry answers with the total it set, not the total after the later correction (#460).
+    const again = await retry(first.id, "7");
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ quantity: "7.000" });
     expect((await retry(second.id, "9")).statusCode).toBe(200);
     expect((await retry(first.id, "9")).statusCode).toBe(400);
     expect((await retry(second.id, "7")).statusCode).toBe(400);

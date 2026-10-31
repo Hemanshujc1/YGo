@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   get: vi.fn(), open: vi.fn(), importLegacy: vi.fn(), set: vi.fn(),
   application: vi.fn(), listings: vi.fn(), opening: vi.fn(), pending: vi.fn(),
-  failed: vi.fn(), batch: vi.fn(), attempted: vi.fn(), acknowledge: vi.fn(), save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(), saveCorrection: vi.fn(), correctionWaiting: vi.fn(),
-  state: [] as unknown[], cursor: 0, mounted: false,
+  failed: vi.fn(), batch: vi.fn(), attempted: vi.fn(), acknowledge: vi.fn(), save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(), saveCorrection: vi.fn(), corrections: vi.fn(),
+  state: [] as unknown[], cursor: 0, effect: 0, effects: [] as Array<{ deps: unknown[]; cleanup?: unknown }>,
 }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
@@ -15,7 +15,13 @@ vi.mock("react", () => ({
       mock.state[index] = typeof value === "function" ? value(mock.state[index]) : value;
     }];
   },
-  useEffect: (effect: () => void) => { if (!mock.mounted) { mock.mounted = true; effect(); } },
+  // Runs an effect again only when its dependencies change, after the previous one's cleanup.
+  useEffect: (effect: () => unknown, deps: unknown[]) => {
+    const index = mock.effect++, before = mock.effects[index];
+    if (before && deps.every((value, i) => Object.is(value, before.deps[i]))) return;
+    if (typeof before?.cleanup === "function") before.cleanup();
+    mock.effects[index] = { deps, cleanup: effect() };
+  },
 }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text", SupportEmail: "SupportEmail" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
@@ -34,13 +40,14 @@ vi.mock("../src/lib/opening-stock-database", () => ({
 }));
 
 import OpeningStockScreen from "../src/app/opening-stock";
+import { stockSync } from "../src/lib/stock-sync";
 import { strings } from "../src/strings";
 
 const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
 const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: { id: entry.clientId }, openingStockRecorded: false, stock: "0", held: "0" };
 const listings = { ok: true, data: { items: [item] } };
-const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions, saveCorrection: mock.saveCorrection, correctionWaiting: mock.correctionWaiting };
-function render() { mock.cursor = 0; return OpeningStockScreen(); }
+const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions, saveCorrection: mock.saveCorrection, corrections: mock.corrections };
+function render() { mock.cursor = 0; mock.effect = 0; return OpeningStockScreen(); }
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); }
 function switchAccount() {
   mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-2" } });
@@ -61,7 +68,9 @@ function press(label: string) {
 
 describe("opening-stock account boundary", () => {
   beforeEach(() => {
-    vi.resetAllMocks(); mock.state = []; mock.cursor = 0; mock.mounted = false;
+    for (const { cleanup } of mock.effects) if (typeof cleanup === "function") cleanup();
+    vi.resetAllMocks(); mock.state = []; mock.cursor = 0; mock.effects = [];
+    mock.corrections.mockReturnValue({});
     mock.get.mockReturnValue({ status: "signed-in", account: { id: "account-1" } });
     mock.application.mockResolvedValue({ ok: true, data: { application: { id: "shop-1" } } });
     mock.listings.mockResolvedValue(listings);
@@ -82,12 +91,14 @@ describe("opening-stock account boundary", () => {
     const box = () => elements(render()).filter((node) => node.type === "TextInput")[0]?.props ?? {};
     const open = async () => {
       mock.listings.mockResolvedValue({ ok: true, data: { items: [recorded] } });
-      mock.correctionWaiting.mockReturnValue(null);
       render(); await settle();
       press("Correct opening stock");
     };
 
-    it("opens the box with the recorded count, trims what is typed, and queues the corrected total", async () => {
+    const lines = () => elements(render()).map((node) => [node.props.children].flat().join(""));
+    const correction = (status: string, quantity: string, code: string | null = null) => ({ "pack-1": { id: "correction-1", status, quantity, code } });
+
+    it("opens the box with the recorded count, trims what is typed, queues the corrected total and fetches the new figures once it syncs", async () => {
       await open();
       expect(box().value).toBe("10");
       (box().onChangeText as (value: string) => void)("8.250");
@@ -98,10 +109,14 @@ describe("opening-stock account boundary", () => {
       mock.opening.mockResolvedValue({ ok: true, data: { results: [{ actionId: "correction-1", sequence: 1, status: "applied", code: null,
         result: { listingId: entry.clientId, quantity: "8.250", recordedAt: new Date().toISOString() }, clockSuspect: false }] } });
       mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...recorded, stock: "8.250", openingStock: "8.250" }] } });
-      press("Save correction"); await settle();
+      mock.saveCorrection.mockImplementation(() => { mock.corrections.mockReturnValue(correction("pending", "8.25")); return { id: "correction-1" }; });
+      mock.acknowledge.mockImplementation(() => mock.corrections.mockReturnValue(correction("applied", "8.25")));
+      press("Save correction"); await settle(); await settle();
       expect(mock.saveCorrection).toHaveBeenCalledWith("shop-1", "pack-1", "8.25");
-      const texts = elements(render()).map((node) => [node.props.children].flat().join(""));
+      const texts = lines();
       expect(texts).toContain("Opening stock corrected.");
+      expect(texts).toContain("Saved. 8.25 kg left");
+      expect(mock.listings).toHaveBeenCalledTimes(2);
       expect(elements(render()).filter((node) => node.type === "TextInput")).toHaveLength(0);
     });
 
@@ -111,12 +126,57 @@ describe("opening-stock account boundary", () => {
       mock.saveCorrection.mockReturnValue({ id: "correction-1" });
       mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [] });
       press("Save correction"); await settle();
-      mock.correctionWaiting.mockReturnValue("8");
-      expect(elements(render()).map((node) => [node.props.children].flat().join(""))).toContain("Correction to 8 kg is waiting to sync.");
-      mock.saveCorrection.mockReturnValue("queueFull");
+      mock.corrections.mockReturnValue(correction("pending", "8"));
+      expect(lines()).toContain("Correction to 8 kg is waiting to sync.");
+      // Correct again starts from the total still waiting, not the synced one (#460).
       press("Correct opening stock");
+      expect(box().value).toBe("8");
+      mock.saveCorrection.mockReturnValue("queueFull");
       press("Save correction"); await settle();
-      expect(elements(render()).map((node) => [node.props.children].flat().join(""))).toContain(strings.stock.queueFull);
+      expect(lines()).toContain(strings.stock.queueFull);
+    });
+
+    it("shows a refused correction on its pack with the reason and reference until a newer one is queued (#460)", async () => {
+      mock.corrections.mockReturnValue(correction("rejected", "4.000", "ACTION_TOO_OLD"));
+      await open();
+      expect(lines()).toContain("Correction to 4 kg wasn't saved: This change waited too long to sync, so the server refused it.");
+      expect(lines()).toContain("Support reference: correction-1");
+      mock.corrections.mockReturnValue(correction("pending", "5"));
+      expect(lines()).not.toContain("Correction to 4 kg wasn't saved: This change waited too long to sync, so the server refused it.");
+    });
+
+    it("fetches a synced correction's figures again after the next pass when the first fetch fails (#460)", async () => {
+      mock.corrections.mockReturnValue(correction("pending", "12"));
+      await open();
+      mock.corrections.mockReturnValue(correction("applied", "12"));
+      mock.listings.mockResolvedValueOnce({ ok: false, code: "UNAVAILABLE" });
+      await stockSync.run(); await settle();
+      expect(lines()).toContain("Saved. 10 kg left");
+      mock.listings.mockResolvedValueOnce({ ok: true, data: { items: [{ ...recorded, stock: "12.000", openingStock: "12.000" }] } });
+      await stockSync.run(); await settle();
+      expect(lines()).toContain("Saved. 12 kg left");
+      await stockSync.run(); await settle();
+      expect(mock.listings).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps a pack's left figure when its correction syncs in the batch of another pack's first count, then fetches it (#460)", async () => {
+      const first = { ...item, packId: "pack-2", name: "Dal", listing: { id: "listing-2" } };
+      mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...recorded, stock: "6.000", held: "4.000" }, first] } });
+      mock.corrections.mockReturnValue(correction("pending", "12"));
+      render(); await settle();
+      mock.pending.mockImplementation((_shop: string, pack: string) => pack === "pack-2" ? entry : null);
+      mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [{ id: "correction-1", sequence: 1 }, { id: entry.clientId, sequence: 2 }] });
+      mock.opening.mockResolvedValue({ ok: true, data: { results: [
+        { actionId: "correction-1", sequence: 1, status: "applied", code: null, result: { listingId: entry.clientId, quantity: "12.000", recordedAt: new Date().toISOString() }, clockSuspect: false },
+        { actionId: entry.clientId, sequence: 2, status: "applied", code: null, result: { listingId: "listing-2", quantity: "2.5", recordedAt: new Date().toISOString() }, clockSuspect: false }] } });
+      let release: () => void = () => undefined;
+      mock.listings.mockImplementation(() => new Promise((resolve) => { release = () => resolve({ ok: true, data: { items: [{ ...recorded, stock: "8.000", held: "4.000", openingStock: "12.000" }] } }); }));
+      mock.acknowledge.mockImplementation(() => mock.corrections.mockReturnValue(correction("applied", "12")));
+      press("Save opening stock"); await settle();
+      expect(lines()).toContain("Saved. 6 kg left · 4 kg held for orders");
+      expect(lines()).toContain("Saved. 2.5 kg left");
+      release(); await settle();
+      expect(lines()).toContain("Saved. 8 kg left · 4 kg held for orders");
     });
 
     it("refuses an empty total without queueing", async () => {
