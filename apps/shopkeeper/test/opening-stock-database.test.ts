@@ -83,8 +83,11 @@ describe("opening-stock native boundary", () => {
   it("counts all unsynced records for sign-out, including malformed imports; isolates accounts", async () => {
     native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
     native.legacy.set(`opening:${shop}:bad`, "broken");
+    const unrelatedShop = "00000000-0000-4000-8000-000000000099";
+    native.legacy.set(`opening:${unrelatedShop}:${pack}`, JSON.stringify(entry));
     const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
     expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
+    expect(native.legacy.get(`opening:${unrelatedShop}:${pack}`)).toBe(JSON.stringify(entry));
     expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
     expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
   });
@@ -96,11 +99,12 @@ describe("opening-stock native boundary", () => {
     expect(native.legacy.size).toBe(1);
   });
 
-  it("keeps legacy records protected when access confirms no current shop", async () => {
+  it("allows sign-out after confirmed unlink while preserving unscoped legacy records", async () => {
     native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
+    native.legacy.set(`opening:${"00000000-0000-4000-8000-000000000099"}:${pack}`, JSON.stringify(entry));
     const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
-    await expect(openingStockBeforeSignOut(account, null)).rejects.toThrow("Verify the shop");
-    expect(native.legacy.size).toBe(1);
+    await expect(openingStockBeforeSignOut(account, null)).resolves.toEqual({ pending: 0, failed: 0 });
+    expect(native.legacy.size).toBe(2);
   });
 
 it("counts durable manual flags before sign-out without reading another account's database", async () => {
