@@ -229,6 +229,7 @@ export const strings = {
       ACTION_TOO_OLD: "This change waited too long to sync, so the server refused it.",
       SEQUENCE_MISSING: "An earlier change from this phone hasn't arrived yet.",
       ACTION_CONFLICT: "This change clashes with one the server already has.",
+      SHOP_NOT_BILLING: "Counter billing is open only while your shop is Live or Suspended.",
     } satisfies Record<SyncActionCode, string>,
   },
   // S04 and S05 (#431): a Live or Suspended shop answers its orders.

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShopState } from "./shops";
-import { PackQuantity } from "./fields";
+import { BillAmount, PackQuantity, ShopPrice } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
 /** Explicit access result: only an authenticated absence/closure ends cached access. */
@@ -26,6 +26,32 @@ export const SyncChangesResponse = z.strictObject({
 }).refine((page) => page.cursor.startsWith(`${page.shopId}:`));
 export type SyncChangesResponse = z.infer<typeof SyncChangesResponse>;
 export type ShopStockResponse = z.infer<typeof ShopStockResponse>;
+/**
+ * A counter bill made on the phone (#51, BIL-1, BIL-9): whole packs only for now, each line at the unit price
+ * the phone showed. Amounts are rupees with at most two decimals, so whole paise, like every money field.
+ */
+export const CounterBillLine = z.strictObject({ packId: z.uuid(), count: z.number().int().positive().max(9999), unitPrice: ShopPrice });
+export const CounterBillPayload = z.strictObject({
+  lines: z.array(CounterBillLine).min(1).max(100).refine((lines) => new Set(lines.map((line) => line.packId)).size === lines.length),
+  total: BillAmount,
+  payment: z.enum(["cash", "upi"]),
+});
+export type CounterBillLine = z.infer<typeof CounterBillLine>;
+export type CounterBillPayload = z.infer<typeof CounterBillPayload>;
+/** Why the server kept a bill without a number; Admin resolves it (BIL-5). */
+export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old", "invalid"]);
+export const CounterBillResponse = z.strictObject({
+  billId: z.uuid(), reference: z.string().regex(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: z.number().int().positive().nullable(),
+  heldReason: CounterBillHeldReason.nullable(), totalMismatch: z.boolean(), recordedAt: z.iso.datetime(),
+}).refine((bill) => (bill.number === null) === (bill.heldReason !== null));
+export type CounterBillResponse = z.infer<typeof CounterBillResponse>;
+
+/** The permanent bill reference (BIL-5): the first eight hex digits of the bill's action id, "0F3A-91BC". */
+export function counterBillReference(actionId: string): string {
+  const hex = actionId.replaceAll("-", "").toUpperCase();
+  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}`;
+}
+
 export const SyncAction = z.strictObject({
   id: z.uuid(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), shopId: z.uuid(),
   type: z.string().min(1).max(80), payload: z.unknown(), createdAt: z.iso.datetime(), clockSuspect: z.boolean(),
@@ -35,12 +61,12 @@ export const SyncActionsBody = z.strictObject({
 });
 export const SyncActionCode = z.enum([
   "VALIDATION_FAILED", "NOT_FOUND", "SHOP_LISTING_NOT_READY", "OPENING_STOCK_ALREADY_RECORDED",
-  "OPENING_STOCK_NOT_RECORDED", "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT",
+  "OPENING_STOCK_NOT_RECORDED", "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT", "SHOP_NOT_BILLING",
 ]);
 export type SyncActionCode = z.infer<typeof SyncActionCode>;
 export const SyncActionResult = z.strictObject({
   actionId: z.uuid(), sequence: z.number().int().positive(), status: z.enum(["applied", "rejected", "retry"]),
-  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse]).nullable(), clockSuspect: z.boolean(),
+  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse, CounterBillResponse]).nullable(), clockSuspect: z.boolean(),
 }).refine((row) => row.status === "applied" ? row.code === null && row.result !== null : row.code !== null && row.result === null);
 export const SyncActionsResponse = z.strictObject({ results: z.array(SyncActionResult) });
 export type SyncAction = z.infer<typeof SyncAction>;
