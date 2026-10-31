@@ -45,3 +45,7 @@ describe("waiting (#363)", () => {
 it("keeps completed onboarding steps done for a suspended shop", () => {
   expect(marks("suspended")).toEqual(marks("live"));
 });
+
+it("keeps historical onboarding steps complete for a closed shop", () => {
+  expect(marks("closed")).toEqual(marks("live"));
+});

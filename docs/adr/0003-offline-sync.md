@@ -75,3 +75,7 @@ This record says an offline bill "carries a provisional number" which the server
 A bill shared before sync shows the reference and "number pending". A quarantined bill has no number until it is resolved. Replaying an action returns the same number. Numbers follow the order in which bills reach the server, so two devices syncing in either order leave an unbroken sequence but not necessarily the same number on the same bill.
 
 Everything else in this record stands.
+
+## Amendment, 31 Oct 2026: confirmed access loss erases the device copy
+
+The owner explicitly accepted one exception to never discarding queued work (#48, round 1; #394): after an authenticated check confirms unlinking or shop closure, erase that account's local database and encryption key, including pending actions, and explain what could not be sent. Network failure and session expiry do not establish lost shop access. Failed erasure blocks reopening across restarts and offers retry and support. Voluntary sign-out still blocks unacknowledged work; acknowledged permanent failures require a warning and remain encrypted for the same account.

@@ -27,6 +27,7 @@ type SessionGateProps = {
   words: SessionGateWords;
   /** The app, shown once signed in with a name and phone. */
   children: ReactNode;
+  profileSignOut?: ReactNode;
 };
 
 /**
@@ -35,7 +36,7 @@ type SessionGateProps = {
  * waits, C01 and C14 while signed out, C02 until the name and phone are
  * saved, "Can't reach YGo" when no answer came, and the app once signed in.
  */
-export function SessionGate({ session, api, supportEmail, words, children, identity }: SessionGateProps) {
+export function SessionGate({ session, api, supportEmail, words, children, identity, profileSignOut }: SessionGateProps) {
   const state = useSession(session);
 
   // Once per launch: a remount (Fast Refresh) never sends the person back to the blank screen.
@@ -65,6 +66,7 @@ export function SessionGate({ session, api, supportEmail, words, children, ident
           api={api}
           onSaved={session.signedIn}
           onSignOut={session.signOut}
+          signOutControl={profileSignOut}
         />
       );
     case "unreachable":

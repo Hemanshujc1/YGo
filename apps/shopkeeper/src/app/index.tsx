@@ -99,7 +99,7 @@ export default function Home() {
   if (application) {
     const answersOrders = application.state === "live" || application.state === "suspended";
     return (
-      <Plain stock={answersOrders} orders={answersOrders} verifiedShopId={application.id} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+      <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
         {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
@@ -134,7 +134,7 @@ export default function Home() {
   }
 
   return (
-    <Plain stock verifiedShopId={null}>
+    <Plain stock>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">
         {words.start.title}
       </Text>
@@ -172,7 +172,7 @@ function Waiting({ check }: { check: LiveCheck }) {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock = false, orders = false }: { stock?: boolean; orders?: boolean; verifiedShopId?: string | null; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+function Plain({ children, refreshing = false, onRefresh, stock = false, orders = false }: { stock?: boolean; orders?: boolean; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
@@ -196,7 +196,7 @@ function Plain({ children, refreshing = false, onRefresh, verifiedShopId, stock 
       </Link>}
       <View className="mt-8 gap-8">
         <ThemePicker session={session} words={strings.theme} />
-        <SignOut verifiedShopId={verifiedShopId} />
+        <SignOut />
       </View>
     </ScrollView>
   );

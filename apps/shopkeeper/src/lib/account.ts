@@ -1,6 +1,6 @@
-import { session } from "../api";
+import { accountEpoch, session } from "../api";
 
-export function isCurrentAccount(accountId: string): boolean {
+export function isCurrentAccount(accountId: string, epoch?: number): boolean {
   const current = session.get();
-  return "account" in current && current.account.id === accountId;
+  return (epoch === undefined || epoch === accountEpoch()) && "account" in current && current.account.id === accountId;
 }

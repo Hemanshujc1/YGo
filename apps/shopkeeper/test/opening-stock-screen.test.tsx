@@ -22,6 +22,7 @@ vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Press
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({
+  accountEpoch: () => 0,
   session: { get: mock.get }, supportEmail: "help@example.com",
   api: { shopApplication: mock.application, shopListings: mock.listings, syncActions: mock.opening },
 }));

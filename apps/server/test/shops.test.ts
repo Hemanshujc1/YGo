@@ -307,6 +307,23 @@ describe("shop application, Admin", () => {
   const move = (headers: Record<string, string>, id: string, step: string) => app.inject({ method: "POST", url: `${url}/${id}/${step}`, headers });
   const correct = (headers: Record<string, string>, id: string, payload: object) => app.inject({ method: "PATCH", url: `${url}/${id}`, headers, payload });
 
+  it("keeps Admin list/detail and Owner responses readable after closure", async () => {
+    await area("411038");
+    const actor = await owner("closed@example.com");
+    const started = (await app.inject({ method: "POST", url: "/v1/me/shop-application", headers: actor.headers })).json();
+    await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers: actor.headers, payload: complete });
+    await database.pool.query("UPDATE shops SET state = 'closed' WHERE id = $1", [started.id]);
+    const sent = await application("other@example.com", true, "+919812345679");
+    const headers = await adminHeaders();
+    const list = await app.inject({ method: "GET", url, headers });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().applications).toEqual(expect.arrayContaining([expect.objectContaining({ id: started.id, state: "closed" }), expect.objectContaining({ id: sent.id, state: "submitted" })]));
+    const detail = await app.inject({ method: "GET", url: `${url}/${started.id}`, headers });
+    expect(detail.statusCode).toBe(200); expect(detail.json().state).toBe("closed");
+    const own = await app.inject({ method: "GET", url: "/v1/me/shop-application", headers: actor.headers });
+    expect(own.statusCode).toBe(200); expect(own.json().application.state).toBe("closed");
+  });
+
   it("refuses signed-out callers and app accounts", async () => {
     const { headers } = await owner("asha@example.com");
     const id = randomUUID();

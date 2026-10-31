@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter } from "./stock-database-fixture";
 
 const native = vi.hoisted(() => ({
-  secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false,
-  cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(),
+  secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false, files: new Set<string>(), flags: new Map<string, string | boolean>(), delete: vi.fn(), drop: vi.fn(),
+  cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(), beforeTransaction: undefined as (() => void) | undefined,
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
-vi.mock("expo-file-system", () => ({ File: class { get exists() { return native.exists; } } }));
-vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set }));
-vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open }));
-vi.mock("react-native-mmkv", () => ({ createMMKV: () => ({
+vi.mock("expo-file-system", () => ({ File: class { constructor(_directory: string, private name: string) {} get exists() { return native.exists || native.files.has(this.name); } } }));
+vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set, deleteItemAsync: native.delete }));
+vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open, deleteDatabaseAsync: native.drop }));
+vi.mock("react-native-mmkv", () => ({ createMMKV: ({ id }: { id: string }) => id === "shop-offline-access" ? { getString: (key: string) => native.flags.get(key), getBoolean: (key: string) => native.flags.get(key), set: (key: string, value: string | boolean) => native.flags.set(key, value), remove: (key: string) => native.flags.delete(key) } : ({
   getAllKeys: () => [...native.legacy.keys()], getString: (key: string) => native.legacy.get(key), remove: (key: string) => native.legacy.delete(key),
 }) }));
 
@@ -21,16 +21,23 @@ const entry = { quantity: "2", clientId: "00000000-0000-4000-8000-000000000004" 
 
 describe("opening-stock native boundary", () => {
   const databases: DatabaseSync[] = [];
-  beforeEach(() => {
-    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.exists = false; native.cipher = "4.0";
+  beforeEach(async () => {
+    vi.resetModules(); vi.clearAllMocks(); native.secrets.clear(); native.legacy.clear(); native.flags.clear(); native.files.clear(); native.beforeTransaction = undefined;
+    native.delete.mockImplementation(async (key: string) => { native.secrets.delete(key); }); native.drop.mockImplementation(async (name: string) => { if (!native.files.delete(name)) throw new Error("DatabaseNotFoundException"); }); native.exists = false; native.cipher = "4.0";
     native.get.mockImplementation(async (key: string) => native.secrets.get(key) ?? null);
     native.set.mockImplementation(async (key: string, value: string) => { native.secrets.set(key, value); });
     native.random.mockResolvedValue(new Uint8Array(32).fill(7));
     native.exec.mockResolvedValue(undefined);
-    native.open.mockImplementation(async () => {
+    native.open.mockImplementation(async (name: string) => {
+      native.files.add(name);
       const db = new DatabaseSync(":memory:"); databases.push(db);
-      return { ...adapter(db), getFirstAsync: async () => native.cipher ? { cipher_version: native.cipher } : null, execAsync: native.exec, closeAsync: native.close };
+      const adapted = adapter(db);
+      return { ...adapted, withTransactionSync: (work: () => void) => {
+        const hook = native.beforeTransaction; native.beforeTransaction = undefined; hook?.();
+        adapted.withTransactionSync(work);
+      }, getFirstAsync: async () => native.cipher ? { cipher_version: native.cipher } : null, execAsync: native.exec, closeAsync: native.close };
     });
+    await import("../src/lib/opening-stock-database");
   });
   afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 
@@ -76,8 +83,11 @@ describe("opening-stock native boundary", () => {
   it("counts all unsynced records for sign-out, including malformed imports; isolates accounts", async () => {
     native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
     native.legacy.set(`opening:${shop}:bad`, "broken");
+    const unrelatedShop = "00000000-0000-4000-8000-000000000099";
+    native.legacy.set(`opening:${unrelatedShop}:${pack}`, JSON.stringify(entry));
     const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
     expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
+    expect(native.legacy.get(`opening:${unrelatedShop}:${pack}`)).toBe(JSON.stringify(entry));
     expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
     expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 2, failed: 0 });
   });
@@ -89,12 +99,103 @@ describe("opening-stock native boundary", () => {
     expect(native.legacy.size).toBe(1);
   });
 
+  it("allows sign-out after confirmed unlink while preserving unscoped legacy records", async () => {
+    native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
+    native.legacy.set(`opening:${"00000000-0000-4000-8000-000000000099"}:${pack}`, JSON.stringify(entry));
+    const { openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
+    await expect(openingStockBeforeSignOut(account, null)).resolves.toEqual({ pending: 0, failed: 0 });
+    expect(native.legacy.size).toBe(2);
+  });
+
 it("counts durable manual flags before sign-out without reading another account's database", async () => {
   const { openOpeningStock, openingStockBeforeSignOut } = await import("../src/lib/opening-stock-database");
   const queue = await openOpeningStock(account);
   queue.saveFlag(shop, pack, true);
   expect(await openingStockBeforeSignOut(account, shop)).toEqual({ pending: 1, failed: 0, stockPending: 1 });
   expect(await openingStockBeforeSignOut("other-account", null)).toEqual({ pending: 0, failed: 0 });
+});
+
+
+it("invalidates handles and erases the account database/key even while actions and a response remain pending", async () => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  const { syncOpeningStockBatch } = await import("../src/lib/opening-stock-queue");
+  const queue = await openOpeningStock(account); queue.saveFlag(shop, pack, true);
+  let answer!: (value: { ok: true; data: { results: [] } }) => void;
+  const flight = syncOpeningStockBatch(queue, shop, () => new Promise((resolve) => { answer = resolve; }));
+  native.legacy.set(`opening:${shop}:${pack}`, JSON.stringify(entry));
+  await offlineStorage.erase(account, shop);
+  answer({ ok: true, data: { results: [] } }); expect(await flight).toBeNull();
+  expect(() => queue.count()).toThrow("unavailable");
+  expect(native.close).toHaveBeenCalled(); expect(native.drop).toHaveBeenCalledWith(`opening-stock-${account}.db`);
+  expect(native.delete).toHaveBeenCalledWith(`opening-stock-${account}`, { keychainAccessible: 1 });
+  expect(native.legacy.size).toBe(0);
+});
+
+it.each(["file", "key"])("keeps the durable block through %s deletion failure and retries after a module restart", async (failure) => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  (failure === "file" ? native.drop : native.delete).mockRejectedValueOnce(new Error("busy"));
+  await expect(offlineStorage.erase(account, shop)).rejects.toThrow("busy");
+  vi.resetModules();
+  const restarted = await import("../src/lib/opening-stock-database");
+  expect(restarted.offlineStorage.blocked(account)).toBe(shop);
+  await expect(restarted.openOpeningStock(account)).rejects.toThrow("cleanup");
+  await restarted.offlineStorage.erase(account, shop);
+  expect(restarted.offlineStorage.blocked(account)).toBeUndefined();
+});
+
+it("keeps cleanup blocked until a failed native close can be retried", async () => {
+  const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  native.close.mockRejectedValueOnce(new Error("native close busy"));
+  await expect(offlineStorage.erase(account, shop)).rejects.toThrow("native close busy");
+  expect(offlineStorage.blocked(account)).toBe(shop);
+  await expect(openOpeningStock(account)).rejects.toThrow("cleanup");
+  await offlineStorage.erase(account, shop);
+  expect(offlineStorage.blocked(account)).toBeUndefined();
+});
+
+it("does not recreate a key or database when signing out after completed erasure", async () => {
+  const { offlineStorage, openingStockBeforeSignOut, openOpeningStock } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account); await offlineStorage.erase(account, shop);
+  native.open.mockClear(); native.set.mockClear();
+  expect(await openingStockBeforeSignOut(account, null)).toEqual({ pending: 0, failed: 0 });
+  expect(native.open).not.toHaveBeenCalled(); expect(native.set).not.toHaveBeenCalled();
+});
+it("completes access erasure even when Stock has never created a database", async () => {
+  const { offlineStorage } = await import("../src/lib/opening-stock-database");
+  await offlineStorage.erase(account, shop);
+  expect(native.drop).not.toHaveBeenCalled(); expect(offlineStorage.blocked(account)).toBeUndefined();
+});
+
+it("shares concurrent close requests and invalidates the handle before native close finishes", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  const queue = await openOpeningStock(account);
+  let finish!: () => void; native.close.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const first = closeOpeningStock(account), second = closeOpeningStock(account); await Promise.resolve(); await Promise.resolve();
+  expect(() => queue.count()).toThrow("unavailable"); expect(native.close).toHaveBeenCalledTimes(1);
+  finish(); await Promise.all([first, second]);
+});
+
+it("recovers from a native close failure before reopening the encrypted database", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  await openOpeningStock(account);
+  native.close.mockRejectedValueOnce(new Error("native close busy"));
+  await expect(closeOpeningStock(account)).rejects.toThrow("native close busy");
+  const reopened = await openOpeningStock(account);
+  expect(reopened).toBeDefined();
+  expect(native.close).toHaveBeenCalledTimes(2);
+  expect(native.open).toHaveBeenCalledTimes(2);
+});
+
+it("aborts a queued database transaction when account invalidation lands before its writes", async () => {
+  const { openOpeningStock, closeOpeningStock } = await import("../src/lib/opening-stock-database");
+  const queue = await openOpeningStock(account);
+  native.beforeTransaction = () => { void closeOpeningStock(account); };
+  // Invalidation lands after the transaction call begins but before the
+  // transaction callback's guarded database writes.
+  expect(() => queue.saveFlag(shop, pack, true)).toThrow("unavailable");
+  await closeOpeningStock(account);
 });
 
 });

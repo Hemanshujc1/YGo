@@ -1,5 +1,5 @@
 import {
-  ShopStockResponse, SyncChangesResponse,
+  ShopStockResponse, SyncAccessResponse, SyncChangesResponse,
   SyncActionsResponse,
   type SyncActionsBody,
   Account,
@@ -503,6 +503,10 @@ export function createApiClient({
     },
 
     /** Shop-scoped durable Stock delta; omit since for the complete projection. */
+    async syncAccess(): Promise<ApiResult<SyncAccessResponse>> {
+      return result(await signedIn("GET", "/v1/sync/access"), SyncAccessResponse);
+    },
+
     async syncChanges(since?: string): Promise<ApiResult<SyncChangesResponse>> {
       return result(await signedIn("GET", `/v1/sync/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`), SyncChangesResponse);
     },

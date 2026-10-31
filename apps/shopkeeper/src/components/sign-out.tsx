@@ -2,7 +2,7 @@ import { Button, Confirm, Text } from "@ygo/mobile";
 import { useRef, useState } from "react";
 import { Link } from "expo-router";
 import { View } from "react-native";
-import { session } from "../api";
+import { access, accountEpoch, session } from "../api";
 import { strings } from "../strings";
 import { openingStockBeforeSignOut } from "../lib/opening-stock-database";
 
@@ -12,8 +12,8 @@ const words = strings.application.signOut;
  * Sign out on the shop application screens until S36 More is built (#294).
  * With changes not yet saved it asks first.
  */
-export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: { unsaved?: boolean; disabled?: boolean; verifiedShopId?: string | null }) {
-  const [failedWarning, setFailedWarning] = useState<string | null>(null);
+export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boolean; disabled?: boolean }) {
+  const [failedWarning, setFailedWarning] = useState<{ accountId: string; epoch: number } | null>(null);
   const [asking, setAsking] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -21,33 +21,40 @@ export function SignOut({ unsaved = false, disabled = false, verifiedShopId }: {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<false | "opening" | "stock">(false);
 
-  async function signOut(acceptedAccount: string | null = null) {
+  async function signOut(accepted: { accountId: string; epoch: number } | null = null) {
     if (working.current) return;
     const before = session.get();
     if (!("account" in before)) return;
+    const epoch = accountEpoch();
     working.current = true;
     setAsking(false);
     setSigningOut(true);
     setMessage(null);
     setPending(false);
     try {
-      const counts = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
+      const verified = await access.verify(before.account);
+      const accessView = access.get();
+      if (accessView.mode === "erasing" || accessView.mode === "signing-out") return;
       const current = session.get();
-      if (!("account" in current) || current.account.id !== before.account.id) return;
+      if (!("account" in current) || current.account.id !== before.account.id || epoch !== accountEpoch()) return;
+      const verifiedShopId = verified ? verified.shopId : accessView.shopId;
+      const counts = await openingStockBeforeSignOut(before.account.id, verifiedShopId);
+      const afterCount = session.get();
+      if (!("account" in afterCount) || afterCount.account.id !== before.account.id || epoch !== accountEpoch()) return;
       if (counts.pending > 0) {
         setMessage(words.pending(counts.pending));
         setPending(counts.stockPending ? "stock" : "opening");
         return;
       }
-      if (counts.failed > 0 && acceptedAccount !== before.account.id) { setFailedWarning(before.account.id); setAsking(true); return; }
+      if (counts.failed > 0 && (accepted?.accountId !== before.account.id || accepted.epoch !== epoch)) { setFailedWarning({ accountId: before.account.id, epoch }); setAsking(true); return; }
       await session.signOut();
     } catch {
       const current = session.get();
-      if ("account" in current && current.account.id === before.account.id) setMessage(words.checkFailed);
+      if ("account" in current && current.account.id === before.account.id && epoch === accountEpoch()) setMessage(words.checkFailed);
     } finally {
       working.current = false;
       const current = session.get();
-      if ("account" in current && current.account.id === before.account.id) setSigningOut(false);
+      if ("account" in current && current.account.id === before.account.id && epoch === accountEpoch()) setSigningOut(false);
     }
   }
 

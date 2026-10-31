@@ -266,6 +266,7 @@ export async function refreshListingsForQueuedConflicts<T extends { packId: stri
 const syncing = new WeakMap<OpeningStockQueue, Promise<SyncActionsResponse | null>>();
 export function syncOpeningStockBatch(queue: OpeningStockQueue, shopId: string,
   send: (body: SyncActionsBody) => Promise<{ ok: true; data: SyncActionsResponse } | { ok: false }>,
+  current = () => true,
 ): Promise<SyncActionsResponse | null> {
   const running = syncing.get(queue);
   if (running) return running;
@@ -274,7 +275,7 @@ export function syncOpeningStockBatch(queue: OpeningStockQueue, shopId: string,
     if (!batch.actions.length) return { results: [] };
     queue.attempted(batch);
     const response = await send(batch);
-    if (!response.ok) return null;
+    if (!response.ok || !current()) return null;
     queue.acknowledge(batch, response.data);
     return response.data;
   })().catch(() => null).finally(() => syncing.delete(queue));

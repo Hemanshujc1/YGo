@@ -174,6 +174,7 @@ describe("ShopApplication", () => {
     expect(MyShopApplicationResponse.parse({ application: null, liveCheck: null })).toEqual({ application: null, liveCheck: null });
     const sent = { ...draft, ...complete, state: "submitted", areaName: "Kothrud", submittedAt: "2026-10-25T10:00:00.000Z" };
     expect(ShopApplication.parse(sent)).toEqual(sent);
+    expect(ShopApplication.parse({ ...sent, state: "closed" }).state).toBe("closed");
   });
 
   it("carries the assigned Area Manager only in the Admin shape (#299)", () => {

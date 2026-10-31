@@ -1,6 +1,8 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
-import { Slot } from "expo-router";
+import { Navigator, Slot } from "expo-router";
 import { api, session, supportEmail } from "../api";
+import { StockAccess } from "../components/stock-access";
+import { SignOut } from "../components/sign-out";
 import { strings } from "../strings";
 import "../global.css";
 
@@ -21,6 +23,7 @@ export default function Layout() {
     >
       <SessionGate
         session={session}
+        profileSignOut={<SignOut />}
         identity={{ googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID, googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
         api={api}
         supportEmail={supportEmail}
@@ -31,7 +34,7 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
-        <Slot />
+        <Navigator><StockAccess><Slot /></StockAccess></Navigator>
       </SessionGate>
     </AppShell>
   );

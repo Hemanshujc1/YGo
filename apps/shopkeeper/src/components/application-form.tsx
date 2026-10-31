@@ -418,7 +418,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
 
         <View className="gap-8 border-t border-border pt-8">
           <ThemePicker session={session} words={strings.theme} />
-          <SignOut verifiedShopId={application.id} unsaved={changed(typed, saved)} disabled={busy} />
+          <SignOut unsaved={changed(typed, saved)} disabled={busy} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -50,6 +50,7 @@ export type ProfileProps = {
    * rejects; C02 only waits for it.
    */
   onSignOut: () => Promise<unknown>;
+  signOutControl?: React.ReactNode;
 };
 
 /**
@@ -58,7 +59,7 @@ export type ProfileProps = {
  * Both boxes start empty: the server saves the name and phone together, and
  * changes a name only once both are set, so an account here has neither.
  */
-export function Profile({ words, supportEmail, api, onSaved, onSignOut }: ProfileProps) {
+export function Profile({ words, supportEmail, api, onSaved, onSignOut, signOutControl }: ProfileProps) {
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -205,13 +206,13 @@ export function Profile({ words, supportEmail, api, onSaved, onSignOut }: Profil
           onPress={() => void save()}
           disabled={busy !== null}
         />
-        <Button
+        {signOutControl ?? <Button
           label={words.signOut}
           onPress={() => void signOut()}
           disabled={busy === "saving"}
           busy={busy === "signing-out"}
           variant="text"
-        />
+        />}
       </View>
     </KeyboardAvoidingView>
   );

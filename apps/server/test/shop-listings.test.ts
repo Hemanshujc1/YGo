@@ -84,6 +84,16 @@ const listingBody = {
 };
 
 describe("Owner shop listings and opening stock", () => {
+  it("does not expose onboarding or Stock operations for a Closed shop", async () => {
+    const actor = await shop("closed");
+    const read = await app.inject({ method: "GET", url: "/v1/me/shop-listings", headers: actor.headers });
+    const save = await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const opening = await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock`, headers: actor.headers, payload: { quantity: "1", clientId: randomUUID() } });
+    const stock = await app.inject({ method: "GET", url: "/v1/me/stock", headers: actor.headers });
+    expect([read.statusCode, save.statusCode, opening.statusCode, stock.statusCode]).toEqual([409, 409, 409, 409]);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM shop_listings WHERE shop_id = $1", [actor.shopId])).rows[0]?.n).toBe(0);
+  });
+
   it("refuses listing and stock setup before Admin approves the shop", async () => {
     const actor = await shop("under_review");
     const listing = await app.inject({ method: "GET", url: "/v1/me/shop-listings", headers: actor.headers });
@@ -353,7 +363,7 @@ describe("manual Stock flags (#392)", () => {
     expect((await send([opening], staff.headers)).statusCode).toBe(404);
   });
 
-  it.each(["draft", "submitted", "under_review", "approved"])("refuses Stock in %s without changing quantities", async (state) => {
+  it.each(["draft", "submitted", "under_review", "approved", "closed"])("refuses Stock in %s without changing quantities", async (state) => {
     const { action, send, read } = await setup(state);
     expect((await read()).statusCode).toBe(409);
     expect((await send([action(1, true)])).json().results[0]).toMatchObject({ status: "rejected", code: "SHOP_LISTING_NOT_READY" });
@@ -372,6 +382,43 @@ describe("manual Stock flags (#392)", () => {
     await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [actor.id]);
     expect((await send(entries)).statusCode).toBe(404);
     expect((await read()).statusCode).toBe(404);
+  });
+});
+
+describe("verified offline shop access", () => {
+  it("distinguishes Live/Suspended/Closed, pre-live, Staff unlink, no shop and session expiry", async () => {
+    const actor = await shop("live"), staff = await owner("staff@example.com");
+    const read = (headers = actor.headers) => app.inject({ method: "GET", url: "/v1/sync/access", headers });
+    await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    for (const state of ["live", "suspended", "approved", "closed"]) {
+      await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [actor.shopId, state]);
+      expect((await read()).json()).toEqual({ shopId: actor.shopId, state });
+      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state });
+    }
+    await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [staff.id]);
+    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null });
+    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null });
+    expect((await app.inject({ method: "GET", url: "/v1/sync/access" })).statusCode).toBe(401);
+    clock.set(new Date("2030-01-02T00:00:00Z"));
+    expect((await read()).statusCode).toBe(401);
+  });
+
+  it("waits for a concurrent membership removal before confirming offline access", async () => {
+    const actor = await shop("live");
+    const removal = await database.pool.connect();
+    try {
+      await removal.query("BEGIN");
+      await removal.query("DELETE FROM shop_members WHERE account_id = $1", [actor.id]);
+      let finished = false;
+      const checking = app.inject({ method: "GET", url: "/v1/sync/access", headers: actor.headers }).then((response) => { finished = true; return response; });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(finished).toBe(false);
+      await removal.query("COMMIT");
+      expect((await checking).json()).toEqual({ shopId: null, state: null });
+    } finally {
+      await removal.query("ROLLBACK");
+      removal.release();
+    }
   });
 });
 

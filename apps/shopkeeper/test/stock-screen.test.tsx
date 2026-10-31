@@ -5,7 +5,7 @@ import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 import type { SyncActionsBody } from "@ygo/contracts";
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), open: vi.fn(), stock: vi.fn(), send: vi.fn(), set: vi.fn(),
+const mock = vi.hoisted(() => ({ get: vi.fn(), access: vi.fn(), permission: vi.fn(), open: vi.fn(), stock: vi.fn(), send: vi.fn(), set: vi.fn(),
   hooks: [] as unknown[], cursor: 0, focused: false }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
@@ -29,13 +29,13 @@ vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
-vi.mock("../src/api", () => ({ session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
+vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "online" }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open,
   legacyOpeningStock: { getAllKeys: () => [] } }));
 import StockScreen from "../src/app/stock";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
-const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false };
+const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
 function render() { mock.cursor = 0; return StockScreen(); }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -62,6 +62,7 @@ describe("minimal Stock screen", () => {
   let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
   beforeEach(() => {
     vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false;
+    mock.access.mockResolvedValue(undefined); mock.permission.mockReturnValue(true);
     db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID);
     mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue);
     mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item, deletedAt: null }] } });
@@ -76,6 +77,25 @@ describe("minimal Stock screen", () => {
     press("Rice: Out of stock"); await settle();
     expect(queue.batch(shopId).actions.map((action) => action.payload)).toEqual([{ packId, outOfStock: true }, { packId, outOfStock: false }]);
     expect(texts()).toContain("7 kg left");
+  });
+
+  it("cold-reopens cached rows with pending overlays when the server is unreachable", async () => {
+    queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item, deletedAt: null }] });
+    queue.saveFlag(shopId, packId, true); mock.stock.mockRejectedValue(new Error("offline"));
+    render(); await settle();
+    expect(texts()).toContain("7 kg left");
+    expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
+    expect(queue.count()).toBe(1);
+  });
+  it("never applies a successful late acknowledgement after the account changes", async () => {
+    render(); await settle();
+    mock.send.mockImplementation(async (body: SyncActionsBody) => {
+      switchAccount();
+      return { ok: true, data: { results: body.actions.map((action) => ({ actionId: action.id, sequence: action.sequence, status: "applied", code: null,
+        result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false })) } };
+    });
+    press("Rice: Out of stock"); await settle();
+    expect(queue.count()).toBe(1);
   });
 
   it("shows Saved after retry acknowledgement and exposes retained failures with support and fresh-ID retry", async () => {

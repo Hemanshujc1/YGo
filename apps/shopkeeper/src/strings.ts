@@ -5,6 +5,16 @@ import type { ProfileWords, SignInWords } from "@ygo/mobile";
 // Every string the app shows lives here, so translation is a later pass over
 // one file (CONTEXT.md: every string externalised from day one).
 export const strings = {
+  offlineAccess: {
+    title: "Saved Stock",
+    signingOut: "Signing out…",
+    body: "You’re using Stock saved on this phone. Connect to YGo to use your other shop tools.",
+    expired: "Connect to YGo to verify your shop before using saved Stock again. Your saved changes are still on this phone.",
+    erasing: "Your shop access ended. This phone could not finish removing its saved shop data. Retry cleanup or contact support.",
+    ended: "Your shop access ended. Saved shop data was removed from this phone, including changes that could not be sent.",
+    retry: "Retry connection",
+    cleanup: "Retry cleanup",
+  },
   update: {
     title: "Update YGo Shopkeeper",
     button: "Update",

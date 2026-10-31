@@ -1235,3 +1235,11 @@ it("pulls authenticated Stock deltas with an encoded cursor and validates the re
   expect(await client.syncChanges(`${id}:1`)).toEqual({ ok: true, data });
   expect(calls.at(-1)?.path).toBe(`/v1/sync/changes?since=${id}%3A1`);
 });
+
+it("checks authenticated shop access independently of catalog readiness", async () => {
+  const data = { shopId: "00000000-0000-4000-8000-000000000394", state: "closed" };
+  const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, data));
+  await client.verifyCode(signIn);
+  expect(await client.syncAccess()).toEqual({ ok: true, data });
+  expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/sync/access", auth: "Bearer a1" });
+});
