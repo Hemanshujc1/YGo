@@ -11,6 +11,8 @@ export const legacyOpeningStock = createMMKV({ id: "shop-opening-stock" });
 type Opened = { active: boolean; promise: Promise<OpeningStockQueue>; close?: () => Promise<void>; closing?: Promise<void> };
 const opened = new Map<string, Opened>();
 const accessFlags = createMMKV({ id: "shop-offline-access" });
+// expo-file-system needs a file:// URI; expo-sqlite gives a plain path.
+const databaseDirectory = `file://${defaultDatabaseDirectory}`;
 const options = { keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
 async function open(accountId: string, handle: { active: boolean; close?: () => Promise<void> }): Promise<OpeningStockQueue> {
@@ -18,7 +20,7 @@ async function open(accountId: string, handle: { active: boolean; close?: () => 
   const keyName = `opening-stock-${accountId}`;
   let key = await getItemAsync(keyName, options);
   if (!key) {
-    if (new File(defaultDatabaseDirectory, name).exists) throw new Error("Opening stock key is missing");
+    if (new File(databaseDirectory, name).exists) throw new Error("Opening stock key is missing");
     key = Array.from(await getRandomBytesAsync(32), (byte) => byte.toString(16).padStart(2, "0")).join("");
     // Persist before creating the database; an interrupted first open can reuse this key.
     await setItemAsync(keyName, key, options);
@@ -78,7 +80,7 @@ export async function closeOpeningStock(accountId: string) {
 }
 
 export const offlineStorage: AccessStorage = {
-  hasData: (id) => new File(defaultDatabaseDirectory, `opening-stock-${id}.db`).exists,
+  hasData: (id) => new File(databaseDirectory, `opening-stock-${id}.db`).exists,
   active: () => accessFlags.getString("account"),
   select: (id) => { accessFlags.set("account", id); },
   forget: () => { accessFlags.remove("account"); },
@@ -89,7 +91,7 @@ export const offlineStorage: AccessStorage = {
     accessFlags.set(`blocked:${id}`, shopId);
     await closeOpeningStock(id);
     const name = `opening-stock-${id}.db`;
-    if (new File(defaultDatabaseDirectory, name).exists) await deleteDatabaseAsync(name);
+    if (new File(databaseDirectory, name).exists) await deleteDatabaseAsync(name);
     await deleteItemAsync(`opening-stock-${id}`, options);
     for (const key of legacyOpeningStock.getAllKeys()) if (key.startsWith(`opening:${shopId}:`)) legacyOpeningStock.remove(key);
     await deleteItemAsync(`stock-access-${id}`, options);
@@ -104,7 +106,7 @@ export async function openingStockBeforeSignOut(accountId: string, verifiedShopI
   if (hasUnscopedLegacy) {
     throw new Error("Verify the shop before checking legacy opening stock");
   }
-  if (!opened.has(accountId) && !new File(defaultDatabaseDirectory, `opening-stock-${accountId}.db`).exists
+  if (!opened.has(accountId) && !new File(databaseDirectory, `opening-stock-${accountId}.db`).exists
     && !legacyOpeningStock.getAllKeys().some((key) => verifiedShopId && key.startsWith(`opening:${verifiedShopId}:`))) return { pending: 0, failed: 0 };
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
