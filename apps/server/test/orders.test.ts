@@ -662,7 +662,7 @@ describe("Shopkeeper sees stock left after accepted orders, with the held amount
     await accept(order.id, owner);
     const holding = await shopSees(dal, owner);
     expect(holding.listings).toEqual({ stock: "6.000", held: "4.000" });
-    // No route moves an accepted order on yet (#55, #56), so set the status as one will.
+    // No route moves an accepted order on yet (#56), so set the status as one will.
     await database.pool.query("UPDATE orders SET status = 'cancelled_by_shop' WHERE id = $1", [order.id]);
     expect(await shopSees(dal, owner, holding.cursor)).toMatchObject({
       listings: { stock: "10.000", held: "0" }, stock: { quantity: "10.000", held: "0" }, sync: [{ quantity: "10.000", held: "0" }],
