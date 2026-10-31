@@ -631,6 +631,19 @@ describe("opening-stock correction (#452)", () => {
     expect((await correct("7", clientId)).json()).toEqual(first.json());
   });
 
+  it("refuses the same id with a different corrected total, even after a later correction", async () => {
+    const { correct, movements } = await recorded();
+    const clientId = randomUUID();
+    expect((await correct("7", clientId)).statusCode).toBe(201);
+    const changed = await correct("9", clientId);
+    expect(changed.statusCode).toBe(400);
+    expect(await movements()).toHaveLength(2);
+    expect((await correct("4")).statusCode).toBe(201);
+    expect((await correct("7.0", clientId)).statusCode).toBe(200);
+    expect((await correct("9", clientId)).statusCode).toBe(400);
+    expect(await movements()).toHaveLength(3);
+  });
+
   it("serializes two corrections: each is worked out against the latest committed total and the last one applied wins", async () => {
     const { correct, item, movements } = await recorded();
     const hold = await database.pool.connect();

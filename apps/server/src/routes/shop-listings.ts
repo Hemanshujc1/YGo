@@ -141,11 +141,17 @@ export async function applyOpeningStockCorrection(client: PoolClient, accountId:
   const openingTotal = () => client.query<{ recorded: boolean; total: string }>(
     `SELECT COALESCE(bool_or(kind = 'opening'), false) AS recorded, COALESCE(sum(quantity), 0)::text AS total
      FROM stock_movements WHERE listing_id = $1 AND kind IN ('opening', 'opening_correction')`, [row.id]).then((answer) => answer.rows[0]);
-  const same = await client.query<{ kind: string; actorId: string; createdAt: Date }>(
-    `SELECT kind, actor_id AS "actorId", created_at AS "createdAt" FROM stock_movements WHERE listing_id = $1 AND client_id = $2`, [row.id, body.clientId]);
+  const same = await client.query<{ kind: string; actorId: string; createdAt: Date; target: string }>(
+    `SELECT m.kind, m.actor_id AS "actorId", m.created_at AS "createdAt",
+       (SELECT COALESCE(sum(o.quantity), 0)::text FROM stock_movements o WHERE o.listing_id = m.listing_id
+         AND o.kind IN ('opening', 'opening_correction')
+         AND (o.created_at < m.created_at OR o.id = m.id OR (o.created_at = m.created_at AND o.kind = 'opening'))) AS target
+     FROM stock_movements m WHERE m.listing_id = $1 AND m.client_id = $2`, [row.id, body.clientId]);
   if (same.rows[0]) {
     const saved = same.rows[0];
     if (saved.kind !== "opening_correction" || saved.actorId !== accountId) return { code: "VALIDATION_FAILED" };
+    // The same id with another total is a different request, never a retry.
+    if (Number(saved.target) !== Number(body.quantity)) return { code: "VALIDATION_FAILED" };
     // A retry of an applied correction answers with the opening total as it stands now.
     return { status: 200, result: { listingId: row.id, quantity: (await openingTotal())?.total ?? "0", recordedAt: saved.createdAt.toISOString() } };
   }
