@@ -90,4 +90,43 @@ describe("sync loop (#395)", () => {
     void loop.run(); void loop.run(); loop.stop(); gates.shift()?.(); await flush();
     expect(pass).toHaveBeenCalledTimes(4);
   });
+
+  it("a request made before stop() still runs exactly once when start() comes back before the pass ends", async () => {
+    const { loop, pass, gates, most } = harness([]);
+    const first = loop.start();
+    const asked = loop.run();
+    loop.stop();
+    const restarted = loop.start();
+    expect(restarted).toBe(asked);
+    await flush(); expect(pass).toHaveBeenCalledTimes(1);
+    gates.shift()?.(); expect(await first).toBe(1);
+    await flush(); expect(pass).toHaveBeenCalledTimes(2);
+    gates.shift()?.(); expect(await asked).toBe(2);
+    await flush(); expect(pass).toHaveBeenCalledTimes(2);
+    expect(most()).toBe(1);
+    // The follow-up replaced the idle timer: one more pass only after 30 s.
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1); expect(pass).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1); expect(pass).toHaveBeenCalledTimes(3);
+    loop.stop();
+  });
+
+  it("keeps a Retry across stop and start: the shared follow-up still checks access again", async () => {
+    const { loop, pass, gates, most } = harness([]);
+    void loop.start();
+    const retried = loop.retryNow();
+    loop.stop();
+    expect(loop.retryNow()).toBe(retried);
+    expect(loop.start()).toBe(retried);
+    gates.shift()?.(); await flush();
+    gates.shift()?.(); expect(await retried).toBe(2);
+    expect(pass.mock.calls.map(([fresh]) => fresh)).toEqual([false, true]);
+    expect(most()).toBe(1);
+    // Stopped for good: the follow-up waits, and its Retry is kept for the next foreground.
+    void loop.run(); const late = loop.retryNow(); loop.stop();
+    gates.shift()?.(); expect(await late).toBeNull();
+    expect(pass).toHaveBeenCalledTimes(3);
+    void loop.start(); await flush();
+    expect(pass.mock.calls.map(([fresh]) => fresh)).toEqual([false, true, false, true]);
+    gates.shift()?.(); await flush(); loop.stop();
+  });
 });
