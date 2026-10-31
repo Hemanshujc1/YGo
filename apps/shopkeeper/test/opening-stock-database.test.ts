@@ -7,7 +7,7 @@ const native = vi.hoisted(() => ({
   cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(), beforeTransaction: undefined as (() => void) | undefined,
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
-vi.mock("expo-file-system", () => ({ File: class { constructor(_directory: string, private name: string) {} get exists() { return native.exists || native.files.has(this.name); } } }));
+vi.mock("expo-file-system", () => ({ File: class { constructor(private directory: string, private name: string) {} get exists() { if (!this.directory.startsWith("file://")) throw new Error("URI is not absolute"); return native.exists || native.files.has(this.name); } } }));
 vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set, deleteItemAsync: native.delete }));
 vi.mock("expo-sqlite", () => ({ defaultDatabaseDirectory: "/databases", openDatabaseAsync: native.open, deleteDatabaseAsync: native.drop }));
 vi.mock("react-native-mmkv", () => ({ createMMKV: ({ id }: { id: string }) => id === "shop-offline-access" ? { getString: (key: string) => native.flags.get(key), getBoolean: (key: string) => native.flags.get(key), set: (key: string, value: string | boolean) => native.flags.set(key, value), remove: (key: string) => native.flags.delete(key) } : ({
