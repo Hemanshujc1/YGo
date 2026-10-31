@@ -34,14 +34,14 @@ A PR stays at about 1,000 changed lines or fewer, not counting lockfiles and gen
 
 ## 5. Done
 
-- While building, run only the tests of the files you change (`pnpm --filter <package> exec vitest run <file>`). Run the full `pnpm check` once, when the work is done.
+- While building, run only the tests of the files you change (`pnpm --filter <package> exec vitest run <file>`). Run the full `pnpm check` once, after the review in section 6.
 - Rebase on `main` before opening the PR.
 - The CI gate `pnpm gate` (lint, typecheck, test, build) is green (ADR-0007).
 - The ticket's done check, named before coding, passes and is recorded in the PR.
 
 ## 6. Review
 
-- Every PR gets a `/code-review` pass, and the author fixes or answers each finding. Run it on the local changes after `pnpm check` passes and before the first push, so CI runs once on reviewed code; push again only for what CI or the owner raises. List the findings and answers in the PR.
+- Every PR gets a `/code-review` pass, and the author fixes or answers each finding. Run it on the local changes when the work is done, before `pnpm check` and the first push, so the one check and the one CI run cover the review fixes too; push again only for what CI or the owner raises. List the findings and answers in the PR.
 - The owner approves every merge by saying "merge"; the agent then follows `.agents/skills/merge/SKILL.md`. PRs that touch `packages/*` or money code (`@ygo/pricing`, server billing and settlement) get a line-by-line human read.
 
 ## 7. Screen checks
