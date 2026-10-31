@@ -83,7 +83,7 @@ describe("minimal Stock screen", () => {
     queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item, deletedAt: null }] });
     queue.saveFlag(shopId, packId, true); mock.stock.mockRejectedValue(new Error("offline"));
     render(); await settle();
-    expect(texts()).toContain("7 kg");
+    expect(texts()).toContain("7 kg left");
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
     expect(queue.count()).toBe(1);
   });
