@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./google-sign-in-plugin": "./google-sign-in.config.js",
+    "./google-maps-keys": "./google-maps-keys.config.js",
     "./address-at": "./src/address-at.ts",
     "./pin-map": "./src/pin-map.tsx",
     "./pack-label": "./src/pack-label.ts",

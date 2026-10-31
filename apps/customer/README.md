@@ -28,7 +28,7 @@ The theme choice is saved on the phone with MMKV and applied before the first sc
 
 ## The map keys
 
-Confirm location draws Google's map on both phones (#255, #307), through `PinMap` from `@ygo/mobile`. Each phone has its own key: a Maps SDK for Android key from `GOOGLE_MAPS_ANDROID_API_KEY` and a Maps SDK for iOS key from `GOOGLE_MAPS_IOS_API_KEY`. The Shopkeeper app uses the same two keys for S17's map. `app.config.ts` reads the variables from `apps/customer/.env` or the build's environment, so the keys are never in the repo. The build writes each into the app, where anyone can read it, so restrict both in Google Cloud:
+Confirm location draws Google's map on both phones (#255, #307), through `PinMap` from `@ygo/mobile`. Each phone has its own key: a Maps SDK for Android key from `GOOGLE_MAPS_ANDROID_API_KEY` and a Maps SDK for iOS key from `GOOGLE_MAPS_IOS_API_KEY`. The Shopkeeper app uses the same two keys for S17's map. `app.config.ts` reads the variables from `apps/customer/.env` or the build's environment, so the keys are never in the repo. A release build sets `YGO_RELEASE_BUILD=1` and then stops with an error naming a missing key, instead of shipping the blank-map placeholder a development build keeps (#315). The build writes each into the app, where anyone can read it, so restrict both in Google Cloud:
 
 - **Android key**: API restrictions to Maps SDK for Android only, and application restrictions to Android apps, each entry a package name with a SHA-1 fingerprint: one per app.
 - **iOS key**: API restrictions to Maps SDK for iOS only, and application restrictions to iOS apps, each entry a bundle ID (`PRODUCT_BUNDLE_IDENTIFIER` in the app's `ios/` Xcode project): one per app.
