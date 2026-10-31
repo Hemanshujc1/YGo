@@ -26,7 +26,7 @@ vi.mock("react", () => ({
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
 vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
-vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", ScrollView: "ScrollView", View: "View" }));
+vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, answer: () => null, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "online" }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));

@@ -19,7 +19,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", SupportEmail: "SupportEmail", Text: "Text", useSession: () => ({ account: { id: "account" } }) }));
 vi.mock("expo-router", () => ({ Link: "Link", usePathname: () => mock.path }));
-vi.mock("react-native", () => ({ ScrollView: "ScrollView", AppState: { addEventListener: (_event: string, callback: (state: string) => void) => {
+vi.mock("react-native", () => ({ Pressable: "Pressable", ScrollView: "ScrollView", AppState: { addEventListener: (_event: string, callback: (state: string) => void) => {
   mock.foreground = callback; return { remove: vi.fn() };
 } } }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));

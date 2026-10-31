@@ -1,7 +1,7 @@
 import { Button, Confirm, Text } from "@ygo/mobile";
 import { useRef, useState } from "react";
 import { Link } from "expo-router";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { access, accountEpoch, session } from "../api";
 import { strings } from "../strings";
 import { openingStockBeforeSignOut } from "../lib/opening-stock-database";
@@ -68,7 +68,7 @@ export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boole
         variant="secondary"
       />
       {message && <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-pending">{message}</Text>}
-      {pending && <Link href={pending === "stock" ? "/stock" : "/opening-stock"} className="mt-3 py-3 text-body text-primary">{pending === "stock" ? strings.stock.title : words.openStock}</Link>}
+      {pending && <Link href={pending === "stock" ? "/stock" : "/opening-stock"} asChild><Pressable accessibilityRole="button" className="mt-3 py-3"><Text className="text-body text-primary">{pending === "stock" ? strings.stock.title : words.openStock}</Text></Pressable></Link>}
       <Confirm
         visible={asking}
         title={failedWarning ? words.failedTitle : words.title}

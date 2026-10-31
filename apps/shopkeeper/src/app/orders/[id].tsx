@@ -135,7 +135,7 @@ export default function OrderScreen() {
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={view.refreshing} onRefresh={() => void order.refresh()} progressViewOffset={insets.top} />}
       >
-        <Link href="/orders" className="py-3 text-body text-primary">{words.back}</Link>
+        <Link href="/orders" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{shown ? words.detailTitle(shown.number) : words.titleLoading}</Text>
         {isNew && seconds !== null && <Countdown seconds={timeUp ? 0 : seconds} />}
         {view.status === "loading" && (

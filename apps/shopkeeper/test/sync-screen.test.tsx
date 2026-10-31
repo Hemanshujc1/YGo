@@ -21,7 +21,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
-vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", ScrollView: "ScrollView", View: "View" }));
+vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, session: { get: () => ({ account: { id: "account-1" } }) }, supportEmail: "help@example.com",
   access: { subscribe: vi.fn(), get: () => mock.view }, api: { shopListings: mock.listings } }));
@@ -40,6 +40,9 @@ function elements(node: unknown): Array<{ type: unknown; props: Record<string, u
 function texts() {
   return elements(render()).flatMap(({ props: { children } }) => typeof children === "string" ? [children]
     : Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number") ? [children.join("")] : []);
+}
+function linkTo(label: string) {
+  return elements(render()).find((node) => node.props.href && elements(node.props.children).some((child) => child.props.children === label))?.props.href;
 }
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); render(); await new Promise((resolve) => setTimeout(resolve, 0)); }
 
@@ -69,7 +72,7 @@ describe("S08 Waiting to sync (#395)", () => {
     expect(lines).toContain("Rice · 1 kg"); expect(lines).toContain("Marked out of stock");
     expect(lines).toContain("This change waited too long to sync, so the server refused it.");
     expect(lines).toContain(`Support reference: ${batch.actions[0]?.id}`);
-    expect(elements(render()).find((node) => node.props.children === "Fix in Stock")?.props.href).toBe("/stock");
+    expect(linkTo("Fix in Stock")).toBe("/stock");
     // No Stock copy names the opening-stock pack, so the listings do.
     expect(lines).toContain("Dal · 0.5 kg"); expect(lines).toContain("Opening stock 4 kg");
     expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
@@ -81,7 +84,7 @@ describe("S08 Waiting to sync (#395)", () => {
     expect(texts()).toContain("Couldn't reach YGo. Changes stay on this phone and sync by themselves when you're back online.");
     expect(texts()).toContain("None");
     expect(mock.listings).not.toHaveBeenCalled();
-    expect(elements(render()).find((node) => node.props.children === "Back")?.props.href).toBe("/stock");
+    expect(linkTo("Back")).toBe("/stock");
     (elements(render()).find((node) => node.props.label === "Retry sync")?.props.onPress as () => void)();
     expect(mock.retry).toHaveBeenCalledOnce();
   });

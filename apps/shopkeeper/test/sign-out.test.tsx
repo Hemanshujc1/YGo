@@ -14,7 +14,7 @@ vi.mock("react", () => ({
   },
 }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", Text: "Text" }));
-vi.mock("react-native", () => ({ View: "View" }));
+vi.mock("react-native", () => ({ Pressable: "Pressable", View: "View" }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("../src/api", () => ({ accountEpoch: () => mock.epoch, access: { verify: mock.verify, get: () => mock.accessView }, session: { get: () => mock.identity, signOut: mock.signOut } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openingStockBeforeSignOut: mock.count }));
