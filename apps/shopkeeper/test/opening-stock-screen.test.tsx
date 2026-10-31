@@ -32,7 +32,7 @@ vi.mock("../src/lib/opening-stock-database", () => ({
 import OpeningStockScreen from "../src/app/opening-stock";
 
 const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
-const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: { id: entry.clientId }, openingStockRecorded: false, stock: "0" };
+const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: { id: entry.clientId }, openingStockRecorded: false, stock: "0", held: "0" };
 const listings = { ok: true, data: { items: [item] } };
 const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
 function render() { mock.cursor = 0; return OpeningStockScreen(); }
@@ -64,6 +64,12 @@ describe("opening-stock account boundary", () => {
     mock.failed.mockReturnValue(null);
     mock.batch.mockImplementation(() => ({ deviceId: "device", sentAt: new Date().toISOString(), actions: mock.heldPacks().length || !mock.pending() ? [] : [{ id: entry.clientId, sequence: 1 }] }));
     mock.pending.mockReturnValue(null); mock.attentionCount.mockReturnValue(0); mock.heldPacks.mockReturnValue([]); mock.versions.mockReturnValue([{ payload: JSON.stringify(entry), entry }, { payload: "broken bytes", entry: null }]);
+  });
+
+  it("shows a recorded pack's stock left after accepted orders, with what they hold (#436)", async () => {
+    mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...item, openingStockRecorded: true, stock: "1.000", held: "2.000" }] } });
+    render(); await settle();
+    expect(elements(render()).map((node) => node.props.children)).toContain("Saved. 1 kg left · 2 kg held for orders");
   });
 
   it("does not import legacy work when the account changes while its database opens", async () => {

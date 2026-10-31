@@ -176,7 +176,7 @@ export const strings = {
       cancel: "Cancel",
     },
   },
-  // Listings and Stock (#436): what's left after accepted orders, and what they hold.
+  // Listings, Stock and Opening stock (#436): what's left after accepted orders, and what they hold.
   stockLine: {
     left: (amount: string) => `${amount} left`,
     held: (amount: string) => `${amount} held for orders`,
