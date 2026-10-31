@@ -37,7 +37,7 @@ describe("shop listing contracts", () => {
     const response = {
       items: [{
         packId: id, productId: id, name: "Rice", brand: null, baseUnit: "kg", classification: "measured",
-        packQuantity: "1", barcode: null, stock: "0", held: "0", openingStockRecorded: false, listing: null,
+        packQuantity: "1", barcode: null, stock: "0", held: "0", openingStockRecorded: false, openingStock: "0", listing: null,
       }],
     };
     expect(ShopListingsResponse.parse(response)).toEqual(response);

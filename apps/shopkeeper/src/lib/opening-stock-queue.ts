@@ -1,6 +1,6 @@
 import { stockCache } from "./stock-cache";
 import { OFFLINE_LIMITS } from "./offline-limits";
-import { StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
+import { OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 type Database = Pick<SQLiteDatabase, "execSync" | "getAllSync" | "getFirstSync" | "runSync" | "withTransactionSync">;
@@ -113,6 +113,29 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
       });
       return null;
+    },
+    /** Queue a correction of a recorded opening count (#452). Each one is its own action, so corrections apply in order and the last wins. */
+    saveCorrection(shopId: string, packId: string, quantity: string): { id: string } | "queueFull" | "queueExpired" {
+      const payload = OpeningStockPayload.parse({ packId, quantity });
+      // Enrol older opening stock before allocating this change's sequence.
+      this.batch(shopId);
+      const stop = blocked(this.count(), true);
+      if (stop) return stop;
+      const id = newId();
+      db.withTransactionSync(() => {
+        const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
+        if (!device) throw new Error("Missing sync device");
+        const action: SyncAction = { id, sequence: device.sequence + 1, shopId, type: "opening_stock_correction", payload,
+          createdAt: now().toISOString(), clockSuspect: false };
+        db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
+        db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
+      });
+      return { id };
+    },
+    /** The corrected total still waiting to sync for a pack, or null. */
+    correctionWaiting(shopId: string, packId: string): string | null {
+      return db.getFirstSync<{ quantity: string }>(`SELECT json_extract(action, '$.payload.quantity') AS quantity FROM opening_stock_actions
+        WHERE shop_id = ? AND pack_id = ? AND status = 'pending' AND json_extract(action, '$.type') = 'opening_stock_correction' ORDER BY sequence DESC LIMIT 1`, shopId, packId)?.quantity ?? null;
     },
     flagCount(): number {
       return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'stock_flag'")?.count ?? 0;
@@ -281,7 +304,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     count(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')) + (SELECT count(*) FROM opening_stock_held) AS count");
       if (!row) throw new Error("Could not count opening stock");
-      return row.count + this.flagCount();
+      const corrections = db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'opening_stock_correction'");
+      return row.count + this.flagCount() + (corrections?.count ?? 0);
     },
     attentionCount(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_held");

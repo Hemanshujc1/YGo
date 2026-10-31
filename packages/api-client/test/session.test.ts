@@ -339,7 +339,7 @@ describe("each call", () => {
     const id = "00000000-0000-4000-8000-000000000201";
     const item = {
       packId: id, productId: id, name: "Rice", brand: null, baseUnit: "kg", classification: "measured",
-      packQuantity: "1", barcode: null, listing: null, stock: "0", held: "0", openingStockRecorded: false,
+      packQuantity: "1", barcode: null, listing: null, stock: "0", held: "0", openingStockRecorded: false, openingStock: "0",
     };
     const listing = { ...item, listing: {
       id, onlinePrice: "20.50", counterPrice: "21", mrp: "25", lowStockLevel: "0", available: true,

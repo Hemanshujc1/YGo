@@ -35,7 +35,7 @@ export const SyncActionsBody = z.strictObject({
 });
 export const SyncActionCode = z.enum([
   "VALIDATION_FAILED", "NOT_FOUND", "SHOP_LISTING_NOT_READY", "OPENING_STOCK_ALREADY_RECORDED",
-  "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT",
+  "OPENING_STOCK_NOT_RECORDED", "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT",
 ]);
 export type SyncActionCode = z.infer<typeof SyncActionCode>;
 export const SyncActionResult = z.strictObject({

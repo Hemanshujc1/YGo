@@ -32,6 +32,28 @@ describe("offline opening stock", () => {
     expect(queue.pending(shopId, packId)).toBeNull();
   });
 
+  it("queues corrections as ordered actions after the opening, each its own change, and clears them once acknowledged (#452)", () => {
+    queue.save(shopId, packId, entry);
+    const first = queue.saveCorrection(shopId, packId, "2");
+    const second = queue.saveCorrection(shopId, packId, "1.5");
+    expect(first).toEqual({ id: expect.any(String) });
+    expect(queue.correctionWaiting(shopId, packId)).toBe("1.5");
+    expect(queue.correctionWaiting(shopId, "00000000-0000-4000-8000-000000000004")).toBeNull();
+    const batch = queue.batch(shopId);
+    expect(batch.actions.map((action) => [action.type, action.sequence])).toEqual([["opening_stock", 1], ["opening_stock_correction", 2], ["opening_stock_correction", 3]]);
+    expect(batch.actions.map((action) => action.id)).toEqual([entry.clientId, (first as { id: string }).id, (second as { id: string }).id]);
+    acknowledge(queue, batch);
+    expect(queue.correctionWaiting(shopId, packId)).toBeNull();
+    expect(queue.count()).toBe(0);
+  });
+
+  it("counts a correction against the offline limit and refuses a malformed total", () => {
+    const small = openingStockQueue(adapter(db), randomUUID, () => new Date(), { maxActions: 1, maxAgeHours: 72 });
+    expect(small.saveCorrection(shopId, packId, "3")).toEqual({ id: expect.any(String) });
+    expect(small.saveCorrection(shopId, packId, "4")).toBe("queueFull");
+    expect(() => small.saveCorrection(shopId, packId, "-1")).toThrow();
+  });
+
   it("preserves malformed imports for attention and refuses to overwrite them", () => {
     const values = new Map([[`opening:${shopId}:${packId}`, "not json"]]);
     queue.importLegacy(shopId, legacy(values));

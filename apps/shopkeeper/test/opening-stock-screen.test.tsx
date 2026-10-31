@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   get: vi.fn(), open: vi.fn(), importLegacy: vi.fn(), set: vi.fn(),
   application: vi.fn(), listings: vi.fn(), opening: vi.fn(), pending: vi.fn(),
-  failed: vi.fn(), batch: vi.fn(), attempted: vi.fn(), acknowledge: vi.fn(), save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(),
+  failed: vi.fn(), batch: vi.fn(), attempted: vi.fn(), acknowledge: vi.fn(), save: vi.fn(), clear: vi.fn(), attentionCount: vi.fn(), heldPacks: vi.fn(), recover: vi.fn(), versions: vi.fn(), saveCorrection: vi.fn(), correctionWaiting: vi.fn(),
   state: [] as unknown[], cursor: 0, mounted: false,
 }));
 vi.mock("react", () => ({
@@ -34,11 +34,12 @@ vi.mock("../src/lib/opening-stock-database", () => ({
 }));
 
 import OpeningStockScreen from "../src/app/opening-stock";
+import { strings } from "../src/strings";
 
 const entry = { clientId: "00000000-0000-4000-8000-000000000001", quantity: "2.5" };
 const item = { packId: "pack-1", name: "Rice", packQuantity: "1", baseUnit: "kg", listing: { id: entry.clientId }, openingStockRecorded: false, stock: "0", held: "0" };
 const listings = { ok: true, data: { items: [item] } };
-const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions };
+const queue = { failed: mock.failed, batch: mock.batch, attempted: mock.attempted, acknowledge: mock.acknowledge, importLegacy: mock.importLegacy, pending: mock.pending, save: mock.save, clear: mock.clear, attentionCount: mock.attentionCount, heldPacks: mock.heldPacks, recover: mock.recover, versions: mock.versions, saveCorrection: mock.saveCorrection, correctionWaiting: mock.correctionWaiting };
 function render() { mock.cursor = 0; return OpeningStockScreen(); }
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); }
 function switchAccount() {
@@ -74,6 +75,56 @@ describe("opening-stock account boundary", () => {
     mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...item, openingStockRecorded: true, stock: "1.000", held: "2.000" }] } });
     render(); await settle();
     expect(elements(render()).map((node) => node.props.children)).toContain("Saved. 1 kg left · 2 kg held for orders");
+  });
+
+  describe("correcting a recorded count (#452)", () => {
+    const recorded = { ...item, openingStockRecorded: true, stock: "10.000", openingStock: "10.000" };
+    const box = () => elements(render()).filter((node) => node.type === "TextInput")[0]?.props ?? {};
+    const open = async () => {
+      mock.listings.mockResolvedValue({ ok: true, data: { items: [recorded] } });
+      mock.correctionWaiting.mockReturnValue(null);
+      render(); await settle();
+      press("Correct opening stock");
+    };
+
+    it("opens the box with the recorded count, trims what is typed, and queues the corrected total", async () => {
+      await open();
+      expect(box().value).toBe("10");
+      (box().onChangeText as (value: string) => void)("8.250");
+      (box().onBlur as () => void)();
+      expect(box().value).toBe("8.25");
+      mock.saveCorrection.mockReturnValue({ id: "correction-1" });
+      mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [{ id: "correction-1", sequence: 1 }] });
+      mock.opening.mockResolvedValue({ ok: true, data: { results: [{ actionId: "correction-1", sequence: 1, status: "applied", code: null,
+        result: { listingId: entry.clientId, quantity: "8.250", recordedAt: new Date().toISOString() }, clockSuspect: false }] } });
+      mock.listings.mockResolvedValue({ ok: true, data: { items: [{ ...recorded, stock: "8.250", openingStock: "8.250" }] } });
+      press("Save correction"); await settle();
+      expect(mock.saveCorrection).toHaveBeenCalledWith("shop-1", "pack-1", "8.25");
+      const texts = elements(render()).map((node) => [node.props.children].flat().join(""));
+      expect(texts).toContain("Opening stock corrected.");
+      expect(elements(render()).filter((node) => node.type === "TextInput")).toHaveLength(0);
+    });
+
+    it("says a correction made offline is waiting, and shows a refusal in words", async () => {
+      await open();
+      (box().onChangeText as (value: string) => void)("8");
+      mock.saveCorrection.mockReturnValue({ id: "correction-1" });
+      mock.batch.mockReturnValue({ deviceId: "device", sentAt: new Date().toISOString(), actions: [] });
+      press("Save correction"); await settle();
+      mock.correctionWaiting.mockReturnValue("8");
+      expect(elements(render()).map((node) => [node.props.children].flat().join(""))).toContain("Correction to 8 kg is waiting to sync.");
+      mock.saveCorrection.mockReturnValue("queueFull");
+      press("Correct opening stock");
+      press("Save correction"); await settle();
+      expect(elements(render()).map((node) => [node.props.children].flat().join(""))).toContain(strings.stock.queueFull);
+    });
+
+    it("refuses an empty total without queueing", async () => {
+      await open();
+      (box().onChangeText as (value: string) => void)("");
+      press("Save correction"); await settle();
+      expect(mock.saveCorrection).not.toHaveBeenCalled();
+    });
   });
 
   it("shows pack sizes and typed amounts without trailing zeros (#451)", async () => {

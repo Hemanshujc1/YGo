@@ -32,6 +32,7 @@ export default function OpeningStockScreen() {
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<Record<string, string>>({});
+  const [correcting, setCorrecting] = useState<Record<string, boolean>>({});
   const [editableQueued, setEditableQueued] = useState<Record<string, boolean>>({});
   const [stockRefreshFailed, setStockRefreshFailed] = useState<Record<string, boolean>>({});
   const [refreshingStock, setRefreshingStock] = useState<string | null>(null);
@@ -160,6 +161,51 @@ export default function OpeningStockScreen() {
       : current);
   }
 
+  // A recorded count is corrected by queueing one more action (#452); the server works out the difference.
+  async function saveCorrection(item: ShopListingCatalogItem) {
+    if (load.kind !== "loaded" || saving) return;
+    const { shopId, queue, accountId, epoch } = load;
+    if (!isCurrentAccount(accountId, epoch)) return;
+    const entry = OpeningStockBody.safeParse({ quantity: quantities[item.packId], clientId: clientId() });
+    if (!entry.success) {
+      setMessage((current) => ({ ...current, [item.packId]: words.errors.quantity }));
+      return;
+    }
+    let queued: ReturnType<OpeningStockQueue["saveCorrection"]>;
+    try { queued = queue.saveCorrection(shopId, item.packId, entry.data.quantity); } catch {
+      setMessage((current) => ({ ...current, [item.packId]: words.storageFailed }));
+      return;
+    }
+    if (typeof queued === "string") {
+      setMessage((current) => ({ ...current, [item.packId]: strings.stock[queued] }));
+      return;
+    }
+    setCorrecting((current) => ({ ...current, [item.packId]: false }));
+    setSaving(item.packId);
+    setMessage((current) => ({ ...current, [item.packId]: "" }));
+    const response = await stockSync.run();
+    if (!isCurrentAccount(accountId, epoch)) return;
+    setSaving(null);
+    const result = response?.results.find((row) => row.actionId === queued.id);
+    if (result?.status === "applied" && result.result) {
+      const updated = await api.shopListings().catch(() => null);
+      if (!isCurrentAccount(accountId, epoch)) return;
+      if (updated?.ok) {
+        const refreshedItems = updated.data.items.filter((row) => row.listing !== null);
+        setLoad((current) => current.kind === "loaded" && current.shopId === shopId
+          ? { ...current, items: replaceListingsFromRefresh(current.items, refreshedItems) }
+          : current);
+      }
+      setMessage((current) => ({ ...current, [item.packId]: words.correctionRecorded }));
+      return;
+    }
+    const code = ErrorCode.safeParse(result?.code);
+    setMessage((current) => ({
+      ...current,
+      [item.packId]: result?.status === "rejected" ? (code.success ? strings.errors[code.data] : words.syncAttention) : words.saveOffline,
+    }));
+  }
+
   async function save(item: ShopListingCatalogItem) {
     if (load.kind !== "loaded" || saving) return;
     const shopId = load.shopId;
@@ -267,8 +313,21 @@ export default function OpeningStockScreen() {
             {queued && (!message[item.packId] || message[item.packId] === words.saveOffline) && <Text className="text-secondary text-pending">{words.stockQueued}</Text>}
             <Button label={words.saveStock} onPress={() => void save(item)} busy={saving === item.packId} disabled={load.queue.heldPacks(load.shopId).includes(item.packId)} />
           </>}
+          {item.openingStockRecorded && (correcting[item.packId] ? <>
+            <TextInput accessibilityLabel={`${words.correctionQuantity} ${item.name}`} keyboardType="decimal-pad" value={quantities[item.packId] ?? ""}
+              onChangeText={(value) => setQuantities((current) => ({ ...current, [item.packId]: value }))}
+              onBlur={() => setQuantities((current) => ({ ...current, [item.packId]: trimDecimal(current[item.packId] ?? "") }))}
+              className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
+            <Button label={words.saveCorrection} onPress={() => void saveCorrection(item)} busy={saving === item.packId} />
+            <Button label={words.cancelCorrection} variant="secondary" onPress={() => setCorrecting((current) => ({ ...current, [item.packId]: false }))} />
+          </> : <Button label={words.correct} variant="secondary" onPress={() => {
+            setQuantities((current) => ({ ...current, [item.packId]: trimDecimal(item.openingStock) }));
+            setCorrecting((current) => ({ ...current, [item.packId]: true }));
+          }} />)}
+          {(() => { const waiting = load.queue.correctionWaiting(load.shopId, item.packId);
+            return waiting && <Text className="text-secondary text-pending">{words.correctionQueued(trimDecimal(waiting), item.baseUnit)}</Text>; })()}
           {failure && <><Text className="text-secondary text-danger">{words.syncAttention}</Text><Text selectable className="text-secondary text-muted">{queued?.clientId}</Text><SupportEmail address={supportEmail} className="text-secondary" /></>}
-          {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-pending" : message[item.packId] === words.stockRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
+          {message[item.packId] && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message[item.packId] === words.saveOffline ? "text-pending" : message[item.packId] === words.stockRecorded || message[item.packId] === words.correctionRecorded ? "text-success" : "text-danger"}`}>{message[item.packId]}</Text>}
           {stockRefreshFailed[item.packId] && <Button label={words.retry} onPress={() => void retryStockRefresh(item, load.shopId)} busy={refreshingStock === item.packId} variant="secondary" />}
         </View>;
       })}

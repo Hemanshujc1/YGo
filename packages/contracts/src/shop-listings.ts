@@ -40,6 +40,8 @@ export const ShopListingCatalogItem = z.strictObject({
   /** What accepted orders hold, "0" when none. */
   held: BaseUnitQuantity,
   openingStockRecorded: z.boolean(),
+  /** The opening count as recorded and corrected (#452), "0" when none. */
+  openingStock: BaseUnitQuantity,
 });
 
 export const ShopListingsResponse = z.strictObject({ items: z.array(ShopListingCatalogItem) });

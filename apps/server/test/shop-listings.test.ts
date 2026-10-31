@@ -573,3 +573,166 @@ it("keeps real-server pulls atomic across SQLite restart, disk interruption and 
     expect(queue.cache.read(actor.shopId)?.items).toEqual([]);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+describe("opening-stock correction (#452)", () => {
+  async function recorded(quantity = "10") {
+    const actor = await shop("live");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const post = (path: string, body: object, headers = actor.headers) => app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/${path}`, headers, payload: body });
+    const correct = (quantity: string, clientId = randomUUID()) => post("opening-stock-correction", { quantity, clientId });
+    const item = async () => (await app.inject({ method: "GET", url: "/v1/me/shop-listings", headers: actor.headers })).json().items[0];
+    const movements = async () => (await database.pool.query("SELECT kind, quantity::text FROM stock_movements ORDER BY created_at, id")).rows;
+    if (quantity) expect((await post("opening-stock", { quantity, clientId: randomUUID() })).statusCode).toBe(201);
+    return { actor, post, correct, item, movements };
+  }
+
+  it("appends a signed movement of the difference, keeps the opening row and answers the corrected total", async () => {
+    const { correct, item, movements } = await recorded();
+    const down = await correct("8");
+    expect(down.statusCode).toBe(201);
+    expect(down.json()).toMatchObject({ quantity: "8.000" });
+    expect(await item()).toMatchObject({ stock: "8.000", openingStock: "8.000", openingStockRecorded: true });
+    expect((await correct("12.5")).json()).toMatchObject({ quantity: "12.500" });
+    expect((await correct("0")).json()).toMatchObject({ quantity: "0.000" });
+    expect(await item()).toMatchObject({ stock: "0.000", openingStock: "0.000" });
+    expect(await movements()).toEqual([
+      { kind: "opening", quantity: "10.000" }, { kind: "opening_correction", quantity: "-2.000" },
+      { kind: "opening_correction", quantity: "4.500" }, { kind: "opening_correction", quantity: "-12.500" },
+    ]);
+    // Only a correction may go negative, and a typed total never does.
+    await expect(database.pool.query("UPDATE stock_movements SET quantity = -1")).rejects.toThrow("append-only");
+    await expect(database.pool.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
+      SELECT listing_id, actor_id, gen_random_uuid(), 'opening', -1 FROM stock_movements LIMIT 1`)).rejects.toThrow("stock_movements_quantity_valid");
+    expect((await correct("-1")).statusCode).toBe(400);
+  });
+
+  it("refuses a correction with no opening to correct, a fractional count of pieces, Staff and another shop", async () => {
+    const { actor, correct, post } = await recorded("");
+    expect((await correct("5")).json()).toEqual({ error: { code: "OPENING_STOCK_NOT_RECORDED" } });
+    await database.pool.query("UPDATE master_products SET base_unit = 'each', classification = 'counted'");
+    await post("opening-stock", { quantity: "3", clientId: randomUUID() });
+    expect((await correct("2.5")).statusCode).toBe(400);
+    const staff = await owner("staff@example.com");
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    expect((await post("opening-stock-correction", { quantity: "2", clientId: randomUUID() }, staff.headers)).statusCode).toBe(404);
+    const other = await shop("live", "other@example.com");
+    const crossed = await app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock-correction`, headers: other.headers, payload: { quantity: "2", clientId: randomUUID() } });
+    expect(crossed.statusCode).toBe(404);
+  });
+
+  it("answers a retry of the same correction without a second movement", async () => {
+    const { correct, movements } = await recorded();
+    const clientId = randomUUID();
+    const first = await correct("7", clientId);
+    const retry = await correct("7", clientId);
+    expect([first.statusCode, retry.statusCode]).toEqual([201, 200]);
+    expect(retry.json()).toEqual(first.json());
+    expect(await movements()).toHaveLength(2);
+    expect((await correct("7", clientId)).json()).toEqual(first.json());
+  });
+
+  it("refuses the same id with a different corrected total, even after a later correction", async () => {
+    const { correct, movements } = await recorded();
+    const clientId = randomUUID();
+    expect((await correct("7", clientId)).statusCode).toBe(201);
+    const changed = await correct("9", clientId);
+    expect(changed.statusCode).toBe(400);
+    expect(await movements()).toHaveLength(2);
+    expect((await correct("4")).statusCode).toBe(201);
+    expect((await correct("7.0", clientId)).statusCode).toBe(200);
+    expect((await correct("9", clientId)).statusCode).toBe(400);
+    expect(await movements()).toHaveLength(3);
+  });
+
+  it("serializes two corrections: each is worked out against the latest committed total and the last one applied wins", async () => {
+    const { correct, item, movements } = await recorded();
+    const hold = await database.pool.connect();
+    let late: ReturnType<typeof correct>;
+    let early: ReturnType<typeof correct>;
+    try {
+      await hold.query("BEGIN");
+      await hold.query("SELECT id FROM shop_listings FOR UPDATE");
+      early = correct("6");
+      late = correct("9");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await hold.query("COMMIT");
+    } finally { hold.release(); }
+    const answers = (await Promise.all([early, late])).map((answer) => answer.json().quantity as string);
+    expect(answers.sort()).toEqual(["6.000", "9.000"]);
+    const rows = await movements();
+    const total = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+    expect(rows.map((row) => row.kind)).toEqual(["opening", "opening_correction", "opening_correction"]);
+    expect([6, 9]).toContain(total);
+    expect(Number((await item()).openingStock)).toBe(total);
+    // Whichever applied last left exactly its own target as the opening total.
+    expect(answers.map(Number)).toContain(total);
+  });
+
+  it("changes only the opening count when orders already hold stock, even below what is held", async () => {
+    const { actor, correct, item } = await recorded();
+    const customer = await owner("customer@example.com");
+    const version = (await database.pool.query<{ version: string }>(
+      "INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) VALUES ($1, 'global', 'test', now()) RETURNING version", [customer.id])).rows[0]?.version;
+    await database.pool.query(
+      `WITH placed AS (INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_pincode,
+          address_point, product_value, delivery_fee, total, rate_card_version, quote)
+        SELECT $1, $2, 'accepted', now(), now(), 'home', '1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 60, 0, 60,
+          $3, '{}'::jsonb RETURNING id)
+       INSERT INTO order_lines (order_id, position, listing_id, name, baseUnit_placeholder, pack_quantity, count, unit_price, line_total, stock_quantity)
+       SELECT id, 0, (SELECT id FROM shop_listings WHERE shop_id = $2), 'Rice', 'kg', 1, 4, 15, 60, 4 FROM placed`.replace("baseUnit_placeholder", "base_unit"),
+      [customer.id, actor.shopId, version]);
+    expect(await item()).toMatchObject({ stock: "6.000", held: "4.000", openingStock: "10.000" });
+    expect((await correct("12")).statusCode).toBe(201);
+    expect(await item()).toMatchObject({ stock: "8.000", held: "4.000", openingStock: "12.000" });
+    expect((await correct("3")).statusCode).toBe(201);
+    expect(await item()).toMatchObject({ stock: "-1.000", held: "4.000", openingStock: "3.000" });
+  });
+});
+
+describe("opening-stock correction sync (#452)", () => {
+  it("applies in order after the opening, replays a lost response once, and rejects a correction with no opening", async () => {
+    const actor = await shop("live");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const deviceId = randomUUID();
+    const action = (sequence: number, type: string, quantity: string) => ({ id: randomUUID(), sequence, shopId: actor.shopId, type,
+      payload: { packId: actor.packId, quantity }, createdAt: clock.now().toISOString(), clockSuspect: false });
+    const send = (actions: object[]) => app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers,
+      payload: { deviceId, sentAt: clock.now().toISOString(), actions } });
+    const early = action(1, "opening_stock_correction", "4");
+    expect((await send([early])).json().results[0]).toMatchObject({ status: "rejected", code: "OPENING_STOCK_NOT_RECORDED" });
+    const opening = action(2, "opening_stock", "10");
+    const fix = action(3, "opening_stock_correction", "7.5");
+    const answer = await send([opening, fix]);
+    expect(answer.json().results.map((row: { status: string }) => row.status)).toEqual(["applied", "applied"]);
+    expect(answer.json().results[1].result).toMatchObject({ quantity: "7.500" });
+    expect((await send([fix])).json()).toEqual({ results: [answer.json().results[1]] });
+    expect((await database.pool.query("SELECT kind, quantity::text FROM stock_movements ORDER BY stock_movements.quantity DESC")).rows).toEqual([
+      { kind: "opening", quantity: "10.000" }, { kind: "opening_correction", quantity: "-2.500" }]);
+    const staff = await owner("staff2@example.com");
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
+    const refused = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: staff.headers,
+      payload: { deviceId: randomUUID(), sentAt: clock.now().toISOString(), actions: [action(1, "opening_stock_correction", "1")] } });
+    expect(refused.statusCode).toBe(404);
+  });
+
+  it("judges a retry by its stored target when two corrections share one batch", async () => {
+    const actor = await shop("live");
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+    const action = (sequence: number, type: string, quantity: string) => ({ id: randomUUID(), sequence, shopId: actor.shopId, type,
+      payload: { packId: actor.packId, quantity }, createdAt: clock.now().toISOString(), clockSuspect: false });
+    const [opening, first, second] = [action(1, "opening_stock", "10"), action(2, "opening_stock_correction", "7"), action(3, "opening_stock_correction", "9")];
+    const sent = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers,
+      payload: { deviceId: randomUUID(), sentAt: clock.now().toISOString(), actions: [opening, first, second] } });
+    expect(sent.json().results.map((row: { status: string }) => row.status)).toEqual(["applied", "applied", "applied"]);
+    const stamps = await database.pool.query("SELECT DISTINCT created_at FROM stock_movements");
+    expect(stamps.rows).toHaveLength(1);
+    const retry = (id: string, quantity: string) => app.inject({ method: "POST", url: `/v1/me/shop-listings/${actor.packId}/opening-stock-correction`,
+      headers: actor.headers, payload: { quantity, clientId: id } });
+    expect((await retry(first.id, "7")).statusCode).toBe(200);
+    expect((await retry(second.id, "9")).statusCode).toBe(200);
+    expect((await retry(first.id, "9")).statusCode).toBe(400);
+    expect((await retry(second.id, "7")).statusCode).toBe(400);
+    expect((await database.pool.query("SELECT quantity::text, target_quantity::text AS target FROM stock_movements WHERE kind = 'opening_correction' ORDER BY target_quantity")).rows)
+      .toEqual([{ quantity: "-3.000", target: "7.000" }, { quantity: "2.000", target: "9.000" }]);
+  });
+});
