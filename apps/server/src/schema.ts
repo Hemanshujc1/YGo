@@ -350,11 +350,60 @@ export const stockMovements = pgTable("stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction') = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
-  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction')`),
-  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} = 'opening_correction') AND ${table.quantity} <> 'NaN'::numeric`),
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale')`),
+  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0) AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
   uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
 ]);
+
+// Counter bills (#51, BIL-5, BIL-9). The bill as the phone recorded it, kept even when held. A sale's
+// `sale` stock movements share the bill's `client_id`. Triggers allow only resolving a held bill.
+export const counterBills = pgTable("counter_bills", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  actorId: uuid("actor_id").notNull(),
+  // The sync action's id; the reference is made from it on the phone.
+  clientId: uuid("client_id").notNull(),
+  reference: text("reference").notNull(),
+  number: integer("number"),
+  heldReason: text("held_reason"),
+  payment: text("payment").notNull(),
+  // The phone's total is the total on record; the server's own sum sits beside it for Admin.
+  total: numeric("total", { precision: 20, scale: 2 }).notNull(),
+  checkedTotal: numeric("checked_total", { precision: 20, scale: 2 }).notNull(),
+  totalMismatch: boolean("total_mismatch").notNull().generatedAlwaysAs(sql`total <> checked_total`),
+  clockSuspect: boolean("clock_suspect").notNull(),
+  madeAt: timestamp("made_at", { withTimezone: true }).notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  uniqueIndex("counter_bills_client_id_idx").on(table.shopId, table.clientId),
+  uniqueIndex("counter_bills_number_idx").on(table.shopId, table.number),
+  // A colliding reference is kept as a held bill outside this index (BIL-5).
+  uniqueIndex("counter_bills_reference_idx").on(table.shopId, table.reference).where(sql`${table.heldReason} IS DISTINCT FROM 'reference_taken'`),
+  check("counter_bills_held_valid", sql`(${table.number} IS NULL) = (${table.heldReason} IS NOT NULL) AND ${table.number} > 0
+    AND ${table.heldReason} IN ('reference_taken', 'not_listed', 'too_old')`),
+  check("counter_bills_payment_valid", sql`${table.payment} IN ('cash', 'upi')`),
+  check("counter_bills_reference_valid", sql`${table.reference} ~ '^[0-9A-F]{4}-[0-9A-F]{4}$'`),
+  check("counter_bills_total_valid", sql`${table.total} >= 0 AND ${table.checkedTotal} >= 0`),
+]);
+
+export const counterBillLines = pgTable("counter_bill_lines", {
+  billId: uuid("bill_id").notNull().references(() => counterBills.id),
+  position: integer("position").notNull(),
+  // No foreign key: a held bill keeps whatever pack the phone sent, and an unknown one must not fail the batch.
+  packId: uuid("pack_id").notNull(),
+  count: integer("count").notNull(),
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.billId, table.position] }),
+  check("counter_bill_lines_valid", sql`${table.position} > 0 AND ${table.count} > 0 AND ${table.unitPrice} >= 0 AND ${table.unitPrice} <> 'NaN'::numeric`),
+]);
+
+// The last bill number given in each shop, locked and raised in the transaction that numbers a bill (ADR-0002).
+export const counterBillNumbers = pgTable("counter_bill_numbers", {
+  shopId: uuid("shop_id").primaryKey().references(() => shops.id),
+  lastNumber: integer("last_number").notNull(),
+});
 
 // Pending uploads bind the server-declared size to a shop and actor. They are
 // disposable; durable visits never depend on their lifecycle (#321, DEL-10).

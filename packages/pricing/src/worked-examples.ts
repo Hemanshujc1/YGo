@@ -157,3 +157,17 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
     },
   },
 ];
+
+export type CounterBillExample = { name: string; lines: Array<{ unitPrice: string; count: number }>; total: string };
+
+/**
+ * Counter-bill totals (BIL-9), written once (#51). The phone's arithmetic and the server's SQL check both
+ * run them. Whole packs only; part packs and quantity-price options join when counter billing sells them.
+ */
+export const COUNTER_BILL_EXAMPLES: CounterBillExample[] = [
+  { name: "One pack at a whole-rupee price", lines: [{ unitPrice: "21", count: 1 }], total: "21.00" },
+  { name: "Paise carried across lines", lines: [{ unitPrice: "99.50", count: 2 }, { unitPrice: "0.05", count: 3 }, { unitPrice: "12.5", count: 1 }], total: "211.65" },
+  { name: "Many packs at one paisa", lines: [{ unitPrice: "0.01", count: 9999 }], total: "99.99" },
+  { name: "A free pack adds nothing", lines: [{ unitPrice: "0", count: 2 }, { unitPrice: "40", count: 1 }], total: "40.00" },
+  { name: "Exact past a float's safe integers", lines: [{ unitPrice: "9999999999.99", count: 9999 }], total: "99989999999900.01" },
+];

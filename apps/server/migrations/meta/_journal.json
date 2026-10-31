@@ -281,6 +281,13 @@
       "when": 1793450483676,
       "tag": "0039_opening_stock_correction",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793474099752,
+      "tag": "0040_counter_bills",
+      "breakpoints": true
     }
   ]
 }
