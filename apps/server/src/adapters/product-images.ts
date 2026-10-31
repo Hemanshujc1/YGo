@@ -63,7 +63,10 @@ export function createProductImageStorage(options: {
   bucket: string;
   imageBaseUrl: string;
 }) {
+  const baseUrl = options.imageBaseUrl.replace(/\/+$/, "");
+  const url = (key: string) => `${baseUrl}/${key}`;
   return {
+    url,
     prepare(source: Buffer): Promise<PreparedProductImage> {
       return createVariants(source);
     },
@@ -96,12 +99,7 @@ export function createProductImageStorage(options: {
       return { keys, urls: this.urls(keys) };
     },
     urls(keys: ProductImageVariants): ProductImageVariants {
-      const baseUrl = options.imageBaseUrl.replace(/\/+$/, "");
-      return {
-        256: `${baseUrl}/${keys[256]}`,
-        512: `${baseUrl}/${keys[512]}`,
-        1024: `${baseUrl}/${keys[1024]}`,
-      };
+      return { 256: url(keys[256]), 512: url(keys[512]), 1024: url(keys[1024]) };
     },
   };
 }

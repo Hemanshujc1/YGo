@@ -26,6 +26,10 @@ The theme choice is saved on the phone with MMKV and applied before the first sc
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
+## Product photos
+
+C05 shows each product's small photo (#378), loaded from the address the server sends. Locally the photos come from SeaweedFS, so a real phone needs the server's `PRODUCT_IMAGE_LOCAL_BASE_URL` on the Mac's LAN address and SeaweedFS published on all interfaces (`apps/server/README.md`, "Local product images"). Without image storage on the server, or when a photo fails to load, C05 shows a plain square instead.
+
 ## The map keys
 
 Confirm location draws Google's map on both phones (#255, #307), through `PinMap` from `@ygo/mobile`. Each phone has its own key: a Maps SDK for Android key from `GOOGLE_MAPS_ANDROID_API_KEY` and a Maps SDK for iOS key from `GOOGLE_MAPS_IOS_API_KEY`. The Shopkeeper app uses the same two keys for S17's map. `app.config.ts` reads the variables from `apps/customer/.env` or the build's environment, so the keys are never in the repo. A release build sets `YGO_RELEASE_BUILD=1` and then stops with an error naming a missing key, instead of shipping the blank-map placeholder a development build keeps (#315). The build writes each into the app, where anyone can read it, so restrict both in Google Cloud:

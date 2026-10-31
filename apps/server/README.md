@@ -57,7 +57,7 @@ You need Docker (Docker Desktop or OrbStack) for the database and local email in
 For Admin product image testing without AWS, start SeaweedFS as a local S3-compatible store:
 
 ```sh
-docker run -d --name ygo-s3 -p 127.0.0.1:8333:8333 -v ygo-s3:/data \
+docker run -d --name ygo-s3 -p 8333:8333 -v ygo-s3:/data \
   chrislusf/seaweedfs:4.48 server -dir=/data -s3 -s3.port=8333 -ip.bind=0.0.0.0
 ```
 
@@ -68,7 +68,14 @@ AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local-secret \
   aws --endpoint-url http://127.0.0.1:8333 s3 mb s3://ygo-product-images
 ```
 
-In `apps/server/.env`, set `PRODUCT_IMAGE_BUCKET=ygo-product-images`, `S3_ENDPOINT=http://127.0.0.1:8333`, `AWS_ACCESS_KEY_ID=local`, and `AWS_SECRET_ACCESS_KEY=local-secret`. Set `PRODUCT_IMAGE_LOCAL_BASE_URL=http://127.0.0.1:8333/ygo-product-images`; it includes the bucket path so the 256, 512 and 1024 WebP URLs load directly from SeaweedFS. Leave `PRODUCT_IMAGE_CLOUDFRONT_DOMAIN` unset. The local URL setting requires `S3_ENDPOINT`; deployments without it continue to use the CloudFront hostname.
+In `apps/server/.env`, set `PRODUCT_IMAGE_BUCKET=ygo-product-images`, `S3_ENDPOINT=http://127.0.0.1:8333`, `AWS_ACCESS_KEY_ID=local`, and `AWS_SECRET_ACCESS_KEY=local-secret`. Set `PRODUCT_IMAGE_LOCAL_BASE_URL=http://<Mac LAN address>:8333/ygo-product-images` (`ipconfig getifaddr en0` prints the address); it includes the bucket path so the 256, 512 and 1024 WebP URLs load directly from SeaweedFS. Leave `PRODUCT_IMAGE_CLOUDFRONT_DOMAIN` unset. The local URL setting requires `S3_ENDPOINT`; deployments without it continue to use the CloudFront hostname.
+
+The two addresses do different jobs:
+
+- `S3_ENDPOINT` is where the server uploads, so `127.0.0.1` works: the server runs on the Mac.
+- `PRODUCT_IMAGE_LOCAL_BASE_URL` goes into every photo address the server sends, and the Customer app on a phone loads the photos from it (C05, #378). It needs the Mac's LAN address, the same one as the app's `EXPO_PUBLIC_API_BASE_URL`; Admin web on the Mac loads from it too. Update it when the Mac's wifi address changes, and restart the server.
+
+`-p 8333:8333` publishes SeaweedFS on every network the Mac joins, so a phone on the same wifi can reach it. With no S3 credentials, anyone on that wifi can also read and write the local bucket, so use it on a trusted network only. A container made earlier with `-p 127.0.0.1:8333:8333` keeps its photos in the `ygo-s3` volume: `docker rm -f ygo-s3`, then run the command above again.
 
 ## Configuration
 

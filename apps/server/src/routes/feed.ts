@@ -5,6 +5,7 @@ import {
   ShopPageParams, ShopPageResponse, type ShopPagePack, type ShopPageProduct,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
+import type { ProductImageStorage } from "../adapters/product-images";
 import { inStock, partOf, visibleListings } from "../listings";
 import { pointFrom } from "../points";
 import { holidaysNear, holidaysOf, indiaWeekday, openStatus, overrideOf } from "../shop-open";
@@ -66,9 +67,9 @@ export async function servingShops(pool: Pool, now: Date, { pincode, latitude, l
 export const feedCard = ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday }: ServingShop): FeedShop =>
   ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday });
 
-type ListingRow = Omit<ShopPageProduct, "packs"> & ShopPagePack & { category: string };
+type ListingRow = Omit<ShopPageProduct, "packs" | "imageUrl"> & ShopPagePack & { category: string; imageKey: string | null };
 
-export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret, images }: { pool: Pool; clock: Clock; secret: string; images?: ProductImageStorage }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope };
 
@@ -88,18 +89,18 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret }
     // Out of stock with neither a whole pack nor a part on sale (owner's answer 9 on #47, #377); the MRP and the percent off, to two decimals, show only below it (answer 3 on #370, #411).
     const { rows } = await pool.query<ListingRow>(
       `SELECT COALESCE(parent.name, category.name) AS category, product.id, product.name, product.brand, product.base_unit AS "baseUnit",
-          listing.id AS "listingId", trim_scale(pack.quantity)::text AS quantity, listing.online_price::text AS price,
+          product.image_256_key AS "imageKey", listing.id AS "listingId", trim_scale(pack.quantity)::text AS quantity, listing.online_price::text AS price,
           CASE WHEN listing.online_price < listing.mrp THEN listing.mrp::text END AS mrp,
           CASE WHEN listing.online_price < listing.mrp THEN round((listing.mrp - listing.online_price) * 100 / listing.mrp, 2)::text END AS "discountPercent",
           NOT ${inStock("listing")} AS "outOfStock", ${partOf("listing")} AS part
         FROM ${visibleListings}
         ORDER BY lower(COALESCE(parent.name, category.name)), lower(product.name), product.id, pack.quantity`, [id]);
     const groups: ShopPageResponse["groups"] = [];
-    for (const { category, id: productId, name, brand, baseUnit, ...pack } of rows) {
+    for (const { category, id: productId, name, brand, baseUnit, imageKey, ...pack } of rows) {
       let group = groups.at(-1);
       if (group?.category !== category) groups.push(group = { category, products: [] });
       let product = group.products.at(-1);
-      if (product?.id !== productId) group.products.push(product = { id: productId, name, brand, baseUnit, packs: [] });
+      if (product?.id !== productId) group.products.push(product = { id: productId, name, brand, baseUnit, imageUrl: images && imageKey ? images.url(imageKey) : null, packs: [] });
       product.packs.push(pack);
     }
     return { shop, groups };

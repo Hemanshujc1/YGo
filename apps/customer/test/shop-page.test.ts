@@ -20,7 +20,7 @@ describe("shop page labels (#370)", () => {
 
   it("keeps the server's category, product and pack order as SectionList sections", () => {
     const pack = (listingId: string, quantity: string) => ({ listingId, quantity, price: "10.00", mrp: null, discountPercent: null, outOfStock: false, part: null });
-    const product = (id: string, packs: ReturnType<typeof pack>[]) => ({ id, name: id, brand: null, baseUnit: "kg" as const, packs });
+    const product = (id: string, packs: ReturnType<typeof pack>[]) => ({ id, name: id, brand: null, baseUnit: "kg" as const, imageUrl: null, packs });
     const groups = [
       { category: "Groceries", products: [product("atta", [pack("a1", "5")]), product("dal", [pack("d1", "0.5"), pack("d2", "1")])] },
       { category: "Stationery", products: [product("pen", [pack("p1", "1")])] },
