@@ -26,7 +26,7 @@ vi.mock("react", () => ({
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
 vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
-vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", View: "View" }));
+vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, answer: () => null, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "online" }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
@@ -48,6 +48,12 @@ function press(label: string) {
   const element = elements(render()).find((node) => node.props.label === label);
   expect(element, label).toBeDefined();
   (element?.props.onPress as () => void)();
+}
+// Pulling the list down is the manual sync.
+function pull() {
+  const control = elements(render()).find((node) => node.props.refreshControl)?.props.refreshControl as { props: { onRefresh: () => void } } | undefined;
+  expect(control).toBeDefined();
+  control?.props.onRefresh();
 }
 function texts() {
   return elements(render()).flatMap((node) => {
@@ -103,7 +109,7 @@ describe("minimal Stock screen", () => {
     mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
       actionId: action.id, sequence: action.sequence, status: "applied", code: null, result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false,
     })) } }));
-    press("Retry sync"); await settle(); expect(texts()).toContain("Saved"); expect(queue.count()).toBe(0);
+    pull(); await settle(); expect(texts()).toContain("Saved"); expect(queue.count()).toBe(0);
     mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
       actionId: action.id, sequence: action.sequence, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false,
     })) } }));
@@ -141,7 +147,7 @@ describe("minimal Stock screen", () => {
       actionId: action.id, sequence: action.sequence, status: "applied", code: null, result: { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }, clockSuspect: false,
     })) } }));
     // The replay acknowledges true, but another phone has since saved false.
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
     mock.stock.mockImplementationOnce(async () => { switchAccount(); return { ok: false }; });
     press("Rice: Out of stock"); await settle();
@@ -151,13 +157,13 @@ describe("minimal Stock screen", () => {
   it("pulls other-device changes on manual refresh and keeps pending toggles over offline pulls", async () => {
     render(); await settle();
     mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: { ...item, quantity: "9", held: "2.000", outOfStock: true }, deletedAt: null }] } });
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(mock.stock).toHaveBeenLastCalledWith(`${shopId}:1`);
     expect(texts()).toContain("9 kg left · 2 kg held for orders");
     press("Rice: Out of stock"); await settle();
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
     mock.stock.mockRejectedValue(new Error("offline"));
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(texts()).toContain("9 kg left · 2 kg held for orders");
     expect(texts()).toContain("Couldn't refresh Stock. Showing saved stock; changes stay on this phone.");
     expect(queue.count()).toBe(1);
@@ -166,14 +172,14 @@ describe("minimal Stock screen", () => {
   it("keeps a removed pending row read-only, then exposes the retained refusal's support reference", async () => {
     render(); await settle(); press("Rice: Out of stock"); await settle();
     mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: null, deletedAt: new Date().toISOString() }] } });
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(texts()).toContain("No longer available · waiting to sync");
     expect(elements(render()).some((node) => node.props.label === "Rice: Out of stock")).toBe(false);
     const id = queue.batch(shopId).actions[0]?.id;
     mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
       actionId: action.id, sequence: action.sequence, status: "rejected", code: "NOT_FOUND", result: null, clockSuspect: false,
     })) } }));
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(texts().join(" ")).not.toContain("Rice");
     expect(texts().join(" ")).toContain(id);
     expect(queue.failureCount()).toBe(1);
@@ -192,8 +198,19 @@ describe("minimal Stock screen", () => {
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(true);
     // Another phone restored false before the server projection changed; no delta is needed.
     mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } });
-    press("Retry sync"); await settle();
+    pull(); await settle();
     expect(elements(render()).find((node) => node.props.label === "Rice: Out of stock")?.props.on).toBe(false);
   });
 
+
+  it("shows Retry sync only after a failed pass and hides it when synced", async () => {
+    render(); await settle();
+    expect(elements(render()).some((node) => node.props.label === "Retry sync")).toBe(false);
+    mock.stock.mockRejectedValue(new Error("offline"));
+    pull(); await settle();
+    expect(elements(render()).some((node) => node.props.label === "Retry sync")).toBe(true);
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [] } });
+    press("Retry sync"); await settle();
+    expect(elements(render()).some((node) => node.props.label === "Retry sync")).toBe(false);
+  });
 });
