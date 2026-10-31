@@ -22,7 +22,7 @@ type CatalogRow = {
   classification: ShopListingCatalogItem["classification"]; packQuantity: string; barcode: string | null;
   listingId: string | null; onlinePrice: string | null; counterPrice: string | null; mrp: string | null;
   lowStockLevel: string | null; available: boolean | null; minimumOrderQuantity: string | null; quantityStep: string | null;
-  stock: string; held: string; openingStockRecorded: boolean; outOfStock: boolean;
+  stock: string; held: string; openingStockRecorded: boolean; openingStock: string; outOfStock: boolean;
 };
 
 async function ownerShop(client: PoolClient, accountId: string): Promise<Shop | undefined> {
@@ -54,7 +54,7 @@ function projectCatalogItem(
   return {
     packId: row.packId, productId: row.productId, name: row.name, brand: row.brand,
     baseUnit: row.baseUnit, classification: row.classification, packQuantity: row.packQuantity,
-    barcode: row.barcode, stock: row.stock, held: row.held, openingStockRecorded: row.openingStockRecorded,
+    barcode: row.barcode, stock: row.stock, held: row.held, openingStockRecorded: row.openingStockRecorded, openingStock: row.openingStock,
     listing: row.listingId === null ? null : {
       id: row.listingId,
       onlinePrice: requiredListingValue(row.onlinePrice, "online price"),
@@ -73,12 +73,13 @@ export const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name
   sl.out_of_stock AS "outOfStock", sl.mrp, sl.low_stock_level AS "lowStockLevel", sl.available,
   sl.minimum_order_quantity AS "minimumOrderQuantity", sl.quantity_step AS "quantityStep",
   ${stockOf("sl")}::text AS stock, ${heldOf("sl")}::text AS held,
-  COALESCE(stock.opening_recorded, false) AS "openingStockRecorded"
+  COALESCE(stock.opening_recorded, false) AS "openingStockRecorded", COALESCE(stock.opening_total, 0)::text AS "openingStock"
   FROM packs pk JOIN master_products p ON p.id = pk.product_id
   JOIN categories c ON c.id = p.category_id
   LEFT JOIN categories parent ON parent.id = c.parent_id
   LEFT JOIN shop_listings sl ON sl.pack_id = pk.id AND sl.shop_id = $1
-  LEFT JOIN LATERAL (SELECT bool_or(sm.kind = 'opening') AS opening_recorded
+  LEFT JOIN LATERAL (SELECT bool_or(sm.kind = 'opening') AS opening_recorded,
+      sum(sm.quantity) FILTER (WHERE sm.kind IN ('opening', 'opening_correction')) AS opening_total
     FROM stock_movements sm WHERE sm.listing_id = sl.id) stock ON true
   WHERE pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)
   `;
@@ -117,6 +118,47 @@ const inserted = await client.query<{ quantity: string; createdAt: Date }>(
 const movement = inserted.rows[0];
 if (!movement) throw new Error("Opening stock insert returned no row");
 return { status: 201, result: { listingId: row.id, quantity: movement.quantity, recordedAt: movement.createdAt.toISOString() } };
+}
+
+/**
+ * Correct a recorded opening count to `body.quantity` (#452). Appends one signed `opening_correction` movement
+ * of the difference, so the opening row stays and stock on hand is still the sum of movements. The listing row
+ * lock serializes two devices: each correction is worked out against the latest committed opening total, so
+ * the last one applied wins. Sales and holds since the opening are untouched.
+ */
+export async function applyOpeningStockCorrection(client: PoolClient, accountId: string, shopId: string, packId: string, body: OpeningStockBody): Promise<
+  { code: "NOT_FOUND" | "VALIDATION_FAILED" | "OPENING_STOCK_NOT_RECORDED" } | { status: 200 | 201; result: OpeningStockResponse }
+> {
+  const listing = await client.query<{ id: string; baseUnit: string }>(
+    `SELECT sl.id, p.base_unit AS "baseUnit" FROM shop_listings sl
+     JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id
+     WHERE sl.shop_id = $1 AND sl.pack_id = $2 FOR UPDATE OF sl`,
+    [shopId, packId],
+  );
+  const row = listing.rows[0];
+  if (!row) return { code: "NOT_FOUND" };
+  if (row.baseUnit === "each" && !isWholeBaseUnitQuantity(body.quantity)) return { code: "VALIDATION_FAILED" };
+  const openingTotal = () => client.query<{ recorded: boolean; total: string }>(
+    `SELECT COALESCE(bool_or(kind = 'opening'), false) AS recorded, COALESCE(sum(quantity), 0)::text AS total
+     FROM stock_movements WHERE listing_id = $1 AND kind IN ('opening', 'opening_correction')`, [row.id]).then((answer) => answer.rows[0]);
+  const same = await client.query<{ kind: string; actorId: string; createdAt: Date }>(
+    `SELECT kind, actor_id AS "actorId", created_at AS "createdAt" FROM stock_movements WHERE listing_id = $1 AND client_id = $2`, [row.id, body.clientId]);
+  if (same.rows[0]) {
+    const saved = same.rows[0];
+    if (saved.kind !== "opening_correction" || saved.actorId !== accountId) return { code: "VALIDATION_FAILED" };
+    // A retry of an applied correction answers with the opening total as it stands now.
+    return { status: 200, result: { listingId: row.id, quantity: (await openingTotal())?.total ?? "0", recordedAt: saved.createdAt.toISOString() } };
+  }
+  const before = await openingTotal();
+  if (!before?.recorded) return { code: "OPENING_STOCK_NOT_RECORDED" };
+  const inserted = await client.query<{ createdAt: Date }>(
+    `INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
+     VALUES ($1, $2, $3, 'opening_correction', $4::numeric - $5::numeric) RETURNING created_at AS "createdAt"`,
+    [row.id, accountId, body.clientId, body.quantity, before.total],
+  );
+  const movement = inserted.rows[0];
+  if (!movement) throw new Error("Opening stock correction insert returned no row");
+  return { status: 201, result: { listingId: row.id, quantity: (await openingTotal())?.total ?? "0", recordedAt: movement.createdAt.toISOString() } };
 }
 
 export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, secret }: Auth): void {
@@ -237,6 +279,25 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
         return reply.code(409).send({ error: { code: "OPENING_STOCK_ALREADY_RECORDED" } });
       }
       throw error;
+    });
+  });
+
+  app.post("/v1/me/shop-listings/:packId/opening-stock-correction", {
+    schema: { params: ShopListingParams, body: OpeningStockBody, response: { 201: OpeningStockResponse, 200: OpeningStockResponse, ...errors } },
+  }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { packId } = request.params as { packId: string };
+    const body = request.body as typeof OpeningStockBody._output;
+    return withTransaction(pool, async (client) => {
+      const shop = await ownerShop(client, who.accountId);
+      if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      if (shop.state !== "approved" && shop.state !== "live") return notReady(reply);
+      const answer = await applyOpeningStockCorrection(client, who.accountId, shop.id, packId, body);
+      if ("code" in answer) return reply.code(answer.code === "NOT_FOUND" ? 404 : answer.code === "VALIDATION_FAILED" ? 400 : 409)
+        .send({ error: { code: answer.code, ...(answer.code === "VALIDATION_FAILED" ? { fields: ["quantity"] } : {}) } });
+      await client.query("COMMIT");
+      return reply.code(answer.status).send(answer.result);
     });
   });
 }

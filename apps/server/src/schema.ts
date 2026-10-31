@@ -337,6 +337,7 @@ export const shopQuantityPriceOptions = pgTable("shop_quantity_price_options", {
 ]);
 
 // Inventory is the append-only source of on-hand stock; the opening row is idempotent for offline sync.
+// A correction (#452) is a signed movement of the difference, so it alone may be negative.
 export const stockMovements = pgTable("stock_movements", {
   id: uuid("id").primaryKey().defaultRandom(),
   listingId: uuid("listing_id").notNull().references(() => shopListings.id),
@@ -346,8 +347,8 @@ export const stockMovements = pgTable("stock_movements", {
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening')`),
-  check("stock_movements_quantity_valid", sql`${table.quantity} >= 0 AND ${table.quantity} <> 'NaN'::numeric`),
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction')`),
+  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} = 'opening_correction') AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
   uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
 ]);

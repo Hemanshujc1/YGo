@@ -4,7 +4,7 @@ import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { applyOpeningStock, catalogSql } from "./shop-listings";
+import { applyOpeningStock, applyOpeningStockCorrection, catalogSql } from "./shop-listings";
 
 type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number };
 
@@ -84,7 +84,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
         // Access is checked even for replays; neither an ID nor a device grants shop access.
         const shop = await client.query<{ state: string; role: string }>(`SELECT s.state, m.role FROM shops s JOIN shop_members m ON m.shop_id = s.id
           WHERE s.id = $1 AND m.account_id = $2 AND m.role IN ('owner', 'staff') FOR UPDATE OF s`, [action.shopId, who.accountId]);
-        if (!shop.rows[0] || (action.type === "opening_stock" && shop.rows[0].role !== "owner")) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        if (!shop.rows[0] || ((action.type === "opening_stock" || action.type === "opening_stock_correction") && shop.rows[0].role !== "owner")) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         const clockSuspect = action.clockSuspect || Math.abs(now.getTime() - Date.parse(body.sentAt)) > clockSkewSeconds * 1000
           || Date.parse(action.createdAt) > Date.parse(body.sentAt) + clockSkewSeconds * 1000;
         const result: SyncActionResult = { actionId: action.id, sequence: action.sequence, status: "retry", code: null, result: null, clockSuspect };
@@ -117,18 +117,19 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
             }
           }
         } else if (shop.rows[0].role !== "owner") result.code = "NOT_FOUND";
-        else if (action.type !== "opening_stock" || !payload.success) result.code = "VALIDATION_FAILED";
+        else if ((action.type !== "opening_stock" && action.type !== "opening_stock_correction") || !payload.success) result.code = "VALIDATION_FAILED";
         else if (shop.rows[0].state !== "approved" && shop.rows[0].state !== "live") result.code = "SHOP_LISTING_NOT_READY";
         else {
           // A legacy endpoint's lost response remains replayable even after the age bound.
-          const legacy = await client.query(`SELECT 1 FROM stock_movements sm JOIN shop_listings sl ON sl.id = sm.listing_id
+          const legacy = action.type === "opening_stock_correction" ? { rowCount: 0 } : await client.query(`SELECT 1 FROM stock_movements sm JOIN shop_listings sl ON sl.id = sm.listing_id
             WHERE sl.shop_id = $1 AND sl.pack_id = $2 AND sm.actor_id = $3 AND sm.client_id = $4
               AND sm.kind = 'opening' AND sm.quantity = $5::numeric`,
           [action.shopId, payload.data.packId, who.accountId, action.id, payload.data.quantity]);
           const age = now.getTime() - Date.parse(action.createdAt);
           if (!legacy.rowCount && age > maxAgeSeconds * 1000) result.code = "ACTION_TOO_OLD";
           else {
-            const answer = await applyOpeningStock(client, who.accountId, action.shopId, payload.data.packId, { clientId: action.id, quantity: payload.data.quantity });
+            const apply = action.type === "opening_stock_correction" ? applyOpeningStockCorrection : applyOpeningStock;
+            const answer = await apply(client, who.accountId, action.shopId, payload.data.packId, { clientId: action.id, quantity: payload.data.quantity });
             if ("code" in answer) result.code = answer.code;
             else { result.status = "applied"; result.result = answer.result; }
           }

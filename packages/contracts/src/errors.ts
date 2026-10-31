@@ -53,6 +53,7 @@ import { LiveCheck } from "./shops";
  * Shop setup (#43):
  * - SHOP_LISTING_NOT_READY (409): the shop has not been Approved yet.
  * - OPENING_STOCK_ALREADY_RECORDED (409): an opening movement already exists for this listing.
+ * - OPENING_STOCK_NOT_RECORDED (409): a correction needs an opening movement to correct, and there is none (#452).
  * Onboarding agreement (#362):
  * - SHOP_NOT_APPROVED (409): the shop is not Approved or Live yet.
  * - RATE_CARD_INCOMPLETE (409): the shop's rate card is missing a required value (MNY-13).
@@ -107,6 +108,7 @@ export const ErrorCode = z.enum([
   "VISIT_PHOTO_LOCATION_MISSING",
   "SHOP_LISTING_NOT_READY",
   "OPENING_STOCK_ALREADY_RECORDED",
+  "OPENING_STOCK_NOT_RECORDED",
   "SHOP_NOT_APPROVED",
   "RATE_CARD_INCOMPLETE",
   "AGREEMENT_OUTDATED",
