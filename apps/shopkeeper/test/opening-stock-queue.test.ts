@@ -1,4 +1,4 @@
-import type { SyncActionsBody } from "@ygo/contracts";
+import type { SyncActionCode, SyncActionsBody } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -68,7 +68,7 @@ describe("opening-stock durability", () => {
       db = new DatabaseSync(filename);
       const queue = openingStockQueue(adapter(db), randomUUID);
       expect(queue.pending(shopId, packId)).toEqual(entry);
-      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
       db.close();
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
@@ -243,7 +243,7 @@ describe("opening-stock durability", () => {
     const db = new DatabaseSync(":memory:");
     try {
       openingStockQueue(adapter(db), randomUUID).save(shopId, packId, entry);
-      db.exec("PRAGMA user_version = 6");
+      db.exec("PRAGMA user_version = 7");
       expect(() => openingStockQueue(adapter(db), randomUUID)).toThrow("newer app");
       expect(db.prepare("SELECT payload FROM opening_stock").get()?.payload).toBe(JSON.stringify(entry));
     } finally { db.close(); }
@@ -413,4 +413,103 @@ it("lets held legacy stock recover after an independent flag is queued for the s
     expect(queue.batch(shopId).actions.map((action) => action.type)).toEqual(["stock_flag", "opening_stock"]);
     expect(db.prepare("SELECT payload FROM opening_stock_recovered").get()?.payload).toBe("broken original");
   } finally { db.close(); }
+});
+
+describe("S08 overview and the shared allowance (#395)", () => {
+  function answer(queue: ReturnType<typeof openingStockQueue>, status: "applied" | "rejected" | "retry", code: SyncActionCode | null = null) {
+    const batch = queue.batch(shopId);
+    queue.acknowledge(batch, { results: batch.actions.map((action) => ({ actionId: action.id, sequence: action.sequence, status, code,
+      result: status !== "applied" ? null : action.type === "stock_flag" ? { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }
+        : { listingId: packId, quantity: "2.5", recordedAt: new Date().toISOString() }, clockSuspect: false })) });
+  }
+
+  it("lists Needs attention, Waiting to sync and Synced today; a newer accepted change supersedes a refusal", () => {
+    const db = new DatabaseSync(":memory:");
+    let now = new Date("2030-01-01T09:00:00Z");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID, () => now);
+      queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, deletedAt: null,
+        item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false } }] });
+      queue.saveFlag(shopId, packId, true);
+      answer(queue, "rejected", "ACTION_TOO_OLD");
+      const refused = queue.overview(new Date("2030-01-01T00:00:00Z"));
+      expect(refused.attention).toMatchObject([{ type: "stock_flag", outOfStock: true, code: "ACTION_TOO_OLD", label: { name: "Rice" } }]);
+      expect(queue.failureCount()).toBe(1);
+      // Saved but unqueued opening stock is never hidden.
+      queue.save(shopId, "00000000-0000-4000-8000-000000000009", entry);
+      queue.saveFlag(shopId, packId, false);
+      const waiting = queue.overview(new Date("2030-01-01T00:00:00Z")).waiting;
+      expect(waiting.map((row) => [row.type, row.quantity ?? row.outOfStock])).toEqual([["opening_stock", "2.5"], ["stock_flag", false]]);
+      // A retry answer keeps the work waiting, with no acceptance time.
+      answer(queue, "retry", "SEQUENCE_MISSING");
+      expect(queue.overview(new Date(0)).waiting).toHaveLength(2);
+      now = new Date("2030-01-01T10:00:00Z");
+      answer(queue, "applied");
+      const after = queue.overview(new Date("2030-01-01T00:00:00Z"));
+      expect(after.attention).toEqual([]);
+      expect(queue.failureCount()).toBe(0);
+      expect(after.waiting).toEqual([]);
+      expect(after.synced.map((row) => row.at)).toEqual(["2030-01-01T10:00:00.000Z", "2030-01-01T10:00:00.000Z"]);
+      // Only today's acceptances are listed.
+      expect(queue.overview(new Date("2030-01-02T00:00:00Z")).synced).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it("settles an 'already recorded' refusal: the server holds that pack's opening stock and refuses any other", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID);
+      queue.save(shopId, packId, entry);
+      answer(queue, "rejected", "OPENING_STOCK_ALREADY_RECORDED");
+      expect(queue.overview(new Date(0)).attention).toEqual([]); expect(queue.failureCount()).toBe(0);
+    } finally { db.close(); }
+  });
+
+  it("keeps a refusal open while the newer change only waits, and lists held legacy stock for attention", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID);
+      queue.saveFlag(shopId, packId, true); answer(queue, "rejected", "ACTION_TOO_OLD");
+      queue.saveFlag(shopId, packId, true);
+      const view = queue.overview(new Date(0));
+      expect(view.attention).toHaveLength(1); expect(view.waiting).toHaveLength(1);
+      db.exec("INSERT INTO opening_stock_held VALUES ('opening:" + shopId + ":" + packId + "', 'broken')");
+      expect(queue.overview(new Date(0)).attention.map((row) => row.type)).toEqual(["held", "stock_flag"]);
+    } finally { db.close(); }
+  });
+
+  it("applies one count and time allowance to opening stock and Stock changes, and reports it for the meter", () => {
+    const db = new DatabaseSync(":memory:");
+    let now = new Date("2030-01-01T00:00:00Z");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID, () => now, { maxActions: 2, maxAgeHours: 3 });
+      expect(queue.allowance()).toEqual({ used: 0, max: 2, hoursLeft: 3 });
+      expect(queue.save(shopId, packId, entry)).toBeNull();
+      now = new Date("2030-01-01T01:30:00Z");
+      expect(queue.allowance()).toEqual({ used: 1, max: 2, hoursLeft: 2 });
+      // Replacing an unsent count adds nothing; a second pack fills the queue.
+      expect(queue.save(shopId, packId, { ...entry, quantity: "4" })).toBeNull();
+      expect(queue.saveFlag(shopId, "00000000-0000-4000-8000-000000000009", true)).toBeNull();
+      expect(queue.save(shopId, "00000000-0000-4000-8000-000000000010", { ...entry, clientId: randomUUID() })).toBe("queueFull");
+      expect(queue.saveFlag(shopId, packId, true)).toBe("queueFull");
+      now = new Date("2030-01-01T04:30:00Z");
+      expect(queue.allowance().hoursLeft).toBe(0);
+      expect(queue.save(shopId, packId, { quantity: "5", clientId: randomUUID() })).toBe("queueExpired");
+      expect(queue.overview(new Date(0)).waiting).toHaveLength(2);
+    } finally { db.close(); }
+  });
+
+  it("upgrades a version 5 phone to record acceptance times without touching queued work", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const first = openingStockQueue(adapter(db), randomUUID);
+      first.saveFlag(shopId, packId, true);
+      db.exec("ALTER TABLE opening_stock_actions DROP COLUMN acknowledged_at; PRAGMA user_version = 5");
+      const queue = openingStockQueue(adapter(db), randomUUID);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+      expect(queue.count()).toBe(1);
+      answer(queue, "applied");
+      expect(db.prepare("SELECT acknowledged_at FROM opening_stock_actions").get()?.acknowledged_at).toEqual(expect.any(String));
+    } finally { db.close(); }
+  });
 });

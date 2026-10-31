@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { accountEpoch, api, session, supportEmail } from "../api";
-import { type OpeningStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh, syncOpeningStockBatch } from "../lib/opening-stock-queue";
+import { type OpeningStockQueue, refreshListingsAfterConflict, refreshListingsForQueuedConflicts, replaceListingsFromRefresh } from "../lib/opening-stock-queue";
+import { stockSync } from "../lib/stock-sync";
+import { SyncStatus } from "../components/sync-status";
 import { strings } from "../strings";
 import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
 import { stockLine } from "../lib/stock-line";
@@ -71,7 +73,7 @@ export default function OpeningStockScreen() {
     setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue, items });
     setQuantities(Object.fromEntries(items.map((item) => [item.packId, queue.pending(shopId, item.packId)?.quantity ?? ""])));
     const pendingBefore = new Map(items.map((item) => [item.packId, queue.pending(shopId, item.packId)]));
-    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body), () => isCurrentAccount(identity.account.id, epoch));
+    const response = await stockSync.run();
     if (!isCurrentAccount(identity.account.id, epoch)) return;
     const syncResults = items.filter((item) => pendingBefore.get(item.packId)).map((item) => {
       const result = response?.results.find((row) => row.actionId === pendingBefore.get(item.packId)?.clientId);
@@ -173,7 +175,11 @@ export default function OpeningStockScreen() {
       return;
     }
     try {
-      queue.save(shopId, item.packId, entry.data);
+      const blocked = queue.save(shopId, item.packId, entry.data);
+      if (blocked) {
+        setMessage((current) => ({ ...current, [item.packId]: strings.stock[blocked] }));
+        return;
+      }
     } catch {
       setMessage((current) => ({ ...current, [item.packId]: words.storageFailed }));
       return;
@@ -181,7 +187,7 @@ export default function OpeningStockScreen() {
     setEditableQueued((current) => ({ ...current, [item.packId]: false }));
     setSaving(item.packId);
     setMessage((current) => ({ ...current, [item.packId]: "" }));
-    const response = await syncOpeningStockBatch(queue, shopId, (body) => api.syncActions(body), () => isCurrentAccount(accountId, epoch));
+    const response = await stockSync.run();
     if (!isCurrentAccount(accountId, epoch)) return;
     setSaving(null);
     const result = response?.results.find((row) => row.actionId === entry.data.clientId);
@@ -241,6 +247,7 @@ export default function OpeningStockScreen() {
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
       <Link href="/" asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.stock}</Text>
+      {load.kind === "loaded" && <SyncStatus />}
       <Text className="text-body text-muted">{words.quantity}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
       {load.kind === "failed" && <><Text className="text-body text-danger">{load.message}</Text><Button label={words.retry} onPress={() => void refresh()} variant="secondary" /><SupportEmail address={supportEmail} className="text-secondary" /></>}

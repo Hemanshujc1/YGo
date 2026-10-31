@@ -1,4 +1,5 @@
 import { stockCache } from "./stock-cache";
+import { OFFLINE_LIMITS } from "./offline-limits";
 import { StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry } from "@ygo/contracts";
 import type { SQLiteDatabase } from "expo-sqlite";
 
@@ -13,11 +14,11 @@ function parse(raw: string): OpeningStockEntry | null {
 }
 
 /** One account's encrypted database; shop and pack remain part of each key. */
-export function openingStockQueue(db: Database, newId: () => string, now = () => new Date(), limits = { maxActions: 500, maxAgeHours: 72 }) {
+export function openingStockQueue(db: Database, newId: () => string, now = () => new Date(), limits: { maxActions: number; maxAgeHours: number } = OFFLINE_LIMITS) {
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 5) throw new Error("Opening stock database needs a newer app");
+  if (version > 6) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
@@ -54,6 +55,35 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     CREATE TABLE stock_cache_items (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL, deleted_at TEXT, acknowledged_flag INTEGER,
       PRIMARY KEY (shop_id, pack_id)); PRAGMA user_version = 5;`));
 
+  // When the server answered, so S08 can list what synced today.
+  if (version < 6) db.withTransactionSync(() => db.execSync(`ALTER TABLE opening_stock_actions ADD COLUMN acknowledged_at TEXT;
+    CREATE INDEX IF NOT EXISTS opening_stock_actions_pack ON opening_stock_actions (shop_id, pack_id, sequence); PRAGMA user_version = 6;`));
+
+  // A refusal stays open until a newer change of the same kind to the same pack is accepted.
+  // "Already recorded" is settled: the server holds opening stock for that pack and refuses
+  // any other, and Opening stock shows it as recorded.
+  const openRefusal = `a.status = 'rejected' AND json_extract(a.result, '$.code') IS NOT 'OPENING_STOCK_ALREADY_RECORDED' AND NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
+    AND json_extract(n.action, '$.type') = json_extract(a.action, '$.type') AND n.sequence > a.sequence AND n.status = 'applied')`;
+  // Opening stock saved on the phone but not yet given a place in the ordered queue.
+  const unqueued = "NOT EXISTS (SELECT 1 FROM opening_stock_actions q WHERE q.id = json_extract(o.payload, '$.clientId'))";
+
+  function oldestWaiting(): string | null {
+    return db.getFirstSync<{ at: string | null }>(`SELECT min(at) AS at FROM (SELECT json_extract(action, '$.createdAt') AS at FROM opening_stock_actions WHERE status = 'pending'
+      UNION ALL SELECT created_at FROM opening_stock o WHERE ${unqueued})`)?.at ?? null;
+  }
+
+  /** The one BIL-3 check for every new piece of offline work. */
+  function blocked(used: number, adding: boolean): "queueFull" | "queueExpired" | null {
+    if (adding && used >= limits.maxActions) return "queueFull";
+    const oldest = oldestWaiting();
+    return oldest && now().getTime() - Date.parse(oldest) >= limits.maxAgeHours * 3600_000 ? "queueExpired" : null;
+  }
+
+  function label(shopId: string, packId: string): { name: string; packQuantity: string; baseUnit: string } | null {
+    const row = db.getFirstSync<{ payload: string }>("SELECT payload FROM stock_cache_items WHERE shop_id = ? AND pack_id = ?", shopId, packId);
+    return row ? JSON.parse(row.payload) as { name: string; packQuantity: string; baseUnit: string } : null;
+  }
+
   function failed(shopId: string, packId: string): SyncActionResult | null {
     const row = db.getFirstSync<{ result: string }>(`SELECT a.result FROM opening_stock_actions a JOIN opening_stock o
       ON o.shop_id = a.shop_id AND o.pack_id = a.pack_id AND json_extract(o.payload, '$.clientId') = a.id
@@ -72,9 +102,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       const payload = StockFlagPayload.parse({ packId, outOfStock });
       // Enrol older opening stock before allocating this change's sequence.
       this.batch(shopId);
-      if (this.count() >= limits.maxActions) return "queueFull" as const;
-      const oldest = db.getFirstSync<{ created_at: string }>("SELECT json_extract(action, '$.createdAt') AS created_at FROM opening_stock_actions WHERE status = 'pending' ORDER BY sequence LIMIT 1");
-      if (oldest && now().getTime() - Date.parse(oldest.created_at) >= limits.maxAgeHours * 3600_000) return "queueExpired" as const;
+      const stop = blocked(this.count(), true);
+      if (stop) return stop;
       db.withTransactionSync(() => {
         const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
         if (!device) throw new Error("Missing sync device");
@@ -90,7 +119,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     },
     failed,
     failureCount(): number {
-      return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'rejected'")?.count ?? 0;
+      return db.getFirstSync<{ count: number }>(`SELECT count(*) AS count FROM opening_stock_actions a WHERE ${openRefusal}`)?.count ?? 0;
     },
     batch(shopId: string): SyncActionsBody {
       let deviceId = "";
@@ -127,7 +156,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       if (checked.results.length !== batch.actions.length || checked.results.some((row, i) => row.actionId !== batch.actions[i]?.id || row.sequence !== batch.actions[i]?.sequence)) throw new Error("Unexpected sync results");
       db.withTransactionSync(() => {
         for (const result of checked.results) {
-          db.runSync("UPDATE opening_stock_actions SET status = ?, result = ? WHERE id = ?", result.status === 'retry' ? 'pending' : result.status, JSON.stringify(result), result.actionId);
+          db.runSync("UPDATE opening_stock_actions SET status = ?, result = ?, acknowledged_at = ? WHERE id = ?", result.status === "retry" ? "pending" : result.status,
+            JSON.stringify(result), result.status === "retry" ? null : now().toISOString(), result.actionId);
           if (result.status === "applied") db.runSync("DELETE FROM opening_stock WHERE json_extract(payload, '$.clientId') = ?", result.actionId);
         }
       });
@@ -202,14 +232,51 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       const row = db.getFirstSync<{ payload: string }>("SELECT payload FROM opening_stock WHERE shop_id = ? AND pack_id = ?", shopId, packId);
       return row ? parse(row.payload) : null;
     },
-    save(shopId: string, packId: string, entry: OpeningStockEntry) {
+    save(shopId: string, packId: string, entry: OpeningStockEntry): "queueFull" | "queueExpired" | null {
       const checked = OpeningStockBody.parse(entry);
       const held = db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${packId}`);
       if (held) throw new Error("Opening stock needs attention");
       const existing = db.getFirstSync<{ action: string }>("SELECT action FROM opening_stock_actions WHERE id = ?", checked.clientId);
       if (existing && JSON.stringify((JSON.parse(existing.action) as SyncAction).payload) !== JSON.stringify({ packId, quantity: checked.quantity })) throw new Error("Queued action is immutable");
+      // Replacing an entry that is already counted adds nothing to the allowance.
+      const counted = db.getFirstSync(`SELECT 1 FROM opening_stock o WHERE shop_id = ? AND pack_id = ? AND NOT EXISTS
+        (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')`, shopId, packId);
+      const stop = blocked(this.count(), !counted);
+      if (stop) return stop;
       db.runSync(`INSERT INTO opening_stock VALUES (?, ?, ?, ?, 0) ON CONFLICT (shop_id, pack_id)
         DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at, clock_suspect = 0`, shopId, packId, JSON.stringify(checked), now().toISOString());
+      return null;
+    },
+    /** The S08 meter: work counted against the allowance, and hours left before the oldest waiting change reaches the limit. */
+    allowance(): { used: number; max: number; hoursLeft: number } {
+      const oldest = oldestWaiting();
+      const left = limits.maxAgeHours * 3600_000 - (oldest ? now().getTime() - Date.parse(oldest) : 0);
+      return { used: this.count(), max: limits.maxActions, hoursLeft: Math.max(0, Math.ceil(left / 3600_000)) };
+    },
+    /** S08's three sections; `since` is the start of today on this phone. */
+    overview(since: Date): Record<"attention" | "waiting" | "synced", QueueRow[]> {
+      type Raw = { id: string; shop_id: string; pack_id: string; action: string; result: string | null; at: string | null };
+      const row = (raw: Raw): QueueRow => {
+        const action = JSON.parse(raw.action) as SyncAction;
+        const payload = action.payload as { quantity?: string; outOfStock?: boolean };
+        const result = raw.result ? JSON.parse(raw.result) as SyncActionResult : null;
+        return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type === "stock_flag" ? "stock_flag" : "opening_stock",
+          quantity: payload.quantity, outOfStock: payload.outOfStock, code: result?.code ?? null, at: raw.at, label: label(raw.shop_id, raw.pack_id) };
+      };
+      const columns = "a.id, a.shop_id, a.pack_id, a.action, a.result";
+      const refused = db.getAllSync<Raw>(`SELECT ${columns}, a.acknowledged_at AS at FROM opening_stock_actions a WHERE ${openRefusal} ORDER BY a.sequence`).map(row);
+      const held = db.getAllSync<{ id: number; source_key: string; payload: string }>("SELECT rowid AS id, source_key, payload FROM opening_stock_held ORDER BY rowid").map(({ id, source_key, payload }): QueueRow => {
+        const [, shopId = "", packId = ""] = source_key.split(":");
+        return { id: `held:${id}`, shopId, packId, type: "held", quantity: parse(payload)?.quantity, code: null, at: null, label: label(shopId, packId) };
+      });
+      const queued = db.getAllSync<Raw>(`SELECT ${columns}, json_extract(a.action, '$.createdAt') AS at FROM opening_stock_actions a WHERE a.status = 'pending' ORDER BY a.sequence`).map(row);
+      // Never hide work saved on the phone, even before it is queued.
+      const saved = db.getAllSync<{ shop_id: string; pack_id: string; payload: string; created_at: string }>(`SELECT shop_id, pack_id, payload, created_at FROM opening_stock o WHERE ${unqueued} ORDER BY rowid`)
+        .map((o): QueueRow => ({ id: parse(o.payload)?.clientId ?? `${o.shop_id}:${o.pack_id}`, shopId: o.shop_id, packId: o.pack_id, type: "opening_stock",
+          quantity: parse(o.payload)?.quantity, code: null, at: o.created_at, label: label(o.shop_id, o.pack_id) }));
+      const synced = db.getAllSync<Raw>(`SELECT ${columns}, a.acknowledged_at AS at FROM opening_stock_actions a WHERE a.status = 'applied' AND a.acknowledged_at >= ?
+        ORDER BY a.acknowledged_at DESC, a.sequence DESC`, since.toISOString()).map(row);
+      return { attention: [...held, ...refused], waiting: [...queued, ...saved], synced };
     },
     count(): number {
       const row = db.getFirstSync<{ count: number }>("SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected')) + (SELECT count(*) FROM opening_stock_held) AS count");
@@ -225,6 +292,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 }
 
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
+export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "stock_flag" | "held"; quantity?: string; outOfStock?: boolean;
+  code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null };
 
 export function replaceListingsFromRefresh<T extends { packId: string }>(current: T[], refreshed: T[]): T[] {
   const refreshedByPack = new Map(refreshed.map((item) => [item.packId, item]));

@@ -6,12 +6,14 @@ import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { access, accountEpoch, api, session, supportEmail } from "../api";
+import { access, accountEpoch, session, supportEmail } from "../api";
+import { SyncStatus } from "../components/sync-status";
 import { Toggle } from "../components/toggle";
 import { isCurrentAccount } from "../lib/account";
 import { stockLine } from "../lib/stock-line";
-import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-database";
-import { type OpeningStockQueue, syncOpeningStockBatch } from "../lib/opening-stock-queue";
+import { openOpeningStock } from "../lib/opening-stock-database";
+import type { OpeningStockQueue } from "../lib/opening-stock-queue";
+import { stockSync } from "../lib/stock-sync";
 import { strings } from "../strings";
 
 const words = strings.stock;
@@ -26,40 +28,20 @@ export default function StockScreen() {
   const [, redraw] = useState(0);
   const visit = useRef(0);
 
-  async function pull(current: Loaded, token: number) {
-    const since = current.queue.cache.cursor(current.stock.shopId);
-    const answer = await api.syncChanges(since).catch(() => null);
-    if (!isCurrentAccount(current.accountId, current.epoch) || visit.current !== token || !access.allowed(current.accountId, current.stock.shopId)) return;
-    if (!answer?.ok) { setMessage(words.refreshFailed); return; }
-    if (answer.data.shopId !== current.stock.shopId) return;
-    current.queue.cache.apply(answer.data, since);
+  const shown = useRef<Loaded | null>(null);
+  shown.current = load.kind === "loaded" ? load : null;
+
+  // The one sync loop sends and pulls; this screen only re-reads what it stored.
+  function reread(current: Loaded) {
+    if (!isCurrentAccount(current.accountId, current.epoch) || !access.allowed(current.accountId, current.stock.shopId)) return;
     const stock = current.queue.cache.read(current.stock.shopId);
     if (stock) setLoad({ ...current, stock });
-    setMessage(null);
+    setMessage(stockSync.get().outcome === "done" ? null : words.refreshFailed);
+    redraw((value) => value + 1);
   }
 
-  async function sync(current: Loaded, token = visit.current) {
-    try {
-      const identity = session.get();
-      if (!("account" in identity)) return;
-      await access.verify(identity.account);
-      if (!isCurrentAccount(current.accountId, current.epoch) || !access.allowed(current.accountId, current.stock.shopId)) return;
-      const since = current.queue.cache.cursor(current.stock.shopId);
-      const response = await syncOpeningStockBatch(current.queue, current.stock.shopId, (body) => api.syncActions(body), () => isCurrentAccount(current.accountId, current.epoch) && access.allowed(current.accountId, current.stock.shopId));
-      if (!isCurrentAccount(current.accountId, current.epoch) || visit.current !== token || !access.allowed(current.accountId, current.stock.shopId)) return;
-      if (response) current.queue.cache.confirmFlags(current.stock.shopId, response.results, since);
-      // Pull current server state even after a replay: its original result may be superseded.
-      await pull(current, token);
-      if (!isCurrentAccount(current.accountId, current.epoch)) return;
-      await access.verify(identity.account);
-      if (!isCurrentAccount(current.accountId, current.epoch) || visit.current !== token || !access.allowed(current.accountId, current.stock.shopId)) return;
-      const stock = current.queue.cache.read(current.stock.shopId);
-      if (stock) setLoad({ ...current, stock });
-      redraw((value) => value + 1);
-    } catch {
-      if (isCurrentAccount(current.accountId, current.epoch) && visit.current === token) setMessage(words.storageFailed);
-    }
-  }
+  // The redraw comes from the loop's subscription below.
+  function sync(manual = false) { void (manual ? stockSync.retryNow() : stockSync.run()); }
 
   async function refresh(token: number) {
     const identity = session.get();
@@ -73,27 +55,22 @@ export default function StockScreen() {
       const queue = await openOpeningStock(identity.account.id);
       if (!isCurrentAccount(identity.account.id, epoch) || visit.current !== token) return;
       const current = load.kind === "loaded" && load.accountId === identity.account.id ? load : null;
-      if (current) { await sync(current, token); return; }
+      if (current) { sync(); return; }
       const cached = queue.cache.read(permission.shopId);
       if (cached) {
         const loaded: Loaded = { kind: "loaded", accountId: identity.account.id, epoch, stock: cached, queue };
         setLoad(loaded);
-        if (permission.mode === "offline") { setMessage(words.refreshFailed); return; }
-        await sync(loaded, token);
+        if (permission.mode === "offline") setMessage(words.refreshFailed);
+        sync();
         return;
       }
       setLoad({ kind: "loading" });
-      const answer = await api.syncChanges().catch(() => null);
-      if (!isCurrentAccount(identity.account.id, epoch) || visit.current !== token) return;
-      if (!answer?.ok) return setLoad({ kind: "failed", message: answer ? strings.errors[answer.code] : words.loadFailed });
-      if (answer.data.shopId !== permission.shopId || !access.allowed(identity.account.id, permission.shopId)) return;
-      queue.importLegacy(answer.data.shopId, legacyOpeningStock);
-      queue.cache.apply(answer.data);
-      const stock = queue.cache.read(answer.data.shopId);
-      if (!stock) throw new Error("Missing Stock cache");
-      const loaded: Loaded = { kind: "loaded", accountId: identity.account.id, epoch, stock, queue };
-      setLoad(loaded);
-      await sync(loaded, token);
+      await stockSync.run();
+      if (!isCurrentAccount(identity.account.id, epoch) || visit.current !== token || !access.allowed(identity.account.id, permission.shopId)) return;
+      const stock = queue.cache.read(permission.shopId);
+      const code = stockSync.get().code;
+      if (!stock) return setLoad({ kind: "failed", message: code ? strings.errors[code] : words.loadFailed });
+      setLoad({ kind: "loaded", accountId: identity.account.id, epoch, stock, queue });
     } catch {
       if (isCurrentAccount(identity.account.id, epoch) && visit.current === token) setLoad({ kind: "failed", message: words.storageFailed });
     }
@@ -102,7 +79,12 @@ export default function StockScreen() {
   useFocusEffect(useCallback(() => {
     const token = ++visit.current;
     void refresh(token);
-    return () => { ++visit.current; };
+    // Passes the loop starts on its own (every 30 s, retries) redraw too.
+    const unsubscribe = stockSync.subscribe(() => {
+      if (stockSync.get().running || !shown.current || visit.current !== token) return;
+      try { reread(shown.current); } catch { setMessage(words.storageFailed); }
+    });
+    return () => { ++visit.current; unsubscribe(); };
   }, []));
 
   function save(current: Loaded, packId: string, outOfStock: boolean) {
@@ -112,7 +94,7 @@ export default function StockScreen() {
       if (blocked) return setMessage(words[blocked]);
       setMessage(null);
       redraw((value) => value + 1);
-      void sync(current);
+      sync();
     } catch { setMessage(words.storageFailed); }
   }
 
@@ -132,7 +114,8 @@ export default function StockScreen() {
       </View>}
       {load.kind === "loaded" && <>
         {load.stock.state === "suspended" && <Text className="text-body text-danger">{words.suspended}</Text>}
-        <Button label={words.retry} variant="secondary" onPress={() => void sync(load)} />
+        <SyncStatus />
+        <Button label={words.retry} variant="secondary" onPress={() => sync(true)} />
         {load.stock.items.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
         {load.stock.items.map((item) => {
           const flag = load.queue.flag(load.stock.shopId, item.packId);

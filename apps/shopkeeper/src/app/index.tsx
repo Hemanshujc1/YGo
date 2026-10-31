@@ -11,6 +11,7 @@ import { OpenSwitch } from "../components/open-switch";
 import { SignOut } from "../components/sign-out";
 import { waiting } from "../lib/application-status";
 import { strings } from "../strings";
+import { SyncStatus } from "../components/sync-status";
 
 const words = strings.application;
 
@@ -102,6 +103,7 @@ export default function Home() {
       <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         {application.state === "live" && <OpenSwitch />}
         {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
+        {(answersOrders || application.state === "approved") && <SyncStatus />}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
         {liveCheck && <Waiting check={liveCheck} />}
         {(application.state === "approved" || application.state === "live") && (

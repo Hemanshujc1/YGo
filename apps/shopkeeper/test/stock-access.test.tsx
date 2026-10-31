@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccessView } from "../src/lib/offline-access";
 
 const mock = vi.hoisted(() => ({ view: {} as AccessView, path: "/", cursor: 0, hooks: [] as unknown[], effects: [] as (() => void)[],
-  cleanups: [] as (() => void)[], foreground: (() => {}) as (state: string) => void, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn() }));
+  cleanups: [] as (() => void)[], foreground: (() => {}) as (state: string) => void, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn(), start: vi.fn(), stop: vi.fn() }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++; if (!(index in mock.hooks)) mock.hooks[index] = initial;
@@ -24,6 +24,7 @@ vi.mock("react-native", () => ({ ScrollView: "ScrollView", AppState: { addEventL
 } } }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/sign-out", () => ({ SignOut: "SignOut" }));
+vi.mock("../src/lib/stock-sync", () => ({ stockSync: { start: mock.start, stop: mock.stop } }));
 vi.mock("../src/api", () => ({ supportEmail: "help@example.com", session: { get: () => ({ account: { id: "account" } }) }, access: {
   get: () => mock.view, subscribe: vi.fn(), verify: mock.verify, cleanup: mock.cleanup, expire: mock.expire, allowed: mock.allowed,
 } }));
@@ -52,7 +53,11 @@ describe("offline Stock entry boundary", () => {
     mock.path = "/orders"; expect(render()).not.toBe("protected screen");
     const retry = elements(render()).find((node) => node.props.label === "Retry connection");
     (retry?.props.onPress as () => void)(); expect(mock.verify).toHaveBeenCalledTimes(2);
-    mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
+    // iOS "inactive" is not leaving; only coming back from the background checks and syncs again (#395).
+    mock.foreground("inactive"); mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(2); expect(mock.stop).not.toHaveBeenCalled();
+    mock.foreground("background"); expect(mock.stop).toHaveBeenCalledOnce();
+    mock.start.mockClear(); mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
+    await Promise.resolve(); await Promise.resolve(); expect(mock.start).toHaveBeenCalledOnce();
   });
   it("keeps accessible cached Stock visible while background verification is pending", () => {
     mock.path = "/stock";

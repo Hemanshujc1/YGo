@@ -37,6 +37,7 @@ export const SyncActionCode = z.enum([
   "VALIDATION_FAILED", "NOT_FOUND", "SHOP_LISTING_NOT_READY", "OPENING_STOCK_ALREADY_RECORDED",
   "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT",
 ]);
+export type SyncActionCode = z.infer<typeof SyncActionCode>;
 export const SyncActionResult = z.strictObject({
   actionId: z.uuid(), sequence: z.number().int().positive(), status: z.enum(["applied", "rejected", "retry"]),
   code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse]).nullable(), clockSuspect: z.boolean(),

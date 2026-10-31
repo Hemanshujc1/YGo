@@ -1,5 +1,5 @@
 import { formatNumber } from "@ygo/format";
-import type { ErrorCode, OrderStatus, RejectReason } from "@ygo/contracts";
+import type { ErrorCode, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -204,6 +204,31 @@ export const strings = {
     suspended: "Your shop is suspended. Stock tools remain available; customers cannot place orders.",
     queueFull: "Your offline queue is full. Sync your saved changes before changing Stock again.",
     queueExpired: "Your saved changes have reached the offline time limit. Sync them before changing Stock again.",
+  },
+  // S08 Waiting to sync and the status line that opens it (#395).
+  sync: {
+    title: "Waiting to sync", back: "Back", retry: "Retry sync", loadFailed: "Couldn't read the changes saved on this phone.",
+    checking: "Checking saved changes", syncing: "Syncing", allSynced: "All synced",
+    waiting: (count: number) => `${formatNumber(count)} waiting to sync`,
+    attention: (count: number) => `${formatNumber(count)} ${count === 1 ? "needs" : "need"} attention`,
+    meter: (used: number, max: number, hours: number) => `Offline room used: ${formatNumber(used)} of ${formatNumber(max)} · ${formatNumber(hours)} h left`,
+    offline: "Couldn't reach YGo. Changes stay on this phone and sync by themselves when you're back online.",
+    stopped: "Syncing stopped. Changes stay on this phone. Fix what needs attention, then tap Retry sync.",
+    sections: { attention: "Needs attention", waiting: "Waiting to sync", synced: "Synced today" },
+    none: "None", unknownProduct: "A product in your shop",
+    markedOut: "Marked out of stock", markedIn: "Marked in stock", opening: (amount: string) => `Opening stock ${amount}`,
+    held: "This saved count conflicts with another one. Choose which to keep in Opening stock.",
+    reference: (id: string) => `Support reference: ${id}`, fixStock: "Fix in Stock", fixOpening: "Fix in Opening stock", fixOnline: "Go online to fix this in Opening stock.",
+    syncedAt: (time: string) => `Synced at ${time}`,
+    reasons: {
+      VALIDATION_FAILED: "The server couldn't read this change.",
+      NOT_FOUND: "This product is no longer in your shop.",
+      SHOP_LISTING_NOT_READY: "This product isn't ready for stock yet.",
+      OPENING_STOCK_ALREADY_RECORDED: "Opening stock was already recorded for this product.",
+      ACTION_TOO_OLD: "This change waited too long to sync, so the server refused it.",
+      SEQUENCE_MISSING: "An earlier change from this phone hasn't arrived yet.",
+      ACTION_CONFLICT: "This change clashes with one the server already has.",
+    } satisfies Record<SyncActionCode, string>,
   },
   // S04 and S05 (#431): a Live or Suspended shop answers its orders.
   orders: {
