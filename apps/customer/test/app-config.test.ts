@@ -28,6 +28,18 @@ describe("app.config", () => {
     expect(mapsOptions()).toEqual(placeholders);
   });
 
+  it("stops a release build that lacks a map key, and keeps the placeholder otherwise (#315)", () => {
+    vi.stubEnv("YGO_RELEASE_BUILD", "1");
+    vi.stubEnv("GOOGLE_MAPS_ANDROID_API_KEY", "");
+    vi.stubEnv("GOOGLE_MAPS_IOS_API_KEY", "key-2");
+    expect(() => mapsOptions()).toThrow("GOOGLE_MAPS_ANDROID_API_KEY");
+    vi.stubEnv("GOOGLE_MAPS_ANDROID_API_KEY", "key-1");
+    expect(mapsOptions()).toEqual({ androidGoogleMapsApiKey: "key-1", iosGoogleMapsApiKey: "key-2" });
+    vi.stubEnv("YGO_RELEASE_BUILD", "");
+    vi.stubEnv("GOOGLE_MAPS_ANDROID_API_KEY", "");
+    expect(mapsOptions()).toMatchObject({ androidGoogleMapsApiKey: "placeholder-until-the-real-key" });
+  });
+
   it("keeps app.json's name, slug and other plugins", () => {
     const config = appConfig({ config: app.expo } as Parameters<typeof appConfig>[0]);
     expect(config).toMatchObject({ name: "YGo", slug: "ygo-customer" });
