@@ -95,13 +95,11 @@ export function createProductImageStorage(options: {
       if (failure) throw failure.reason;
       return { keys, urls: this.urls(keys) };
     },
+    url(key: string): string {
+      return `${options.imageBaseUrl.replace(/\/+$/, "")}/${key}`;
+    },
     urls(keys: ProductImageVariants): ProductImageVariants {
-      const baseUrl = options.imageBaseUrl.replace(/\/+$/, "");
-      return {
-        256: `${baseUrl}/${keys[256]}`,
-        512: `${baseUrl}/${keys[512]}`,
-        1024: `${baseUrl}/${keys[1024]}`,
-      };
+      return { 256: this.url(keys[256]), 512: this.url(keys[512]), 1024: this.url(keys[1024]) };
     },
   };
 }

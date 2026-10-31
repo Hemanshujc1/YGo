@@ -2,9 +2,10 @@ import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contr
 import { Button, Text } from "@ygo/mobile";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { memo, useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, SectionList, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, SectionList, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
+import { ImageIcon } from "../../components/icons";
 import { Stepper } from "../../components/stepper";
 import { TopBar } from "../../components/top-bar";
 import { cartBarLabel, type Cart } from "../../lib/cart";
@@ -16,7 +17,7 @@ import { useCart, usePack } from "../../lib/use-cart";
 import { strings } from "../../strings";
 
 // C05 Shop page (#370): the shop's terms (DSC-2), then its products under their top category.
-// Each in-stock pack has C17's stepper, and the bar below opens C07 (#406). The hours line opens the week (#381).
+// Each product shows its small photo (#378), and each in-stock pack has C17's stepper, and the bar below opens C07 (#406). The hours line opens the week (#381).
 
 type PageState =
   | { kind: "loading" }
@@ -71,13 +72,28 @@ function Pack({ pack, baseUnit, first, cart }: { pack: ShopPagePack; baseUnit: S
   );
 }
 
+/** The product's 256 px photo, or a plain square when there is none or it fails to load (#378). */
+export function ProductPhoto({ uri }: { uri: string | null }) {
+  const [failed, setFailed] = useState(false);
+  return uri && !failed ? (
+    <Image source={{ uri }} onError={() => setFailed(true)} className="h-14 w-14 rounded-input bg-sunken" />
+  ) : (
+    <View className="h-14 w-14 items-center justify-center rounded-input bg-sunken">
+      <ImageIcon className="text-muted" size={24} />
+    </View>
+  );
+}
+
 function Product({ product, cart }: { product: ShopPageProduct; cart: Cart }) {
   return (
-    <View className="rounded-card border border-border bg-surface px-4 py-3">
-      <Text className="text-body font-semibold text-text">{product.name}</Text>
-      {product.brand && <Text className="text-secondary text-muted">{product.brand}</Text>}
-      <View className="mt-1">
-        {product.packs.map((pack, index) => <Pack key={pack.listingId} pack={pack} baseUnit={product.baseUnit} first={index === 0} cart={cart} />)}
+    <View className="flex-row gap-3 rounded-card border border-border bg-surface px-4 py-3">
+      <ProductPhoto key={product.imageUrl} uri={product.imageUrl} />
+      <View className="flex-1">
+        <Text className="text-body font-semibold text-text">{product.name}</Text>
+        {product.brand && <Text className="text-secondary text-muted">{product.brand}</Text>}
+        <View className="mt-1">
+          {product.packs.map((pack, index) => <Pack key={pack.listingId} pack={pack} baseUnit={product.baseUnit} first={index === 0} cart={cart} />)}
+        </View>
       </View>
     </View>
   );

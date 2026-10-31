@@ -69,6 +69,8 @@ export const ShopPageProduct = z.strictObject({
   name: z.string(),
   brand: z.string().nullable(),
   baseUnit: ProductBaseUnit,
+  /** The 256 px photo for C05's row (#378); null when the server has no image storage set up. */
+  imageUrl: z.url().nullable(),
   packs: z.array(ShopPagePack),
 });
 export type ShopPageProduct = z.infer<typeof ShopPageProduct>;

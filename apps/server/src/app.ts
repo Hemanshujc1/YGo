@@ -144,7 +144,7 @@ export function buildApp({
     registerShopHolidayRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopOpenRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
-    registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

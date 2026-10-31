@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
+import { createProductImageStorage } from "../src/adapters/product-images";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
@@ -205,25 +206,44 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
       },
       groups: [
         { category: "Groceries", products: [
-          { id: atta.productId, name: "atta", brand: null, baseUnit: "kg", packs: [
+          { id: atta.productId, name: "atta", brand: null, baseUnit: "kg", imageUrl: null, packs: [
             { listingId: atta.listings[0], quantity: "5", price: "199.99", mrp: "200.00", discountPercent: "0.01", outOfStock: false, part: null },
             { listingId: atta.listings[1], quantity: "10", price: "60.00", mrp: "65.00", discountPercent: "7.69", outOfStock: false, part: { quantity: "5", price: "30.00" } },
           ] },
-          { id: eggs.productId, name: "Eggs", brand: null, baseUnit: "each", packs: [
+          { id: eggs.productId, name: "Eggs", brand: null, baseUnit: "each", imageUrl: null, packs: [
             { listingId: eggs.listings[0], quantity: "12", price: "84.00", mrp: null, discountPercent: null, outOfStock: true, part: null },
           ] },
-          { id: dal.productId, name: "Toor Dal", brand: null, baseUnit: "kg", packs: [
+          { id: dal.productId, name: "Toor Dal", brand: null, baseUnit: "kg", imageUrl: null, packs: [
             { listingId: dal.listings[1], quantity: "0.5", price: "70.00", mrp: null, discountPercent: null, outOfStock: true, part: null },
             { listingId: dal.listings[0], quantity: "1", price: "135.00", mrp: "150.00", discountPercent: "10.00", outOfStock: false, part: null },
           ] },
         ] },
         { category: "Stationery", products: [
-          { id: pen.productId, name: "Pen", brand: null, baseUnit: "each", packs: [
+          { id: pen.productId, name: "Pen", brand: null, baseUnit: "each", imageUrl: null, packs: [
             { listingId: pen.listings[0], quantity: "1", price: "10.00", mrp: null, discountPercent: null, outOfStock: true, part: null },
           ] },
         ] },
       ],
     });
+  });
+
+  it("gives each product its 256 px photo address when image storage is set up (#378)", async () => {
+    // The other tests run with no image storage, so every imageUrl there is null.
+    await app.close();
+    const productImages = createProductImageStorage({ client: { async putObject() {}, async deleteObject() {} }, bucket: "test", imageBaseUrl: "https://images.ygo.example/" });
+    app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, productImages });
+    const id = await shop("Near Dairy", 300);
+    await publish({ type: "global" }, card);
+    const groceries = await category("Groceries");
+    const rice = await product(id, groceries, "Rice", "kg", [{ quantity: "1", price: "60", mrp: "60", stock: "3" }]);
+    await database.pool.query("UPDATE master_products SET image_256_key = 'products/rice/256.webp' WHERE id = $1", [rice.productId]);
+    await product(id, groceries, "Atta", "kg", [{ quantity: "5", price: "200", mrp: "200", stock: "3" }]);
+
+    const products = (await page(id)).json().groups[0].products as Array<{ name: string; imageUrl: string | null }>;
+    expect(products.map(({ name, imageUrl }) => ({ name, imageUrl }))).toEqual([
+      { name: "Atta", imageUrl: "https://images.ygo.example/p/256.webp" },
+      { name: "Rice", imageUrl: "https://images.ygo.example/products/rice/256.webp" },
+    ]);
   });
 
   it("answers 404 wherever the feed would leave the shop out, and refuses a bad query, the admin web and no sign-in", async () => {
