@@ -61,7 +61,10 @@ export default function SyncScreen() {
       {section === "attention" && <>
         <Text className="text-secondary text-danger">{row.type === "held" ? words.held : code.success ? words.reasons[code.data] : words.reasons.VALIDATION_FAILED}</Text>
         {row.type !== "held" && <Text selectable className="text-secondary text-muted">{words.reference(row.id)}</Text>}
-        <Link href={row.type === "stock_flag" ? "/stock" : "/opening-stock"} className="py-3 text-body text-primary">{row.type === "stock_flag" ? words.fixStock : words.fixOpening}</Link>
+        {/* Offline, Opening stock is closed (#394). */}
+        {row.type === "stock_flag" ? <Link href="/stock" className="py-3 text-body text-primary">{words.fixStock}</Link>
+          : view.mode === "offline" ? <Text className="text-secondary text-muted">{words.fixOnline}</Text>
+          : <Link href="/opening-stock" className="py-3 text-body text-primary">{words.fixOpening}</Link>}
       </>}
     </View>;
   }
@@ -75,7 +78,7 @@ export default function SyncScreen() {
       {data === "failed" && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{words.loadFailed}</Text>}
       {data && data !== "failed" && <>
         <Text className="text-body text-text">{words.meter(data.allowance.used, data.allowance.max, data.allowance.hoursLeft)}</Text>
-        {(status.outcome === "retry" || status.outcome === "halt") && <Text accessibilityLiveRegion="polite" className="text-body text-pending">{words.offline}</Text>}
+        {(status.outcome === "retry" || status.outcome === "halt") && <Text accessibilityLiveRegion="polite" className="text-body text-pending">{status.outcome === "retry" ? words.offline : words.stopped}</Text>}
         <Button label={words.retry} variant="secondary" busy={status.running} onPress={() => void stockSync.retryNow()} />
         {(["attention", "waiting", "synced"] as const).map((section) => <View key={section} className="gap-3">
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.sections[section]} · {data.overview[section].length}</Text>

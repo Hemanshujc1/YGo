@@ -26,7 +26,7 @@ vi.mock("../src/api", () => ({
   accountEpoch: () => 0,
   session: { get: mock.get }, supportEmail: "help@example.com",
   // An Approved shop: the sync loop sends opening stock but pulls no Stock (#395).
-  access: { verify: async () => ({ shopId: "shop-1", state: "approved" }), get: () => ({ mode: "online", accountId: "account-1" }), allowed: () => false },
+  access: { verify: async () => ({ shopId: "shop-1", state: "approved" }), get: () => ({ mode: "online", accountId: "account-1" }), allowed: () => false, answer: () => null },
   api: { shopApplication: mock.application, shopListings: mock.listings, syncActions: mock.opening },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({

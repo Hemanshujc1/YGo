@@ -25,9 +25,15 @@ export function StockAccess({ children }: { children: ReactNode }) {
   }
   // The one sync loop runs only while the app is in front (#395): no background service.
   useEffect(() => {
-    void verify(); void stockSync.start();
+    // The loop starts after the access check, so the pass reuses its answer.
+    const enter = () => void verify().then(() => stockSync.start());
+    enter();
+    // iOS "inactive" (Control Center, Face ID) is not leaving: only background stops the loop.
+    let previous = AppState.currentState;
     const listener = AppState.addEventListener("change", (state) => {
-      if (state === "active") { void verify(); void stockSync.start(); } else stockSync.stop();
+      if (state === "background") stockSync.stop();
+      else if (state === "active" && previous === "background") enter();
+      previous = state;
     });
     return () => { listener.remove(); stockSync.stop(); };
   }, [id]);

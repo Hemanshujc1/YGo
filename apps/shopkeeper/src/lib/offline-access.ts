@@ -20,6 +20,8 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
   let view: AccessView = { mode: "online" };
   let turn = 0;
   let saved: SavedAccess | null = null;
+  let last: { accountId: string; data: SyncAccessResponse } | null = null;
+  function answered(accountId: string, data: SyncAccessResponse) { last = { accountId, data }; return data; }
   const erasing = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
   function show(next: AccessView) { view = next; for (const notify of listeners) notify(); }
@@ -33,13 +35,15 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
     let work = erasing.get(accountId);
     if (!work) { work = storage.erase(accountId, shopId).finally(() => erasing.delete(accountId)); erasing.set(accountId, work); }
     await work;
-    if (mine === turn) { saved = null; show({ mode: "ended", accountId }); }
+    if (mine === turn) { saved = null; last = null; show({ mode: "ended", accountId }); }
   }
   return {
     get: () => view,
+    /** The last answer the server gave this account, so a sync pass need not ask again. */
+    answer: (accountId: string) => last?.accountId === accountId ? last.data : null,
     subscribe(notify: () => void) { listeners.add(notify); return () => { listeners.delete(notify); }; },
-    pause() { turn++; saved = null; storage.forget(); show({ mode: "signing-out" }); },
-    reset() { turn++; saved = null; storage.forget(); show({ mode: "online" }); },
+    pause() { turn++; saved = null; last = null; storage.forget(); show({ mode: "signing-out" }); },
+    reset() { turn++; saved = null; last = null; storage.forget(); show({ mode: "online" }); },
     async restore() {
       const mine = turn, id = storage.active();
       if (!id) return null;
@@ -77,7 +81,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
           storage.select(account.id);
           saved = record;
           show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
-          return answer.data;
+          return answered(account.id, answer.data);
         }
         const next = { account, shopId, verifiedAt: now(), stockAllowed };
         await storage.save(next);
@@ -85,10 +89,10 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
         storage.select(account.id);
         saved = next;
         show({ mode: "online", accountId: account.id, ...(stockAllowed ? { shopId, expiresAt: next.verifiedAt + OFFLINE_WINDOW_MS } : {}) });
-        return answer.data;
+        return answered(account.id, answer.data);
       } else {
         if (mine === turn) show({ mode: "online", accountId: account.id });
-        return answer.data;
+        return answered(account.id, answer.data);
       }
     },
     async cleanup() {

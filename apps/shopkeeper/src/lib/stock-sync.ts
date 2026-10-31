@@ -14,11 +14,14 @@ const kindOf = (status: number | undefined) => status === undefined || status >=
  * send (opening stock starts at Approved); only a Live or Suspended lease
  * pulls Stock. A late answer for an earlier account or shop is dropped.
  */
-export async function stockSyncPass(): Promise<Outcome<SyncActionsResponse>> {
+export async function stockSyncPass(fresh = false): Promise<Outcome<SyncActionsResponse>> {
   const identity = session.get();
   if (!("account" in identity)) return halt;
   const account = identity.account, epoch = accountEpoch();
-  const answer = await access.verify(account);
+  // Re-asking on every pass would flip a Live shop to the offline gate on one dropped reply,
+  // so only Retry, or a phone not yet online with an answer, asks the server again.
+  const known = access.get().mode === "online" ? access.answer(account.id) : null;
+  const answer = !fresh && known ? known : await access.verify(account);
   if (!isCurrentAccount(account.id, epoch)) return halt;
   const view = access.get();
   const pulls = !!view.shopId && access.allowed(account.id, view.shopId);
@@ -50,7 +53,7 @@ export async function stockSyncPass(): Promise<Outcome<SyncActionsResponse>> {
   if (page?.ok) queue.cache.apply(page.data, from);
   const pulled = !page ? "retry" : page.ok ? "done" : kindOf(page.status);
   const order = ["done", "retry", "halt"] as const;
-  return { kind: order[Math.max(order.indexOf(sent), order.indexOf(pulled))] ?? "halt", value: response };
+  return { kind: order[Math.max(order.indexOf(sent), order.indexOf(pulled))] ?? "halt", value: response, ...(page && !page.ok ? { code: page.code } : {}) };
 }
 
 export const stockSync = createSyncLoop(stockSyncPass);

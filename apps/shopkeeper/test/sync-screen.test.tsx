@@ -85,4 +85,15 @@ describe("S08 Waiting to sync (#395)", () => {
     (elements(render()).find((node) => node.props.label === "Retry sync")?.props.onPress as () => void)();
     expect(mock.retry).toHaveBeenCalledOnce();
   });
+
+  it("says syncing stopped after a refusal, and offline points opening-stock fixes to going online", async () => {
+    mock.status = { running: false, outcome: "halt", failures: 0 }; mock.view = { mode: "offline" };
+    queue.save(shopId, dal, { quantity: "4", clientId: randomUUID() });
+    const batch = queue.batch(shopId);
+    queue.acknowledge(batch, { results: [{ actionId: batch.actions[0]?.id ?? "", sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] });
+    render(); await settle();
+    expect(texts()).toContain("Syncing stopped. Changes stay on this phone. Fix what needs attention, then tap Retry sync.");
+    expect(texts()).toContain("Go online to fix this in Opening stock.");
+    expect(elements(render()).some((node) => node.props.href === "/opening-stock")).toBe(false);
+  });
 });

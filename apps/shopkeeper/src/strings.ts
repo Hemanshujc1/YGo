@@ -213,11 +213,12 @@ export const strings = {
     attention: (count: number) => `${formatNumber(count)} ${count === 1 ? "needs" : "need"} attention`,
     meter: (used: number, max: number, hours: number) => `Offline room used: ${formatNumber(used)} of ${formatNumber(max)} · ${formatNumber(hours)} h left`,
     offline: "Couldn't reach YGo. Changes stay on this phone and sync by themselves when you're back online.",
+    stopped: "Syncing stopped. Changes stay on this phone. Fix what needs attention, then tap Retry sync.",
     sections: { attention: "Needs attention", waiting: "Waiting to sync", synced: "Synced today" },
     none: "None", unknownProduct: "A product in your shop",
     markedOut: "Marked out of stock", markedIn: "Marked in stock", opening: (amount: string) => `Opening stock ${amount}`,
     held: "This saved count conflicts with another one. Choose which to keep in Opening stock.",
-    reference: (id: string) => `Support reference: ${id}`, fixStock: "Fix in Stock", fixOpening: "Fix in Opening stock",
+    reference: (id: string) => `Support reference: ${id}`, fixStock: "Fix in Stock", fixOpening: "Fix in Opening stock", fixOnline: "Go online to fix this in Opening stock.",
     syncedAt: (time: string) => `Synced at ${time}`,
     reasons: {
       VALIDATION_FAILED: "The server couldn't read this change.",

@@ -53,7 +53,11 @@ describe("offline Stock entry boundary", () => {
     mock.path = "/orders"; expect(render()).not.toBe("protected screen");
     const retry = elements(render()).find((node) => node.props.label === "Retry connection");
     (retry?.props.onPress as () => void)(); expect(mock.verify).toHaveBeenCalledTimes(2);
-    mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
+    // iOS "inactive" is not leaving; only coming back from the background checks and syncs again (#395).
+    mock.foreground("inactive"); mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(2); expect(mock.stop).not.toHaveBeenCalled();
+    mock.foreground("background"); expect(mock.stop).toHaveBeenCalledOnce();
+    mock.start.mockClear(); mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
+    await Promise.resolve(); await Promise.resolve(); expect(mock.start).toHaveBeenCalledOnce();
   });
   it("keeps accessible cached Stock visible while background verification is pending", () => {
     mock.path = "/stock";

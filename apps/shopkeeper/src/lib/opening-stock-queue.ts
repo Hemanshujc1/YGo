@@ -56,10 +56,13 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       PRIMARY KEY (shop_id, pack_id)); PRAGMA user_version = 5;`));
 
   // When the server answered, so S08 can list what synced today.
-  if (version < 6) db.withTransactionSync(() => db.execSync("ALTER TABLE opening_stock_actions ADD COLUMN acknowledged_at TEXT; PRAGMA user_version = 6;"));
+  if (version < 6) db.withTransactionSync(() => db.execSync(`ALTER TABLE opening_stock_actions ADD COLUMN acknowledged_at TEXT;
+    CREATE INDEX IF NOT EXISTS opening_stock_actions_pack ON opening_stock_actions (shop_id, pack_id, sequence); PRAGMA user_version = 6;`));
 
   // A refusal stays open until a newer change of the same kind to the same pack is accepted.
-  const openRefusal = `a.status = 'rejected' AND NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
+  // "Already recorded" is settled: the server holds opening stock for that pack and refuses
+  // any other, and Opening stock shows it as recorded.
+  const openRefusal = `a.status = 'rejected' AND json_extract(a.result, '$.code') IS NOT 'OPENING_STOCK_ALREADY_RECORDED' AND NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
     AND json_extract(n.action, '$.type') = json_extract(a.action, '$.type') AND n.sequence > a.sequence AND n.status = 'applied')`;
   // Opening stock saved on the phone but not yet given a place in the ordered queue.
   const unqueued = "NOT EXISTS (SELECT 1 FROM opening_stock_actions q WHERE q.id = json_extract(o.payload, '$.clientId'))";

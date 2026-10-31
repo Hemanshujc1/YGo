@@ -6,11 +6,11 @@ import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
-const mock = vi.hoisted(() => ({ account: "account-1", verify: vi.fn(), view: {} as Record<string, unknown>, allowed: vi.fn(), open: vi.fn(), send: vi.fn(), pull: vi.fn(), legacy: vi.fn() }));
+const mock = vi.hoisted(() => ({ account: "account-1", verify: vi.fn(), view: {} as Record<string, unknown>, allowed: vi.fn(), answer: vi.fn(), open: vi.fn(), send: vi.fn(), pull: vi.fn(), legacy: vi.fn() }));
 vi.mock("../src/api", () => ({
   accountEpoch: () => 0,
   session: { get: () => ({ account: { id: mock.account } }) },
-  access: { verify: mock.verify, get: () => mock.view, allowed: mock.allowed },
+  access: { verify: mock.verify, get: () => mock.view, allowed: mock.allowed, answer: mock.answer },
   api: { syncActions: mock.send, syncChanges: mock.pull },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open, legacyOpeningStock: { getAllKeys: () => [], getString: () => undefined, remove: () => false } }));
@@ -97,5 +97,18 @@ describe("one sync pass (#395)", () => {
     mock.send.mockImplementation(async (body: SyncActionsBody) => { mock.account = "account-2"; return answer("applied")(body); });
     expect((await stockSyncPass()).kind).toBe("halt");
     expect(queue.count()).toBe(1); expect(mock.pull).not.toHaveBeenCalled();
+  });
+
+  it("reuses the last access answer while online, so a dropped access reply cannot close a Live shop's screens; Retry asks again", async () => {
+    mock.answer.mockReturnValue({ shopId, state: "live" });
+    expect((await stockSyncPass()).kind).toBe("done"); expect(mock.verify).not.toHaveBeenCalled();
+    await stockSyncPass(true); expect(mock.verify).toHaveBeenCalledOnce();
+    mock.view = { mode: "offline", accountId: "account-1", shopId };
+    await stockSyncPass(); expect(mock.verify).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the server's code when the pull is refused", async () => {
+    mock.pull.mockResolvedValue({ ok: false, status: 409, code: "SHOP_LISTING_NOT_READY" });
+    expect(await stockSyncPass()).toMatchObject({ kind: "halt", code: "SHOP_LISTING_NOT_READY" });
   });
 });

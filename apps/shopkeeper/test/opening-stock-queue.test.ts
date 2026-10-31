@@ -1,4 +1,4 @@
-import type { SyncActionsBody } from "@ygo/contracts";
+import type { SyncActionCode, SyncActionsBody } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -416,7 +416,7 @@ it("lets held legacy stock recover after an independent flag is queued for the s
 });
 
 describe("S08 overview and the shared allowance (#395)", () => {
-  function answer(queue: ReturnType<typeof openingStockQueue>, status: "applied" | "rejected" | "retry", code: "ACTION_TOO_OLD" | "SEQUENCE_MISSING" | null = null) {
+  function answer(queue: ReturnType<typeof openingStockQueue>, status: "applied" | "rejected" | "retry", code: SyncActionCode | null = null) {
     const batch = queue.batch(shopId);
     queue.acknowledge(batch, { results: batch.actions.map((action) => ({ actionId: action.id, sequence: action.sequence, status, code,
       result: status !== "applied" ? null : action.type === "stock_flag" ? { listingId: packId, outOfStock: true, recordedAt: new Date().toISOString() }
@@ -452,6 +452,16 @@ describe("S08 overview and the shared allowance (#395)", () => {
       expect(after.synced.map((row) => row.at)).toEqual(["2030-01-01T10:00:00.000Z", "2030-01-01T10:00:00.000Z"]);
       // Only today's acceptances are listed.
       expect(queue.overview(new Date("2030-01-02T00:00:00Z")).synced).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it("settles an 'already recorded' refusal: the server holds that pack's opening stock and refuses any other", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const queue = openingStockQueue(adapter(db), randomUUID);
+      queue.save(shopId, packId, entry);
+      answer(queue, "rejected", "OPENING_STOCK_ALREADY_RECORDED");
+      expect(queue.overview(new Date(0)).attention).toEqual([]); expect(queue.failureCount()).toBe(0);
     } finally { db.close(); }
   });
 

@@ -5,7 +5,7 @@ type Kind = Outcome<number>["kind"];
 function harness(kinds: Kind[], random = () => 1) {
   let running = 0, most = 0, calls = 0;
   const gates: Array<() => void> = [];
-  const pass = vi.fn(async (): Promise<Outcome<number>> => {
+  const pass = vi.fn<(fresh: boolean) => Promise<Outcome<number>>>(async () => {
     running++; most = Math.max(most, running); calls++;
     const call = calls;
     await new Promise<void>((resolve) => gates.push(resolve));
@@ -23,7 +23,7 @@ describe("sync loop (#395)", () => {
 
   it("never overlaps passes; callers during a pass share exactly one follow-up pass", async () => {
     const { loop, pass, gates, most } = harness([]);
-    const first = loop.run();
+    const first = loop.start();
     const second = loop.run(), third = loop.retryNow();
     expect(second).toBe(third);
     await flush(); expect(pass).toHaveBeenCalledTimes(1);
@@ -31,6 +31,9 @@ describe("sync loop (#395)", () => {
     await flush(); expect(pass).toHaveBeenCalledTimes(2);
     gates.shift()?.(); expect(await second).toBe(2);
     expect(most()).toBe(1);
+    // Retry asks the pass to check access again; other passes reuse the last answer.
+    expect(pass.mock.calls.map(([fresh]) => fresh)).toEqual([false, true]);
+    loop.stop();
   });
 
   it("backs off 2, 4, 8 … seconds capped at 60 with jitter in the upper half, and resets after success", async () => {
@@ -83,5 +86,8 @@ describe("sync loop (#395)", () => {
     void loop.run(); gates.shift()?.(); await flush();
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(pass).toHaveBeenCalledTimes(3);
+    // A follow-up asked for during a pass is dropped once stopped; it runs at the next foreground.
+    void loop.run(); void loop.run(); loop.stop(); gates.shift()?.(); await flush();
+    expect(pass).toHaveBeenCalledTimes(4);
   });
 });
