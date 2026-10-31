@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
@@ -10,6 +7,7 @@ import { createGooglePlaceFinder, type PlaceFinder } from "../src/adapters/place
 import { buildApp } from "../src/app";
 import { hourlyLimit } from "../src/routes/places";
 import { connectDatabase } from "../src/db";
+import { createTestDatabase } from "./test-database";
 
 const session = "00000000-0000-4000-8000-000000000401";
 const baner = { id: "ChIJ-baner_1", title: "Baner Road", detail: "Baner, Pune, Maharashtra" };
@@ -171,18 +169,7 @@ const places: PlaceFinder = {
 
 beforeEach(async () => {
   name = `ygo_places_${randomUUID().replaceAll("-", "")}`;
-  const root = new pg.Client({ connectionString: rootUrl });
-  await root.connect();
-  try { await root.query(`CREATE DATABASE ${name}`); } finally { await root.end(); }
-  const url = new URL(rootUrl);
-  url.pathname = `/${name}`;
-  const migrationClient = new pg.Client({ connectionString: url.href });
-  try {
-    await migrationClient.connect();
-    await migrate(drizzle({ client: migrationClient }), {
-      migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
-    });
-  } finally { await migrationClient.end(); }
+  const url = await createTestDatabase(name);
   database = connectDatabase(url.href);
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;

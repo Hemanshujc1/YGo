@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import sharp from "sharp";
 import { zipSync } from "fflate";
@@ -14,6 +11,7 @@ import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 import { createProductImageStorage, type ProductImagePutClient } from "../src/adapters/product-images";
 import { accessToken, deriveKeys } from "../src/tokens";
+import { createTestDatabase } from "./test-database";
 
 const rootUrl = inject("databaseUrl");
 const secret = "01234567890123456789012345678901";
@@ -31,18 +29,7 @@ let onProductImagePut: (() => Promise<void>) | undefined;
 
 beforeEach(async () => {
   name = `ygo_admin_routes_${randomUUID().replaceAll("-", "")}`;
-  const root = new pg.Client({ connectionString: rootUrl });
-  await root.connect();
-  try { await root.query(`CREATE DATABASE ${name}`); } finally { await root.end(); }
-  const url = new URL(rootUrl);
-  url.pathname = `/${name}`;
-  const migrationClient = new pg.Client({ connectionString: url.href });
-  try {
-    await migrationClient.connect();
-    await migrate(drizzle({ client: migrationClient }), {
-      migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
-    });
-  } finally { await migrationClient.end(); }
+  const url = await createTestDatabase(name);
   database = connectDatabase(url.href);
   await bootstrapAdmin(database.pool, admin);
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
