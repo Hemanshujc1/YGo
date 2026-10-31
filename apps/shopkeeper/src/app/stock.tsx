@@ -4,7 +4,7 @@ import { Button, SupportEmail, Text } from "@ygo/mobile";
 import { Cloud } from "../components/icons";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, session, supportEmail } from "../api";
 import { SyncStatus } from "../components/sync-status";
@@ -26,6 +26,7 @@ export default function StockScreen() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [message, setMessage] = useState<string | null>(null);
   const [, redraw] = useState(0);
+  const [pulling, setPulling] = useState(false);
   const visit = useRef(0);
 
   const shown = useRef<Loaded | null>(null);
@@ -42,6 +43,13 @@ export default function StockScreen() {
 
   // The redraw comes from the loop's subscription below.
   function sync(manual = false) { void (manual ? stockSync.retryNow() : stockSync.run()); }
+
+  // Pulling the list down is the manual sync; the spinner stays until the pass ends.
+  async function pull() {
+    if (pulling) return;
+    setPulling(true);
+    try { await stockSync.retryNow(); } finally { setPulling(false); }
+  }
 
   async function refresh(token: number) {
     const identity = session.get();
@@ -99,7 +107,8 @@ export default function StockScreen() {
   }
 
   return (
-    <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}>
+    <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
+      refreshControl={load.kind === "loaded" ? <RefreshControl refreshing={pulling} onRefresh={() => void pull()} progressViewOffset={insets.top} /> : undefined}>
       <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator className="text-primary" />}
@@ -115,7 +124,7 @@ export default function StockScreen() {
       {load.kind === "loaded" && <>
         {load.stock.state === "suspended" && <Text className="text-body text-danger">{words.suspended}</Text>}
         <SyncStatus />
-        <Button label={words.retry} variant="secondary" onPress={() => sync(true)} />
+        {["retry", "halt"].includes(stockSync.get().outcome ?? "") && <Button label={words.retry} variant="secondary" onPress={() => sync(true)} />}
         {load.stock.items.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
         {load.stock.items.map((item) => {
           const flag = load.queue.flag(load.stock.shopId, item.packId);
