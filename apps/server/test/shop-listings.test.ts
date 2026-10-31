@@ -325,6 +325,46 @@ it.each(["opening_stock", "stock_flag"] as const)("reopens the SQL queue and ser
 });
 
 
+// S08 over HTTP (#395): nothing saved on the phone is lost or shown as synced before the server's answer arrives.
+it("keeps S08 truthful across a dropped reply, a restart, a real refusal and its correction", async () => {
+  const { openingStockQueue, syncOpeningStockBatch } = await import(new URL("../../shopkeeper/src/lib/opening-stock-queue.ts", import.meta.url).href);
+  const { adapter } = await import(new URL("../../shopkeeper/test/stock-database-fixture.ts", import.meta.url).href);
+  const actor = await shop("live");
+  await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: listingBody });
+  const directory = mkdtempSync(join(tmpdir(), "ygo-s08-"));
+  const path = join(directory, "outbox.db");
+  // The phone saved its first change 8 days ago: past the server's 7-day age bound.
+  let phoneNow = new Date(clock.now().getTime() - 8 * 86400_000);
+  const today = new Date(clock.now().getTime() - 3600_000);
+  let db = new DatabaseSync(path);
+  try {
+    let queue = openingStockQueue(adapter(db), randomUUID, () => phoneNow);
+    queue.saveFlag(actor.shopId, actor.packId, true);
+    phoneNow = clock.now();
+    const send = async (body: SyncActionsBody) => {
+      const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: actor.headers, payload: body });
+      return { ok: true as const, data: SyncActionsResponse.parse(response.json()) };
+    };
+    await syncOpeningStockBatch(queue, actor.shopId, async (body: SyncActionsBody) => { await send(body); throw new Error("lost response"); });
+    // Answered on the server, but the phone never heard: still waiting, never claimed as synced or refused.
+    expect(queue.overview(today)).toMatchObject({ attention: [], waiting: [{ type: "stock_flag" }], synced: [] });
+    db.close(); db = new DatabaseSync(path); queue = openingStockQueue(adapter(db), randomUUID, () => phoneNow);
+    expect(queue.overview(today).waiting).toHaveLength(1);
+    await syncOpeningStockBatch(queue, actor.shopId, send);
+    const refused = queue.overview(today).attention;
+    expect(refused).toMatchObject([{ type: "stock_flag", code: "ACTION_TOO_OLD" }]);
+    // Sign-out warns while the refusal is open.
+    expect(queue.failureCount()).toBe(1);
+    queue.saveFlag(actor.shopId, actor.packId, true);
+    await syncOpeningStockBatch(queue, actor.shopId, send);
+    const after = queue.overview(today);
+    expect(after.attention).toEqual([]); expect(after.waiting).toEqual([]);
+    expect(after.synced).toMatchObject([{ type: "stock_flag", outOfStock: true, at: clock.now().toISOString() }]);
+    expect(queue.failureCount()).toBe(0);
+    expect((await database.pool.query("SELECT out_of_stock FROM shop_listings WHERE shop_id = $1", [actor.shopId])).rows[0]?.out_of_stock).toBe(true);
+  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 describe("manual Stock flags (#392)", () => {
   async function setup(state = "live") {
     const actor = await shop();

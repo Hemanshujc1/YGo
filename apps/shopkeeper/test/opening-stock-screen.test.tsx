@@ -21,9 +21,12 @@ vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text", SupportEmail: "S
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
+vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("../src/api", () => ({
   accountEpoch: () => 0,
   session: { get: mock.get }, supportEmail: "help@example.com",
+  // An Approved shop: the sync loop sends opening stock but pulls no Stock (#395).
+  access: { verify: async () => ({ shopId: "shop-1", state: "approved" }), get: () => ({ mode: "online", accountId: "account-1" }), allowed: () => false },
   api: { shopApplication: mock.application, shopListings: mock.listings, syncActions: mock.opening },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({

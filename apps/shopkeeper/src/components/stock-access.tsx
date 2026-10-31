@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, session, supportEmail } from "../api";
 import { strings } from "../strings";
 import { SignOut } from "./sign-out";
+import { stockSync } from "../lib/stock-sync";
 
 /** Only cached Stock is reachable when launch identity came from the offline lease. */
 export function StockAccess({ children }: { children: ReactNode }) {
@@ -22,10 +23,13 @@ export function StockAccess({ children }: { children: ReactNode }) {
     try { await access.verify(identity.account); } catch { setFailed(true); }
     finally { setChecking(false); }
   }
+  // The one sync loop runs only while the app is in front (#395): no background service.
   useEffect(() => {
-    void verify();
-    const listener = AppState.addEventListener("change", (state) => { if (state === "active") void verify(); });
-    return () => listener.remove();
+    void verify(); void stockSync.start();
+    const listener = AppState.addEventListener("change", (state) => {
+      if (state === "active") { void verify(); void stockSync.start(); } else stockSync.stop();
+    });
+    return () => { listener.remove(); stockSync.stop(); };
   }, [id]);
   // Check the lease again while foregrounded so a screen cannot stay open past its deadline.
   useEffect(() => {
@@ -35,7 +39,7 @@ export function StockAccess({ children }: { children: ReactNode }) {
     return () => { clearTimeout(timer); clearInterval(watchClock); };
   }, [view]);
   if (!checking && !failed && view.mode === "online" && view.accountId === id) return children;
-  if (view.mode === "offline" && pathname === "/stock" && id && view.shopId && access.allowed(id, view.shopId)) return children;
+  if (view.mode === "offline" && (pathname === "/stock" || pathname === "/sync") && id && view.shopId && access.allowed(id, view.shopId)) return children;
   const words = strings.offlineAccess;
   return <ScrollView className="flex-1 bg-bg" contentContainerClassName="grow justify-center gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}>
     <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>

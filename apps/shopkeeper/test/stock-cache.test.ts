@@ -48,11 +48,11 @@ it("keeps a tombstoned pending row until acknowledgement, retaining failure reco
 it("upgrades v4 without changing queued originals", () => {
   queue.saveFlag(shopId, packId, true);
   const original = queue.batch(shopId);
-  db.exec("DROP TABLE stock_cache_items; DROP TABLE stock_cache_shops; PRAGMA user_version = 4");
+  db.exec("DROP TABLE stock_cache_items; DROP TABLE stock_cache_shops; ALTER TABLE opening_stock_actions DROP COLUMN acknowledged_at; PRAGMA user_version = 4");
   queue = openingStockQueue(adapter(db), randomUUID);
   expect(queue.batch(shopId)).toMatchObject({ deviceId: original.deviceId, actions: original.actions });
   expect(queue.cache.cursor(shopId)).toBeUndefined();
-  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
 });
 it("reads a Stock item saved before #436 without held, then the next pull adds it", () => {
   queue.cache.apply(page(1));
