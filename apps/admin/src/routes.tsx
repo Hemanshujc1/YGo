@@ -16,6 +16,7 @@ import {
 import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
+import { CounterBills } from "./counter-bills";
 import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
 import { Products } from "./products";
@@ -353,6 +354,17 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     throw new Error(result.code);
   };
 
+  const counterBillsLoader: LoaderFunction = async ({ params }) => {
+    const id = params.id;
+    if (!id) throw new Error(strings.notFound);
+    const [application, bills] = await Promise.all([api.getShopApplication(id), api.listCounterBills(id)]);
+    for (const result of [application, bills]) {
+      if (!result.ok && (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN")) return redirect("/sign-in");
+      if (!result.ok) throw new Error(result.code);
+    }
+    return { application: application.ok ? application.data : null, bills: bills.ok ? bills.data.bills : [] };
+  };
+
   // Rate cards (A03) and the price simulator (A05) both pick from every category and every shop.
   const rateCardLoader = async () => {
     const [categories, shops] = await Promise.all([api.listCategories(), api.listShopApplications()]);
@@ -444,6 +456,13 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       areaManager: applicationLoader,
       element: <Page protectedArea api={api}><ShopApplicationReview api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.applicationsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/applications/:id/counter-bills",
+      loader: counterBillsLoader,
+      element: <Page protectedArea api={api}><CounterBills api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.counterBillsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

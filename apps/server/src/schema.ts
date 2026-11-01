@@ -412,6 +412,27 @@ export const counterBillNumbers = pgTable("counter_bill_numbers", {
   lastNumber: integer("last_number").notNull(),
 });
 
+// What Admin did about a held or flagged counter bill (#470). `note` rows only add a note; every other action
+// closes the bill, and the unique index lets one Admin close it once, however many act at the same moment.
+// Rows are kept as written, like the bill itself.
+export const counterBillResolutions = pgTable("counter_bill_resolutions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  billId: uuid("bill_id").notNull().references(() => counterBills.id),
+  // No foreign key to accounts, like admin_actions: the record outlives the person (DEL-12).
+  actorId: uuid("actor_id").notNull(),
+  action: text("action").notNull(),
+  note: text("note").notNull(),
+  // Whether this action moved the bill's stock; false for every action but `numbered`.
+  stockMoved: boolean("stock_moved").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("counter_bill_resolutions_action_valid", sql`${table.action} IN ('numbered', 'duplicate', 'reviewed', 'noted')`),
+  check("counter_bill_resolutions_note_valid", sql`btrim(${table.note}) <> '' AND char_length(${table.note}) <= 500`),
+  check("counter_bill_resolutions_stock_valid", sql`NOT ${table.stockMoved} OR ${table.action} = 'numbered'`),
+  uniqueIndex("counter_bill_resolutions_closing_idx").on(table.billId).where(sql`${table.action} <> 'noted'`),
+  index("counter_bill_resolutions_bill_id_idx").on(table.billId),
+]);
+
 // Pending uploads bind the server-declared size to a shop and actor. They are
 // disposable; durable visits never depend on their lifecycle (#321, DEL-10).
 export const visitPhotoUploads = pgTable("visit_photo_uploads", {

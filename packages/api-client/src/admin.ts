@@ -32,6 +32,9 @@ import {
   ShopApplicationsResponse,
   ShopVisit,
   ShopOnboarding,
+  AdminCounterBill,
+  AdminCounterBillsResponse,
+  type ResolveCounterBillBody,
   OnboardingFee,
   VisitPhotoUpload,
   VisitPhotoAccess,
@@ -115,7 +118,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -383,6 +386,16 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** Append a paid fee or reasoned waiver, preserving earlier entries. */
     async recordOnboardingFee(id: string, body: RecordOnboardingFeeBody): Promise<ApiResult<OnboardingFee>> {
       return result(await adminRequest("POST", `/v1/admin/shop-applications/${encodeURIComponent(id)}/onboarding-fees`, body), OnboardingFee);
+    },
+
+    /** A shop's held and flagged counter bills, and the ones Admin has dealt with (#470). Admin only. */
+    async listCounterBills(shopId: string): Promise<ApiResult<AdminCounterBillsResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/shops/${encodeURIComponent(shopId)}/counter-bills`), AdminCounterBillsResponse);
+    },
+
+    /** Number, close, review or add a note to one held or flagged bill; the bill comes back as it now stands (#470). */
+    async resolveCounterBill(shopId: string, billId: string, body: ResolveCounterBillBody): Promise<ApiResult<AdminCounterBill>> {
+      return result(await adminRequest("POST", `/v1/admin/shops/${encodeURIComponent(shopId)}/counter-bills/${encodeURIComponent(billId)}/resolutions`, body), AdminCounterBill);
     },
 
     /** Read visit and fee histories, newest first, with the owner's contact confirmation state. */

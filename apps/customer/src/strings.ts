@@ -393,5 +393,7 @@ export const strings = {
     ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
     ORDER_EXPIRED: "The shop didn't answer this order in time.",
     NOT_ENOUGH_STOCK: "The shop doesn't have enough stock for this order.",
+    COUNTER_BILL_RESOLVED: "Something changed. Try again.",
+    COUNTER_BILL_ACTION_REFUSED: "Something changed. Try again.",
   } satisfies Record<ErrorCode, string>,
 };

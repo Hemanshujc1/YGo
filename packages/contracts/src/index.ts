@@ -241,6 +241,10 @@ export {
 } from "./orders";
 
 export {
+  AdminCounterBill, AdminCounterBillParams, AdminCounterBillsResponse, CounterBillOriginal, CounterBillResolution, CounterBillResolutionAction, ResolveCounterBillBody,
+} from "./counter-bills";
+
+export {
   counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillPayload, CounterBillResponse,
   ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse,
 } from "./sync";
