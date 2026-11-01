@@ -32,6 +32,12 @@ function expectIndianFormats() {
     expect([formatMoney("-59.995"), formatMoney("1.005"), formatMoney("-0.004"), formatMoney("60.00")]).toEqual(["−₹60", "₹1.01", "₹0", "₹60"]);
   });
 
+  it("throws on a string that is not a plain decimal amount, rather than showing a made-up one (#475)", () => {
+    for (const bad of ["", "-", "+", ".", "1.2.3", "1.", ".5", "1e3", "1,000", " 60", "60 ", "--5", "abc"]) {
+      expect(() => formatMoney(bad), JSON.stringify(bad)).toThrow(RangeError);
+    }
+  });
+
   it("shows dates and 12-hour times in India", () => {
     const instant = "2026-10-13T20:35:00.000Z";
     expect(formatDate(instant)).toBe("14/10/2026");

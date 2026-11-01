@@ -48,6 +48,7 @@ const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "�
 // digits with BigInt, so no amount passes through a JS number and loses digits past 15 (#475). Only the
 // bigint path of Intl is used, which Hermes supports. Rounding matches the number path: half away from zero.
 const formatMoneyText = (text: string) => {
+  if (!/^[-+]?\d+(\.\d+)?$/.test(text)) throw new RangeError(`Not a decimal amount: "${text}"`);
   const [whole = "", fraction = ""] = text.replace(/^[-+]/, "").split(".");
   const paise = BigInt(whole + fraction.padEnd(3, "0").slice(0, 2)) + (fraction.charAt(2) >= "5" ? 1n : 0n);
   const rest = paise % 100n;
