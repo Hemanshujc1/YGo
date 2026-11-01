@@ -8,11 +8,9 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[] };
 
-const money = (amount: string) => formatMoney(Number(amount));
-
 function Lines({ lines }: { lines: AdminCounterBill["lines"] }) {
   return <ul className="mt-1 space-y-1">{lines.map((line, index) => <li key={`${line.packId}-${index}`}>
-    {strings.counterBillLine(line.name ? `${line.name} ${trimDecimal(line.packQuantity ?? "")} ${line.baseUnit ?? ""}`.trim() : strings.counterBillPackGone, line.count, money(line.unitPrice))}
+    {strings.counterBillLine(line.name ? `${line.name} ${trimDecimal(line.packQuantity ?? "")} ${line.baseUnit ?? ""}`.trim() : strings.counterBillPackGone, line.count, formatMoney(line.unitPrice))}
   </li>)}</ul>;
 }
 
@@ -56,8 +54,8 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
     <p className="mt-2 text-muted">{strings.counterBillMadeBy(person, bill.madeBy.role ? strings.counterBillRole[bill.madeBy.role] : "—")}</p>
     <p className="text-muted">{strings.counterBillMadeAt(formatDateTime(bill.madeAt), formatDateTime(bill.receivedAt))}</p>
     {bill.total !== null && bill.checkedTotal !== null && bill.payment && <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
-      <div><dt className="text-muted">{strings.counterBillPhoneTotal}</dt><dd className="font-medium tabular-nums">{money(bill.total)}</dd></div>
-      <div><dt className="text-muted">{strings.counterBillServerTotal}</dt><dd className="font-medium tabular-nums">{money(bill.checkedTotal)}</dd></div>
+      <div><dt className="text-muted">{strings.counterBillPhoneTotal}</dt><dd className="font-medium tabular-nums">{formatMoney(bill.total)}</dd></div>
+      <div><dt className="text-muted">{strings.counterBillServerTotal}</dt><dd className="font-medium tabular-nums">{formatMoney(bill.checkedTotal)}</dd></div>
       <div><dt className="text-muted">{strings.counterBillPayment[bill.payment]}</dt></div>
     </dl>}
     {bill.lines.length > 0 && <Lines lines={bill.lines} />}
@@ -66,7 +64,7 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
     {bill.original && <div className="mt-3 rounded-lg bg-sunken p-3">
       <p className="font-medium">{strings.counterBillOriginal}</p>
       <p className="text-muted">{[bill.original.number === null ? strings.counterBillNoNumber : strings.counterBillNumbered(bill.original.number),
-        bill.original.total === null ? "" : money(bill.original.total), bill.original.payment ? strings.counterBillPayment[bill.original.payment] : "", formatDateTime(bill.original.madeAt)].filter(Boolean).join(" · ")}</p>
+        bill.original.total === null ? "" : formatMoney(bill.original.total), bill.original.payment ? strings.counterBillPayment[bill.original.payment] : "", formatDateTime(bill.original.madeAt)].filter(Boolean).join(" · ")}</p>
       <Lines lines={bill.original.lines} />
     </div>}
     {bill.resolutions.length > 0 && <ul className="mt-3 space-y-2 border-t border-border pt-3">{bill.resolutions.map((resolution, index) => <li key={index}>

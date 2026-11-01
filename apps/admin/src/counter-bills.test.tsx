@@ -40,6 +40,17 @@ describe("Counter bills screen (#470)", () => {
     expect(screen.getByRole("heading", { name: `${strings.counterBillsOf("Fresh Mart")}` })).toBeTruthy();
   });
 
+  it("shows very large totals and prices to the last paise, as the server sent them (#475)", async () => {
+    const big = { ...line, unitPrice: "4999499999995000.75" };
+    setup([bill(1, { heldReason: "reference_taken", total: "9998999999990001.50", checkedTotal: "9998999999990001.55", lines: [big],
+      original: { id: "00000000-0000-4000-8000-000000000999", number: 3, total: "9998999999990001.05", payment: "upi", madeAt: "2030-01-01T04:00:00.000Z", lines: [big] } })]);
+    const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
+    expect(card.textContent).toContain("₹9,99,89,99,99,99,90,001.50");
+    expect(card.textContent).toContain("₹9,99,89,99,99,99,90,001.55");
+    expect(card.textContent).toContain("₹9,99,89,99,99,99,90,001.05");
+    expect(card.textContent).toContain("Toor Dal 5 kg × 2 at ₹4,99,94,99,99,99,95,000.75");
+  });
+
   it("offers only the actions that fit each kind of bill", async () => {
     setup([
       bill(1, { heldReason: "too_old" }), bill(2, { heldReason: "reference_taken" }), bill(3, { heldReason: "invalid", total: null, checkedTotal: null, payment: null, lines: [], invalidPayload: '{"total":"9"}' }),
