@@ -7,6 +7,8 @@ import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session, supportEmail } from "../api";
 import { isCurrentAccount } from "../lib/account";
+import { startOfToday } from "../lib/bill-status";
+import { BillCard } from "../components/bill-card";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import type { OpeningStockQueue, QueueRow } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
@@ -15,8 +17,6 @@ import { strings } from "../strings";
 const words = strings.sync;
 type Label = NonNullable<QueueRow["label"]>;
 type Data = { overview: ReturnType<OpeningStockQueue["overview"]>; allowance: ReturnType<OpeningStockQueue["allowance"]> };
-
-function startOfToday(now = new Date()) { return new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
 
 /** S08 Waiting to sync (design system 5.1): Needs attention, Waiting to sync, Synced today. It never edits; fixes stay on Stock and Opening stock. */
 export default function SyncScreen() {
@@ -39,7 +39,7 @@ export default function SyncScreen() {
   }, [status]);
 
   // An Approved shop has no Stock copy on the phone yet: name its rows from the listings while online.
-  const unnamed = data && data !== "failed" && Object.values(data.overview).some((rows) => rows.some((row) => !row.label));
+  const unnamed = data && data !== "failed" && Object.values(data.overview).some((rows) => rows.some((row) => !row.bill && !row.label));
   useEffect(() => {
     if (!unnamed || view.mode !== "online") return;
     let gone = false;
@@ -50,6 +50,7 @@ export default function SyncScreen() {
   }, [unnamed, view.mode]);
 
   function card(row: QueueRow, section: keyof Data["overview"]) {
+    if (row.bill) return <BillCard key={row.id} bill={row.bill} syncedAt={section === "synced" ? row.at : null} />;
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
     const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");

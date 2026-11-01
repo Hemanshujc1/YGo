@@ -480,7 +480,7 @@ describe("S08 overview and the shared allowance (#395)", () => {
     try {
       const queue = openingStockQueue(adapter(db), randomUUID, () => now);
       queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, deletedAt: null,
-        item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false } }] });
+        item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false, counterPrice: "21" } }] });
       queue.saveFlag(shopId, packId, true);
       answer(queue, "rejected", "ACTION_TOO_OLD");
       const refused = queue.overview(new Date("2030-01-01T00:00:00Z"));

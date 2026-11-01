@@ -6,7 +6,7 @@ import { adapter } from "./stock-database-fixture";
 import type { SyncActionsBody } from "@ygo/contracts";
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), access: vi.fn(), permission: vi.fn(), open: vi.fn(), stock: vi.fn(), send: vi.fn(), set: vi.fn(),
-  hooks: [] as unknown[], cursor: 0, focused: false }));
+  hooks: [] as unknown[], cursor: 0, focused: false, mode: "online" }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++;
@@ -29,14 +29,14 @@ vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
-vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, answer: () => null, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "online" }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
+vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, answer: () => null, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open,
   legacyOpeningStock: { getAllKeys: () => [] } }));
 import StockScreen from "../src/app/stock";
 import { stockSync } from "../src/lib/stock-sync";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
-const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
+const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false, counterPrice: "21" };
 function render() { mock.cursor = 0; return StockScreen(); }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -68,7 +68,7 @@ function switchAccount() { mock.get.mockReturnValue({ account: { id: "account-2"
 describe("minimal Stock screen", () => {
   let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
   beforeEach(() => {
-    vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false;
+    vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false; mock.mode = "online";
     mock.access.mockResolvedValue(undefined); mock.permission.mockReturnValue(true);
     db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID);
     mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue);
@@ -76,6 +76,15 @@ describe("minimal Stock screen", () => {
     mock.send.mockResolvedValue({ ok: false });
   });
   afterEach(() => db.close());
+
+  it("links to New bill from Stock offline (#468)", async () => {
+    mock.mode = "offline"; mock.stock.mockRejectedValue(new Error("offline"));
+    queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item, deletedAt: null }] });
+    render(); await settle();
+    const link = elements(render()).find((node) => node.props.href === "/bill")?.props;
+    expect(link).toBeDefined();
+    expect(elements(link?.children).map((node) => node.props.children)).toContain("New bill");
+  });
 
   it("keeps offline toggles pending in order and updates the switch without changing quantity", async () => {
     render(); await settle(); press("Rice: Out of stock"); await settle();

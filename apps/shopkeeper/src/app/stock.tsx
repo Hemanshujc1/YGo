@@ -124,6 +124,12 @@ export default function StockScreen() {
       {load.kind === "loaded" && <>
         {load.stock.state === "suspended" && <Text className="text-body text-danger">{words.suspended}</Text>}
         <SyncStatus />
+        {/* Offline too: a Live or Suspended shop bills at the counter from here (owner's answer 1 on #468). */}
+        <Link href="/bill" asChild>
+          <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+            <Text className="text-body font-semibold text-on-primary">{strings.bill.open}</Text>
+          </Pressable>
+        </Link>
         {["retry", "halt"].includes(stockSync.get().outcome ?? "") && <Button label={words.retry} variant="secondary" onPress={() => sync(true)} />}
         {load.stock.items.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
         {load.stock.items.map((item) => {

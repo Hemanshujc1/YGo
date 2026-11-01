@@ -5,7 +5,7 @@ import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 import type { SyncChangesResponse } from "@ygo/contracts";
 const shopId = randomUUID(), packId = randomUUID();
-const item = { listingId: randomUUID(), packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
+const item = { listingId: randomUUID(), packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false, counterPrice: "21" };
 const page = (revision: number, changes: SyncChangesResponse["changes"] = [{ packId, item, deletedAt: null }]): SyncChangesResponse => ({ shopId, state: "live", cursor: `${shopId}:${revision}`, changes });
 let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
 beforeEach(() => { db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID); });

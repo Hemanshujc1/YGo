@@ -458,6 +458,19 @@ describe("durable Stock cursor", () => {
     return actor;
   }
   const pull = (headers: { authorization: string }, since?: string) => app.inject({ method: "GET", url: `/v1/sync/changes${since ? `?since=${encodeURIComponent(since)}` : ""}`, headers });
+  it("sends each pack's counter price, and resends an item saved before #468 or whose price changed on the next pull", async () => {
+    const actor = await listed();
+    expect((await app.inject({ method: "GET", url: "/v1/me/stock", headers: actor.headers })).json().items[0]).toMatchObject({ counterPrice: "21.00" });
+    const first = (await pull(actor.headers)).json();
+    expect(first.changes[0].item).toMatchObject({ counterPrice: "21.00" });
+    await database.pool.query("UPDATE stock_sync_items SET payload = payload - 'counterPrice'");
+    const resent = (await pull(actor.headers, first.cursor)).json();
+    expect(resent.changes.map((change: { item: unknown }) => change.item)).toEqual([expect.objectContaining({ packId: actor.packId, counterPrice: "21.00" })]);
+    expect((await pull(actor.headers, resent.cursor)).json().changes).toEqual([]);
+    await app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: { ...listingBody, counterPrice: "19.50" } });
+    expect((await pull(actor.headers, resent.cursor)).json().changes[0].item).toMatchObject({ counterPrice: "19.50" });
+  });
+
   it("returns first load, unchanged delta, metadata/stock/flag updates, and replayable lost responses", async () => {
     const actor = await listed();
     const first = await pull(actor.headers);

@@ -191,6 +191,12 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
         </Pressable>
       </Link>}
       {children}
+      {/* A Live or Suspended shop bills at the counter (#468, BIL-1). */}
+      {orders && <Link href="/bill" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
+          <Text className="text-body font-semibold text-on-primary">{strings.bill.open}</Text>
+        </Pressable>
+      </Link>}
       {stock && <Link href="/stock" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
           <Text className="text-body font-semibold text-primary">{strings.stock.title}</Text>

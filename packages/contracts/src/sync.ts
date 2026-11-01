@@ -14,6 +14,8 @@ export const ShopStockResponse = z.strictObject({
   shopId: z.uuid(), state: z.enum(["live", "suspended"]), items: z.array(z.strictObject({
     listingId: z.uuid(), packId: z.uuid(), name: z.string(), packQuantity: PackQuantity,
     baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, held: BaseUnitQuantity, outOfStock: z.boolean(),
+    // The price a counter bill charges for one pack, kept on the phone so billing works offline (#468).
+    counterPrice: ShopPrice,
   })),
 });
 export const StockCursor = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,18})$/);

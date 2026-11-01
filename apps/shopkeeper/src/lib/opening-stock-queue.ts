@@ -1,6 +1,6 @@
 import { stockCache } from "./stock-cache";
 import { OFFLINE_LIMITS } from "./offline-limits";
-import { OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
+import { counterBillReference, CounterBillPayload, type CounterBillResponse, OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import type { SQLiteDatabase } from "expo-sqlite";
 
@@ -64,9 +64,11 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   // correction closes as soon as a newer correction is queued, even offline, as on Opening stock (#460).
   // "Already recorded" is settled: the server holds opening stock for that pack and refuses
   // any other, and Opening stock shows it as recorded.
-  const openRefusal = `a.status = 'rejected' AND json_extract(a.result, '$.code') IS NOT 'OPENING_STOCK_ALREADY_RECORDED' AND NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
+  // A refused counter bill stays open: no later bill replaces it (#468).
+  const openRefusal = `a.status = 'rejected' AND json_extract(a.result, '$.code') IS NOT 'OPENING_STOCK_ALREADY_RECORDED' AND (json_extract(a.action, '$.type') = 'counter_bill'
+    OR NOT EXISTS (SELECT 1 FROM opening_stock_actions n WHERE n.shop_id = a.shop_id AND n.pack_id = a.pack_id
     AND json_extract(n.action, '$.type') = json_extract(a.action, '$.type') AND n.sequence > a.sequence
-    AND (n.status = 'applied' OR json_extract(n.action, '$.type') = 'opening_stock_correction'))`;
+    AND (n.status = 'applied' OR json_extract(n.action, '$.type') = 'opening_stock_correction')))`;
   // Opening stock saved on the phone but not yet given a place in the ordered queue.
   const unqueued = "NOT EXISTS (SELECT 1 FROM opening_stock_actions q WHERE q.id = json_extract(o.payload, '$.clientId'))";
 
@@ -80,6 +82,19 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     if (adding && used >= limits.maxActions) return "queueFull";
     const oldest = oldestWaiting();
     return oldest && now().getTime() - Date.parse(oldest) >= limits.maxAgeHours * 3600_000 ? "queueExpired" : null;
+  }
+
+  /** Give a new change the next place in the ordered queue. */
+  function enqueue(shopId: string, packId: string, type: string, payload: unknown): string {
+    const id = newId();
+    db.withTransactionSync(() => {
+      const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
+      if (!device) throw new Error("Missing sync device");
+      const action: SyncAction = { id, sequence: device.sequence + 1, shopId, type, payload, createdAt: now().toISOString(), clockSuspect: false };
+      db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
+      db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
+    });
+    return id;
   }
 
   function label(shopId: string, packId: string): { name: string; packQuantity: string; baseUnit: string } | null {
@@ -107,14 +122,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       this.batch(shopId);
       const stop = blocked(this.count(), true);
       if (stop) return stop;
-      db.withTransactionSync(() => {
-        const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
-        if (!device) throw new Error("Missing sync device");
-        const action: SyncAction = { id: newId(), sequence: device.sequence + 1, shopId, type: "stock_flag", payload,
-          createdAt: now().toISOString(), clockSuspect: false };
-        db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
-        db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
-      });
+      enqueue(shopId, packId, "stock_flag", payload);
       return null;
     },
     /** Queue a correction of a recorded opening count (#452). Each one is its own action, so corrections apply in order and the last wins. */
@@ -124,16 +132,26 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       this.batch(shopId);
       const stop = blocked(this.count(), true);
       if (stop) return stop;
-      const id = newId();
-      db.withTransactionSync(() => {
-        const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
-        if (!device) throw new Error("Missing sync device");
-        const action: SyncAction = { id, sequence: device.sequence + 1, shopId, type: "opening_stock_correction", payload,
-          createdAt: now().toISOString(), clockSuspect: false };
-        db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
-        db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
-      });
-      return { id };
+      return { id: enqueue(shopId, packId, "opening_stock_correction", payload) };
+    },
+    /**
+     * Queue a counter bill (#468). The action is the bill: lines, prices, total and payment, kept after it syncs
+     * with the server's answer, so Today's bills and S08 show its number. It names no single pack.
+     */
+    saveBill(shopId: string, bill: CounterBillPayload): { id: string; reference: string } | "queueFull" | "queueExpired" {
+      const payload = CounterBillPayload.parse(bill);
+      // Enrol older opening stock before allocating this bill's sequence.
+      this.batch(shopId);
+      const stop = blocked(this.count(), true);
+      if (stop) return stop;
+      const id = enqueue(shopId, "", "counter_bill", payload);
+      return { id, reference: counterBillReference(id) };
+    },
+    /** The shop's bills made since `since` (the start of today), and older ones still waiting or refused; newest first. */
+    bills(shopId: string, since: Date): BillRow[] {
+      return db.getAllSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
+        WHERE shop_id = ? AND json_extract(action, '$.type') = 'counter_bill' AND (json_extract(action, '$.createdAt') >= ? OR status <> 'applied') ORDER BY sequence DESC`,
+      shopId, since.toISOString()).map((row) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null));
     },
     /**
      * Each pack's latest correction in the shop, by pack. Actions sync in order, so only the latest can still be waiting,
@@ -148,6 +166,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     },
     flagCount(): number {
       return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'stock_flag'")?.count ?? 0;
+    },
+    billCount(): number {
+      return db.getFirstSync<{ count: number }>("SELECT count(*) AS count FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') = 'counter_bill'")?.count ?? 0;
     },
     failed,
     failureCount(): number {
@@ -292,6 +313,10 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         const action = JSON.parse(raw.action) as SyncAction;
         const payload = action.payload as { quantity?: string; outOfStock?: boolean };
         const result = raw.result ? JSON.parse(raw.result) as SyncActionResult : null;
+        if (action.type === "counter_bill") {
+          return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type, code: result?.code ?? null, at: raw.at, label: null,
+            bill: billRow(action, result?.status ?? "pending", result) };
+        }
         return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type === "stock_flag" || action.type === "opening_stock_correction" ? action.type : "opening_stock",
           quantity: payload.quantity, outOfStock: payload.outOfStock, code: result?.code ?? null, at: raw.at, label: label(raw.shop_id, raw.pack_id) };
       };
@@ -313,7 +338,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     count(): number {
       const row = db.getFirstSync<{ count: number }>(`SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected'))
         + (SELECT count(*) FROM opening_stock_held)
-        + (SELECT count(*) FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN ('stock_flag', 'opening_stock_correction')) AS count`);
+        + (SELECT count(*) FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN ('stock_flag', 'opening_stock_correction', 'counter_bill')) AS count`);
       if (!row) throw new Error("Could not count opening stock");
       return row.count;
     },
@@ -326,8 +351,17 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 }
 
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
-export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "held"; quantity?: string; outOfStock?: boolean;
-  code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null };
+export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "held" | "counter_bill"; quantity?: string; outOfStock?: boolean;
+  code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null; bill?: BillRow };
+/** A counter bill as the phone knows it: waiting, synced with its number (or held for Admin), or refused with the server's code. */
+export type BillRow = CounterBillPayload & { id: string; reference: string; createdAt: string; status: "pending" | "synced" | "held" | "refused"; number: number | null; code: string | null };
+
+function billRow(action: SyncAction, status: string, result: SyncActionResult | null): BillRow {
+  const bill = result?.result as CounterBillResponse | null | undefined;
+  return { ...(action.payload as CounterBillPayload), id: action.id, reference: counterBillReference(action.id), createdAt: action.createdAt,
+    status: status === "rejected" ? "refused" : status !== "applied" || !bill ? "pending" : bill.number === null ? "held" : "synced",
+    number: bill?.number ?? null, code: result?.code ?? null };
+}
 
 // The shop's listed packs, or null when the server can't be reached or refuses (#464). The client is
 // passed in because the app's api module already imports this file.

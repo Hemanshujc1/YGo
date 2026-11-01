@@ -179,7 +179,7 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       const { rows } = await client.query<CatalogRow>(`${catalogSql} AND sl.id IS NOT NULL ORDER BY lower(p.name), pk.quantity`, [shop.id]);
       return reply.send({ shopId: shop.id, state: shop.state, items: rows.map((row) => ({
         listingId: row.listingId, packId: row.packId, name: row.name, packQuantity: row.packQuantity,
-        baseUnit: row.baseUnit, quantity: row.stock, held: row.held, outOfStock: row.outOfStock,
+        baseUnit: row.baseUnit, quantity: row.stock, held: row.held, outOfStock: row.outOfStock, counterPrice: requiredListingValue(row.counterPrice, "counter price"),
       })) });
     });
   });

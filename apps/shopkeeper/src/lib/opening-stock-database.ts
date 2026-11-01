@@ -101,7 +101,7 @@ export const offlineStorage: AccessStorage = {
 };
 
 /** Undefined means the shop lookup failed; null means the server confirmed no shop. */
-export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number; stockPending?: number }> {
+export async function openingStockBeforeSignOut(accountId: string, verifiedShopId?: string | null): Promise<{ pending: number; failed: number; stockPending?: number; billsPending?: number }> {
   const hasUnscopedLegacy = verifiedShopId === undefined && legacyOpeningStock.getAllKeys().some((key) => key.startsWith("opening:"));
   if (hasUnscopedLegacy) {
     throw new Error("Verify the shop before checking legacy opening stock");
@@ -110,5 +110,5 @@ export async function openingStockBeforeSignOut(accountId: string, verifiedShopI
     && !legacyOpeningStock.getAllKeys().some((key) => verifiedShopId && key.startsWith(`opening:${verifiedShopId}:`))) return { pending: 0, failed: 0 };
   const queue = await openOpeningStock(accountId);
   if (verifiedShopId) queue.importLegacy(verifiedShopId, legacyOpeningStock);
-  return { pending: queue.count(), failed: queue.failureCount(), ...(queue.flagCount() > 0 ? { stockPending: queue.flagCount() } : {}) };
+  return { pending: queue.count(), failed: queue.failureCount(), ...(queue.flagCount() > 0 ? { stockPending: queue.flagCount() } : {}), ...(queue.billCount() > 0 ? { billsPending: queue.billCount() } : {}) };
 }

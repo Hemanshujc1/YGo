@@ -19,7 +19,7 @@ export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boole
 
   const working = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [pending, setPending] = useState<false | "opening" | "stock">(false);
+  const [pending, setPending] = useState<false | "opening" | "stock" | "sync">(false);
 
   async function signOut(accepted: { accountId: string; epoch: number } | null = null) {
     if (working.current) return;
@@ -42,8 +42,9 @@ export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boole
       const afterCount = session.get();
       if (!("account" in afterCount) || afterCount.account.id !== before.account.id || epoch !== accountEpoch()) return;
       if (counts.pending > 0) {
-        setMessage(words.pending(counts.pending));
-        setPending(counts.stockPending ? "stock" : "opening");
+        // A waiting bill is shown only on S08 and the Bill screen, not on Stock or Opening stock (#468).
+        setMessage(counts.billsPending ? words.billsPending(counts.pending) : words.pending(counts.pending));
+        setPending(counts.billsPending ? "sync" : counts.stockPending ? "stock" : "opening");
         return;
       }
       if (counts.failed > 0 && (accepted?.accountId !== before.account.id || accepted.epoch !== epoch)) { setFailedWarning({ accountId: before.account.id, epoch }); setAsking(true); return; }
@@ -68,7 +69,7 @@ export function SignOut({ unsaved = false, disabled = false }: { unsaved?: boole
         variant="secondary"
       />
       {message && <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-pending">{message}</Text>}
-      {pending && <Link href={pending === "stock" ? "/stock" : "/opening-stock"} asChild><Pressable accessibilityRole="button" className="mt-3 py-3"><Text className="text-body text-primary">{pending === "stock" ? strings.stock.title : words.openStock}</Text></Pressable></Link>}
+      {pending && <Link href={pending === "sync" ? "/sync" : pending === "stock" ? "/stock" : "/opening-stock"} asChild><Pressable accessibilityRole="button" className="mt-3 py-3"><Text className="text-body text-primary">{pending === "sync" ? words.openSync : pending === "stock" ? strings.stock.title : words.openStock}</Text></Pressable></Link>}
       <Confirm
         visible={asking}
         title={failedWarning ? words.failedTitle : words.title}
