@@ -77,6 +77,9 @@ import { LiveCheck } from "./shops";
  * Answering an order (#425):
  * - ORDER_EXPIRED (409): ORDER_ANSWER_SECONDS have passed since placement, so it can't be accepted or rejected.
  * - NOT_ENOUGH_STOCK (409): a line no longer fits the stock left; `shortLines` names each one.
+ * Held counter bills (#470):
+ * - COUNTER_BILL_RESOLVED (409): another Admin closed this bill first.
+ * - COUNTER_BILL_ACTION_REFUSED (409): the action does not fit the bill, such as numbering an `invalid` bill.
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -123,6 +126,8 @@ export const ErrorCode = z.enum([
   "ORDER_STATUS_CHANGED",
   "ORDER_EXPIRED",
   "NOT_ENOUGH_STOCK",
+  "COUNTER_BILL_RESOLVED",
+  "COUNTER_BILL_ACTION_REFUSED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

@@ -97,6 +97,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getVisitPhotoAccess: vi.fn(),
     recordOnboardingFee: vi.fn(),
     getShopOnboarding: vi.fn(),
+    listCounterBills: vi.fn(),
+    resolveCounterBill: vi.fn(),
     me: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     ...asRole("admin"),
     setTheme: vi.fn(),
@@ -1182,13 +1184,13 @@ describe("Area Manager shell (#343)", () => {
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
-  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", "/price-simulator"])(
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", "/price-simulator", "/applications/00000000-0000-4000-8000-000000000501/counter-bills"])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
       const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
-      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings]) {
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings, api.listCounterBills]) {
         expect(call).not.toHaveBeenCalled();
       }
     },

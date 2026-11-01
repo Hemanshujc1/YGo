@@ -205,6 +205,7 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
         <dt className="font-medium">{strings.roles.area_manager}</dt><dd className="min-w-48 flex-1">{areaManagerName(application)}</dd>
         <button disabled={busy} onClick={() => void pick()} className="h-10 rounded-lg border border-border-strong px-3 disabled:opacity-60">{application.areaManager ? strings.changeAreaManager : strings.assignAreaManager}</button>
       </div>}
+      {admin && <div className="border-t border-border p-4"><Link className="text-primary underline" to={`/applications/${application.id}/counter-bills`}>{strings.counterBillsLink}</Link></div>}
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.phone}</dt><dd className="mt-1 tabular-nums">{application.ownerPhone ? formatPhone(application.ownerPhone) : "—"}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.ownerEmail}</dt><dd className="mt-1">{application.ownerEmail}</dd></div>
       <div className="border-t border-border p-4"><dt className="font-medium">{strings.submittedAt}</dt><dd className="mt-1">{application.submittedAt ? formatDateTime(application.submittedAt) : "—"}</dd></div>
