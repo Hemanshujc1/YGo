@@ -221,15 +221,24 @@ describe("counter bill sync (#51)", () => {
 
   it("numbers the largest bill a phone can make at its 16-digit total, and holds a 17-digit total as unreadable (#471)", async () => {
     const { pack, bill, send, stock } = await shop();
-    const lines = [];
-    for (let index = 0; index < 100; index += 1) lines.push({ packId: await pack(), count: 9999, unitPrice: "9999999999.99" });
+    // One pack through the routes, then 99 copies in one statement, so the test stays quick.
+    const first = await pack();
+    const { rows: copies } = await database.pool.query<{ packId: string }>(`WITH source AS (SELECT p.category_id, sl.* FROM shop_listings sl
+        JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id WHERE sl.pack_id = $1),
+      products AS (INSERT INTO master_products (name, category_id, base_unit, classification, image_256_key, image_512_key, image_1024_key, published)
+        SELECT 'Rice ' || gen_random_uuid(), category_id, 'kg', 'measured', 'image256', 'image512', 'image1024', true FROM source, generate_series(1, 99) RETURNING id),
+      copied AS (INSERT INTO packs (product_id, quantity) SELECT id, 1 FROM products RETURNING id)
+    INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, minimum_order_quantity, quantity_step)
+    SELECT shop_id, copied.id, online_price, counter_price, mrp, minimum_order_quantity, quantity_step FROM source, copied RETURNING pack_id AS "packId"`, [first]);
+    const lines = [first, ...copies.map((copy) => copy.packId)].map((packId) => ({ packId, count: 9999, unitPrice: "9999999999.99" }));
     const [largest, longer] = await send([
       bill(lines, { payload: { lines, total: "9998999999990001", payment: "upi" } }),
       bill(lines, { payload: { lines, total: "99989999999900010", payment: "upi" } }),
     ]);
     expect(largest?.result).toMatchObject({ number: 1, heldReason: null, totalMismatch: false });
     expect(longer?.result).toMatchObject({ number: null, heldReason: "invalid" });
-    expect(await stock(lines[0]?.packId ?? "")).toBe("-9949.000");
+    expect(await stock(first)).toBe("-9949.000");
+    expect(await stock(copies[98]?.packId ?? "")).toBe("-9999.000");
     expect((await database.pool.query("SELECT checked_total::text AS total FROM counter_bills WHERE number = 1")).rows).toEqual([{ total: "9998999999990001.00" }]);
   });
 

@@ -369,8 +369,8 @@ export const counterBills = pgTable("counter_bills", {
   referenceClash: boolean("reference_clash").notNull().default(false),
   number: integer("number"),
   heldReason: text("held_reason"),
-  // A payload the server could not read is kept whole, in place of the columns below (BIL-5), as the
-  // `JSON.stringify` text: jsonb refuses the `\u0000` and lone-surrogate escapes such a payload may hold (#471).
+  // A payload the server could not read is kept, in place of the columns below (BIL-5), as the `JSON.stringify`
+  // text of what the server parsed: jsonb refuses the `\u0000` and lone-surrogate escapes it may hold (#471).
   invalidPayload: text("invalid_payload"),
   payment: text("payment"),
   // The phone's total is the total on record; the server's own sum sits beside it for Admin.

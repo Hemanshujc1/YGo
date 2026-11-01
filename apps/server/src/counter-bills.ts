@@ -39,7 +39,6 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
   const sum = parsed.success ? (await client.query<{ total: string; mismatch: boolean }>(`SELECT total::text, total <> $2::numeric AS mismatch
     FROM (SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric) AS total FROM jsonb_array_elements($1::jsonb) line) checked`,
   [lines, parsed.data.total])).rows[0] : undefined;
-  const checked = sum?.total;
   // On the shop's list means what the phone's Stock shows: listed, with pack, product and category active.
   const listed = parsed.success && (await client.query(`SELECT 1 FROM shop_listings sl JOIN packs pk ON pk.id = sl.pack_id
       JOIN master_products p ON p.id = pk.product_id JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
@@ -58,7 +57,7 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (shop_id, reference) WHERE NOT reference_clash DO NOTHING RETURNING ${billColumns}`,
   [bill.shopId, bill.accountId, bill.actionId, counterBillReference(bill.actionId), clash, number, heldReason,
-    parsed.success ? null : JSON.stringify(payload ?? null), parsed.data?.payment ?? null, parsed.data?.total ?? null, checked ?? null,
+    parsed.success ? null : JSON.stringify(payload ?? null), parsed.data?.payment ?? null, parsed.data?.total ?? null, sum?.total ?? null,
     bill.clockSuspect, bill.madeAt, bill.receivedAt]);
   // A refused insert rolls its number back too, so the shop's numbers keep no gap (BIL-5).
   await client.query("SAVEPOINT counter_bill");
