@@ -288,6 +288,13 @@
       "when": 1793474676049,
       "tag": "0040_counter_bills",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793510491209,
+      "tag": "0041_counter_bill_invalid_text",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "counter_bills" ALTER COLUMN "invalid_payload" SET DATA TYPE text;
