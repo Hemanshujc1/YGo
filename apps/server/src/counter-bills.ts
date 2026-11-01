@@ -1,5 +1,9 @@
 import { counterBillReference, CounterBillPayload, type CounterBillResponse } from "@ygo/contracts";
 import type { PoolClient } from "pg";
+import { stockOf } from "./listings";
+
+/** The largest stock quantity a movement holds (NUMERIC(12,3)) and Stock shows (`SignedBaseUnitQuantity`). */
+const largestQuantity = "999999999.999";
 
 type Bill = {
   accountId: string; shopId: string; actionId: string; madeAt: string; receivedAt: Date;
@@ -18,8 +22,8 @@ const answer = (row: Row): { result: CounterBillResponse } => ({ result: {
  * Records one counter bill (#51) inside the sync transaction, which holds the shop's row lock.
  *
  * A bill that can be applied as recorded gets the shop's next number and one `sale` movement per line. Stock
- * may go negative (BIL-4). A bill the server cannot read, whose pack has left the shop's list, or which is
- * older than the server's limit, is kept with no number and moves no stock (BIL-5). So is a bill whose
+ * may go negative (BIL-4). A bill the server cannot read, whose pack has left the shop's list, which is older
+ * than the server's limit, or whose sale is too large to record as stock, is kept with no number and moves no stock (BIL-5). So is a bill whose
  * reference another bill already has: the unique index refuses it, and it is kept beside the first. A total
  * that differs from the server's sum still gets its number, but moves no stock (owner's answer on #51).
  */
@@ -38,7 +42,12 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
       JOIN master_products p ON p.id = pk.product_id JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
     WHERE sl.shop_id = $1 AND sl.pack_id = ANY($2::uuid[]) AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`,
   [bill.shopId, parsed.data.lines.map((line) => line.packId)])).rowCount === parsed.data.lines.length;
-  const held = !parsed.success ? "invalid" : bill.tooOld ? "too_old" : listed ? null : "not_listed";
+  // A line's sale must fit one stock movement, and leave stock the shop's Stock list can show; otherwise the
+  // whole sync batch would fail and stall the phone's queue.
+  const tooLarge = listed && !bill.tooOld && Boolean((await client.query(`SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS line("packId" uuid, count integer)
+      JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = line."packId" JOIN packs pk ON pk.id = sl.pack_id
+    WHERE line.count * pk.quantity > ${largestQuantity} OR ${stockOf("sl")} - line.count * pk.quantity < -${largestQuantity}`, [bill.shopId, lines])).rowCount);
+  const held = !parsed.success ? "invalid" : bill.tooOld ? "too_old" : !listed ? "not_listed" : tooLarge ? "too_large" : null;
 
   const insert = (heldReason: string | null, number: number | null, clash: boolean) => client.query<Row>(`INSERT INTO counter_bills (shop_id, actor_id, client_id,
       reference, reference_clash, number, held_reason, invalid_payload, payment, total, checked_total, clock_suspect, made_at, received_at)

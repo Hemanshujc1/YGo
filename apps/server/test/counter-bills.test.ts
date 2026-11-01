@@ -219,6 +219,36 @@ describe("counter bill sync (#51)", () => {
       .toEqual({ clock_suspect: true, made_at: new Date("2029-12-24T00:00:00.000Z") });
   });
 
+  it("holds a bill at the largest pack and count, too large for a stock movement, and keeps the batch going", async () => {
+    const { owner, pack, bill, send, stock, count } = await shop();
+    const largest = await pack("999999999.999", "1"), rice = await pack();
+    const huge = [{ packId: largest, count: 9999, unitPrice: "21" }], small = [{ packId: rice, count: 1, unitPrice: "21" }];
+    const [held, sold] = await send([
+      bill(huge, { payload: { lines: huge, total: "209979", payment: "cash" } }),
+      bill(small, { payload: { lines: small, total: "21", payment: "cash" } }),
+    ]);
+    expect(held).toMatchObject({ status: "applied", result: { number: null, heldReason: "too_large", totalMismatch: false } });
+    expect(sold).toMatchObject({ status: "applied", result: { number: 1, heldReason: null } });
+    expect(await stock(largest)).toBe("1.000");
+    expect(await count("counter_bill_lines")).toBe(2);
+    expect((await app.inject({ method: "GET", url: "/v1/me/stock", headers: owner.headers })).statusCode).toBe(200);
+  });
+
+  it("numbers sales down to the lowest stock Stock can show, and holds the one past it", async () => {
+    const { owner, pack, bill, send, stock } = await shop();
+    const largest = await pack("999999999.999", "999999999.999");
+    const line = [{ packId: largest, count: 1, unitPrice: "21" }];
+    const sale = () => bill(line, { payload: { lines: line, total: "21", payment: "cash" } });
+    const results = await send([sale(), sale(), sale()]);
+    expect(results.map((row) => row.result)).toMatchObject([
+      { number: 1, heldReason: null }, { number: 2, heldReason: null }, { number: null, heldReason: "too_large" },
+    ]);
+    expect(await stock(largest)).toBe("-999999999.999");
+    const listed = await app.inject({ method: "GET", url: "/v1/me/stock", headers: owner.headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().items[0]).toMatchObject({ quantity: expect.stringMatching(/^-999999999\.999$/) });
+  });
+
   it("numbers a bill whose total disagrees and keeps both totals, but moves no stock", async () => {
     const { pack, bill, send, stock } = await shop();
     const rice = await pack("1", "10");

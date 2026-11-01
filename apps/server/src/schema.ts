@@ -385,7 +385,7 @@ export const counterBills = pgTable("counter_bills", {
   // A clashing reference is kept as a second, held bill outside this index (BIL-5).
   uniqueIndex("counter_bills_reference_idx").on(table.shopId, table.reference).where(sql`NOT ${table.referenceClash}`),
   check("counter_bills_held_valid", sql`(${table.number} IS NULL) = (${table.heldReason} IS NOT NULL) AND ${table.number} > 0
-    AND ${table.heldReason} IN ('reference_taken', 'not_listed', 'too_old', 'invalid')`),
+    AND ${table.heldReason} IN ('reference_taken', 'not_listed', 'too_old', 'too_large', 'invalid')`),
   check("counter_bills_recorded_valid", sql`(${table.heldReason} IS NOT DISTINCT FROM 'invalid') = (${table.invalidPayload} IS NOT NULL)
     AND (${table.invalidPayload} IS NULL) = (${table.payment} IS NOT NULL AND ${table.total} IS NOT NULL AND ${table.checkedTotal} IS NOT NULL)`),
   check("counter_bills_payment_valid", sql`${table.payment} IN ('cash', 'upi')`),

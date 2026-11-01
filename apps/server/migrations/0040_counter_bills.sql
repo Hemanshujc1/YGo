@@ -31,7 +31,7 @@ CREATE TABLE "counter_bills" (
 	"made_at" timestamp with time zone NOT NULL,
 	"received_at" timestamp with time zone NOT NULL,
 	CONSTRAINT "counter_bills_held_valid" CHECK (("counter_bills"."number" IS NULL) = ("counter_bills"."held_reason" IS NOT NULL) AND "counter_bills"."number" > 0
-    AND "counter_bills"."held_reason" IN ('reference_taken', 'not_listed', 'too_old', 'invalid')),
+    AND "counter_bills"."held_reason" IN ('reference_taken', 'not_listed', 'too_old', 'too_large', 'invalid')),
 	CONSTRAINT "counter_bills_recorded_valid" CHECK (("counter_bills"."held_reason" IS NOT DISTINCT FROM 'invalid') = ("counter_bills"."invalid_payload" IS NOT NULL)
     AND ("counter_bills"."invalid_payload" IS NULL) = ("counter_bills"."payment" IS NOT NULL AND "counter_bills"."total" IS NOT NULL AND "counter_bills"."checked_total" IS NOT NULL)),
 	CONSTRAINT "counter_bills_payment_valid" CHECK ("counter_bills"."payment" IN ('cash', 'upi')),

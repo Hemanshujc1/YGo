@@ -39,7 +39,7 @@ export const CounterBillPayload = z.strictObject({
 export type CounterBillLine = z.infer<typeof CounterBillLine>;
 export type CounterBillPayload = z.infer<typeof CounterBillPayload>;
 /** Why the server kept a bill without a number; Admin resolves it (BIL-5). */
-export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old", "invalid"]);
+export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old", "too_large", "invalid"]);
 export const CounterBillResponse = z.strictObject({
   billId: z.uuid(), reference: z.string().regex(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: z.number().int().positive().nullable(),
   heldReason: CounterBillHeldReason.nullable(), totalMismatch: z.boolean(), recordedAt: z.iso.datetime(),
