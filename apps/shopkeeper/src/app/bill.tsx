@@ -1,16 +1,17 @@
-import { CounterBillPayload } from "@ygo/contracts";
+import { CounterBillLine, CounterBillPayload } from "@ygo/contracts";
 import { formatNumber, trimDecimal } from "@ygo/format";
 import { Button, SupportEmail, Text } from "@ygo/mobile";
 import { counterBillTotal } from "@ygo/pricing";
 import { Link, useFocusEffect } from "expo-router";
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, session, supportEmail } from "../api";
+import { BillCard } from "../components/bill-card";
 import { Minus, Plus } from "../components/icons";
 import { SyncStatus } from "../components/sync-status";
 import { isCurrentAccount } from "../lib/account";
-import { billStatus } from "../lib/bill-status";
+import { startOfToday } from "../lib/bill-status";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import type { OpeningStockQueue } from "../lib/opening-stock-queue";
@@ -23,8 +24,6 @@ type Loaded = { kind: "loaded"; accountId: string; epoch: number; shopId: string
 type Load = { kind: "loading" } | { kind: "failed" } | Loaded;
 type Line = { item: Item & { counterPrice: string }; count: string };
 
-function startOfToday(now = new Date()) { return new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
-
 /**
  * S06 Counter bill (#468): whole packs from the Stock saved on this phone, at each pack's counter price, paid
  * by cash or UPI. It works offline: the bill is queued, and Today's bills shows its number once it syncs.
@@ -33,14 +32,16 @@ function startOfToday(now = new Date()) { return new Date(now.getFullYear(), now
 export default function BillScreen() {
   const insets = useSafeAreaInsets();
   const view = useSyncExternalStore(access.subscribe, access.get);
-  // A finished sync pass redraws, so Today's bills shows each new number.
-  useSyncExternalStore(stockSync.subscribe, stockSync.get);
+  // A sync pass redraws, so Today's bills shows each new number.
+  const status = useSyncExternalStore(stockSync.subscribe, stockSync.get);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [payment, setPayment] = useState<"cash" | "upi" | null>(null);
   const [message, setMessage] = useState<{ text: string; saved: boolean } | null>(null);
   const visit = useRef(0);
+  // The lines last saved: a second tap before the cleared form redraws must not queue the same bill again.
+  const savedLines = useRef<Line[] | null>(null);
 
   async function open(token: number) {
     const identity = session.get();
@@ -61,20 +62,22 @@ export default function BillScreen() {
     return () => { ++visit.current; };
   }, []));
 
-  // Stock and Today's bills are read from the phone on each render.
   const loaded = load.kind === "loaded" && isCurrentAccount(load.accountId, load.epoch) && access.allowed(load.accountId, load.shopId) ? load : null;
-  let read: { items: Item[]; bills: ReturnType<OpeningStockQueue["bills"]> } | null;
-  try {
-    read = loaded ? { items: loaded.queue.cache.read(loaded.shopId)?.items.filter((item) => !item.unavailable) ?? [], bills: loaded.queue.bills(loaded.shopId, startOfToday()) } : null;
-  } catch { read = null; }
+  // Stock and Today's bills are read from the phone on opening, after a save and after each sync pass, not on every keystroke.
+  const read = useMemo(() => {
+    try {
+      return loaded ? { items: loaded.queue.cache.read(loaded.shopId)?.items.filter((item) => !item.unavailable) ?? [], bills: loaded.queue.bills(loaded.shopId, startOfToday()) } : null;
+    } catch { return null; }
+  }, [loaded, status, message]);
 
   const counts = lines.map((line) => Number(line.count));
-  const ready = lines.length > 0 && counts.every((count) => Number.isInteger(count) && count >= 1 && count <= 9999);
+  const ready = lines.length > 0 && counts.every((count) => CounterBillLine.shape.count.safeParse(count).success);
   const total = ready ? counterBillTotal(lines.map((line, i) => ({ unitPrice: line.item.counterPrice, count: counts[i] ?? 0 }))) : null;
   const found = search.trim() ? read?.items.filter((item) => item.name.toLowerCase().includes(search.trim().toLowerCase()) && !lines.some((line) => line.item.packId === item.packId)) ?? [] : [];
 
   function add(item: Item) {
-    if (!item.counterPrice || lines.length >= 100) return;
+    if (!item.counterPrice) return;
+    if (lines.length >= 100) return setMessage({ text: words.tooMany, saved: false });
     setLines((current) => [...current, { item: { ...item, counterPrice: item.counterPrice as string }, count: "1" }]);
     setSearch("");
   }
@@ -84,19 +87,20 @@ export default function BillScreen() {
   function step(packId: string, by: number) {
     setLines((current) => current.flatMap((line) => {
       if (line.item.packId !== packId) return [line];
-      const next = Math.min(9999, (Number.parseInt(line.count, 10) || 0) + by);
+      const next = (Number.parseInt(line.count, 10) || 0) + by;
       return next < 1 ? [] : [{ ...line, count: String(next) }];
     }));
   }
 
   function save() {
-    if (!loaded || !total || !payment) return;
+    if (!loaded || !total || !payment || savedLines.current === lines) return;
     if (!isCurrentAccount(loaded.accountId, loaded.epoch) || !access.allowed(loaded.accountId, loaded.shopId)) { access.expire(); return; }
     const bill = CounterBillPayload.safeParse({ lines: lines.map((line, i) => ({ packId: line.item.packId, count: counts[i], unitPrice: line.item.counterPrice })), total, payment });
     if (!bill.success) return setMessage({ text: words.checkCounts, saved: false });
     try {
       const saved = loaded.queue.saveBill(loaded.shopId, bill.data);
       if (typeof saved === "string") return setMessage({ text: words[saved], saved: false });
+      savedLines.current = lines;
       setLines([]); setPayment(null); setMessage({ text: words.saved(saved.reference), saved: true });
       void stockSync.run();
     } catch { setMessage({ text: words.storageFailed, saved: false }); }
@@ -155,15 +159,7 @@ export default function BillScreen() {
 
         <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.today} · {formatNumber(read.bills.length)}</Text>
         {read.bills.length === 0 && <Text className="text-body text-muted">{words.none}</Text>}
-        {read.bills.map((bill) => {
-          const line = billStatus(bill);
-          return <View key={bill.id} className="gap-1 rounded-card border border-border bg-surface p-4">
-            <Text selectable className="text-headline font-semibold text-text">{words.reference(bill.reference)}</Text>
-            <Text className="text-body text-text">{words.summary(money(bill.total), words.payments[bill.payment], bill.lines.length)}</Text>
-            <Text className={line.tone === "danger" ? "text-secondary text-danger" : line.tone === "warning" ? "text-secondary text-warning" : "text-secondary text-muted"}>{line.text}</Text>
-            {bill.status === "refused" && <SupportEmail address={supportEmail} className="text-secondary" />}
-          </View>;
-        })}
+        {read.bills.map((bill) => <BillCard key={bill.id} bill={bill} />)}
       </>}
     </ScrollView>
   );

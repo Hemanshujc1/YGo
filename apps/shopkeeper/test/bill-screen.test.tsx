@@ -17,6 +17,7 @@ vi.mock("react", () => ({
     return mock.hooks[index];
   },
   useCallback: (callback: unknown) => callback,
+  useMemo: (make: () => unknown) => make(),
   useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get(),
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
@@ -38,7 +39,9 @@ function render() { mock.cursor = 0; return BillScreen(); }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
-  const element = node as { props: Record<string, unknown> };
+  const element = node as { type: unknown; props: Record<string, unknown> };
+  // Render our own components, such as BillCard, in place.
+  if (typeof element.type === "function") return elements((element.type as (props: unknown) => unknown)(element.props));
   return [element, ...elements(element.props.children)];
 }
 const find = (test: (props: Record<string, unknown>) => boolean) => elements(render()).find((node) => test(node.props))?.props;
@@ -85,6 +88,16 @@ describe("S06 Counter bill (#468)", () => {
     queue.acknowledge(batch, { results: batch.actions.map((sent) => ({ actionId: sent.id, sequence: sent.sequence, status: "applied", code: null, clockSuspect: false,
       result: { billId: randomUUID(), reference: bill?.reference ?? "", number: 1, heldReason: null, totalMismatch: false, recordedAt: new Date().toISOString() } })) });
     expect(texts()).toContain("Synced · Bill 1");
+  });
+
+  it("queues the bill once when Save is tapped twice before the cleared form redraws", async () => {
+    render(); await settle();
+    (find((props) => props.accessibilityLabel === "Search products")?.onChangeText as (value: string) => void)("rice");
+    (find((props) => props.accessibilityRole === "button" && text(props).includes("Rice · 1 kg"))?.onPress as () => void)();
+    (find((props) => props.accessibilityRole === "radio" && text(props).includes("UPI"))?.onPress as () => void)();
+    const tap = find((props) => props.label === "Save bill")?.onPress as () => void;
+    tap(); tap();
+    expect(queue.batch(shopId).actions).toHaveLength(1);
   });
 
   it("greys a pack whose price isn't on the phone yet, so it can't be billed", async () => {
