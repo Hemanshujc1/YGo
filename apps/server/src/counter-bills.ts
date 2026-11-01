@@ -25,7 +25,8 @@ const answer = (row: Row): { result: CounterBillResponse } => ({ result: {
  * may go negative (BIL-4). A bill the server cannot read, whose pack has left the shop's list, which is older
  * than the server's limit, or whose sale is too large to record as stock, is kept with no number and moves no stock (BIL-5). So is a bill whose
  * reference another bill already has: the unique index refuses it, and it is kept beside the first. A total
- * that differs from the server's sum still gets its number, but moves no stock (owner's answer on #51).
+ * that differs from the server's sum still gets its number, but moves no stock (owner's answer on #51), however
+ * large its lines. An unreadable payload is kept as its `JSON.stringify` text (#471).
  */
 export async function applyCounterBill(client: PoolClient, bill: Bill, payload: unknown): Promise<{ code: "ACTION_CONFLICT" } | { result: CounterBillResponse }> {
   // The same action id can only reach here again through a phone bug; it gets its first answer, and only its own.
@@ -35,16 +36,18 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
   const parsed = CounterBillPayload.safeParse(payload);
   const lines = parsed.success ? JSON.stringify(parsed.data.lines) : null;
   // The server's check of the phone's total runs on NUMERIC (MNY-15).
-  const checked = lines && (await client.query<{ total: string }>(`SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric)::text AS total
-    FROM jsonb_array_elements($1::jsonb) line`, [lines])).rows[0]?.total;
+  const sum = parsed.success ? (await client.query<{ total: string; mismatch: boolean }>(`SELECT total::text, total <> $2::numeric AS mismatch
+    FROM (SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric) AS total FROM jsonb_array_elements($1::jsonb) line) checked`,
+  [lines, parsed.data.total])).rows[0] : undefined;
   // On the shop's list means what the phone's Stock shows: listed, with pack, product and category active.
   const listed = parsed.success && (await client.query(`SELECT 1 FROM shop_listings sl JOIN packs pk ON pk.id = sl.pack_id
       JOIN master_products p ON p.id = pk.product_id JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
     WHERE sl.shop_id = $1 AND sl.pack_id = ANY($2::uuid[]) AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`,
   [bill.shopId, parsed.data.lines.map((line) => line.packId)])).rowCount === parsed.data.lines.length;
   // A line's sale must fit one stock movement, and leave stock the shop's Stock list can show; otherwise the
-  // whole sync batch would fail and stall the phone's queue.
-  const tooLarge = listed && !bill.tooOld && Boolean((await client.query(`SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS line("packId" uuid, count integer)
+  // whole sync batch would fail and stall the phone's queue. A mismatched bill moves no stock, so it is numbered
+  // and flagged rather than held (#471).
+  const tooLarge = listed && !bill.tooOld && !sum?.mismatch && Boolean((await client.query(`SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS line("packId" uuid, count integer)
       JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = line."packId" JOIN packs pk ON pk.id = sl.pack_id
     WHERE line.count * pk.quantity > ${largestQuantity} OR ${stockOf("sl")} - line.count * pk.quantity < -${largestQuantity}`, [bill.shopId, lines])).rowCount);
   const held = !parsed.success ? "invalid" : bill.tooOld ? "too_old" : !listed ? "not_listed" : tooLarge ? "too_large" : null;
@@ -54,7 +57,7 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (shop_id, reference) WHERE NOT reference_clash DO NOTHING RETURNING ${billColumns}`,
   [bill.shopId, bill.accountId, bill.actionId, counterBillReference(bill.actionId), clash, number, heldReason,
-    parsed.success ? null : JSON.stringify(payload ?? null), parsed.data?.payment ?? null, parsed.data?.total ?? null, checked ?? null,
+    parsed.success ? null : JSON.stringify(payload ?? null), parsed.data?.payment ?? null, parsed.data?.total ?? null, sum?.total ?? null,
     bill.clockSuspect, bill.madeAt, bill.receivedAt]);
   // A refused insert rolls its number back too, so the shop's numbers keep no gap (BIL-5).
   await client.query("SAVEPOINT counter_bill");

@@ -196,8 +196,50 @@ describe("counter bill sync (#51)", () => {
     const line = { packId: await pack(), count: 1, unitPrice: "21" };
     const payload = { lines: [line, line], total: "42", payment: "cash" };
     expect((await send([bill([line], { payload })]))[0]).toMatchObject({ status: "applied", result: { number: null, heldReason: "invalid", totalMismatch: false } });
-    expect((await database.pool.query("SELECT invalid_payload, payment, total FROM counter_bills")).rows).toEqual([{ invalid_payload: payload, payment: null, total: null }]);
+    expect((await database.pool.query("SELECT invalid_payload, payment, total FROM counter_bills")).rows).toEqual([{ invalid_payload: JSON.stringify(payload), payment: null, total: null }]);
     expect(await count("counter_bill_lines")).toBe(0);
+  });
+
+  it("keeps unreadable bills holding NUL and a lone surrogate as exact escaped text, and numbers the next bill 1 (#471)", async () => {
+    const { pack, bill, send, stock } = await shop();
+    const rice = await pack("1", "10");
+    const line = [{ packId: rice, count: 2, unitPrice: "21" }];
+    // inject sends these as the six-character escapes a phone would send; the server parses them back into the characters.
+    const nul = { lines: line, total: "42", payment: "cash\u0000" }, surrogate = { lines: line, total: "42", payment: "\ud800" };
+    const results = await send([bill(line, { payload: nul }), bill(line, { payload: surrogate }), bill(line, { payload: { lines: line, total: "42", payment: "cash" } })]);
+    expect(results.map((row) => [row.status, row.result])).toMatchObject([
+      ["applied", { number: null, heldReason: "invalid" }], ["applied", { number: null, heldReason: "invalid" }], ["applied", { number: 1, heldReason: null }],
+    ]);
+    expect(await stock(rice)).toBe("8.000");
+    const { rows } = await database.pool.query<{ text: string }>("SELECT invalid_payload AS text FROM counter_bills WHERE held_reason = 'invalid' ORDER BY client_id = $1 DESC", [results[0]?.actionId]);
+    expect(rows.map((row) => row.text)).toEqual([
+      `{"lines":[{"packId":"${rice}","count":2,"unitPrice":"21"}],"total":"42","payment":"cash\\u0000"}`,
+      `{"lines":[{"packId":"${rice}","count":2,"unitPrice":"21"}],"total":"42","payment":"\\ud800"}`,
+    ]);
+    expect(rows.map((row) => JSON.parse(row.text) as unknown)).toEqual([nul, surrogate]);
+  });
+
+  it("numbers the largest bill a phone can make at its 16-digit total, and holds a 17-digit total as unreadable (#471)", async () => {
+    const { pack, bill, send, stock } = await shop();
+    // One pack through the routes, then 99 copies in one statement, so the test stays quick.
+    const first = await pack();
+    const { rows: copies } = await database.pool.query<{ packId: string }>(`WITH source AS (SELECT p.category_id, sl.* FROM shop_listings sl
+        JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id WHERE sl.pack_id = $1),
+      products AS (INSERT INTO master_products (name, category_id, base_unit, classification, image_256_key, image_512_key, image_1024_key, published)
+        SELECT 'Rice ' || gen_random_uuid(), category_id, 'kg', 'measured', 'image256', 'image512', 'image1024', true FROM source, generate_series(1, 99) RETURNING id),
+      copied AS (INSERT INTO packs (product_id, quantity) SELECT id, 1 FROM products RETURNING id)
+    INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, minimum_order_quantity, quantity_step)
+    SELECT shop_id, copied.id, online_price, counter_price, mrp, minimum_order_quantity, quantity_step FROM source, copied RETURNING pack_id AS "packId"`, [first]);
+    const lines = [first, ...copies.map((copy) => copy.packId)].map((packId) => ({ packId, count: 9999, unitPrice: "9999999999.99" }));
+    const [largest, longer] = await send([
+      bill(lines, { payload: { lines, total: "9998999999990001", payment: "upi" } }),
+      bill(lines, { payload: { lines, total: "99989999999900010", payment: "upi" } }),
+    ]);
+    expect(largest?.result).toMatchObject({ number: 1, heldReason: null, totalMismatch: false });
+    expect(longer?.result).toMatchObject({ number: null, heldReason: "invalid" });
+    expect(await stock(first)).toBe("-9949.000");
+    expect(await stock(copies[98]?.packId ?? "")).toBe("-9999.000");
+    expect((await database.pool.query("SELECT checked_total::text AS total FROM counter_bills WHERE number = 1")).rows).toEqual([{ total: "9998999999990001.00" }]);
   });
 
   it("holds a bill with a pack off the shop's list or older than the limit, recording its lines", async () => {
@@ -258,6 +300,15 @@ describe("counter bill sync (#51)", () => {
     expect(await stock(rice)).toBe("10.000");
     expect((await database.pool.query("SELECT total::text, checked_total::text, total_mismatch, payment FROM counter_bills")).rows)
       .toEqual([{ total: "60.00", checked_total: "63.00", total_mismatch: true, payment: "upi" }]);
+  });
+
+  it("numbers a mismatched bill too large for a stock movement, flagged and moving no stock (#471)", async () => {
+    const { pack, bill, send, stock } = await shop();
+    const largest = await pack("999999999.999", "1");
+    const huge = [{ packId: largest, count: 9999, unitPrice: "21" }];
+    const [flagged] = await send([bill(huge, { payload: { lines: huge, total: "1", payment: "cash" } })]);
+    expect(flagged?.result).toMatchObject({ number: 1, heldReason: null, totalMismatch: true });
+    expect(await stock(largest)).toBe("1.000");
   });
 
   it.each(["live", "suspended"])("bills while %s", async (state) => {

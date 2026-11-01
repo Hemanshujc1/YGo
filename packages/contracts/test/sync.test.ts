@@ -50,6 +50,11 @@ it("keeps counter bills to whole packs of distinct listings with exact amounts, 
     { lines: [{ ...bill.lines[0], unitPrice: "1.005" }] }, { total: "1.005" }, { total: 199 }, { payment: "card" }, { discount: "1" }]) {
     expect(CounterBillPayload.safeParse({ ...bill, ...change }).success).toBe(false);
   }
+  // The largest bill: 100 distinct packs, each 9,999 at the largest shop price (#471).
+  const largest = { lines: Array.from({ length: 100 }, (_, index) => ({ packId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, count: 9999, unitPrice: "9999999999.99" })),
+    total: "9998999999990001", payment: "upi" };
+  expect(CounterBillPayload.safeParse(largest).success).toBe(true);
+  expect(CounterBillPayload.safeParse({ ...largest, total: "99989999999900010" }).success).toBe(false);
   expect(counterBillReference("0f3a91bc-0000-4000-8000-000000000001")).toBe("0F3A-91BC");
   const answer = { billId: id, reference: "0F3A-91BC", number: 1, heldReason: null, totalMismatch: false, recordedAt: action.createdAt };
   expect(CounterBillResponse.safeParse(answer).success).toBe(true);
