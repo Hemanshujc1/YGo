@@ -140,4 +140,12 @@ it("blocks sign-out for pending manual flags and links to Stock", async () => {
   expect(view.props.children[2].props.href).toBe("/stock");
 });
 
+it("blocks sign-out for waiting bills and links to Waiting to sync (#468)", async () => {
+  mock.count.mockResolvedValue({ pending: 3, failed: 0, stockPending: 1, billsPending: 2 });
+  const view = await pressSignOut();
+  expect(mock.signOut).not.toHaveBeenCalled();
+  expect(view.props.children[1].props.children).toBe("3 changes are waiting to sync, bills among them. Open Waiting to sync and retry before signing out.");
+  expect(view.props.children[2].props.href).toBe("/sync");
+});
+
 });

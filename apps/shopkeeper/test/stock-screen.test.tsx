@@ -36,7 +36,7 @@ import StockScreen from "../src/app/stock";
 import { stockSync } from "../src/lib/stock-sync";
 
 const shopId = "00000000-0000-4000-8000-000000000001", packId = "00000000-0000-4000-8000-000000000002";
-const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false };
+const item = { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg" as const, quantity: "7", held: "0", outOfStock: false, counterPrice: "21" };
 function render() { mock.cursor = 0; return StockScreen(); }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);

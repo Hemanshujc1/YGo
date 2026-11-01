@@ -48,8 +48,11 @@ describe("offline Stock entry boundary", () => {
   it("offers saved Stock, retry and guarded sign-out while blocking online-only routes", async () => {
     const tree = await ready(); expect(tree).not.toBe("protected screen");
     expect(elements(tree).find((node) => node.props.href === "/stock")).toBeDefined();
+    expect(elements(tree).find((node) => node.props.href === "/bill")).toBeDefined();
     expect(elements(tree).find((node) => node.type === "SignOut")).toBeDefined();
     mock.path = "/stock"; expect(render()).toBe("protected screen");
+    // A counter bill works with no internet (#468, BIL-3).
+    mock.path = "/bill"; expect(render()).toBe("protected screen");
     mock.path = "/orders"; expect(render()).not.toBe("protected screen");
     const retry = elements(render()).find((node) => node.props.label === "Retry connection");
     (retry?.props.onPress as () => void)(); expect(mock.verify).toHaveBeenCalledTimes(2);

@@ -59,7 +59,7 @@ describe("S08 Waiting to sync (#395)", () => {
 
   it("shows the three sections in order with the meter, a refusal's reason, reference and fix, and names from the Stock copy or listings", async () => {
     queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, deletedAt: null,
-      item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false } }] });
+      item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false, counterPrice: "21" } }] });
     queue.saveFlag(shopId, packId, true);
     const batch = queue.batch(shopId);
     queue.acknowledge(batch, { results: [{ actionId: batch.actions[0]?.id ?? "", sequence: 1, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false }] });

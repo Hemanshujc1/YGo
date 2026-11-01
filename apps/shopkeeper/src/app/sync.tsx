@@ -7,6 +7,8 @@ import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session, supportEmail } from "../api";
 import { isCurrentAccount } from "../lib/account";
+import { billStatus } from "../lib/bill-status";
+import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import type { OpeningStockQueue, QueueRow } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
@@ -50,6 +52,15 @@ export default function SyncScreen() {
   }, [unnamed, view.mode]);
 
   function card(row: QueueRow, section: keyof Data["overview"]) {
+    if (row.bill) {
+      const bill = row.bill, line = billStatus(bill);
+      return <View key={row.id} className="gap-1 rounded-card border border-border bg-surface p-4">
+        <Text selectable className="text-headline font-semibold text-text">{strings.bill.reference(bill.reference)}</Text>
+        <Text className="text-body text-text">{strings.bill.summary(money(bill.total), strings.bill.payments[bill.payment], bill.lines.length)}</Text>
+        <Text className={line.tone === "danger" ? "text-secondary text-danger" : line.tone === "warning" ? "text-secondary text-warning" : "text-secondary text-muted"}>{line.text}</Text>
+        {section === "synced" && row.at && <Text className="text-secondary text-muted">{words.syncedAt(formatTime(row.at))}</Text>}
+      </View>;
+    }
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
     const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");

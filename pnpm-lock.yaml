@@ -466,6 +466,9 @@ importers:
       '@ygo/mobile':
         specifier: workspace:*
         version: link:../../packages/mobile
+      '@ygo/pricing':
+        specifier: workspace:*
+        version: link:../../packages/pricing
       '@ygo/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens

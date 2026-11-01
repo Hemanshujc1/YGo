@@ -19,6 +19,7 @@
     "@ygo/contracts": "workspace:*",
     "@ygo/format": "workspace:*",
     "@ygo/mobile": "workspace:*",
+    "@ygo/pricing": "workspace:*",
     "@ygo/tokens": "workspace:*",
     "expo": "57.0.27",
     "expo-apple-authentication": "57.0.2",
