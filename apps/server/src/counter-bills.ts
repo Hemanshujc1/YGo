@@ -35,30 +35,37 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
 
   const parsed = CounterBillPayload.safeParse(payload);
   const lines = parsed.success ? JSON.stringify(parsed.data.lines) : null;
-  // The server's check of the phone's total runs on NUMERIC (MNY-15).
-  const sum = parsed.success ? (await client.query<{ total: string; mismatch: boolean }>(`SELECT total::text, total <> $2::numeric AS mismatch
-    FROM (SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric) AS total FROM jsonb_array_elements($1::jsonb) line) checked`,
-  [lines, parsed.data.total])).rows[0] : undefined;
+  const manual = parsed.success ? JSON.stringify(parsed.data.manualLines ?? []) : null;
+  // The server's check of the phone's total runs on NUMERIC (MNY-15): catalog and typed lines, less the discount.
+  const sum = parsed.success ? (await client.query<{ total: string; mismatch: boolean }>(`SELECT total::text, total <> $4::numeric AS mismatch FROM (SELECT
+      COALESCE((SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric) FROM jsonb_array_elements($1::jsonb) line), 0)
+      + COALESCE((SELECT sum((line->>'count')::integer * (line->>'unitPrice')::numeric) FROM jsonb_array_elements($2::jsonb) line), 0)
+      - $3::numeric AS total) checked`,
+  [lines, manual, parsed.data.discount ?? "0", parsed.data.total])).rows[0] : undefined;
+  // A discount over the sum cannot be a bill: it is kept as unreadable rather than recorded with a negative total.
+  const data = parsed.success && sum && !sum.total.startsWith("-") ? parsed.data : undefined;
   // On the shop's list means what the phone's Stock shows: listed, with pack, product and category active.
-  const listed = parsed.success && (await client.query(`SELECT 1 FROM shop_listings sl JOIN packs pk ON pk.id = sl.pack_id
+  const listed = data !== undefined && (await client.query(`SELECT 1 FROM shop_listings sl JOIN packs pk ON pk.id = sl.pack_id
       JOIN master_products p ON p.id = pk.product_id JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
     WHERE sl.shop_id = $1 AND sl.pack_id = ANY($2::uuid[]) AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`,
-  [bill.shopId, parsed.data.lines.map((line) => line.packId)])).rowCount === parsed.data.lines.length;
+  [bill.shopId, data.lines.map((line) => line.packId)])).rowCount === data.lines.length;
   // A line's sale must fit one stock movement, and leave stock the shop's Stock list can show; otherwise the
   // whole sync batch would fail and stall the phone's queue. A mismatched bill moves no stock, so it is numbered
   // and flagged rather than held (#471).
   const tooLarge = listed && !bill.tooOld && !sum?.mismatch && Boolean((await client.query(`SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS line("packId" uuid, count integer)
       JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = line."packId" JOIN packs pk ON pk.id = sl.pack_id
     WHERE line.count * pk.quantity > ${largestQuantity} OR ${stockOf("sl")} - line.count * pk.quantity < -${largestQuantity}`, [bill.shopId, lines])).rowCount);
-  const held = !parsed.success ? "invalid" : bill.tooOld ? "too_old" : !listed ? "not_listed" : tooLarge ? "too_large" : null;
+  const held = !data ? "invalid" : bill.tooOld ? "too_old" : !listed ? "not_listed" : tooLarge ? "too_large" : null;
 
   const insert = (heldReason: string | null, number: number | null, clash: boolean) => client.query<Row>(`INSERT INTO counter_bills (shop_id, actor_id, client_id,
-      reference, reference_clash, number, held_reason, invalid_payload, payment, total, checked_total, clock_suspect, made_at, received_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      reference, reference_clash, number, held_reason, invalid_payload, payment, total, checked_total, clock_suspect, made_at, received_at,
+      discount, customer_name, customer_phone, customer_offers)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     ON CONFLICT (shop_id, reference) WHERE NOT reference_clash DO NOTHING RETURNING ${billColumns}`,
   [bill.shopId, bill.accountId, bill.actionId, counterBillReference(bill.actionId), clash, number, heldReason,
-    parsed.success ? null : JSON.stringify(payload ?? null), parsed.data?.payment ?? null, parsed.data?.total ?? null, sum?.total ?? null,
-    bill.clockSuspect, bill.madeAt, bill.receivedAt]);
+    data ? null : JSON.stringify(payload ?? null), data?.payment ?? null, data?.total ?? null, data ? sum?.total ?? null : null,
+    bill.clockSuspect, bill.madeAt, bill.receivedAt,
+    data?.discount ?? "0", data?.customer?.name ?? null, data?.customer?.phone ?? null, data?.customer?.offers ?? false]);
   // A refused insert rolls its number back too, so the shop's numbers keep no gap (BIL-5).
   await client.query("SAVEPOINT counter_bill");
   const number = held ? null : (await client.query<{ number: number }>(`INSERT INTO counter_bill_numbers (shop_id, last_number) VALUES ($1, 1)
@@ -71,7 +78,10 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
   await client.query("RELEASE SAVEPOINT counter_bill");
   if (!row) throw new Error("Counter bill insert returned no row");
 
-  if (lines) {
+  if (data) {
+    await client.query(`INSERT INTO counter_bill_manual_lines (bill_id, position, name, count, unit_price)
+      SELECT $1, line.position, line.value->>'name', (line.value->>'count')::integer, (line.value->>'unitPrice')::numeric
+      FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS line(value, position)`, [row.billId, manual]);
     await client.query(`INSERT INTO counter_bill_lines (bill_id, position, pack_id, count, unit_price)
       SELECT $1, line.position, (line.value->>'packId')::uuid, (line.value->>'count')::integer, (line.value->>'unitPrice')::numeric
       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS line(value, position)`, [row.billId, lines]);

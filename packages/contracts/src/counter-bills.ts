@@ -29,6 +29,9 @@ const BillLine = z.strictObject({
   unitPrice: z.string(),
 });
 
+/** A line the shop typed at the counter (#53): no pack, so no stock moved. */
+const ManualBillLine = z.strictObject({ name: z.string(), count: z.number().int(), unitPrice: z.string() });
+
 export const CounterBillResolution = z.strictObject({
   action: z.enum(["numbered", "duplicate", "reviewed", "noted"]),
   note: z.string(),
@@ -46,6 +49,8 @@ export const CounterBillOriginal = z.strictObject({
   payment: z.enum(["cash", "upi"]).nullable(),
   madeAt: z.iso.datetime(),
   lines: z.array(BillLine),
+  manualLines: z.array(ManualBillLine),
+  discount: z.string(),
 });
 
 export const AdminCounterBill = z.strictObject({
@@ -65,6 +70,9 @@ export const AdminCounterBill = z.strictObject({
   /** Null once the person has left the shop. */
   madeBy: z.strictObject({ name: z.string().nullable(), role: z.enum(["owner", "staff"]).nullable() }),
   lines: z.array(BillLine),
+  manualLines: z.array(ManualBillLine),
+  /** Rupees the shop took off the lines' sum; the phone's total and the server's both come after it. */
+  discount: z.string(),
   /** What the phone sent, as the JSON text it sent, for an `invalid` bill. */
   invalidPayload: z.string().nullable(),
   original: CounterBillOriginal.nullable(),

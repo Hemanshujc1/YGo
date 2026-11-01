@@ -302,6 +302,13 @@
       "when": 1793511782752,
       "tag": "0042_counter_bill_resolutions",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793523763290,
+      "tag": "0043_counter_bill_extras",
+      "breakpoints": true
     }
   ]
 }

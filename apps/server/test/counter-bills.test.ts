@@ -95,19 +95,72 @@ async function shop(state = "live") {
 }
 
 describe("counter bill sync (#51)", () => {
-  it("checks every shared counter-bill example in SQL, and flags a total one paisa off", async () => {
-    const { pack, bill, send } = await shop();
+  it("checks every shared counter-bill example in SQL, as catalog lines and as typed lines, and flags a total one paisa off", async () => {
+    const { pack, bill, send, stock } = await shop();
+    const plusPaisa = (total: string) => (BigInt(total.replace(".", "")) + 1n).toString().padStart(3, "0").replace(/(\d\d)$/, ".$1");
     for (const example of COUNTER_BILL_EXAMPLES) {
-      const lines = await Promise.all(example.lines.map(async (line) => ({ ...line, packId: await pack("1", "100000") })));
-      const [agreed, off] = await send([
-        bill(lines, { payload: { lines, total: example.total, payment: "upi" } }),
-        bill(lines, { payload: { lines, total: (BigInt(example.total.replace(".", "")) + 1n).toString().replace(/(\d\d)$/, ".$1"), payment: "upi" } }),
+      const discount = example.discount ? { discount: example.discount } : {};
+      const catalog = await Promise.all(example.lines.map(async (line) => ({ ...line, packId: await pack("1", "100000") })));
+      const manualLines = example.lines.map((line, index) => ({ name: `Loose item ${index + 1}`, ...line }));
+      if (example.total === null) {
+        // A discount over the sum cannot be recorded: it is kept unreadable, with no number and no stock moved.
+        const [refused, typed] = await send([bill(catalog, { payload: { lines: catalog, ...discount, total: "0", payment: "upi" } }),
+          bill([], { payload: { lines: [], manualLines, ...discount, total: "0", payment: "upi" } })]);
+        expect(refused?.result).toMatchObject({ number: null, heldReason: "invalid" });
+        expect(typed?.result).toMatchObject({ number: null, heldReason: "invalid" });
+        continue;
+      }
+      const [agreed, off, typedAgreed, typedOff] = await send([
+        bill(catalog, { payload: { lines: catalog, ...discount, total: example.total, payment: "upi" } }),
+        bill(catalog, { payload: { lines: catalog, ...discount, total: plusPaisa(example.total), payment: "upi" } }),
+        bill([], { payload: { lines: [], manualLines, ...discount, total: example.total, payment: "upi" } }),
+        bill([], { payload: { lines: [], manualLines, ...discount, total: plusPaisa(example.total), payment: "upi" } }),
       ]);
-      expect(agreed?.result).toMatchObject({ heldReason: null, totalMismatch: false });
-      expect(off?.result).toMatchObject({ heldReason: null, totalMismatch: true });
-      const { rows: [saved] } = await database.pool.query("SELECT checked_total::text AS total FROM counter_bills WHERE client_id = $1", [agreed?.actionId]);
-      expect(saved?.total).toBe(example.total);
+      for (const row of [agreed, typedAgreed]) expect(row?.result).toMatchObject({ heldReason: null, totalMismatch: false });
+      for (const row of [off, typedOff]) expect(row?.result).toMatchObject({ heldReason: null, totalMismatch: true });
+      for (const row of [agreed, typedAgreed]) {
+        const { rows: [saved] } = await database.pool.query("SELECT checked_total::text AS total FROM counter_bills WHERE client_id = $1", [row?.actionId]);
+        expect(saved?.total).toBe(example.total);
+      }
+      // Typed lines move no stock; the catalog lines of the agreeing bill do.
+      expect(await stock(catalog[0]?.packId ?? "")).toBe(`${100000 - (example.lines[0]?.count ?? 0)}.000`);
     }
+  });
+
+  it("records a typed line, a discount and the customer with the bill, and moves stock for the catalog lines only", async () => {
+    const { pack, bill, send, stock } = await shop();
+    const rice = await pack("1", "10");
+    const lines = [{ packId: rice, count: 2, unitPrice: "21" }];
+    const manualLines = [{ name: "Loose sugar", count: 3, unitPrice: "12.50" }];
+    const customer = { name: "Meena Rao", phone: "+919812345678", offers: true };
+    const [first] = await send([bill(lines, { payload: { lines, manualLines, discount: "9.50", customer, total: "70.00", payment: "cash" } })]);
+    expect(first?.result).toMatchObject({ number: 1, heldReason: null, totalMismatch: false });
+    expect(await stock(rice)).toBe("8.000");
+    const { rows: [saved] } = await database.pool.query("SELECT discount::text, customer_name, customer_phone, customer_offers, checked_total::text FROM counter_bills");
+    expect(saved).toEqual({ discount: "9.50", customer_name: "Meena Rao", customer_phone: "+919812345678", customer_offers: true, checked_total: "70.00" });
+    expect((await database.pool.query("SELECT position, name, count, unit_price::text AS price FROM counter_bill_manual_lines")).rows)
+      .toEqual([{ position: 1, name: "Loose sugar", count: 3, price: "12.50" }]);
+  });
+
+  it("numbers a bill made only of typed lines, with no stock to move", async () => {
+    const { pack, bill, send, count } = await shop();
+    await pack(); // a listed pack makes the shop Live
+    const manualLines = [{ name: "Carry bag", count: 1, unitPrice: "5" }];
+    const [only] = await send([bill([], { payload: { lines: [], manualLines, total: "5.00", payment: "upi" } })]);
+    expect(only?.result).toMatchObject({ number: 1, heldReason: null });
+    expect(await count("stock_movements WHERE kind = 'sale'")).toBe(0);
+  });
+
+  it("holds a bill with an unreadable customer or a name the database cannot keep, without stalling the batch", async () => {
+    const { pack, bill, send } = await shop();
+    const rice = await pack();
+    const lines = [{ packId: rice, count: 1, unitPrice: "21" }];
+    const rows = await send([
+      bill(lines, { payload: { lines, customer: { phone: "+919812345678", offers: false, name: "Meena" }, manualLines: [{ name: "Bad \ud800 name", count: 1, unitPrice: "1" }], total: "22.00", payment: "cash" } }),
+      bill(lines, { payload: { lines, customer: { name: "Meena", offers: true }, total: "21.00", payment: "cash" } }),
+      bill(lines, { payload: { lines, total: "21.00", payment: "cash" } }),
+    ]);
+    expect(rows.map((row) => row.result && "heldReason" in row.result ? row.result.heldReason : "?")).toEqual(["invalid", "invalid", null]);
   });
 
   it("numbers a bill, moves stock once per line even below zero, and replays the same answer", async () => {

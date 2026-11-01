@@ -158,7 +158,7 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
   },
 ];
 
-export type CounterBillExample = { name: string; lines: Array<{ unitPrice: string; count: number }>; total: string };
+export type CounterBillExample = { name: string; lines: Array<{ unitPrice: string; count: number }>; discount?: string; total: string | null };
 
 /**
  * Counter-bill totals (BIL-9), written once (#51). The phone's arithmetic and the server's SQL check both
@@ -170,4 +170,8 @@ export const COUNTER_BILL_EXAMPLES: CounterBillExample[] = [
   { name: "Many packs at one paisa", lines: [{ unitPrice: "0.01", count: 9999 }], total: "99.99" },
   { name: "A free pack adds nothing", lines: [{ unitPrice: "0", count: 2 }, { unitPrice: "40", count: 1 }], total: "40.00" },
   { name: "Exact past a float's safe integers", lines: [{ unitPrice: "9999999999.99", count: 9999 }], total: "99989999999900.01" },
+  { name: "A discount comes off the sum", lines: [{ unitPrice: "99.50", count: 2 }, { unitPrice: "12.5", count: 1 }], discount: "11.50", total: "200.00" },
+  { name: "A discount of the whole sum leaves nothing to pay", lines: [{ unitPrice: "40", count: 2 }], discount: "80", total: "0.00" },
+  { name: "A discount of one paisa more than the sum is refused", lines: [{ unitPrice: "40", count: 2 }], discount: "80.01", total: null },
+  { name: "A discount in paise on a large sum stays exact", lines: [{ unitPrice: "9999999999.99", count: 9999 }], discount: "0.01", total: "99989999999900.00" },
 ];

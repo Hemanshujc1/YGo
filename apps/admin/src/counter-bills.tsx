@@ -8,10 +8,12 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[] };
 
-function Lines({ lines }: { lines: AdminCounterBill["lines"] }) {
+function Lines({ lines, manualLines, discount }: Pick<AdminCounterBill, "lines" | "manualLines" | "discount">) {
   return <ul className="mt-1 space-y-1">{lines.map((line, index) => <li key={`${line.packId}-${index}`}>
     {strings.counterBillLine(line.name ? `${line.name} ${trimDecimal(line.packQuantity ?? "")} ${line.baseUnit ?? ""}`.trim() : strings.counterBillPackGone, line.count, formatMoney(line.unitPrice))}
-  </li>)}</ul>;
+  </li>)}
+  {manualLines.map((line, index) => <li key={`typed-${index}`}>{strings.counterBillLine(strings.counterBillTyped(line.name), line.count, formatMoney(line.unitPrice))}</li>)}
+  {Number(discount) > 0 && <li>{strings.counterBillDiscount(formatMoney(discount))}</li>}</ul>;
 }
 
 /** What Admin may do with a bill that is still open, from the same rules the server holds it to. */
@@ -58,14 +60,14 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
       <div><dt className="text-muted">{strings.counterBillServerTotal}</dt><dd className="font-medium tabular-nums">{formatMoney(bill.checkedTotal)}</dd></div>
       <div><dt className="text-muted">{strings.counterBillPayment[bill.payment]}</dt></div>
     </dl>}
-    {bill.lines.length > 0 && <Lines lines={bill.lines} />}
+    {(bill.lines.length > 0 || bill.manualLines.length > 0) && <Lines lines={bill.lines} manualLines={bill.manualLines} discount={bill.discount} />}
     {bill.invalidPayload !== null && <details className="mt-2"><summary className="cursor-pointer text-primary">{strings.counterBillPayload}</summary>
       <pre className="mt-1 overflow-x-auto rounded-lg bg-sunken p-3 text-sm">{bill.invalidPayload}</pre></details>}
     {bill.original && <div className="mt-3 rounded-lg bg-sunken p-3">
       <p className="font-medium">{strings.counterBillOriginal}</p>
       <p className="text-muted">{[bill.original.number === null ? strings.counterBillNoNumber : strings.counterBillNumbered(bill.original.number),
         bill.original.total === null ? "" : formatMoney(bill.original.total), bill.original.payment ? strings.counterBillPayment[bill.original.payment] : "", formatDateTime(bill.original.madeAt)].filter(Boolean).join(" · ")}</p>
-      <Lines lines={bill.original.lines} />
+      <Lines lines={bill.original.lines} manualLines={bill.original.manualLines} discount={bill.original.discount} />
     </div>}
     {bill.resolutions.length > 0 && <ul className="mt-3 space-y-2 border-t border-border pt-3">{bill.resolutions.map((resolution, index) => <li key={index}>
       <p className="font-medium">{strings.counterBillResolution[resolution.action]}{resolution.action === "numbered" && ` · ${resolution.stockMoved ? strings.counterBillStockMoved : strings.counterBillStockNotMoved}`}</p>
