@@ -20,6 +20,18 @@ function expectIndianFormats() {
       .toEqual(["₹1.01", "−₹1.01", "−₹60", "₹0", "−₹20"]);
   });
 
+  it("shows a decimal string exactly, past the 15 digits a number holds (#475)", () => {
+    expect([formatMoney("9998999999990001"), formatMoney("99999999999999.99"), formatMoney("9998999999990001.5")])
+      .toEqual(["₹9,99,89,99,99,99,90,001", "₹9,99,99,99,99,99,999.99", "₹9,99,89,99,99,99,90,001.50"]);
+    expect(formatMoney("-9998999999990001.25")).toBe("−₹9,99,89,99,99,99,90,001.25");
+  });
+
+  it("rounds a decimal string like a number: half away from zero, no negative zero (#475)", () => {
+    const amounts = ["125000", "60", "0", "20.5", "59.05", "-20", "-20.5", "59.999", "0.004", "-0.001", "-0", "59.995", "19.994", "1.005", "-1.005", "-59.995", "-0.004", "-19.995", "60.00"];
+    expect(amounts.map(formatMoney)).toEqual(amounts.map((amount) => formatMoney(Number(amount))));
+    expect([formatMoney("-59.995"), formatMoney("1.005"), formatMoney("-0.004"), formatMoney("60.00")]).toEqual(["−₹60", "₹1.01", "₹0", "₹60"]);
+  });
+
   it("shows dates and 12-hour times in India", () => {
     const instant = "2026-10-13T20:35:00.000Z";
     expect(formatDate(instant)).toBe("14/10/2026");

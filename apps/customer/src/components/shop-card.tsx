@@ -17,7 +17,7 @@ export function ShopCard({ shop, query, now, children }: { shop: FeedShop; query
     >
       <Text className="text-headline font-semibold text-text">{shop.name}</Text>
       <Text className="mt-1 text-secondary tabular-nums text-muted">
-        {strings.feed.card(shop.estimatedMinutes, formatMoney(Number(shop.deliveryFee)))}
+        {strings.feed.card(shop.estimatedMinutes, formatMoney(shop.deliveryFee))}
       </Text>
       {!shop.open && <Text className="mt-1 text-secondary tabular-nums text-muted">{closedLine(shop, now)}</Text>}
       {children}
