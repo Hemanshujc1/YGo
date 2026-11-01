@@ -21,7 +21,7 @@ const DELIVERED_KEYS: RateCardKey[] = ["commission", "deliveryFee", "smallCartFe
 const text = strings.simulator;
 
 /** Display only: every amount arrives worked out by the server's one calculation (MNY-15). */
-const money = (amount: string) => formatMoney(Number(amount));
+const money = (amount: string) => formatMoney(amount);
 
 function rows(listings: SimulatorListing[]): Row[] {
   return listings.flatMap((listing) => {

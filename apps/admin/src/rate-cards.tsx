@@ -13,7 +13,7 @@ type Loaded = { categories: Array<{ id: string; name: string }>; shops: Array<{ 
 type PreviewScopes = { global: Values; category: Values; shop: Values };
 
 const previewText = strings.rateCardPreviewValues;
-const money = (value: string) => formatMoney(Number(value));
+const money = (value: string) => formatMoney(value);
 const percentage = (value: string) => previewText.percentage(value);
 const join = (...parts: Array<string | null | undefined>) => parts.filter((part): part is string => Boolean(part)).join(strings.rateCardPreviewSeparator);
 

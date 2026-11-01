@@ -108,7 +108,7 @@ export default function ListingsScreen() {
         {visible.map((item) => <Pressable key={item.packId} onPress={() => choose(item)} className="gap-1 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{item.name}{item.brand ? ` · ${item.brand}` : ""}</Text>
           <Text className="text-secondary text-muted">{trimDecimal(item.packQuantity)} {item.baseUnit} {item.barcode ? `· ${item.barcode}` : ""}</Text>
-          <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ${formatMoney(Number(item.listing.onlinePrice))}` : words.chooseProduct}</Text>
+          <Text className="text-secondary text-muted">{item.listing ? `${words.onlinePrice}: ${formatMoney(item.listing.onlinePrice)}` : words.chooseProduct}</Text>
           {item.listing && <Text className="text-secondary text-muted">{stockLine(item.stock, item.held, item.baseUnit)}</Text>}
         </Pressable>)}
       </>}
