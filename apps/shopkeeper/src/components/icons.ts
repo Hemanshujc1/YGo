@@ -1,6 +1,6 @@
 import { colourIcons } from "@ygo/mobile";
-import { Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus } from "lucide-react-native";
+import { Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus, Square, SquareCheck } from "lucide-react-native";
 
-colourIcons(Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus);
+colourIcons(Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus, Square, SquareCheck);
 
-export { Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus };
+export { Cloud, ChevronLeft, Circle, CircleArrowRight, CircleCheck, MapPin, Minus, Plus, Square, SquareCheck };

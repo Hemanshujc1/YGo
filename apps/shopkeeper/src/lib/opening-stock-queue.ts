@@ -154,6 +154,20 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       shopId, since.toISOString()).map((row) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null));
     },
     /**
+     * The shop's bills on this phone, of any day, found by either identifier (#53): the start of the reference
+     * ("A1B2-C3", dash and case optional) or the whole bill number ("42"). Digits try both. The newest 50 are enough.
+     */
+    findBills(shopId: string, query: string): BillRow[] {
+      const typed = query.replace(/[\s-]/g, "").toUpperCase();
+      const reference = /^[0-9A-F]{1,8}$/.test(typed) ? `${typed}%` : null;
+      const number = /^\d{1,9}$/.test(typed) ? Number(typed) : null;
+      if (reference === null && number === null) return [];
+      return db.getAllSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
+        WHERE shop_id = ? AND json_extract(action, '$.type') = 'counter_bill'
+          AND (upper(replace(id, '-', '')) LIKE ? OR (status = 'applied' AND json_extract(result, '$.result.number') = ?)) ORDER BY sequence DESC LIMIT 50`,
+      shopId, reference ?? "", number ?? -1).map((row) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null));
+    },
+    /**
      * Each pack's latest correction in the shop, by pack. Actions sync in order, so only the latest can still be waiting,
      * and a refusal stops showing on Opening stock once a newer correction is queued (#460).
      */

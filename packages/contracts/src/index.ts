@@ -245,6 +245,6 @@ export {
 } from "./counter-bills";
 
 export {
-  counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillPayload, CounterBillResponse,
+  counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillManualLine, CounterBillPayload, CounterBillResponse,
   ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse,
 } from "./sync";

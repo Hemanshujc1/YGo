@@ -21,8 +21,8 @@ vi.mock("react", () => ({
   useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get(),
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
-vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
-vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus" }));
+vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail", FieldMessage: "FieldMessage", PhoneField: "PhoneField" }));
+vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus", Square: "Square", SquareCheck: "SquareCheck" }));
 vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
@@ -49,7 +49,9 @@ const text = (props: Record<string, unknown> | undefined) => elements(props?.chi
   const children = node.props.children;
   return typeof children === "string" ? [children] : Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number") ? [children.join("")] : [];
 });
-const texts = () => text({ children: render() });
+const texts = () => text({ children: render() }).concat(elements(render()).flatMap((node) => typeof node.props.text === "string" ? [node.props.text] : []));
+const type = (label: string, value: string) => (find((props) => props.accessibilityLabel === label || props.label === label)?.onChangeText as (value: string) => void)(value);
+const tap = (test: (props: Record<string, unknown>) => boolean) => (find(test)?.onPress as () => void)();
 async function settle() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 
 describe("S06 Counter bill (#468)", () => {
@@ -106,5 +108,84 @@ describe("S06 Counter bill (#468)", () => {
     const pick = find((props) => props.accessibilityRole === "button" && text(props).includes("Dal · 1 kg"));
     expect(pick?.disabled).toBe(true);
     expect(text(pick)).toContain("Connect once to get its price");
+  });
+
+  it("bills a typed item less a discount for a customer who agrees to offers, and shows them on the bill (#53)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope"); type("Typed item 1: Price each (₹)", "15");
+    tap((props) => props.accessibilityLabel === "One more Typed item 1");
+    type("Discount (₹)", "5");
+    expect(texts()).toEqual(expect.arrayContaining(["Items ₹30 · Discount ₹5", "Total ₹25"]));
+    expect(find((props) => props.accessibilityRole === "checkbox")?.disabled).toBe(true);
+    type("Customer name", "Meera"); type("Customer phone", "98765 43210");
+    tap((props) => props.accessibilityRole === "checkbox");
+    expect(find((props) => props.accessibilityRole === "checkbox")?.accessibilityState).toEqual({ checked: true, disabled: false });
+    tap((props) => props.accessibilityRole === "radio" && text(props).includes("UPI"));
+    tap((props) => props.label === "Save bill");
+
+    expect(queue.batch(shopId).actions[0]?.payload).toEqual({ lines: [], manualLines: [{ name: "Rope", count: 2, unitPrice: "15" }], discount: "5",
+      customer: { name: "Meera", phone: "+919876543210", offers: true }, total: "25.00", payment: "upi" });
+    expect(texts()).toEqual(expect.arrayContaining(["₹25 · UPI · 1 item", "Meera · +919876543210"]));
+    // The form starts empty again.
+    expect(find((props) => props.accessibilityLabel === "Discount (₹)")).toBeUndefined();
+  });
+
+  it("marks a typed item with no price and a short phone when Save is tapped, and queues nothing (#53)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope"); type("Customer phone", "12345");
+    tap((props) => props.accessibilityRole === "radio" && text(props).includes("Cash"));
+    expect(texts()).not.toContain("Type a price such as 40 or 39.50.");
+    tap((props) => props.label === "Save bill");
+    expect(texts()).toEqual(expect.arrayContaining(["Type a price such as 40 or 39.50.", "Fix the fields marked in red to save.", "Fill in every item to see the total."]));
+    expect(find((props) => props.label === "Customer phone")?.message).toBe("Enter a 10-digit mobile number, such as 98765 43210.");
+    expect(queue.batch(shopId).actions).toHaveLength(0);
+  });
+
+  it("finds an older day's bill by its reference or its number, offline (#53)", async () => {
+    const saved = queue.saveBill(shopId, { lines: [{ packId: rice, count: 1, unitPrice: "21" }], total: "21.00", payment: "cash" });
+    if (typeof saved === "string") throw new Error(saved);
+    const batch = queue.batch(shopId);
+    queue.acknowledge(batch, { results: batch.actions.map((sent) => ({ actionId: sent.id, sequence: sent.sequence, status: "applied", code: null, clockSuspect: false,
+      result: { billId: randomUUID(), reference: saved.reference, number: 987654, heldReason: null, totalMismatch: false, recordedAt: new Date().toISOString() } })) });
+    db.prepare("UPDATE opening_stock_actions SET action = json_set(action, '$.createdAt', '2020-01-01T00:00:00.000Z')").run();
+    render(); await settle();
+    expect(texts()).toContain("No bills yet today.");
+
+    type("Find a bill by reference or number", saved.reference.toLowerCase());
+    expect(texts()).toEqual(expect.arrayContaining(["Bills found · 1", `Bill ${saved.reference}`, "Synced · Bill 987654"]));
+    type("Find a bill by reference or number", "987654");
+    expect(texts()).toContain("Synced · Bill 987654");
+    type("Find a bill by reference or number", "Rice");
+    expect(texts()).toEqual(expect.arrayContaining(["Bills found · 0", "No bill on this phone matches."]));
+  });
+
+  it("trims a price and discount as their fields are left, takes a spaced discount, and clears the offers tick when the phone changes (#53)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope"); type("Typed item 1: Price each (₹)", "15.50");
+    (find((props) => props.accessibilityLabel === "Typed item 1: Price each (₹)")?.onBlur as () => void)();
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Price each (₹)")?.value).toBe("15.5");
+    type("Discount (₹)", "5.");
+    (find((props) => props.accessibilityLabel === "Discount (₹)")?.onBlur as () => void)();
+    expect(find((props) => props.accessibilityLabel === "Discount (₹)")?.value).toBe("5");
+    type("Discount (₹)", " 5 ");
+    expect(texts()).toEqual(expect.arrayContaining(["Items ₹15.50 · Discount ₹5", "Total ₹10.50"]));
+
+    type("Customer phone", "98765 43210");
+    tap((props) => props.accessibilityRole === "checkbox");
+    type("Customer phone", "98765 43211");
+    expect(find((props) => props.accessibilityRole === "checkbox")?.accessibilityState).toEqual({ checked: false, disabled: false });
+  });
+
+  it("stops at 100 catalog and typed items together, as the contract does (#53)", async () => {
+    render(); await settle();
+    (find((props) => props.accessibilityLabel === "Search products")?.onChangeText as (value: string) => void)("rice");
+    tap((props) => props.accessibilityRole === "button" && text(props).includes("Rice · 1 kg"));
+    for (let i = 0; i < 100; i++) tap((props) => props.label === "Add a typed item");
+    expect(find((props) => props.accessibilityLabel === "Typed item 99: Item name")).toBeDefined();
+    expect(find((props) => props.accessibilityLabel === "Typed item 100: Item name")).toBeUndefined();
+    expect(texts()).toContain("A bill holds up to 100 items. Save this one and start another.");
   });
 });

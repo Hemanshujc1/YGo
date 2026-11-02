@@ -65,6 +65,33 @@ describe("counter bills in the ordered queue (#468)", () => {
     expect(queue.bills(shopId, new Date("2030-01-03T00:00:00.000Z")).map((row) => row.status)).toEqual(["refused"]);
   });
 
+  it("finds a bill of any day by its reference, with or without the dash and in any case, or by its whole number once synced (#53)", () => {
+    const older = queue.saveBill(shopId, bill);
+    if (typeof older === "string") throw new Error(older);
+    answer(queue.batch(shopId), [{ status: "applied", number: 7 }]);
+    clock = new Date("2030-01-05T10:00:00.000Z");
+    const today = queue.saveBill(shopId, bill);
+    if (typeof today === "string") throw new Error(today);
+    const ids = (query: string) => queue.findBills(shopId, query).map((row) => row.id);
+
+    expect(ids(older.reference)).toEqual([older.id]);
+    expect(ids(older.reference.replace("-", "").toLowerCase())).toEqual([older.id]);
+    expect(ids(` ${today.reference.slice(0, 6)} `)).toEqual([today.id]);
+    expect(queue.findBills(shopId, "7")).toEqual(expect.arrayContaining([expect.objectContaining({ id: older.id, number: 7, status: "synced" })]));
+    // Not a reference or a number, or another shop's bill.
+    expect(ids("Rice")).toEqual([]);
+    expect(queue.findBills("00000000-0000-4000-8000-000000000009", older.reference)).toEqual([]);
+  });
+
+  it("finds both a bill whose reference starts with the digits and the bill with that number, newest first (#53)", () => {
+    const ids = ["00000000-0000-4000-8000-0000000000d0", "10420000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000002"];
+    db.close(); db = new DatabaseSync(":memory:");
+    queue = openingStockQueue(adapter(db), () => ids.shift() ?? randomUUID(), () => clock, { maxActions: 3, maxAgeHours: 72 });
+    queue.saveBill(shopId, bill); queue.saveBill(shopId, bill);
+    answer(queue.batch(shopId), [{ status: "applied", number: 1 }, { status: "applied", number: 1042 }]);
+    expect(queue.findBills(shopId, "1042").map((row) => [row.reference, row.number])).toEqual([["2000-0000", 1042], ["1042-0000", 1]]);
+  });
+
   it("keeps a refused bill in Needs attention after a later bill syncs, since no later bill replaces it", () => {
     queue.saveBill(shopId, bill);
     answer(queue.batch(shopId), [{ status: "rejected", code: "SHOP_NOT_BILLING" }]);
