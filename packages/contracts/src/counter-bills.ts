@@ -100,14 +100,15 @@ export type VoidCounterBillBody = z.infer<typeof VoidCounterBillBody>;
 
 /**
  * One of the shop's counter bills on S37 (#54). `voidable` is decided on the server's clock: the bill has its
- * number, is not voided, and `voidUntil` has not passed. A held bill has no number and is never voidable.
+ * number, is not voided, `voidUntil` has not passed, and the shop is Live or Suspended. A held bill has no number
+ * and is never voidable. A bill the server could not read is held with no total or payment (BIL-5).
  */
 export const ShopCounterBill = z.strictObject({
   id: z.uuid(),
   reference: z.string(),
   number: z.number().int().nullable(),
-  total: z.string(),
-  payment: z.enum(["cash", "upi"]),
+  total: z.string().nullable(),
+  payment: z.enum(["cash", "upi"]).nullable(),
   madeAt: z.iso.datetime(),
   receivedAt: z.iso.datetime(),
   voidUntil: z.iso.datetime(),

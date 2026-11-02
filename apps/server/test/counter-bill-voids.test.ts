@@ -106,7 +106,7 @@ const voids = async () => (await database.pool.query<{ bill_id: string; reason: 
 const code = (response: { json: () => unknown }) => (response.json() as { error: { code: string } }).error.code;
 
 describe("The Owner voids a counter bill (#54, BIL-6)", () => {
-  it("lists the shop's readable bills from the last 2 days, newest first, held ones without a void", async () => {
+  it("lists the shop's bills from the last 2 days, newest first, held and unreadable ones without a void", async () => {
     const { owner, pack, bill, send } = await shop();
     const rice = await pack("5", "50");
     const line = [{ packId: rice, count: 2, unitPrice: "21" }];
@@ -115,7 +115,9 @@ describe("The Owner voids a counter bill (#54, BIL-6)", () => {
     clock.set(start);
     const [first] = await send(bill(line, { payload: { lines: line, total: "42", payment: "upi" } }));
     clock.set(new Date(start.getTime() + 60_000));
-    const [sameReference, invalid] = await send(bill(line, { id: "0f3a91bc-0000-4000-8000-000000000001" }), bill(line, { payload: { lines: line, total: "-1", payment: "cash" } }));
+    const [sameReference] = await send(bill(line, { id: "0f3a91bc-0000-4000-8000-000000000001" }));
+    clock.set(new Date(start.getTime() + 90_000));
+    const [invalid] = await send(bill(line, { payload: { lines: line, total: "-1", payment: "cash" } }));
     // A second bill with the same reference is held, with no number.
     clock.set(new Date(start.getTime() + 120_000));
     const [clash] = await send(bill(line, { id: "0f3a91bc-1111-4000-8000-000000000002" }));
@@ -126,10 +128,13 @@ describe("The Owner voids a counter bill (#54, BIL-6)", () => {
     const response = await list(owner.headers);
     expect(response.statusCode).toBe(200);
     const { bills } = ShopCounterBillsResponse.parse(response.json());
-    expect(bills.map((found) => found.id)).toEqual([clash, sameReference, first]);
+    expect(bills.map((found) => found.id)).toEqual([clash, invalid, sameReference, first]);
     expect(bills.map((found) => found.id)).not.toContain(old);
-    expect(bills.map((found) => found.id)).not.toContain(invalid);
-    expect(bills[2]).toEqual({ id: first, reference: expect.stringMatching(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: 2, total: "42.00", payment: "upi",
+    // A bill the server could not read is held, with its reference but no total or payment.
+    expect(bills.find((found) => found.id === invalid)).toMatchObject({ reference: expect.stringMatching(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: null, total: null, payment: null, voidable: false, voided: null });
+    const refused = await voidBill(owner.headers, invalid as string);
+    expect([refused.statusCode, code(refused)]).toEqual([409, "COUNTER_BILL_NOT_VOIDABLE"]);
+    expect(bills[3]).toEqual({ id: first, reference: expect.stringMatching(/^[0-9A-F]{4}-[0-9A-F]{4}$/), number: 2, total: "42.00", payment: "upi",
       madeAt: start.toISOString(), receivedAt: start.toISOString(), voidUntil: new Date(start.getTime() + day).toISOString(), voidable: true, voided: null });
     expect(bills[0]).toMatchObject({ number: null, voidable: false, voided: null });
   });
@@ -282,15 +287,26 @@ describe("The Owner voids a counter bill (#54, BIL-6)", () => {
     expect(await stock(rice)).toBe("45.000");
   });
 
-  it("voids while Live or Suspended, and refuses once the shop is Closed", async () => {
+  it("voids while Live or Suspended, refuses before Live and once Closed, and lists bills as voidable only then", async () => {
     const { owner, shopId, pack, bill, send } = await shop();
     const rice = await pack("5", "50");
     const [first, second] = await send(bill([{ packId: rice, count: 1, unitPrice: "21" }]), bill([{ packId: rice, count: 1, unitPrice: "21" }]));
-    await database.pool.query("UPDATE shops SET state = 'suspended' WHERE id = $1", [shopId]);
+    const voidable = async (state: string) => {
+      await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [shopId, state]);
+      const { bills } = ShopCounterBillsResponse.parse((await list(owner.headers)).json());
+      return bills.find((found) => found.id === second)?.voidable;
+    };
+    // Before Live (an approved shop never bills, but its state can go back) and once Closed, the list offers no void.
+    expect(await voidable("approved")).toBe(false);
+    const early = await voidBill(owner.headers, second as string);
+    expect([early.statusCode, code(early)]).toEqual([409, "SHOP_NOT_BILLING"]);
+    expect(await voidable("live")).toBe(true);
+    expect(await voidable("suspended")).toBe(true);
     expect((await voidBill(owner.headers, first as string)).statusCode).toBe(201);
-    await database.pool.query("UPDATE shops SET state = 'closed' WHERE id = $1", [shopId]);
+    expect(await voidable("closed")).toBe(false);
     const response = await voidBill(owner.headers, second as string);
     expect([response.statusCode, code(response)]).toEqual([409, "SHOP_NOT_BILLING"]);
+    expect(await voids()).toHaveLength(1);
   });
 
   it("needs a reason from the list, and a note only for Other", async () => {
