@@ -97,5 +97,8 @@ it("configures the sync age and clock-skew bounds", () => {
   const env = { ...database, MAILER: "mailpit", MAIL_FROM: "test@example.com", MAILPIT_URL: "http://localhost:8025" };
   expect(loadConfig(env)).toMatchObject({ SYNC_MAX_AGE_SECONDS: 604800, SYNC_CLOCK_SKEW_SECONDS: 300 });
   expect(loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "60", SYNC_CLOCK_SKEW_SECONDS: "30" })).toMatchObject({ SYNC_MAX_AGE_SECONDS: 60, SYNC_CLOCK_SKEW_SECONDS: 30 });
+  expect(loadConfig(env)).toMatchObject({ COUNTER_BILL_VOID_SECONDS: 86400 });
+  expect(loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "3600" })).toMatchObject({ COUNTER_BILL_VOID_SECONDS: 3600 });
+  expect(() => loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "0" })).toThrow();
   expect(() => loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "0" })).toThrow();
 });

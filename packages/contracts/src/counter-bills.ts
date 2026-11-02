@@ -84,3 +84,38 @@ export type AdminCounterBill = z.infer<typeof AdminCounterBill>;
 
 export const AdminCounterBillsResponse = z.strictObject({ bills: z.array(AdminCounterBill) });
 export type AdminCounterBillsResponse = z.infer<typeof AdminCounterBillsResponse>;
+
+/** Why the Owner voids a counter bill (S37, BIL-6). Only `other` takes a typed note. */
+export const CounterBillVoidReason = z.enum(["wrong_item", "wrong_price", "billed_twice", "not_taken", "other"]);
+export type CounterBillVoidReason = z.infer<typeof CounterBillVoidReason>;
+
+export const CounterBillParams = z.strictObject({ id: z.uuid() });
+export type CounterBillParams = z.infer<typeof CounterBillParams>;
+
+export const VoidCounterBillBody = z.discriminatedUnion("reason", [
+  z.strictObject({ reason: CounterBillVoidReason.exclude(["other"]) }),
+  z.strictObject({ reason: z.literal("other"), note: AdminActionReason }),
+]);
+export type VoidCounterBillBody = z.infer<typeof VoidCounterBillBody>;
+
+/**
+ * One of the shop's counter bills on S37 (#54). `voidable` is decided on the server's clock: the bill has its
+ * number, is not voided, `voidUntil` has not passed, and the shop is Live or Suspended. A held bill has no number
+ * and is never voidable. A bill the server could not read is held with no total or payment (BIL-5).
+ */
+export const ShopCounterBill = z.strictObject({
+  id: z.uuid(),
+  reference: z.string(),
+  number: z.number().int().nullable(),
+  total: z.string().nullable(),
+  payment: z.enum(["cash", "upi"]).nullable(),
+  madeAt: z.iso.datetime(),
+  receivedAt: z.iso.datetime(),
+  voidUntil: z.iso.datetime(),
+  voidable: z.boolean(),
+  voided: z.strictObject({ reason: CounterBillVoidReason, note: z.string().nullable(), createdAt: z.iso.datetime() }).nullable(),
+});
+export type ShopCounterBill = z.infer<typeof ShopCounterBill>;
+
+export const ShopCounterBillsResponse = z.strictObject({ bills: z.array(ShopCounterBill) });
+export type ShopCounterBillsResponse = z.infer<typeof ShopCounterBillsResponse>;

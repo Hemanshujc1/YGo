@@ -350,8 +350,9 @@ export const stockMovements = pgTable("stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction') = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
-  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale')`),
-  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0) AND ${table.quantity} <> 'NaN'::numeric`),
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale', 'void')`),
+  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0)
+    AND (${table.kind} <> 'void' OR ${table.quantity} > 0) AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
   uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
 ]);
@@ -399,6 +400,8 @@ export const counterBills = pgTable("counter_bills", {
   check("counter_bills_reference_valid", sql`${table.reference} ~ '^[0-9A-F]{4}-[0-9A-F]{4}$'`),
   check("counter_bills_total_valid", sql`${table.total} >= 0 AND ${table.checkedTotal} >= 0`),
   check("counter_bills_discount_valid", sql`${table.discount} >= 0 AND ${table.discount} <> 'NaN'::numeric`),
+  // S37 lists a shop's recent bills (#54).
+  index("counter_bills_received_idx").on(table.shopId, table.receivedAt),
   check("counter_bills_customer_valid", sql`(${table.customerName} IS NOT NULL OR ${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})
     AND (${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})`),
 ]);
@@ -453,6 +456,24 @@ export const counterBillResolutions = pgTable("counter_bill_resolutions", {
   check("counter_bill_resolutions_stock_valid", sql`NOT ${table.stockMoved} OR ${table.action} = 'numbered'`),
   uniqueIndex("counter_bill_resolutions_closing_idx").on(table.billId).where(sql`${table.action} <> 'noted'`),
   index("counter_bill_resolutions_bill_id_idx").on(table.billId),
+]);
+
+// The Owner's void of a numbered counter bill (#54, BIL-6). The bill itself stays as recorded; one void per bill,
+// kept as written. Its `void` stock movements give back what the bill's `sale` movements took, and share this id.
+export const counterBillVoids = pgTable("counter_bill_voids", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  billId: uuid("bill_id").notNull().references(() => counterBills.id),
+  // No foreign key to accounts, like counter_bill_resolutions: the record outlives the person (DEL-12).
+  actorId: uuid("actor_id").notNull(),
+  reason: text("reason").notNull(),
+  note: text("note"),
+  // Whether the void gave stock back; false for a bill that moved none, such as one whose total disagrees.
+  stockMoved: boolean("stock_moved").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("counter_bill_voids_reason_valid", sql`${table.reason} IN ('wrong_item', 'wrong_price', 'billed_twice', 'not_taken', 'other')`),
+  check("counter_bill_voids_note_valid", sql`(${table.reason} = 'other') = (${table.note} IS NOT NULL) AND btrim(${table.note}) <> '' AND char_length(${table.note}) <= 500`),
+  uniqueIndex("counter_bill_voids_bill_id_idx").on(table.billId),
 ]);
 
 // Pending uploads bind the server-declared size to a shop and actor. They are

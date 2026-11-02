@@ -43,6 +43,7 @@ import { registerShopHoursRoutes } from "./routes/shop-hours";
 import { registerShopOpenRoutes } from "./routes/shop-open";
 import { registerShopOrderRoutes } from "./routes/shop-orders";
 import { registerSyncRoutes } from "./routes/sync";
+import { registerShopCounterBillRoutes } from "./routes/shop-counter-bills";
 import { registerShopListingRoutes } from "./routes/shop-listings";
 
 export interface AppOptions {
@@ -62,6 +63,8 @@ export interface AppOptions {
   minAppVersions?: Record<AppName, AppVersion>;
   syncMaxAgeSeconds?: number;
   syncClockSkewSeconds?: number;
+  /** How long after the server receives a counter bill the Owner may void it (BIL-6). */
+  counterBillVoidSeconds?: number;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -93,6 +96,7 @@ export function buildApp({
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   syncMaxAgeSeconds = 7 * 86400,
   syncClockSkewSeconds = 300,
+  counterBillVoidSeconds = 86400,
   logger = false,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
@@ -145,6 +149,7 @@ export function buildApp({
     registerShopHolidayRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopOpenRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCounterBillRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopCounterBillRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, voidSeconds: counterBillVoidSeconds });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
     registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
