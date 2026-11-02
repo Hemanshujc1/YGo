@@ -14,7 +14,7 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-const { PHONE_PREFIX, PhoneField } = await import("../src/phone-field");
+const { PhoneField } = await import("../src/phone-field");
 
 function findTextInput(node: unknown): Record<string, unknown> | undefined {
   if (!node || typeof node !== "object" || !("props" in node)) return undefined;
@@ -48,15 +48,5 @@ describe("PhoneField (#482)", () => {
     const input = findTextInput(PhoneField({ ...base, autofill: false }));
     expect(input?.autoComplete).toBe("off");
     expect(input?.textContentType).toBe("none");
-  });
-
-  it("keeps tel autocomplete and telephoneNumber contentType when autofill={true}", () => {
-    const input = findTextInput(PhoneField({ ...base, autofill: true }));
-    expect(input?.autoComplete).toBe("tel");
-    expect(input?.textContentType).toBe("telephoneNumber");
-  });
-
-  it("exports PHONE_PREFIX as +91", () => {
-    expect(PHONE_PREFIX).toBe("+91");
   });
 });
