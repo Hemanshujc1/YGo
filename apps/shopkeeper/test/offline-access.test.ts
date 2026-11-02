@@ -145,4 +145,14 @@ describe("verified offline shop access", () => {
     expect(readSavedAccess("broken")).toBeNull();
     expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: "bad" }))).toBeNull();
   });
+  it("keeps the shop's name from the last check for a bill made offline, and reads a record saved before it", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai General Stores" } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.shopName()).toBe("Sai General Stores");
+    const older = readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }));
+    expect(older?.shopName).toBeNull();
+  });
 });

@@ -238,6 +238,14 @@ export const strings = {
     today: "Today's bills", none: "No bills yet today.",
     reference: (reference: string) => `Bill ${reference}`,
     summary: (total: string, payment: string, items: number) => `${total} · ${payment} · ${formatNumber(items)} ${items === 1 ? "item" : "items"}`,
+    // #53: each bill, before and after sync, shared as a PDF for the customer.
+    share: "Share bill", shareFailed: "Couldn't make the bill PDF. Try again.",
+    pdf: {
+      number: (number: number) => `Bill ${number}`, numberPending: "Number pending", reference: (reference: string) => `Reference ${reference}`,
+      item: "Item", count: "Count", price: "Price", amount: "Amount", items: "Items", discount: "Discount", total: "Total",
+      paidBy: (payment: string) => `Paid by ${payment}`, customer: (name: string) => `Customer: ${name}`, unknownItem: "Item",
+      file: (reference: string) => `YGo bill ${reference}`,
+    },
     status: {
       pending: "Saved on phone · number pending",
       synced: (number: number) => `Synced · Bill ${number}`,

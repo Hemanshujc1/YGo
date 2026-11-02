@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
-const mock = vi.hoisted(() => ({ hooks: [] as unknown[], cursor: 0, effects: new Map<number, unknown[]>(), open: vi.fn(), listings: vi.fn(), retry: vi.fn(),
+const mock = vi.hoisted(() => ({ hooks: [] as unknown[], cursor: 0, effects: new Map<number, unknown[]>(), open: vi.fn(), listings: vi.fn(), retry: vi.fn(), share: vi.fn(),
   status: { running: false, outcome: "done", failures: 0 } as Record<string, unknown>, view: { mode: "online" } as Record<string, unknown> }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
@@ -22,9 +22,11 @@ vi.mock("react", () => ({
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", View: "View" }));
+vi.mock("../src/components/icons", () => ({ Share2: "Share2" }));
+vi.mock("../src/lib/share-bill", () => ({ shareBill: mock.share }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, session: { get: () => ({ account: { id: "account-1" } }) }, supportEmail: "help@example.com",
-  access: { subscribe: vi.fn(), get: () => mock.view }, api: { shopListings: mock.listings } }));
+  access: { subscribe: vi.fn(), get: () => mock.view, shopName: () => "Sai General Stores" }, api: { shopListings: mock.listings } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: vi.fn(), get: () => mock.status, retryNow: mock.retry } }));
 import SyncScreen from "../src/app/sync";
@@ -76,6 +78,18 @@ describe("S08 Waiting to sync (#395)", () => {
     // No Stock copy names the opening-stock pack, so the listings do.
     expect(lines).toContain("Dal · 0.5 kg"); expect(lines).toContain("Opening stock 4 kg");
     expect(elements(render()).some((node) => node.props.address === "help@example.com")).toBe(true);
+  });
+
+  it("shares a waiting bill from its card with the shop's name and the pack's name (#53)", async () => {
+    queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, deletedAt: null,
+      item: { packId, listingId: packId, name: "Rice", packQuantity: "1", baseUnit: "kg", quantity: "7", held: "0", outOfStock: false, counterPrice: "21" } }] });
+    const saved = queue.saveBill(shopId, { lines: [{ packId, count: 1, unitPrice: "21" }], total: "21.00", payment: "cash" });
+    render(); await settle();
+    const card = elements(render()).find((node) => (node.props.bill as { id?: string } | undefined)?.id === (typeof saved === "string" ? "" : saved.id));
+    await (card?.props.onShare as () => Promise<void>)();
+    const [{ shopName, label }] = mock.share.mock.calls[0] as [{ shopName: string; label: (id: string) => { name: string } | null }];
+    expect(shopName).toBe("Sai General Stores");
+    expect(label(packId)?.name).toBe("Rice");
   });
 
   it("names a correction as one and sends a refused one to Opening stock (#460)", async () => {

@@ -97,9 +97,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     return id;
   }
 
-  function label(shopId: string, packId: string): { name: string; packQuantity: string; baseUnit: string } | null {
+  function label(shopId: string, packId: string): PackName | null {
     const row = db.getFirstSync<{ payload: string }>("SELECT payload FROM stock_cache_items WHERE shop_id = ? AND pack_id = ?", shopId, packId);
-    return row ? JSON.parse(row.payload) as { name: string; packQuantity: string; baseUnit: string } : null;
+    return row ? JSON.parse(row.payload) as PackName : null;
   }
 
   function failed(shopId: string, packId: string): SyncActionResult | null {
@@ -111,6 +111,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 
   return {
     cache: stockCache(db),
+    /** A pack's name and size as Stock last showed it, kept after it is delisted, so an old bill can still name it (#53). */
+    label,
     flag(shopId: string, packId: string): { action: SyncAction; status: string; result: SyncActionResult | null } | null {
       const row = db.getFirstSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
         WHERE shop_id = ? AND pack_id = ? AND json_extract(action, '$.type') = 'stock_flag' ORDER BY sequence DESC LIMIT 1`, shopId, packId);
@@ -366,7 +368,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
 export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "held" | "counter_bill"; quantity?: string; outOfStock?: boolean;
-  code: string | null; at: string | null; label: { name: string; packQuantity: string; baseUnit: string } | null; bill?: BillRow };
+  code: string | null; at: string | null; label: PackName | null; bill?: BillRow };
+export type PackName = { name: string; packQuantity: string; baseUnit: "each" | "kg" | "l" };
 /** A counter bill as the phone knows it: waiting, synced with its number (or held for Admin), or refused with the server's code. */
 export type BillRow = CounterBillPayload & { id: string; reference: string; createdAt: string; status: "pending" | "synced" | "held" | "refused"; number: number | null; code: string | null };
 

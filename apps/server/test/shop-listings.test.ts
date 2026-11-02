@@ -415,18 +415,21 @@ describe("manual Stock flags (#392)", () => {
 });
 
 describe("verified offline shop access", () => {
-  it("distinguishes Live/Suspended/Closed, pre-live, Staff unlink, no shop and session expiry", async () => {
+  it("distinguishes Live/Suspended/Closed, pre-live, Staff unlink, no shop and session expiry, with the shop's name", async () => {
     const actor = await shop("live"), staff = await owner("staff@example.com");
     const read = (headers = actor.headers) => app.inject({ method: "GET", url: "/v1/sync/access", headers });
     await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
     for (const state of ["live", "suspended", "approved", "closed"]) {
       await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [actor.shopId, state]);
-      expect((await read()).json()).toEqual({ shopId: actor.shopId, state });
-      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state });
+      expect((await read()).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores" });
+      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores" });
     }
+    // The name a bill PDF prints offline follows a rename at the next check (#53).
+    await database.pool.query("UPDATE shops SET shop_name = 'Sai Stores' WHERE id = $1", [actor.shopId]);
+    expect((await read()).json().shopName).toBe("Sai Stores");
     await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [staff.id]);
-    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null });
-    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null });
+    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null, shopName: null });
+    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null, shopName: null });
     expect((await app.inject({ method: "GET", url: "/v1/sync/access" })).statusCode).toBe(401);
     clock.set(new Date("2030-01-02T00:00:00Z"));
     expect((await read()).statusCode).toBe(401);
@@ -443,7 +446,7 @@ describe("verified offline shop access", () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(finished).toBe(false);
       await removal.query("COMMIT");
-      expect((await checking).json()).toEqual({ shopId: null, state: null });
+      expect((await checking).json()).toEqual({ shopId: null, state: null, shopName: null });
     } finally {
       await removal.query("ROLLBACK");
       removal.release();

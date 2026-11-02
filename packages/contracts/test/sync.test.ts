@@ -33,12 +33,14 @@ it("validates shop-scoped cursors and paired Stock rows/tombstones", async () =>
   expect(SyncChangesQuery.safeParse({ since: `${id}:0` }).success).toBe(true);
 });
 
-it("requires paired shop identity/state for the explicit access check", async () => {
+it("requires paired shop identity/state for the explicit access check, and a name only with a shop (#53)", async () => {
   const { SyncAccessResponse } = await import("../src/sync");
-  for (const state of ["live", "suspended", "approved", "closed"]) expect(SyncAccessResponse.safeParse({ shopId: id, state }).success).toBe(true);
-  expect(SyncAccessResponse.safeParse({ shopId: null, state: null }).success).toBe(true);
-  expect(SyncAccessResponse.safeParse({ shopId: null, state: "closed" }).success).toBe(false);
-  expect(SyncAccessResponse.safeParse({ shopId: id, state: null }).success).toBe(false);
+  for (const state of ["live", "suspended", "approved", "closed"]) expect(SyncAccessResponse.safeParse({ shopId: id, state, shopName: "Sai" }).success).toBe(true);
+  expect(SyncAccessResponse.safeParse({ shopId: id, state: "approved", shopName: null }).success).toBe(true);
+  expect(SyncAccessResponse.safeParse({ shopId: null, state: null, shopName: null }).success).toBe(true);
+  expect(SyncAccessResponse.safeParse({ shopId: null, state: null, shopName: "Sai" }).success).toBe(false);
+  expect(SyncAccessResponse.safeParse({ shopId: null, state: "closed", shopName: null }).success).toBe(false);
+  expect(SyncAccessResponse.safeParse({ shopId: id, state: null, shopName: null }).success).toBe(false);
 });
 
 it("keeps counter bills to whole packs of distinct listings with exact amounts, and pairs a number with no held reason", async () => {
