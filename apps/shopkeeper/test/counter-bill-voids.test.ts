@@ -2,6 +2,7 @@ import type { ApiResult } from "@ygo/api-client";
 import type { ShopCounterBill, ShopCounterBillsResponse, VoidCounterBillBody } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { canVoid, createCounterBillVoids } from "../src/lib/counter-bill-voids";
+import { strings } from "../src/strings";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
 const bill = (over: Partial<ShopCounterBill> = {}): ShopCounterBill => ({
@@ -10,7 +11,7 @@ const bill = (over: Partial<ShopCounterBill> = {}): ShopCounterBill => ({
 });
 const voided = bill({ voidable: false, voided: { reason: "billed_twice", note: null, createdAt: "2030-01-01T11:00:00.000Z" } });
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "COUNTER_BILL_VOIDED" | "COUNTER_BILL_NOT_VOIDABLE" | "INTERNAL", status = 409) => ({ ok: false, status, code }) as ApiResult<never>;
+const refused = (code: "COUNTER_BILL_VOIDED" | "COUNTER_BILL_NOT_VOIDABLE" | "INTERNAL" | "TOO_MANY_REQUESTS", status = 409) => ({ ok: false, status, code }) as ApiResult<never>;
 const offline = () => Promise.reject(new TypeError("Network request failed"));
 const body: VoidCounterBillBody = { reason: "other", note: "Customer changed mind" };
 
@@ -20,6 +21,7 @@ function later<T>() {
   const promise = new Promise<T>((resolve) => { settle = resolve; });
   return { promise, settle };
 }
+function never(): never { throw new Error("unexpected read"); }
 async function settle() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 
 function setup(list: () => Promise<ApiResult<ShopCounterBillsResponse>>, send: () => Promise<ApiResult<ShopCounterBill>> = () => Promise.resolve(ok(voided))) {
@@ -98,20 +100,88 @@ describe("S37 Void a bill store (#492)", () => {
     expect(voids.get()).toMatchObject({ bills: [closed], notice: { text: "This bill can't be voided now." } });
   });
 
-  it("keeps the sheet open offline, with no read, so the typed note isn't lost", async () => {
+  it("keeps the sheet open offline, so the typed note isn't lost, after checking the list in case the void got through", async () => {
     const { client, voids } = setup(() => Promise.resolve(ok({ bills: [bill()] })), offline);
     voids.start(); await settle();
     expect(await voids.voidBill(id, body)).toEqual({ close: false, message: "Voiding needs a connection." });
-    expect(client.shopCounterBills).toHaveBeenCalledTimes(1);
+    expect(client.shopCounterBills).toHaveBeenCalledTimes(2);
     expect(voids.get()).toMatchObject({ bills: [bill()], voiding: null, notice: null });
   });
 
-  it("keeps the sheet open on a server fault, and reads the list again in case the bill changed", async () => {
-    const { client, voids } = setup(() => Promise.resolve(ok({ bills: [bill()] })), () => Promise.resolve(refused("INTERNAL", 500)));
+  it("closes the sheet when a void timed out but the list shows it went through", async () => {
+    let reads = 0;
+    const { voids } = setup(() => Promise.resolve(ok({ bills: [++reads === 1 ? bill() : voided] })), offline);
     voids.start(); await settle();
-    expect(await voids.voidBill(id, body)).toEqual({ close: false, message: "Something went wrong on the server." });
+    expect(await voids.voidBill(id, body)).toEqual({ close: true, message: null });
+    expect(voids.get()).toMatchObject({ bills: [voided], voiding: null });
+  });
+
+  it("never leaves the sheet busy, even if reading the list throws", async () => {
+    let reads = 0;
+    const { voids } = setup(() => (++reads === 1 ? Promise.resolve(ok({ bills: [bill()] })) : never()), () => Promise.resolve(refused("INTERNAL", 500)));
+    voids.start(); await settle();
+    await expect(voids.voidBill(id, body)).rejects.toThrow();
+    expect(voids.get().voiding).toBeNull();
+  });
+
+  it("keeps the sheet open on a server fault, busy until the list is read again, so the void can't be sent twice", async () => {
+    let reads = 0;
+    const reread = later<ApiResult<ShopCounterBillsResponse>>();
+    const { client, voids } = setup(() => (++reads === 1 ? Promise.resolve(ok({ bills: [bill()] })) : reread.promise), () => Promise.resolve(refused("INTERNAL", 500)));
+    voids.start(); await settle();
+    const done = voids.voidBill(id, body);
     await settle();
     expect(client.shopCounterBills).toHaveBeenCalledTimes(2);
+    expect(voids.get().voiding).toBe(id);
+    // A second tap while the read is on its way sends nothing and leaves the sheet as it is.
+    expect(await voids.voidBill(id, body)).toEqual({ close: false, message: null });
+    expect(client.voidCounterBill).toHaveBeenCalledTimes(1);
+    reread.settle(ok({ bills: [bill()] }));
+    expect(await done).toEqual({ close: false, message: "Something went wrong on the server." });
+    expect(voids.get().voiding).toBeNull();
+  });
+
+  it("closes the sheet after a server fault when the list read again shows the bill already voided", async () => {
+    let reads = 0;
+    const { voids } = setup(() => Promise.resolve(ok({ bills: [++reads === 1 ? bill() : voided] })), () => Promise.resolve(refused("INTERNAL", 500)));
+    voids.start(); await settle();
+    expect(await voids.voidBill(id, body)).toEqual({ close: true, message: null });
+    expect(voids.get()).toMatchObject({ bills: [voided], voiding: null, notice: { text: "This bill is already voided.", tone: "danger" } });
+  });
+
+  it("stays busy after a server fault until a pull sent meanwhile has landed too", async () => {
+    let reads = 0;
+    const first = later<ApiResult<ShopCounterBillsResponse>>(), pulled = later<ApiResult<ShopCounterBillsResponse>>();
+    const { client, voids } = setup(() => [Promise.resolve(ok({ bills: [bill()] })), first.promise, pulled.promise][reads++] ?? never(), () => Promise.resolve(refused("INTERNAL", 500)));
+    voids.start(); await settle();
+    const done = voids.voidBill(id, body);
+    await settle();
+    void voids.refresh();
+    first.settle(ok({ bills: [bill()] })); await settle();
+    // The void's own read was dropped for the pull: still busy, so a tap sends nothing.
+    expect(voids.get().voiding).toBe(id);
+    expect(await voids.voidBill(id, body)).toEqual({ close: false, message: null });
+    expect(client.voidCounterBill).toHaveBeenCalledTimes(1);
+    pulled.settle(ok({ bills: [bill()] }));
+    expect(await done).toEqual({ close: false, message: "Something went wrong on the server." });
+    expect(voids.get().voiding).toBeNull();
+  });
+
+  it("keeps the sheet open after a server fault when the list can't be read again, as the bill's state is unknown", async () => {
+    let reads = 0;
+    const { client, voids } = setup(() => (++reads === 1 ? Promise.resolve(ok({ bills: [bill()] })) : offline()), () => Promise.resolve(refused("INTERNAL", 500)));
+    voids.start(); await settle();
+    expect(await voids.voidBill(id, body)).toEqual({ close: false, message: "Something went wrong on the server." });
+    expect(client.shopCounterBills).toHaveBeenCalledTimes(2);
+    expect(voids.get().voiding).toBeNull();
+  });
+
+  it("keeps the sheet open without reading the list again on a refusal that leaves the bill as it was", async () => {
+    const { client, voids } = setup(() => Promise.resolve(ok({ bills: [bill()] })), () => Promise.resolve(refused("TOO_MANY_REQUESTS", 429)));
+    voids.start(); await settle();
+    expect(await voids.voidBill(id, body)).toEqual({ close: false, message: strings.errors.TOO_MANY_REQUESTS });
+    expect(client.shopCounterBills).toHaveBeenCalledTimes(1);
+    expect(voids.get().voiding).toBeNull();
   });
 
   it("sends one void at a time, and a second tap leaves the sheet as it is", async () => {

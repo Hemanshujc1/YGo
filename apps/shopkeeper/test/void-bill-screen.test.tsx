@@ -161,6 +161,22 @@ describe("S37 Void a bill (#492)", () => {
     expect(texts()).toContain("Voided · Other · Customer changed mind");
   });
 
+  it("keeps the sheet busy, with no way out, while a void is on its way", async () => {
+    mock.list.mockResolvedValue({ ok: true, data: { bills: [bill()] } });
+    let answer!: (value: unknown) => void;
+    mock.send.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    render(); await settle();
+    tap("Void"); choose("Billed twice"); tap("Void bill");
+    expect(button("Void bill")?.busy).toBe(true);
+    expect(button("Keep bill")?.disabled).toBe(true);
+    (find((props) => typeof props.onRequestClose === "function")?.onRequestClose as () => void)();
+    expect(sheetOpen()).toBe(true);
+    answer({ ok: true, data: voided() }); await settle();
+    expect(mock.send).toHaveBeenCalledTimes(1);
+    expect(sheetOpen()).toBe(false);
+    expect(texts()).toContain("Voided · Billed twice");
+  });
+
   it("closes the sheet and refreshes the list when the bill was already voided", async () => {
     mock.list.mockResolvedValueOnce({ ok: true, data: { bills: [bill()] } }).mockResolvedValueOnce({ ok: true, data: { bills: [voided()] } });
     mock.send.mockResolvedValue({ ok: false, status: 409, code: "COUNTER_BILL_VOIDED" });
