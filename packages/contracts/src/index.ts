@@ -242,6 +242,7 @@ export {
 
 export {
   AdminCounterBill, AdminCounterBillParams, AdminCounterBillsResponse, CounterBillOriginal, CounterBillResolution, CounterBillResolutionAction, ResolveCounterBillBody,
+  CounterBillParams, CounterBillVoidReason, ShopCounterBill, ShopCounterBillsResponse, VoidCounterBillBody,
 } from "./counter-bills";
 
 export {

@@ -80,6 +80,12 @@ import { LiveCheck } from "./shops";
  * Held counter bills (#470):
  * - COUNTER_BILL_RESOLVED (409): another Admin closed this bill first.
  * - COUNTER_BILL_ACTION_REFUSED (409): the action does not fit the bill, such as numbering an `invalid` bill.
+ * Voiding a counter bill (#54):
+ * - COUNTER_BILL_VOIDED (409): the bill is already voided.
+ * - COUNTER_BILL_NOT_VOIDABLE (409): the bill has no number yet, its void window has passed on the server's clock, or
+ *   the stock it would give back is more than Stock can show.
+ * - SHOP_NOT_BILLING (409): the shop is not Live or Suspended.
+ * - FORBIDDEN (403): the account is Staff; only the Owner voids (BIL-6).
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -128,6 +134,9 @@ export const ErrorCode = z.enum([
   "NOT_ENOUGH_STOCK",
   "COUNTER_BILL_RESOLVED",
   "COUNTER_BILL_ACTION_REFUSED",
+  "COUNTER_BILL_VOIDED",
+  "COUNTER_BILL_NOT_VOIDABLE",
+  "SHOP_NOT_BILLING",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

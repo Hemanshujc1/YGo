@@ -43,6 +43,7 @@ const app = buildApp({
   minAppVersions: { customer: config.MIN_CUSTOMER_VERSION, shopkeeper: config.MIN_SHOPKEEPER_VERSION },
   syncMaxAgeSeconds: config.SYNC_MAX_AGE_SECONDS,
   syncClockSkewSeconds: config.SYNC_CLOCK_SKEW_SECONDS,
+  counterBillVoidSeconds: config.COUNTER_BILL_VOID_SECONDS,
   logger: { level: config.LOG_LEVEL },
 });
 

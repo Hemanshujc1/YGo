@@ -14,6 +14,8 @@ const BaseEnv = z.object({
   APPLE_CLIENT_IDS: z.string().default(""),
   SYNC_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(7 * 86400),
   SYNC_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().default(300),
+  // How long after the server receives a counter bill the Owner may void it (BIL-6, #54).
+  COUNTER_BILL_VOID_SECONDS: z.coerce.number().int().positive().default(86400),
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

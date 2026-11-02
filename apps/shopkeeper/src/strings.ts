@@ -591,5 +591,8 @@ export const strings = {
     NOT_ENOUGH_STOCK: "There isn't enough stock left for this order.",
     COUNTER_BILL_RESOLVED: "This bill has already been dealt with.",
     COUNTER_BILL_ACTION_REFUSED: "This can't be done to this bill.",
+    COUNTER_BILL_VOIDED: "This bill is already voided.",
+    COUNTER_BILL_NOT_VOIDABLE: "This bill can't be voided now.",
+    SHOP_NOT_BILLING: "Your shop can't bill right now.",
   } satisfies Record<ErrorCode, string>,
 };

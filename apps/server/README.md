@@ -101,6 +101,7 @@ The two addresses do different jobs:
 | `MIN_CUSTOMER_VERSION` | no | `0.0.0`; an older Customer app gets `426 UPDATE_REQUIRED` |
 | `SYNC_MAX_AGE_SECONDS` | no | `604800` (7 days); oldest new sync action accepted |
 | `SYNC_CLOCK_SKEW_SECONDS` | no | `300` (5 minutes); clock differences beyond this are flagged |
+| `COUNTER_BILL_VOID_SECONDS` | no | `86400` (24 hours); how long after the server receives a counter bill the Owner may void it, on the server's clock |
 | `MIN_SHOPKEEPER_VERSION` | no | `0.0.0`; an older Shopkeeper app gets `426 UPDATE_REQUIRED` |
 
 The process refuses to start when one is missing or malformed.

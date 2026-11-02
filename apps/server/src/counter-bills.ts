@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { stockOf } from "./listings";
 
 /** The largest stock quantity a movement holds (NUMERIC(12,3)) and Stock shows (`SignedBaseUnitQuantity`). */
-const largestQuantity = "999999999.999";
+export const largestQuantity = "999999999.999";
 
 type Bill = {
   accountId: string; shopId: string; actionId: string; madeAt: string; receivedAt: Date;
