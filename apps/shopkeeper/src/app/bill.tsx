@@ -1,4 +1,3 @@
-import { CounterBillLine } from "@ygo/contracts";
 import { formatNumber, trimDecimal } from "@ygo/format";
 import { Button, FieldMessage, PhoneField, SupportEmail, Text } from "@ygo/mobile";
 import { Link, useFocusEffect } from "expo-router";
@@ -86,12 +85,13 @@ export default function BillScreen() {
       return loaded ? { items: loaded.queue.cache.read(loaded.shopId)?.items.filter((item) => !item.unavailable) ?? [], bills: loaded.queue.bills(loaded.shopId, startOfToday()) } : null;
     } catch { return null; }
   }, [loaded, status, message]);
+  const searching = find.trim() !== "";
   const found = useMemo(() => {
-    try { return loaded && debouncedFind.trim() ? loaded.queue.findBills(loaded.shopId, debouncedFind) : null; } catch { return null; }
-  }, [loaded, status, message, debouncedFind]);
+    try { return loaded && searching && find === debouncedFind ? loaded.queue.findBills(loaded.shopId, debouncedFind) : null; } catch { return null; }
+  }, [loaded, status, message, searching, find, debouncedFind]);
 
   const draft = draftBill({ lines: lines.map((line) => ({ packId: line.item.packId, unitPrice: line.item.counterPrice, count: line.count })), typed, discount, customer, payment });
-  const wrong = draft.problems.counts || Object.keys(draft.problems.typed).length > 0 || draft.problems.discount !== null || draft.problems.customerName || draft.problems.phone;
+  const wrong = Object.keys(draft.problems.counts).length > 0 || Object.keys(draft.problems.typed).length > 0 || draft.problems.discount !== null || draft.problems.customerName || draft.problems.phone;
   const shown = tried ? draft.problems : null;
   // A discount bigger than the items shows at once; a half-typed one ("10.") waits for Save.
   const discountProblem = tried || draft.problems.discount === "tooBig" ? draft.problems.discount : null;
@@ -188,7 +188,7 @@ export default function BillScreen() {
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.lines}</Text>
           {lines.map((line) => {
             const name = `${line.item.name} · ${trimDecimal(line.item.packQuantity)} ${line.item.baseUnit}`;
-            const countWrong = shown?.counts && !CounterBillLine.shape.count.safeParse(Number(line.count)).success;
+            const countWrong = shown?.counts[line.item.packId] ?? false;
             return <View key={line.item.packId} className="gap-2 rounded-card border border-border bg-surface p-4">
               <Text className="text-headline font-semibold text-text">{name}</Text>
               <Text className="text-secondary text-muted">{words.each(money(line.item.counterPrice))}</Text>
@@ -200,7 +200,7 @@ export default function BillScreen() {
               </View>
             </View>;
           })}
-          {shown?.counts && <FieldMessage text={words.checkCounts} />}
+          {shown && Object.keys(shown.counts).length > 0 && <FieldMessage text={words.checkCounts} />}
           {typed.map((line, index) => {
             const label = words.typedLabel(index + 1), problem = shown?.typed[line.key];
             return <View key={line.key} className="gap-2 rounded-card border border-border bg-surface p-4">
@@ -269,11 +269,11 @@ export default function BillScreen() {
 
         <TextInput accessibilityLabel={words.find} placeholder={words.find} value={find} onChangeText={setFind} autoCapitalize="characters" autoCorrect={false}
           className="h-[52px] rounded-input border border-border bg-bg px-3 text-body text-text" />
-        {found ? <>
+        {searching ? (find === debouncedFind && found ? <>
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.found(found.length)}</Text>
           {found.length === 0 && <Text className="text-body text-muted">{words.noBill}</Text>}
           {found.map((bill) => <BillCard key={bill.id} bill={bill} onShare={() => share(bill)} />)}
-        </> : <>
+        </> : null) : <>
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.today} · {formatNumber(read.bills.length)}</Text>
           {read.bills.length === 0 && <Text className="text-body text-muted">{words.none}</Text>}
           {read.bills.map((bill) => <BillCard key={bill.id} bill={bill} onShare={() => share(bill)} />)}

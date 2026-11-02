@@ -27,7 +27,7 @@ describe("the Bill screen's form (#53)", () => {
     const draft = draftBill({ ...blank, lines: [{ packId, unitPrice: "21", count: "0" }],
       typed: [{ key: "a", name: "", price: "15", count: "1" }, { key: "b", name: "Tape", price: "1.505", count: "1" }, { key: "c", name: "Box", price: "5", count: "10000" }],
       discount: "1.5.0", customer: { name: " ", phone: "12345", offers: true } });
-    expect(draft.problems).toEqual({ counts: true, typed: { a: "name", b: "price", c: "count" }, discount: "format", customerName: false, phone: true });
+    expect(draft.problems).toEqual({ counts: { [packId]: true }, typed: { a: "name", b: "price", c: "count" }, discount: "format", customerName: false, phone: true });
     expect(draft).toMatchObject({ sum: null, total: null, payload: null });
     expect(draftBill({ ...blank, typed: [rope], customer: { name: "x".repeat(81), phone: "", offers: false } }).problems.customerName).toBe(true);
     expect(draftBill({ ...blank, typed: [rope], customer: { name: "\ud800", phone: "", offers: false } }).problems.customerName).toBe(true);
