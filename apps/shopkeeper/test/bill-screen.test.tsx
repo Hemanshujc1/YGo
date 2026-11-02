@@ -173,6 +173,7 @@ describe("S06 Counter bill (#468)", () => {
     expect(find((props) => props.accessibilityLabel === "Discount (₹)")?.value).toBe("5");
     type("Discount (₹)", " 5 ");
     expect(texts()).toEqual(expect.arrayContaining(["Items ₹15.50 · Discount ₹5", "Total ₹10.50"]));
+    expect(find((props) => props.label === "Customer phone")?.autofill).toBe(false);
 
     type("Customer phone", "98765 43210");
     tap((props) => props.accessibilityRole === "checkbox");

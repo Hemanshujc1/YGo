@@ -15,10 +15,12 @@ type PhoneFieldProps = {
   /** Shown under the box in red, and turns its edge red. */
   message?: string | null;
   ref?: Ref<TextInput>;
+  /** When false, turns autofill off so the phone doesn't suggest the user's own number (#482). */
+  autofill?: boolean;
 };
 
 /** A phone number box with "+91" fixed before it: C02 and C03 (#216, Q8). */
-export function PhoneField({ label, value, onChangeText, onSubmitEditing, editable, message, ref }: PhoneFieldProps) {
+export function PhoneField({ label, value, onChangeText, onSubmitEditing, editable, message, ref, autofill = true }: PhoneFieldProps) {
   const [focused, setFocused] = useState(false);
   return (
     <View>
@@ -36,8 +38,8 @@ export function PhoneField({ label, value, onChangeText, onSubmitEditing, editab
           onSubmitEditing={onSubmitEditing}
           editable={editable}
           keyboardType="phone-pad"
-          textContentType="telephoneNumber"
-          autoComplete="tel"
+          textContentType={autofill ? "telephoneNumber" : "none"}
+          autoComplete={autofill ? "tel" : "off"}
           returnKeyType="done"
           accessibilityLabel={label}
           className="h-full flex-1 font-sans text-body tabular-nums text-text"

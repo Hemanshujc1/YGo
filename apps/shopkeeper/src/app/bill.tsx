@@ -217,7 +217,7 @@ export default function BillScreen() {
               className={`mt-2 h-[52px] rounded-input border bg-bg px-3 text-body text-text ${shown?.customerName ? "border-danger" : "border-border"}`} />
             {shown?.customerName && <FieldMessage text={words.nameWrong} />}
           </View>
-          <PhoneField label={words.customerPhone} value={customer.phone} editable onSubmitEditing={() => undefined} message={shown?.phone ? words.phoneWrong : null}
+          <PhoneField label={words.customerPhone} value={customer.phone} editable autofill={false} onSubmitEditing={() => undefined} message={shown?.phone ? words.phoneWrong : null}
             // A new number needs its own consent, so editing the phone clears the tick.
             onChangeText={(phone) => setCustomer((current) => ({ ...current, phone, offers: false }))} />
           <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: customer.offers && phoneReads, disabled: !phoneReads }} disabled={!phoneReads}
