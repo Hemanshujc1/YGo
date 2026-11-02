@@ -1,7 +1,7 @@
 import { formatNumber, trimDecimal } from "@ygo/format";
 import { Button, FieldMessage, PhoneField, SupportEmail, Text } from "@ygo/mobile";
 import { Link, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, session, supportEmail } from "../api";
@@ -47,6 +47,11 @@ export default function BillScreen() {
   // Field messages show once Save is tapped, not while the shopkeeper is still typing.
   const [tried, setTried] = useState(false);
   const [find, setFind] = useState("");
+  const [debouncedFind, setDebouncedFind] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedFind(find), 250);
+    return () => clearTimeout(timer);
+  }, [find]);
   const typedKey = useRef(0);
   const [message, setMessage] = useState<{ text: string; saved: boolean } | null>(null);
   const visit = useRef(0);
@@ -81,8 +86,8 @@ export default function BillScreen() {
     } catch { return null; }
   }, [loaded, status, message]);
   const found = useMemo(() => {
-    try { return loaded && find.trim() ? loaded.queue.findBills(loaded.shopId, find) : null; } catch { return null; }
-  }, [loaded, status, message, find]);
+    try { return loaded && debouncedFind.trim() ? loaded.queue.findBills(loaded.shopId, debouncedFind) : null; } catch { return null; }
+  }, [loaded, status, message, debouncedFind]);
 
   const draft = draftBill({ lines: lines.map((line) => ({ packId: line.item.packId, unitPrice: line.item.counterPrice, count: line.count })), typed, discount, customer, payment });
   const wrong = draft.problems.counts || Object.keys(draft.problems.typed).length > 0 || draft.problems.discount !== null || draft.problems.customerName || draft.problems.phone;
@@ -117,21 +122,32 @@ export default function BillScreen() {
     if (lines.length + typed.length >= 100) return setMessage({ text: words.tooMany, saved: false });
     setTyped((current) => [...current, { key: String(++typedKey.current), name: "", price: "", count: "1" }]);
   }
-  function editTyped(key: string, change: Partial<TypedLine>) {
-    setTyped((current) => current.map((line) => line.key === key ? { ...line, ...change } : line));
+  function editTyped(key: string, change: Partial<TypedLine> | ((current: TypedLine) => Partial<TypedLine>)) {
+    setTyped((current) => current.map((line) => {
+      if (line.key !== key) return line;
+      const patch = typeof change === "function" ? change(line) : change;
+      return { ...line, ...patch };
+    }));
   }
   function stepTyped(key: string, by: number) {
-    setTyped((current) => current.flatMap((line) => {
-      if (line.key !== key) return [line];
+    setTyped((current) => current.map((line) => {
+      if (line.key !== key) return line;
       const next = (Number.parseInt(line.count, 10) || 0) + by;
-      return next < 1 ? [] : [{ ...line, count: String(next) }];
+      return { ...line, count: String(Math.max(1, next)) };
     }));
+  }
+  function removeTyped(key: string) {
+    setTyped((current) => current.filter((line) => line.key !== key));
   }
 
   function save() {
     if (!loaded || !payment || savedLines.current === lines) return;
     if (!isCurrentAccount(loaded.accountId, loaded.epoch) || !access.allowed(loaded.accountId, loaded.shopId)) { access.expire(); return; }
-    if (!draft.payload) return setTried(true);
+    if (!draft.payload) {
+      setTried(true);
+      if (!wrong) setMessage({ text: words.storageFailed, saved: false });
+      return;
+    }
     try {
       const saved = loaded.queue.saveBill(loaded.shopId, draft.payload);
       if (typeof saved === "string") return setMessage({ text: words[saved], saved: false });
@@ -171,13 +187,14 @@ export default function BillScreen() {
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.lines}</Text>
           {lines.map((line) => {
             const name = `${line.item.name} · ${trimDecimal(line.item.packQuantity)} ${line.item.baseUnit}`;
+            const countWrong = shown?.counts && (line.count === "" || Number(line.count) < 1 || Number(line.count) > 9999);
             return <View key={line.item.packId} className="gap-2 rounded-card border border-border bg-surface p-4">
               <Text className="text-headline font-semibold text-text">{name}</Text>
               <Text className="text-secondary text-muted">{words.each(money(line.item.counterPrice))}</Text>
               <View className="flex-row items-center gap-3">
                 <Pressable accessibilityRole="button" accessibilityLabel={words.less(name)} onPress={() => step(line.item.packId, -1)} className="h-12 w-12 items-center justify-center rounded-button border border-border"><Minus size={20} className="text-text" /></Pressable>
                 <TextInput accessibilityLabel={words.count(name)} keyboardType="number-pad" value={line.count} onChangeText={(value) => setCount(line.item.packId, value.replace(/\D/g, ""))}
-                  className="h-12 w-20 rounded-input border border-border bg-bg px-3 text-center text-body text-text" />
+                  className={`h-12 w-20 rounded-input border bg-bg px-3 text-center text-body text-text ${countWrong ? "border-danger" : "border-border"}`} />
                 <Pressable accessibilityRole="button" accessibilityLabel={words.more(name)} onPress={() => step(line.item.packId, 1)} className="h-12 w-12 items-center justify-center rounded-button border border-border"><Plus size={20} className="text-text" /></Pressable>
               </View>
             </View>;
@@ -186,10 +203,16 @@ export default function BillScreen() {
           {typed.map((line, index) => {
             const label = words.typedLabel(index + 1), problem = shown?.typed[line.key];
             return <View key={line.key} className="gap-2 rounded-card border border-border bg-surface p-4">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-secondary text-muted">{label}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${words.removeTyped}`} onPress={() => removeTyped(line.key)}>
+                  <Text className="text-secondary font-medium text-danger">{words.removeTyped}</Text>
+                </Pressable>
+              </View>
               <TextInput accessibilityLabel={`${label}: ${words.typedName}`} placeholder={words.typedName} value={line.name} maxLength={80} onChangeText={(name) => editTyped(line.key, { name })}
                 className={`h-[52px] rounded-input border bg-bg px-3 text-body text-text ${problem === "name" ? "border-danger" : "border-border"}`} />
               <TextInput accessibilityLabel={`${label}: ${words.typedPrice}`} placeholder={words.typedPrice} keyboardType="decimal-pad" value={line.price}
-                onChangeText={(price) => editTyped(line.key, { price })} onBlur={() => editTyped(line.key, { price: leave(line.price) })}
+                onChangeText={(price) => editTyped(line.key, { price })} onBlur={() => editTyped(line.key, (current) => ({ price: leave(current.price) }))}
                 className={`h-[52px] rounded-input border bg-bg px-3 text-body text-text ${problem === "price" ? "border-danger" : "border-border"}`} />
               <View className="flex-row items-center gap-3">
                 <Pressable accessibilityRole="button" accessibilityLabel={words.less(label)} onPress={() => stepTyped(line.key, -1)} className="h-12 w-12 items-center justify-center rounded-button border border-border"><Minus size={20} className="text-text" /></Pressable>
@@ -203,12 +226,12 @@ export default function BillScreen() {
 
           <View>
             <Text className="text-label font-medium text-text">{words.discount}</Text>
-            <TextInput accessibilityLabel={words.discount} keyboardType="decimal-pad" value={discount} onChangeText={setDiscount} onBlur={() => setDiscount(leave(discount))}
+            <TextInput accessibilityLabel={words.discount} keyboardType="decimal-pad" value={discount} onChangeText={setDiscount} onBlur={() => setDiscount((current) => leave(current))}
               className={`mt-2 h-[52px] rounded-input border bg-bg px-3 text-body text-text ${discountProblem ? "border-danger" : "border-border"}`} />
             {discountProblem && <FieldMessage text={discountProblem === "tooBig" ? words.discountTooBig : words.discountWrong} />}
           </View>
           {draft.sum && draft.total && draft.sum !== draft.total && <Text className="text-body text-muted">{words.sum(money(draft.sum), money(draft.discount))}</Text>}
-          <Text accessibilityLiveRegion="polite" className="text-title font-semibold text-text">{draft.total ? words.total(money(draft.total)) : words.fillLines}</Text>
+          <Text accessibilityLiveRegion="polite" className="text-title font-semibold text-text">{draft.total ? words.total(money(draft.total)) : draft.sum ? words.fixDiscount : words.fillLines}</Text>
 
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.customer}</Text>
           <View>

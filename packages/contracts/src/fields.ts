@@ -131,8 +131,14 @@ export const PackBarcode = z.string().regex(/^(?:\d{8}|\d{12}|\d{13})$/);
 /** A non-negative rupee price with at most two decimals (CAT-1, ADR-0002). */
 export const ShopPrice = z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
 
+/** Checks whether a string contains no lone surrogates; falls back to encodeURI on engines lacking ES2024 isWellFormed (#485). */
+const isWellFormed = (value: string): boolean => {
+  if (typeof value.isWellFormed === "function") return value.isWellFormed();
+  try { encodeURI(value); return true; } catch { return false; }
+};
+
 /** A typed counter-bill line's name, or a customer's name on a bill: 1 to 80 characters once trimmed (#53). */
-export const CounterBillName = z.string().trim().min(1).max(80).refine((value) => !value.includes("\0") && value.isWellFormed());
+export const CounterBillName = z.string().trim().min(1).max(80).refine((value) => !value.includes("\0") && isWellFormed(value));
 
 /** A bill total in rupees with at most two decimals (whole paise), up to 16 rupee digits: 100 lines of 9,999 packs at the largest `ShopPrice` (#51, #471). */
 export const BillAmount = z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/);

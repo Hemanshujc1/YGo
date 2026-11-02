@@ -30,6 +30,8 @@ describe("the Bill screen's form (#53)", () => {
     expect(draft.problems).toEqual({ counts: true, typed: { a: "name", b: "price", c: "count" }, discount: "format", customerName: false, phone: true });
     expect(draft).toMatchObject({ sum: null, total: null, payload: null });
     expect(draftBill({ ...blank, typed: [rope], customer: { name: "x".repeat(81), phone: "", offers: false } }).problems.customerName).toBe(true);
+    expect(draftBill({ ...blank, typed: [rope], customer: { name: "\ud800", phone: "", offers: false } }).problems.customerName).toBe(true);
+    expect(draftBill({ ...blank, typed: [{ key: "a", name: "\ud800", price: "15", count: "1" }] }).problems.typed.a).toBe("name");
   });
 
   it("refuses a discount of more than the items, and allows one of all of them", () => {

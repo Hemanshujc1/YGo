@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), share: vi.fn(), hooks: [] as unknown[], cursor: 0, focused: false }));
+const mock = vi.hoisted(() => ({
+  get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), share: vi.fn(),
+  hooks: [] as unknown[], effects: [] as (() => void)[], cleanups: [] as (() => void)[],
+  cursor: 0, focused: false,
+}));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++;
@@ -19,6 +23,13 @@ vi.mock("react", () => ({
   useCallback: (callback: unknown) => callback,
   useMemo: (make: () => unknown) => make(),
   useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get(),
+  useEffect: (effect: () => unknown, deps: unknown[]) => {
+    const index = mock.cursor++, before = mock.hooks[index] as unknown[] | undefined;
+    if (!before || deps.some((dep, i) => dep !== before[i])) {
+      mock.hooks[index] = deps;
+      mock.effects.push(() => { const cleanup = effect(); if (typeof cleanup === "function") mock.cleanups.push(cleanup as () => void); });
+    }
+  },
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail", FieldMessage: "FieldMessage", PhoneField: "PhoneField" }));
@@ -36,7 +47,7 @@ import BillScreen from "../src/app/bill";
 const shopId = "00000000-0000-4000-8000-000000000001", rice = "00000000-0000-4000-8000-000000000002", dal = "00000000-0000-4000-8000-000000000003";
 const item = { listingId: rice, packId: rice, name: "Rice", packQuantity: "1.000", baseUnit: "kg" as const, quantity: "-2", held: "0", outOfStock: true, counterPrice: "21.00" };
 
-function render() { mock.cursor = 0; return BillScreen(); }
+function render() { mock.cursor = 0; const tree = BillScreen(); for (const effect of mock.effects.splice(0)) effect(); return tree; }
 function elements(node: unknown): Array<{ props: Record<string, unknown> }> {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
@@ -51,14 +62,19 @@ const text = (props: Record<string, unknown> | undefined) => elements(props?.chi
   return typeof children === "string" ? [children] : Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number") ? [children.join("")] : [];
 });
 const texts = () => text({ children: render() }).concat(elements(render()).flatMap((node) => typeof node.props.text === "string" ? [node.props.text] : []));
-const type = (label: string, value: string) => (find((props) => props.accessibilityLabel === label || props.label === label)?.onChangeText as (value: string) => void)(value);
+const type = (label: string, value: string) => {
+  (find((props) => props.accessibilityLabel === label || props.label === label)?.onChangeText as (value: string) => void)(value);
+  render();
+  vi.advanceTimersByTime(250);
+  render();
+};
 const tap = (test: (props: Record<string, unknown>) => boolean) => (find(test)?.onPress as () => void)();
 async function settle() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 
 describe("S06 Counter bill (#468)", () => {
   let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
   beforeEach(() => {
-    vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false;
+    vi.clearAllMocks(); vi.useFakeTimers(); mock.hooks = []; mock.cursor = 0; mock.focused = false; mock.effects = []; mock.cleanups = [];
     db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID);
     queue.cache.apply({ shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId: rice, item, deletedAt: null }] });
     // Saved before #468: no counter price until the next pull.
@@ -66,7 +82,7 @@ describe("S06 Counter bill (#468)", () => {
       JSON.stringify({ ...item, listingId: dal, packId: dal, name: "Dal", counterPrice: undefined }));
     mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue); mock.allowed.mockReturnValue(true);
   });
-  afterEach(() => db.close());
+  afterEach(() => { for (const cleanup of mock.cleanups) cleanup(); vi.useRealTimers(); db.close(); });
 
   it("bills an out-of-stock pack offline at its counter price, then shows the bill's number once it syncs", async () => {
     render(); await settle();
@@ -154,7 +170,11 @@ describe("S06 Counter bill (#468)", () => {
     render(); await settle();
     expect(texts()).toContain("No bills yet today.");
 
-    type("Find a bill by reference or number", saved.reference.toLowerCase());
+    (find((props) => props.accessibilityLabel === "Find a bill by reference or number")?.onChangeText as (value: string) => void)(saved.reference.toLowerCase());
+    render();
+    expect(texts()).not.toContain("Bills found · 1");
+    vi.advanceTimersByTime(250);
+    render();
     expect(texts()).toEqual(expect.arrayContaining(["Bills found · 1", `Bill ${saved.reference}`, "Synced · Bill 987654"]));
     type("Find a bill by reference or number", "987654");
     expect(texts()).toContain("Synced · Bill 987654");
@@ -209,5 +229,47 @@ describe("S06 Counter bill (#468)", () => {
     expect(find((props) => props.accessibilityLabel === "Typed item 99: Item name")).toBeDefined();
     expect(find((props) => props.accessibilityLabel === "Typed item 100: Item name")).toBeUndefined();
     expect(texts()).toContain("A bill holds up to 100 items. Save this one and start another.");
+  });
+
+  it("clamps typed count at 1 on minus and removes the item with the Remove action (#485)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: count")?.value).toBe("1");
+    tap((props) => props.accessibilityLabel === "One less Typed item 1");
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: count")?.value).toBe("1");
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Item name")).toBeDefined();
+    tap((props) => props.accessibilityLabel === "Typed item 1: Remove");
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Item name")).toBeUndefined();
+  });
+
+  it("shows a prompt to fix the discount when lines are valid but the discount is not (#485)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope");
+    type("Typed item 1: Price each (₹)", "50");
+    expect(texts()).toContain("Total ₹50");
+
+    type("Discount (₹)", "60");
+    expect(texts()).toContain("Fix the discount to see the total.");
+    expect(texts()).not.toContain("Fill in every item to see the total.");
+
+    type("Discount (₹)", "10.");
+    expect(texts()).toContain("Fix the discount to see the total.");
+
+    type("Discount (₹)", "10");
+    expect(texts()).toContain("Total ₹40");
+  });
+
+  it("marks invalid catalog count in red and reports fixFields on Save (#485)", async () => {
+    render(); await settle();
+    type("Search products", "ric");
+    tap((props) => props.accessibilityRole === "button" && text(props).includes("Rice · 1 kg"));
+    type("Rice · 1 kg: number of packs", "0");
+    tap((props) => props.accessibilityRole === "radio" && text(props).includes("Cash"));
+    tap((props) => props.label === "Save bill");
+    expect(texts()).toContain("Fix the fields marked in red to save.");
+    expect(texts()).toContain("Each count must be 1 to 9,999 packs.");
+    const countInput = find((props) => props.accessibilityLabel === "Rice · 1 kg: number of packs");
+    expect(countInput?.className).toContain("border-danger");
   });
 });
