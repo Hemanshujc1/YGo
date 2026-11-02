@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
+import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 import { createTestDatabase } from "./test-database";
 
@@ -36,10 +37,11 @@ afterEach(async () => {
   try { await root.connect(); await root.query(`DROP DATABASE ${name} WITH (FORCE)`); } finally { await root.end(); }
 });
 
-async function signIn(email: string) {
-  await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email } });
+async function signIn(email: string, mobile = true) {
+  const path = mobile ? "/v1/auth" : "/v1/admin/auth";
+  await app.inject({ method: "POST", url: `${path}/code`, payload: { email } });
   const code = mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1];
-  const signed = (await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email, code } })).json();
+  const signed = (await app.inject({ method: "POST", url: `${path}/verify`, payload: { email, code } })).json();
   return { id: signed.account.id as string, headers: { authorization: `Bearer ${signed.accessToken as string}` }, refreshToken: signed.refreshToken as string };
 }
 
@@ -198,6 +200,46 @@ describe("The Owner voids a counter bill (#54, BIL-6)", () => {
     expect(bills.find((found) => found.id === onTime)).toMatchObject({ voidable: false, voided: null });
     expect(await voids()).toHaveLength(1);
     expect(await stock(rice)).toBe("40.000");
+  });
+
+  it("counts a held bill's window from when Admin numbered it, on the server's clock, and lists it first (#497)", async () => {
+    const { owner, shopId, pack, bill, send } = await shop();
+    const rice = await pack("5", "50");
+    // Two bills reuse the first one's reference, so both are held until Admin numbers them.
+    await send(bill([{ packId: rice, count: 1, unitPrice: "21" }], { id: "0f3a91bc-0000-4000-8000-000000000001" }));
+    const [kept, expiring] = await send(bill([{ packId: rice, count: 1, unitPrice: "21" }], { id: "0f3a91bc-1111-4000-8000-000000000002" }),
+      bill([{ packId: rice, count: 1, unitPrice: "21" }], { id: "0f3a91bc-2222-4000-8000-000000000003" }),
+      bill([{ packId: rice, count: 1, unitPrice: "21" }], { id: "0f3a91bc-3333-4000-8000-000000000004" }));
+    const held = ShopCounterBillsResponse.parse((await list(owner)).json()).bills.filter((found) => found.number === null);
+    expect(held.map((found) => [found.voidUntil, found.voidable])).toEqual([[null, false], [null, false], [null, false]]);
+    clock.set(new Date(start.getTime() + 2.5 * day));
+    owner.headers = await fresh(owner);
+    const [recent] = await send(bill([{ packId: rice, count: 1, unitPrice: "21" }]));
+
+    // Admin numbers them 3 days after they arrived: past the old window, and past the 2 days the list goes back.
+    const numbered = new Date(start.getTime() + 3 * day);
+    clock.set(numbered);
+    await bootstrapAdmin(database.pool, { email: "admin@example.com", name: "Ravi Admin", phone: "+919812345678" });
+    const admin = await signIn("admin@example.com", false);
+    for (const billId of [kept, expiring]) {
+      const done = await app.inject({ method: "POST", url: `/v1/admin/shops/${shopId}/counter-bills/${billId}/resolutions`, headers: admin.headers, payload: { action: "number", note: "Sold at the counter" } });
+      expect(done.statusCode).toBe(201);
+    }
+    // Listed above the newer bill, by when they were numbered. The first bill, numbered 3 days ago, and the third
+    // held bill, which Admin left alone, are gone.
+    const until = new Date(numbered.getTime() + day).toISOString();
+    const { bills } = ShopCounterBillsResponse.parse((await list(owner)).json());
+    expect(bills.map((found) => found.id).slice(0, 2).sort()).toEqual([kept, expiring].sort());
+    expect(bills.slice(2)).toMatchObject([{ id: recent, number: 2, voidable: true }]);
+    expect(bills.slice(0, 2).map((found) => [found.voidUntil, found.voidable])).toEqual([[until, true], [until, true]]);
+
+    clock.set(new Date(numbered.getTime() + day - 1));
+    expect((await voidBill(owner, kept as string)).statusCode).toBe(201);
+    clock.set(new Date(numbered.getTime() + day));
+    const refused = await voidBill(owner, expiring as string);
+    expect([refused.statusCode, code(refused)]).toEqual([409, "COUNTER_BILL_NOT_VOIDABLE"]);
+    expect(ShopCounterBillsResponse.parse((await list(owner)).json()).bills.find((found) => found.id === expiring)).toMatchObject({ voidable: false, voided: null });
+    expect((await voids()).map((found) => found.bill_id)).toEqual([kept]);
   });
 
   it("takes the window from COUNTER_BILL_VOID_SECONDS", async () => {

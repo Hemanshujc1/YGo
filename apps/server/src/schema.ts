@@ -387,8 +387,12 @@ export const counterBills = pgTable("counter_bills", {
   clockSuspect: boolean("clock_suspect").notNull(),
   madeAt: timestamp("made_at", { withTimezone: true }).notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  // When the bill got its number, on the server's clock: on arrival, or when Admin numbered it while held. The
+  // Owner's void window starts here (#497).
+  numberedAt: timestamp("numbered_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("counter_bills_client_id_idx").on(table.shopId, table.clientId),
+  check("counter_bills_numbered_valid", sql`(${table.number} IS NULL) = (${table.numberedAt} IS NULL)`),
   uniqueIndex("counter_bills_number_idx").on(table.shopId, table.number),
   // A clashing reference is kept as a second, held bill outside this index (BIL-5).
   uniqueIndex("counter_bills_reference_idx").on(table.shopId, table.reference).where(sql`NOT ${table.referenceClash}`),
@@ -400,8 +404,8 @@ export const counterBills = pgTable("counter_bills", {
   check("counter_bills_reference_valid", sql`${table.reference} ~ '^[0-9A-F]{4}-[0-9A-F]{4}$'`),
   check("counter_bills_total_valid", sql`${table.total} >= 0 AND ${table.checkedTotal} >= 0`),
   check("counter_bills_discount_valid", sql`${table.discount} >= 0 AND ${table.discount} <> 'NaN'::numeric`),
-  // S37 lists a shop's recent bills (#54).
-  index("counter_bills_received_idx").on(table.shopId, table.receivedAt),
+  // S37 lists a shop's bills received or numbered lately (#54, #497).
+  index("counter_bills_listed_idx").on(table.shopId, sql`COALESCE(${table.numberedAt}, ${table.receivedAt})`),
   check("counter_bills_customer_valid", sql`(${table.customerName} IS NOT NULL OR ${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})
     AND (${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})`),
 ]);

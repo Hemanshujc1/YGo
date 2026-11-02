@@ -222,7 +222,7 @@ describe("counter bill sync (#51)", () => {
     ]);
     // Admin can still number the clashing bill later, from the shop's counter.
     await database.pool.query("UPDATE counter_bill_numbers SET last_number = 3");
-    await database.pool.query("UPDATE counter_bills SET number = 3, held_reason = NULL WHERE client_id = $1", [second.id]);
+    await database.pool.query("UPDATE counter_bills SET number = 3, held_reason = NULL, numbered_at = received_at WHERE client_id = $1", [second.id]);
   });
 
   it("answers a reused action id from another account with a conflict, recording nothing", async () => {
@@ -382,13 +382,17 @@ describe("counter bill sync (#51)", () => {
     const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
     await send([bill(line, { payload: { lines: line, total: "21", payment: "cash" } }), bill(line, { createdAt: "2029-12-01T00:00:00.000Z", payload: { lines: line, total: "21", payment: "cash" } })]);
     for (const statement of ["UPDATE counter_bills SET total = 1", "UPDATE counter_bills SET number = 9 WHERE number = 1", "DELETE FROM counter_bills",
-      "UPDATE counter_bill_lines SET count = 9", "DELETE FROM counter_bill_lines", "TRUNCATE counter_bills CASCADE"]) {
+      "UPDATE counter_bill_lines SET count = 9", "DELETE FROM counter_bill_lines", "TRUNCATE counter_bills CASCADE", "UPDATE counter_bills SET numbered_at = now()"]) {
       await expect(database.pool.query(statement)).rejects.toThrow(/refused/);
     }
     // A held bill takes only the counter's next number, so Admin raises the counter first.
-    await expect(database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL WHERE held_reason = 'too_old'")).rejects.toThrow(/refused/);
+    await expect(database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL, numbered_at = now() WHERE held_reason = 'too_old'")).rejects.toThrow(/refused/);
     await database.pool.query("UPDATE counter_bill_numbers SET last_number = 2");
-    await database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL WHERE held_reason = 'too_old'");
+    // Numbering stamps when, never before the bill arrived, since the void window starts there (#497).
+    for (const stamp of ["", ", numbered_at = received_at - interval '1 millisecond'"]) {
+      await expect(database.pool.query(`UPDATE counter_bills SET number = 2, held_reason = NULL${stamp} WHERE held_reason = 'too_old'`)).rejects.toThrow(/refused/);
+    }
+    await database.pool.query("UPDATE counter_bills SET number = 2, held_reason = NULL, numbered_at = received_at WHERE held_reason = 'too_old'");
     expect((await database.pool.query("SELECT number FROM counter_bills ORDER BY number")).rows).toEqual([{ number: 1 }, { number: 2 }]);
   });
 });

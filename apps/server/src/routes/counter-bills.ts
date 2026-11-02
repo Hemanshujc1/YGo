@@ -28,7 +28,7 @@ export function registerCounterBillRoutes(app: FastifyInstance, { pool, clock, s
     return withAdminTransaction(pool, who.accountId, reply, async (client) => {
       // The shop's row lock first, the order a sync batch takes its locks in.
       if (!(await client.query("SELECT 1 FROM shops WHERE id = $1 AND state <> 'draft' FOR UPDATE", [id])).rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-      const done = await resolveCounterBill(client, id, billId, who.accountId, body);
+      const done = await resolveCounterBill(client, id, billId, who.accountId, body, clock.now());
       if ("code" in done) return reply.code(done.code === "NOT_FOUND" ? 404 : 409).send({ error: { code: done.code } });
       await client.query("COMMIT");
       return reply.code(201).send(done.bill);
