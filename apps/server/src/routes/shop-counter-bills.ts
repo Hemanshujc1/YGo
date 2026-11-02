@@ -13,10 +13,13 @@ const listedMs = (voidSeconds: number) => Math.max(2 * 86400_000, voidSeconds * 
 
 const iso = (column: string) => `to_char((${column}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 // $2 is the server's clock and $3 the void window in seconds; the phone's clock never decides (owner's answers 3 and 4 on #54).
+// The window starts at numbered_at: on arrival, or when Admin numbered a held bill (#497), both on the server's
+// clock. A held bill has neither, so no window yet.
 // Only a Live or Suspended shop voids, as only it bills (ONB-7, owner's answer 8).
+const voidUntil = "b.numbered_at + make_interval(secs => $3)";
 const billsSql = (extra = "") => `SELECT ${extra}b.id, b.reference, b.number, b.total::text AS total, b.payment, ${iso("b.made_at")} AS "madeAt", ${iso("b.received_at")} AS "receivedAt",
-    ${iso("b.received_at + make_interval(secs => $3)")} AS "voidUntil",
-    (s.state IN ('live', 'suspended') AND b.number IS NOT NULL AND v.id IS NULL AND $2::timestamptz < b.received_at + make_interval(secs => $3)) AS voidable,
+    CASE WHEN b.numbered_at IS NULL THEN NULL ELSE ${iso(voidUntil)} END AS "voidUntil",
+    (s.state IN ('live', 'suspended') AND b.numbered_at IS NOT NULL AND v.id IS NULL AND $2::timestamptz < ${voidUntil}) AS voidable,
     CASE WHEN v.id IS NULL THEN NULL ELSE json_build_object('reason', v.reason, 'note', v.note, 'createdAt', ${iso("v.created_at")}) END AS voided
   FROM counter_bills b JOIN shops s ON s.id = b.shop_id LEFT JOIN counter_bill_voids v ON v.bill_id = b.id
   WHERE b.shop_id = $1`;
@@ -34,14 +37,15 @@ export function registerShopCounterBillRoutes(app: FastifyInstance, { pool, cloc
   const member = (client: Pool | PoolClient, accountId: string, lock: string) => client.query<Member>(`SELECT s.id AS "shopId", s.state, m.role FROM shops s
     JOIN shop_members m ON m.shop_id = s.id WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') ${lock}`, [accountId]);
 
-  // The shop's bills received in the last 2 days (or the void window, if longer), held and unreadable ones included, newest first.
+  // The shop's bills received or numbered in the last 2 days (or the void window, if longer), held and unreadable
+  // ones included, newest first. A bill Admin just numbered sorts by that time, so the Owner sees it while it can be voided.
   app.get("/v1/me/counter-bills", { schema: { response: { 200: ShopCounterBillsResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { rows: [shop] } = await member(pool, who.accountId, "");
     if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     const now = clock.now();
-    const { rows } = await pool.query<ShopCounterBill>(`${billsSql()} AND b.received_at > $4 ORDER BY b.received_at DESC, b.id`,
+    const { rows } = await pool.query<ShopCounterBill>(`${billsSql()} AND COALESCE(b.numbered_at, b.received_at) > $4 ORDER BY COALESCE(b.numbered_at, b.received_at) DESC, b.id`,
       [shop.shopId, now, voidSeconds, new Date(now.getTime() - listedMs(voidSeconds))]);
     return { bills: rows };
   });

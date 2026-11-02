@@ -87,7 +87,7 @@ type Row = { id: string; heldReason: string | null; number: number | null; total
  * unique closing row stop two Admins closing it twice; the stock movements share the bill's `client_id`, which
  * the table keeps unique per listing, so a sale cannot be taken from stock twice either.
  */
-export async function resolveCounterBill(client: PoolClient, shopId: string, billId: string, adminId: string, body: ResolveCounterBillBody):
+export async function resolveCounterBill(client: PoolClient, shopId: string, billId: string, adminId: string, body: ResolveCounterBillBody, now: Date):
   Promise<{ code: "NOT_FOUND" | "COUNTER_BILL_RESOLVED" | "COUNTER_BILL_ACTION_REFUSED" } | { bill: AdminCounterBill }> {
   const { rows: [bill] } = await client.query<Row>(`SELECT id, held_reason AS "heldReason", number, total_mismatch AS "totalMismatch", actor_id AS "actorId", client_id AS "clientId"
     FROM counter_bills WHERE id = $1 AND shop_id = $2 FOR UPDATE`, [billId, shopId]);
@@ -108,7 +108,8 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
     const { rows: [given] } = await client.query<{ number: number }>(`INSERT INTO counter_bill_numbers (shop_id, last_number) VALUES ($1, 1)
       ON CONFLICT (shop_id) DO UPDATE SET last_number = counter_bill_numbers.last_number + 1 RETURNING last_number AS number`, [shopId]);
     if (!given) throw new Error("Counter bill number returned no row");
-    await client.query("UPDATE counter_bills SET number = $2, held_reason = NULL WHERE id = $1", [billId, given.number]);
+    // On the server's clock: the Owner's void window starts here (#497).
+    await client.query("UPDATE counter_bills SET number = $2, held_reason = NULL, numbered_at = $3 WHERE id = $1", [billId, given.number, now]);
     // A sale moves stock only when it can be applied as recorded: not a `too_large` one, not one whose total the
     // server disagrees with (BIL-9), every pack still on the shop's list, and every line fitting one movement.
     if (held !== "too_large" && !bill.totalMismatch) {
