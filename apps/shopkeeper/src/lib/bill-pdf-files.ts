@@ -51,8 +51,13 @@ let clears = 0;
 /** Counts full clears, so a share running across a sign-out can tell and keep nothing. */
 export const billPdfClears = () => clears;
 
-// Outside the cache, so it survives the cache being cleared: the time of a full clear that left files behind.
-const pending = () => new File(Paths.document, "bill-pdfs-clear-pending");
+// Outside the cache, so it survives the cache being cleared: one empty file per full clear that left files behind,
+// named by its time, or "unknown" when its time couldn't be recorded. Files are only ever created, never rewritten,
+// so a failed record can't leave an older time standing in for a newer clear.
+const records = () => new Directory(Paths.document, "bill-pdf-clears");
+const UNKNOWN = "unknown";
+// Set when no record at all could be made: this session's retries then delete everything and keep every record.
+let unrecorded = false;
 
 // Deletes an entry, falling back to its contents one by one when the whole delete fails.
 // True when no file is left; an empty folder that won't delete holds no customer data.
@@ -67,23 +72,50 @@ function wipe(entry: Directory | File): boolean {
   return gone;
 }
 
-// The recorded clear time; null when it is missing, blank or unreadable, which means "delete everything".
-function recorded(marker: File): number | null {
-  const at = Number(marker.textSync());
-  return at > 0 && Number.isFinite(at) ? at : null;
+function record(name: string): boolean {
+  try {
+    const folder = records();
+    folder.create({ intermediates: true, idempotent: true });
+    const file = new File(folder, name);
+    if (!file.exists) file.create();
+    return true;
+  } catch { return false; }
+}
+// Turns an existing record into "unknown". A rename needs no new space, so it can work on a full disk.
+function widen(): boolean {
+  try {
+    const folder = records();
+    if (folder.exists && new File(folder, UNKNOWN).exists) return true;
+    const first = folder.exists ? folder.list().find((entry): entry is File => entry instanceof File) : undefined;
+    if (!first) return false;
+    first.rename(UNKNOWN);
+    return true;
+  } catch { return false; }
+}
+function remember(at: number) {
+  if (!record(String(at)) && !record(UNKNOWN) && !widen()) unrecorded = true;
 }
 
-function remember(at: number) {
+// The records on disk and the time the retry must cover: the latest, or null for "delete everything".
+// Null overall when the records can't be read, so nothing is assumed finished.
+function readRecords(): { files: File[]; at: number | null } | null {
   try {
-    const marker = pending();
-    if (!marker.exists) marker.create();
-    // Keep the later time, so a second failed clear can't shrink what the retry covers.
-    const before = recorded(marker);
-    marker.write(String(before === null ? at : Math.max(before, at)));
-  } catch { /* nothing more can be done until the next clear */ }
+    const folder = records();
+    if (!folder.exists) return { files: [], at: null };
+    const files = folder.list().filter((entry): entry is File => entry instanceof File);
+    let at = 0;
+    for (const file of files) {
+      // Only a plain positive number is a time; "unknown" or anything else means delete everything.
+      if (!/^\d+$/.test(file.name) || Number(file.name) === 0) return { files, at: null };
+      at = Math.max(at, Number(file.name));
+    }
+    return { files, at };
+  } catch { return null; }
 }
-function forget() {
-  try { const marker = pending(); if (marker.exists) marker.delete(); } catch { /* the next launch retries harmlessly */ }
+function forget(files: File[]) {
+  for (const file of files) {
+    try { file.delete(); } catch { /* the next retry finds nothing left and tries again */ }
+  }
 }
 
 /**
@@ -98,24 +130,26 @@ export function removeAllBillPdfs(now = Date.now()): boolean {
   for (const folder of list) {
     try { if (folder.exists && !wipe(folder)) gone = false; } catch { gone = false; }
   }
-  if (gone) forget(); else remember(now);
-  return gone;
+  if (!gone) { remember(now); return false; }
+  // Every PDF is gone, so every earlier record is done too.
+  const read = readRecords();
+  if (read) forget(read.files);
+  unrecorded = false;
+  return true;
 }
 
 /**
- * At launch and before each share: finishes a full clear that left files behind, deleting everything made up to that
- * clear (and anything of unknown age). PDFs shared since, by whoever signed in next, stay.
- * Returns whether nothing from it is left.
+ * At launch and before each share: finishes full clears that left files behind, deleting everything made up to the
+ * latest of them (and anything of unknown age). PDFs shared since, by whoever signed in next, stay.
+ * Returns whether nothing from them is left; the records go only then.
  */
 export function retryBillPdfClear(): boolean {
-  let at: number | null;
-  try {
-    const marker = pending();
-    if (!marker.exists) return true;
-    at = recorded(marker);
-  } catch { return false; }
+  const read = readRecords();
+  if (!read) return false;
+  if (read.files.length === 0 && !unrecorded) return true;
+  const at = unrecorded ? null : read.at;
   const list = folders();
-  // Nothing could be checked, so the record stays.
+  // Nothing could be checked, so the records stay.
   if (list.length === 0) return false;
   let gone = true;
   for (const folder of list) {
@@ -127,6 +161,8 @@ export function retryBillPdfClear(): boolean {
       }
     } catch { gone = false; }
   }
-  if (gone) forget();
-  return gone;
+  if (!gone) return false;
+  forget(read.files);
+  unrecorded = false;
+  return true;
 }
