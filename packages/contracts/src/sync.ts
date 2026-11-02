@@ -3,8 +3,12 @@ import { ShopState } from "./shops";
 import { BillAmount, CounterBillName, PackQuantity, Phone, ShopPrice } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
-/** Explicit access result: only an authenticated absence/closure ends cached access. */
-export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable() }).refine((value) => (value.shopId === null) === (value.state === null));
+/**
+ * Explicit access result: only an authenticated absence/closure ends cached access.
+ * `shopName` is kept with the phone's access record so a bill PDF can name the shop offline (#53); a Draft may have none yet.
+ */
+export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable() })
+  .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId !== null || value.shopName === null));
 export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
 
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });

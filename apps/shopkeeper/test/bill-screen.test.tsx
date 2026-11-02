@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), hooks: [] as unknown[], cursor: 0, focused: false }));
+const mock = vi.hoisted(() => ({ get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), share: vi.fn(), hooks: [] as unknown[], cursor: 0, focused: false }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++;
@@ -22,12 +22,13 @@ vi.mock("react", () => ({
 }));
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail", FieldMessage: "FieldMessage", PhoneField: "PhoneField" }));
-vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus", Square: "Square", SquareCheck: "SquareCheck" }));
+vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus", Share2: "Share2", Square: "Square", SquareCheck: "SquareCheck" }));
+vi.mock("../src/lib/share-bill", () => ({ shareBill: mock.share }));
 vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, supportEmail: "help@example.com", session: { get: mock.get },
-  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "offline" }) } }));
+  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "offline" }) } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }), run: mock.run } }));
 import BillScreen from "../src/app/bill";
@@ -126,7 +127,7 @@ describe("S06 Counter bill (#468)", () => {
 
     expect(queue.batch(shopId).actions[0]?.payload).toEqual({ lines: [], manualLines: [{ name: "Rope", count: 2, unitPrice: "15" }], discount: "5",
       customer: { name: "Meera", phone: "+919876543210", offers: true }, total: "25.00", payment: "upi" });
-    expect(texts()).toEqual(expect.arrayContaining(["₹25 · UPI · 1 item", "Meera · +919876543210"]));
+    expect(texts()).toEqual(expect.arrayContaining(["₹25 · UPI · 1 item", "Meera · 98765 43210"]));
     // The form starts empty again.
     expect(find((props) => props.accessibilityLabel === "Discount (₹)")).toBeUndefined();
   });
@@ -177,6 +178,26 @@ describe("S06 Counter bill (#468)", () => {
     tap((props) => props.accessibilityRole === "checkbox");
     type("Customer phone", "98765 43211");
     expect(find((props) => props.accessibilityRole === "checkbox")?.accessibilityState).toEqual({ checked: false, disabled: false });
+  });
+
+  it("shares a bill as a PDF before it syncs, with the shop's name and each pack's name, but not a refused bill (#53)", async () => {
+    const refused = queue.saveBill(shopId, { lines: [{ packId: rice, count: 1, unitPrice: "21" }], total: "21.00", payment: "cash" });
+    const waiting = queue.saveBill(shopId, { lines: [{ packId: rice, count: 2, unitPrice: "21" }], total: "42.00", payment: "upi" });
+    if (typeof refused === "string" || typeof waiting === "string") throw new Error("not saved");
+    db.prepare("UPDATE opening_stock_actions SET status = 'rejected', result = ? WHERE id = ?").run(JSON.stringify({ code: "VALIDATION_FAILED" }), refused.id);
+    mock.share.mockResolvedValue(undefined);
+    render(); await settle();
+    const shares = elements(render()).filter((node) => node.props.label === "Share bill");
+    expect(shares).toHaveLength(1);
+    (shares[0]?.props.onPress as () => void)(); await settle();
+    const [{ bill, shopName, label }] = mock.share.mock.calls[0] as [{ bill: { reference: string; status: string }; shopName: string; label: (packId: string) => { name: string } | null }];
+    expect(bill).toMatchObject({ reference: waiting.reference, status: "pending" });
+    expect(shopName).toBe("Sai General Stores");
+    expect(label(rice)?.name).toBe("Rice");
+
+    mock.share.mockRejectedValue(new Error("no printer"));
+    tap((props) => props.label === "Share bill"); await settle();
+    expect(texts()).toContain("Couldn't make the bill PDF. Try again.");
   });
 
   it("stops at 100 catalog and typed items together, as the contract does (#53)", async () => {

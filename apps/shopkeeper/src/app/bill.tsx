@@ -13,7 +13,8 @@ import { startOfToday } from "../lib/bill-status";
 import { type BillCustomer, draftBill, type TypedLine } from "../lib/bill-draft";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
-import type { OpeningStockQueue } from "../lib/opening-stock-queue";
+import { shareBill } from "../lib/share-bill";
+import type { BillRow, OpeningStockQueue } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
 import { strings } from "../strings";
 
@@ -90,6 +91,9 @@ export default function BillScreen() {
   const discountProblem = tried || draft.problems.discount === "tooBig" ? draft.problems.discount : null;
   const phoneReads = customer.phone.trim() !== "" && !draft.problems.phone;
   const matches = search.trim() ? read?.items.filter((item) => item.name.toLowerCase().includes(search.trim().toLowerCase()) && !lines.some((line) => line.item.packId === item.packId)) ?? [] : [];
+
+  // The bill cards only show while the Stock on the phone is open.
+  const share = (bill: BillRow) => loaded ? shareBill({ bill, shopName: access.shopName(), label: (packId) => loaded.queue.label(loaded.shopId, packId) }) : Promise.resolve();
 
   function add(item: Item) {
     if (!item.counterPrice) return;
@@ -241,11 +245,11 @@ export default function BillScreen() {
         {found ? <>
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.found(found.length)}</Text>
           {found.length === 0 && <Text className="text-body text-muted">{words.noBill}</Text>}
-          {found.map((bill) => <BillCard key={bill.id} bill={bill} />)}
+          {found.map((bill) => <BillCard key={bill.id} bill={bill} onShare={() => share(bill)} />)}
         </> : <>
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.today} · {formatNumber(read.bills.length)}</Text>
           {read.bills.length === 0 && <Text className="text-body text-muted">{words.none}</Text>}
-          {read.bills.map((bill) => <BillCard key={bill.id} bill={bill} />)}
+          {read.bills.map((bill) => <BillCard key={bill.id} bill={bill} onShare={() => share(bill)} />)}
         </>}
       </>}
     </ScrollView>

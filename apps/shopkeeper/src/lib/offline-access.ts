@@ -2,7 +2,8 @@ import type { ApiResult } from "@ygo/api-client";
 import { Account, ShopStockResponse, type SyncAccessResponse } from "@ygo/contracts";
 import { OFFLINE_WINDOW_MS } from "./offline-limits";
 
-export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean };
+/** `shopName` is what a bill PDF prints offline (#53); a record saved before it, or a Draft without a name, has null. */
+export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null };
 export type AccessView = { mode: "online" | "offline" | "expired" | "erasing" | "ended" | "signing-out"; accountId?: string; shopId?: string; expiresAt?: number };
 export interface AccessStorage {
   active(): string | undefined;
@@ -39,6 +40,8 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
   }
   return {
     get: () => view,
+    /** The shop's name from the last check this phone saved, for a bill PDF made offline (#53). */
+    shopName: () => saved?.shopName ?? null,
     /** The last answer the server gave this account, so a sync pass need not ask again. */
     answer: (accountId: string) => last?.accountId === accountId ? last.data : null,
     subscribe(notify: () => void) { listeners.add(notify); return () => { listeners.delete(notify); }; },
@@ -68,7 +71,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       }
       if (mine !== turn) return null;
       if (!answer.ok) { if (record) cached(record); return null; }
-      const { shopId, state } = answer.data;
+      const { shopId, state, shopName } = answer.data;
       if (state === "closed" || (record && shopId !== record.shopId) || (!record && storage.hasData(account.id) && !shopId)) {
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
         return null;
@@ -83,7 +86,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
           show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
           return answered(account.id, answer.data);
         }
-        const next = { account, shopId, verifiedAt: now(), stockAllowed };
+        const next = { account, shopId, verifiedAt: now(), stockAllowed, shopName };
         await storage.save(next);
         if (mine !== turn) return null;
         storage.select(account.id);
@@ -113,6 +116,6 @@ export function readSavedAccess(raw: string | null): SavedAccess | null {
     const value = JSON.parse(raw) as SavedAccess;
     const account = Account.safeParse(value.account);
     return account.success && ShopStockResponse.shape.shopId.safeParse(value.shopId).success && typeof value.stockAllowed === "boolean" && Number.isFinite(value.verifiedAt)
-      ? { ...value, account: account.data } : null;
+      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null } : null;
   } catch { return null; }
 }

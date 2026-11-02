@@ -10,13 +10,14 @@ import { isCurrentAccount } from "../lib/account";
 import { startOfToday } from "../lib/bill-status";
 import { BillCard } from "../components/bill-card";
 import { openOpeningStock } from "../lib/opening-stock-database";
+import { shareBill } from "../lib/share-bill";
 import type { OpeningStockQueue, QueueRow } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
 import { strings } from "../strings";
 
 const words = strings.sync;
 type Label = NonNullable<QueueRow["label"]>;
-type Data = { overview: ReturnType<OpeningStockQueue["overview"]>; allowance: ReturnType<OpeningStockQueue["allowance"]> };
+type Data = { queue: OpeningStockQueue; overview: ReturnType<OpeningStockQueue["overview"]>; allowance: ReturnType<OpeningStockQueue["allowance"]> };
 
 /** S08 Waiting to sync (design system 5.1): Needs attention, Waiting to sync, Synced today. It never edits; fixes stay on Stock and Opening stock. */
 export default function SyncScreen() {
@@ -33,7 +34,7 @@ export default function SyncScreen() {
     const id = identity.account.id, epoch = accountEpoch();
     let gone = false;
     openOpeningStock(id).then((queue) => {
-      if (!gone && isCurrentAccount(id, epoch)) setData({ overview: queue.overview(startOfToday()), allowance: queue.allowance() });
+      if (!gone && isCurrentAccount(id, epoch)) setData({ queue, overview: queue.overview(startOfToday()), allowance: queue.allowance() });
     }).catch(() => { if (!gone && isCurrentAccount(id, epoch)) setData("failed"); });
     return () => { gone = true; };
   }, [status]);
@@ -49,8 +50,10 @@ export default function SyncScreen() {
     return () => { gone = true; };
   }, [unnamed, view.mode]);
 
-  function card(row: QueueRow, section: keyof Data["overview"]) {
-    if (row.bill) return <BillCard key={row.id} bill={row.bill} syncedAt={section === "synced" ? row.at : null} />;
+  function card(row: QueueRow, section: keyof Data["overview"], queue: OpeningStockQueue) {
+    const bill = row.bill;
+    if (bill) return <BillCard key={row.id} bill={bill} syncedAt={section === "synced" ? row.at : null}
+      onShare={() => shareBill({ bill, shopName: access.shopName(), label: (packId) => queue.label(row.shopId, packId) })} />;
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
     const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");
@@ -84,7 +87,7 @@ export default function SyncScreen() {
         {(["attention", "waiting", "synced"] as const).map((section) => <View key={section} className="gap-3">
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.sections[section]} · {data.overview[section].length}</Text>
           {data.overview[section].length === 0 && <Text className="text-body text-muted">{words.none}</Text>}
-          {data.overview[section].map((row) => card(row, section))}
+          {data.overview[section].map((row) => card(row, section, data.queue))}
         </View>)}
         {data.overview.attention.length > 0 && <SupportEmail address={supportEmail} className="text-secondary" />}
       </>}
