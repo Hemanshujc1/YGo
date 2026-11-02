@@ -145,7 +145,11 @@ describe("S06 Counter bill (#468)", () => {
       customer: { name: "Meera", phone: "+919876543210", offers: true }, total: "25.00", payment: "upi" });
     expect(texts()).toEqual(expect.arrayContaining(["₹25 · UPI · 1 item", "Meera · 98765 43210"]));
     // The form starts empty again.
-    expect(find((props) => props.accessibilityLabel === "Discount (₹)")).toBeUndefined();
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Item name")).toBeUndefined();
+    expect(find((props) => props.accessibilityLabel === "Discount (₹)")?.value).toBe("");
+    expect(find((props) => props.accessibilityLabel === "Customer name")?.value).toBe("");
+    expect(find((props) => props.label === "Customer phone")?.value).toBe("");
+    expect(find((props) => props.label === "Save bill")?.disabled).toBe(true);
   });
 
   it("marks a typed item with no price and a short phone when Save is tapped, and queues nothing (#53)", async () => {
@@ -271,5 +275,14 @@ describe("S06 Counter bill (#468)", () => {
     expect(texts()).toContain("Each count must be 1 to 9,999 packs.");
     const countInput = find((props) => props.accessibilityLabel === "Rice · 1 kg: number of packs");
     expect(countInput?.className).toContain("border-danger");
+  });
+
+  it("refuses to save an empty bill and asks for at least one item (#485)", async () => {
+    render(); await settle();
+    tap((props) => props.accessibilityRole === "radio" && text(props).includes("Cash"));
+    expect(find((props) => props.label === "Save bill")?.disabled).toBe(false);
+    tap((props) => props.label === "Save bill");
+    expect(texts()).toContain("Add at least one item to save.");
+    expect(queue.batch(shopId).actions).toHaveLength(0);
   });
 });

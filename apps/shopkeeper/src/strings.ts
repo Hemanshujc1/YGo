@@ -226,6 +226,7 @@ export const strings = {
     discount: "Discount (₹)", discountWrong: "Type a discount such as 10 or 9.50.", discountTooBig: "The discount can't be more than the items.",
     sum: (items: string, discount: string) => `Items ${items} · Discount ${discount}`,
     fillLines: "Fill in every item to see the total.", fixDiscount: "Fix the discount to see the total.", fixFields: "Fix the fields marked in red to save.",
+    noItems: "Add at least one item to save.",
     customer: "Customer (optional)", customerName: "Customer name", customerPhone: "Customer phone",
     phoneWrong: "Enter a 10-digit mobile number, such as 98765 43210.",
     offers: "OK to send offers to this number", offersNeedPhone: "Add their phone number to ask about offers.",

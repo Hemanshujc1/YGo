@@ -1,3 +1,4 @@
+import { CounterBillLine } from "@ygo/contracts";
 import { formatNumber, trimDecimal } from "@ygo/format";
 import { Button, FieldMessage, PhoneField, SupportEmail, Text } from "@ygo/mobile";
 import { Link, useFocusEffect } from "expo-router";
@@ -145,7 +146,7 @@ export default function BillScreen() {
     if (!isCurrentAccount(loaded.accountId, loaded.epoch) || !access.allowed(loaded.accountId, loaded.shopId)) { access.expire(); return; }
     if (!draft.payload) {
       setTried(true);
-      if (!wrong) setMessage({ text: words.storageFailed, saved: false });
+      if (!wrong) setMessage({ text: words.noItems, saved: false });
       return;
     }
     try {
@@ -187,7 +188,7 @@ export default function BillScreen() {
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.lines}</Text>
           {lines.map((line) => {
             const name = `${line.item.name} · ${trimDecimal(line.item.packQuantity)} ${line.item.baseUnit}`;
-            const countWrong = shown?.counts && (line.count === "" || Number(line.count) < 1 || Number(line.count) > 9999);
+            const countWrong = shown?.counts && !CounterBillLine.shape.count.safeParse(Number(line.count)).success;
             return <View key={line.item.packId} className="gap-2 rounded-card border border-border bg-surface p-4">
               <Text className="text-headline font-semibold text-text">{name}</Text>
               <Text className="text-secondary text-muted">{words.each(money(line.item.counterPrice))}</Text>
@@ -205,7 +206,7 @@ export default function BillScreen() {
             return <View key={line.key} className="gap-2 rounded-card border border-border bg-surface p-4">
               <View className="flex-row items-center justify-between">
                 <Text className="text-secondary text-muted">{label}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${words.removeTyped}`} onPress={() => removeTyped(line.key)}>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${words.removeTyped}`} onPress={() => removeTyped(line.key)} className="h-12 justify-center">
                   <Text className="text-secondary font-medium text-danger">{words.removeTyped}</Text>
                 </Pressable>
               </View>
@@ -223,6 +224,9 @@ export default function BillScreen() {
               {problem && <FieldMessage text={{ name: words.nameWrong, price: words.priceWrong, count: words.countWrong }[problem]} />}
             </View>;
           })}
+        </View>}
+
+        <View className="gap-3">
 
           <View>
             <Text className="text-label font-medium text-text">{words.discount}</Text>
@@ -260,7 +264,7 @@ export default function BillScreen() {
           {!payment && <Text className="text-secondary text-muted">{words.choosePayment}</Text>}
           {tried && wrong && <FieldMessage text={words.fixFields} />}
           <Button label={words.save} disabled={!payment} onPress={save} />
-        </View>}
+        </View>
         {message && <Text accessibilityLiveRegion="polite" selectable className={message.saved ? "text-body text-success" : "text-body text-danger"}>{message.text}</Text>}
 
         <TextInput accessibilityLabel={words.find} placeholder={words.find} value={find} onChangeText={setFind} autoCapitalize="characters" autoCorrect={false}
