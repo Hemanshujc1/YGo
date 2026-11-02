@@ -27,7 +27,18 @@ const indianTime = new Intl.DateTimeFormat(locale, {
   hour12: true,
 });
 
-export const formatNumber = (value: number | bigint) => indianNumber.format(value);
+// Hermes on Android and iOS does not support BigInt in Intl.NumberFormat.format() and throws
+// TypeError: Cannot convert BigInt to number (#479). Format whole rupees and large integers directly
+// using the Indian grouping pattern (3 digits at the right, then groups of 2).
+const groupIndian = (digits: string) =>
+  digits.length <= 3 ? digits : digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + digits.slice(-3);
+
+const formatWholeRupees = (rupees: bigint) => `₹${groupIndian(rupees.toString())}`;
+
+export const formatNumber = (value: number | bigint) =>
+  typeof value === "bigint"
+    ? `${value < 0n ? "−" : ""}${groupIndian((value < 0n ? -value : value).toString())}`
+    : indianNumber.format(value);
 
 // A decimal string without its trailing zeros ("10.00" -> "10", "12.3450" -> "12.345"). It only cuts text,
 // so a rate such as "12.3456" is never rounded (ADR-0004), unlike formatNumber, which keeps three digits.
@@ -45,20 +56,20 @@ const tidyMoney = (text: string) => text.replace("-", "−").replace(/₹\s/, "�
 // rounded -0 into 0 so no "−₹0" appears. A bigint is whole rupees already.
 //
 // A decimal string ("9998999999990001.50", as the server sends it) is split at the point and rounded on its
-// digits with BigInt, so no amount passes through a JS number and loses digits past 15 (#475). Only the
-// bigint path of Intl is used, which Hermes supports. Rounding matches the number path: half away from zero.
+// digits with BigInt, so no amount passes through a JS number and loses digits past 15 (#475). Whole rupees
+// format without Intl BigInt support, so Hermes never throws (#479). Rounding matches the number path: half away from zero.
 const formatMoneyText = (text: string) => {
   if (!/^[-+]?\d+(\.\d+)?$/.test(text)) throw new RangeError(`Not a decimal amount: "${text}"`);
   const [whole = "", fraction = ""] = text.replace(/^[-+]/, "").split(".");
   const paise = BigInt(whole + fraction.padEnd(3, "0").slice(0, 2)) + (fraction.charAt(2) >= "5" ? 1n : 0n);
   const rest = paise % 100n;
-  const rupees = tidyMoney(indianWholeMoney.format(paise / 100n));
+  const rupees = formatWholeRupees(paise / 100n);
   return `${text.startsWith("-") && paise > 0n ? "−" : ""}${rupees}${rest === 0n ? "" : `.${String(rest).padStart(2, "0")}`}`;
 };
 
 export const formatMoney = (value: number | bigint | string) => {
   if (typeof value === "string") return formatMoneyText(value);
-  if (typeof value === "bigint") return tidyMoney(indianWholeMoney.format(value));
+  if (typeof value === "bigint") return `${value < 0n ? "−" : ""}${formatWholeRupees(value < 0n ? -value : value)}`;
   const paise = Math.sign(value) * Math.round(Number((Math.abs(value) * 100).toPrecision(15)));
   return tidyMoney(paise % 100 === 0 ? indianWholeMoney.format(paise / 100 + 0) : indianMoney.format(paise / 100));
 };
