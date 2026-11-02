@@ -25,10 +25,56 @@ const billsSql = `SELECT b.id, b.reference, b.number, b.held_reason AS "heldReas
   FROM counter_bills b LEFT JOIN accounts a ON a.id = b.actor_id LEFT JOIN shop_members m ON m.account_id = b.actor_id AND m.shop_id = b.shop_id
   WHERE b.shop_id = $1`;
 
+const hidden = "[hidden]";
+/** A key the bill does not have: its name could itself be a customer's name or phone, so only its place is kept. */
+const unknownKey = (index: number) => `[hidden key ${index + 1}]`;
+/** At most 9 digits in all (6 whole, 3 after the point), one fewer than a phone number, so a phone number put in an amount is hidden, dot or no dot. A larger amount in an unreadable bill is hidden too. */
+const money = /^\d{1,6}(\.\d{1,3})?$/;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const isMoney = (value: unknown) => typeof value === "string" && money.test(value);
+
+/** One line of a bill: its pack's id, count and price, each only when it has the form the contract gives it; a typed line's name is always hidden. */
+const lineOf = (line: unknown, typed: boolean): unknown => {
+  if (!isRecord(line)) return hidden;
+  return Object.fromEntries(Object.entries(line).map(([key, value], index) => {
+    switch (key) {
+      case "count": return [key, typeof value === "number" && Number.isInteger(value) && Math.abs(value) < 1e6 ? value : hidden];
+      case "unitPrice": return [key, isMoney(value) ? value : hidden];
+      case "packId": return [key, !typed && typeof value === "string" && uuid.test(value) ? value : hidden];
+      case "name": return [key, hidden];
+      default: return [unknownKey(index), hidden];
+    }
+  }));
+};
+
+const readableLines = (typed: boolean) => (value: unknown) => (Array.isArray(value) && value.length <= 100 ? value.map((line) => lineOf(line, typed)) : hidden);
+const readableOf: Record<string, (value: unknown) => unknown> = {
+  lines: readableLines(false),
+  manualLines: readableLines(true),
+  discount: (value) => (isMoney(value) ? value : hidden),
+  total: (value) => (isMoney(value) ? value : hidden),
+  payment: (value) => (value === "cash" || value === "upi" ? value : hidden),
+};
+
+/**
+ * An unreadable bill's stored text for Admin (#53): the bill's own keys, and a value only where it is a known field of
+ * the bill with the form the contract gives it (an id, a count, an amount, cash or upi). Every other key and value
+ * becomes "[hidden]", so a customer's name, phone or consent never reaches Admin wherever the phone put it, and a
+ * typed line's name is hidden too. Text that is not a JSON object is hidden whole. No recursion, so no depth can break it.
+ */
+export function readableInvalidPayload(text: string | null): string | null {
+  if (text === null) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return hidden; }
+  if (!isRecord(parsed)) return hidden;
+  return JSON.stringify(Object.fromEntries(Object.entries(parsed).map(([key, value], index) => Object.hasOwn(readableOf, key) ? [key, readableOf[key]?.(value)] : [unknownKey(index), hidden])));
+}
+
 /** A shop's held and flagged bills, and the ones Admin has dealt with, the open ones first. The newest 200 are enough for one shop's queue. */
 export async function listCounterBills(client: Pick<PoolClient, "query">, shopId: string): Promise<AdminCounterBill[]> {
   const { rows } = await client.query<AdminCounterBill>(`${billsSql} AND (b.held_reason IS NOT NULL OR b.total_mismatch OR EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id)) ORDER BY resolved, b.received_at DESC, b.id LIMIT 200`, [shopId]);
-  return rows;
+  return rows.map((row) => ({ ...row, invalidPayload: readableInvalidPayload(row.invalidPayload) }));
 }
 
 type Row = { id: string; heldReason: string | null; number: number | null; totalMismatch: boolean; actorId: string; clientId: string };
@@ -82,5 +128,5 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
 
   const { rows: [saved] } = await client.query<AdminCounterBill>(`${billsSql} AND b.id = $2`, [shopId, billId]);
   if (!saved) throw new Error("Resolved counter bill vanished");
-  return { bill: saved };
+  return { bill: { ...saved, invalidPayload: readableInvalidPayload(saved.invalidPayload) } };
 }
