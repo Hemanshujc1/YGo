@@ -1,5 +1,5 @@
 import { formatNumber } from "@ygo/format";
-import type { ErrorCode, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
+import type { CounterBillVoidReason, ErrorCode, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -252,6 +252,30 @@ export const strings = {
       held: "Synced · Number pending · YGo will give this bill a number",
       refused: (reason: string) => `Not accepted by YGo: ${reason}`,
     },
+  },
+  // S37 Void a bill (#492): the Owner voids a numbered bill, online, while the server says it may (#54).
+  voids: {
+    open: "Void a bill", title: "Void a bill", back: "Back", loading: "Loading bills", retry: "Try again",
+    offline: "Voiding needs a connection.",
+    empty: "No bills in the last 2 days.",
+    waiting: (count: number) => `${formatNumber(count)} ${count === 1 ? "bill on this phone is" : "bills on this phone are"} waiting to sync. You can void them once they have a number.`,
+    number: (number: number) => `Bill ${formatNumber(number)}`, numberPending: "Number pending",
+    reference: (reference: string) => `Reference ${reference}`,
+    summary: (total: string, payment: string) => `${total} · ${payment}`,
+    pending: "Number pending · can be voided once it has a number",
+    tooOld: "Older than 24 hours",
+    voided: (reason: string) => `Voided · ${reason}`,
+    action: "Void",
+    done: (bill: string) => `${bill} voided.`,
+    sheet: {
+      title: "Void this bill?", reasons: "Why the bill is voided", note: "What happened", noteWrong: "Type what happened, up to 500 characters.",
+      warning: "A voided bill keeps its reference and number. This can't be undone.",
+      confirm: "Void bill", cancel: "Keep bill",
+    },
+    reasons: {
+      wrong_item: "Wrong item billed", wrong_price: "Wrong price or quantity", billed_twice: "Billed twice",
+      not_taken: "Customer did not take the goods", other: "Other",
+    } satisfies Record<CounterBillVoidReason, string>,
   },
   // S08 Waiting to sync and the status line that opens it (#395).
   sync: {

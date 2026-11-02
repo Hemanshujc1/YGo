@@ -6,6 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
+import { ReasonPicker } from "../../components/reason-picker";
 import { money } from "../../lib/money";
 import { clock, createShopOrder, lineLabel, secondsLeft, shortLabel, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
@@ -91,22 +92,7 @@ function RejectSheet({ chosen, onChoose, onConfirm, onCancel }: {
       <View className="flex-1 justify-end bg-scrim">
         <View accessibilityViewIsModal className="gap-2 rounded-t-sheet bg-raised px-4 pt-4" style={{ paddingBottom: insets.bottom + 12 }}>
           <Text accessibilityRole="header" className="text-headline font-semibold text-text">{words.sheet.title}</Text>
-          <View accessibilityRole="radiogroup">
-            {RejectReason.options.map((reason) => (
-              <Pressable
-                key={reason}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: reason === chosen }}
-                onPress={() => onChoose(reason)}
-                className="min-h-12 flex-row items-center gap-3 rounded-input px-3 active:bg-primary-subtle"
-              >
-                <View className={`size-5 items-center justify-center rounded-full border-2 ${reason === chosen ? "border-primary" : "border-border-strong"}`}>
-                  {reason === chosen && <View className="size-2.5 rounded-full bg-primary" />}
-                </View>
-                <Text className="text-body text-text">{words.reasons[reason]}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <ReasonPicker reasons={RejectReason.options} chosen={chosen} words={words.reasons} onChoose={onChoose} />
           <Button label={words.sheet.confirm} disabled={!chosen} onPress={onConfirm} />
           <Button label={words.sheet.cancel} variant="text" onPress={onCancel} />
         </View>

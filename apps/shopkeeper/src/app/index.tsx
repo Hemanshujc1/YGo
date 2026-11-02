@@ -197,6 +197,12 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
           <Text className="text-body font-semibold text-on-primary">{strings.bill.open}</Text>
         </Pressable>
       </Link>}
+      {/* Beside New bill (owner's answer 9 on #54); everyone sees it until Staff screens come with #58. */}
+      {orders && <Link href="/void-bill" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+          <Text className="text-body font-semibold text-primary">{strings.voids.open}</Text>
+        </Pressable>
+      </Link>}
       {stock && <Link href="/stock" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
           <Text className="text-body font-semibold text-primary">{strings.stock.title}</Text>

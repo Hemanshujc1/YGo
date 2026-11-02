@@ -51,7 +51,8 @@ type ButtonProps = {
   disabled?: boolean;
   /** Shows a spinner in place of the label, and takes no taps. */
   busy?: boolean;
-  variant?: "primary" | "secondary" | "text";
+  /** `destructive` is the design system's red button, for an action that can't be undone, such as "Void bill" (#492). */
+  variant?: "primary" | "secondary" | "destructive" | "text";
   /** A 20 px icon before the label, coloured like it: a Lucide icon the app has given `className` (C15, C03). */
   icon?: ComponentType<{ size?: number; className?: string }>;
   /** Puts the icon and label at the start, as on "Use my current location" (C15). */
@@ -61,10 +62,11 @@ type ButtonProps = {
 const boxClass = {
   primary: "h-[52px] bg-primary active:bg-primary-pressed",
   secondary: "h-[52px] border border-border-strong bg-surface active:bg-primary-subtle",
+  destructive: "h-[52px] bg-danger active:opacity-80",
   text: "min-h-12 active:bg-primary-subtle",
 };
 
-/** The primary and secondary buttons (52 high) and the text button (48 high) of the design system. */
+/** The primary, secondary and destructive buttons (52 high) and the text button (48 high) of the design system. */
 export function Button({
   label,
   onPress,
@@ -75,8 +77,8 @@ export function Button({
   alignStart = false,
 }: ButtonProps) {
   const off = disabled || busy;
-  const primary = variant === "primary";
-  const colour = off ? "text-disabled-text" : primary ? "text-on-primary" : "text-primary";
+  const onFill = { primary: "text-on-primary", destructive: "text-on-danger", secondary: "text-primary", text: "text-primary" }[variant];
+  const colour = off ? "text-disabled-text" : onFill;
   const box = off && !busy && variant !== "text" ? "h-[52px] bg-disabled-bg" : boxClass[variant];
   return (
     <Pressable
@@ -88,7 +90,7 @@ export function Button({
       className={`flex-row items-center gap-2 rounded-button px-4 ${alignStart ? "justify-start" : "justify-center"} ${box}`}
     >
       {busy ? (
-        <ActivityIndicator className={primary ? "text-on-primary" : "text-primary"} />
+        <ActivityIndicator className={onFill} />
       ) : (
         <>
           {Icon && <Icon size={20} className={colour} />}

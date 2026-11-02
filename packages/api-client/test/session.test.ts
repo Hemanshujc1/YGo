@@ -315,6 +315,22 @@ describe("each call", () => {
     ]);
   });
 
+  it("lists the shop's counter bills and voids one with its reason (#492)", async () => {
+    const billId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path.endsWith("/void")) return answer(409, { error: { code: "COUNTER_BILL_VOIDED" } });
+      return answer(200, { bills: [] });
+    });
+    await client.verifyCode(signIn);
+    expect(await client.shopCounterBills()).toEqual({ ok: true, data: { bills: [] } });
+    expect(await client.voidCounterBill(billId, { reason: "other", note: "Customer changed mind" })).toMatchObject({ ok: false, status: 409, code: "COUNTER_BILL_VOIDED" });
+    expect(calls.slice(1).map(({ method, path, body: sent }) => ({ method, path, sent }))).toEqual([
+      { method: "GET", path: "/v1/me/counter-bills", sent: undefined },
+      { method: "POST", path: `/v1/me/counter-bills/${billId}/void`, sent: { reason: "other", note: "Customer changed mind" } },
+    ]);
+  });
+
   it("reads a pincode in no Area as its code", async () => {
     const { client } = setup((call) =>
       call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(409, { error: { code: "PINCODE_NOT_IN_AREA" } }),
