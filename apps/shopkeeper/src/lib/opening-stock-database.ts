@@ -3,6 +3,7 @@ import { File } from "expo-file-system";
 import { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY, deleteItemAsync, getItemAsync, setItemAsync } from "expo-secure-store";
 import { defaultDatabaseDirectory, deleteDatabaseAsync, openDatabaseAsync } from "expo-sqlite";
 import { createMMKV } from "react-native-mmkv";
+import { removeAllBillPdfs } from "./bill-pdf-files";
 import { readSavedAccess, type AccessStorage } from "./offline-access";
 import { openingStockQueue, type OpeningStockQueue } from "./opening-stock-queue";
 
@@ -89,6 +90,8 @@ export const offlineStorage: AccessStorage = {
   save: (record) => setItemAsync(`stock-access-${record.account.id}`, JSON.stringify(record), options),
   async erase(id, shopId) {
     accessFlags.set(`blocked:${id}`, shopId);
+    // First, so a failed close below can't keep customers' bill PDFs (#488).
+    removeAllBillPdfs();
     await closeOpeningStock(id);
     const name = `opening-stock-${id}.db`;
     if (new File(databaseDirectory, name).exists) await deleteDatabaseAsync(name);

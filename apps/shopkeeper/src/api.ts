@@ -1,6 +1,7 @@
 import { createApiClient } from "@ygo/api-client";
 import { Email } from "@ygo/contracts";
 import { createSession, phoneTheme, sessionStore, showSignedOut, showUpdateRequired } from "@ygo/mobile";
+import { removeAllBillPdfs } from "./lib/bill-pdf-files";
 import { offlineAccess } from "./lib/offline-access";
 import { closeOpeningStock, offlineStorage } from "./lib/opening-stock-database";
 import Constants from "expo-constants";
@@ -46,6 +47,7 @@ export const session = { ...liveSession, async signOut() {
   access.pause();
   const before = liveSession.get();
   if ("account" in before) void closeOpeningStock(before.account.id).catch(() => undefined);
+  removeAllBillPdfs();
   return liveSession.signOut();
 } };
 
@@ -58,6 +60,8 @@ session.subscribe(() => {
   if (state.status === "signed-out" || (next && previousAccount && next !== previousAccount)) {
     epoch++;
     if (previousAccount) void closeOpeningStock(previousAccount).catch(() => undefined);
+    // Bill PDFs hold customers' names, so none outlives the account on this phone (#488).
+    removeAllBillPdfs();
     access.reset();
   }
   if (next || state.status === "signed-out") previousAccount = next;

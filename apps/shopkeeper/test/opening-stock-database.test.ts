@@ -5,7 +5,9 @@ import { adapter } from "./stock-database-fixture";
 const native = vi.hoisted(() => ({
   secrets: new Map<string, string>(), legacy: new Map<string, string>(), exists: false, files: new Set<string>(), flags: new Map<string, string | boolean>(), delete: vi.fn(), drop: vi.fn(),
   cipher: "4.0", get: vi.fn(), set: vi.fn(), random: vi.fn(), open: vi.fn(), close: vi.fn(), exec: vi.fn(), beforeTransaction: undefined as (() => void) | undefined,
+  clearPdfs: vi.fn(),
 }));
+vi.mock("../src/lib/bill-pdf-files", () => ({ removeAllBillPdfs: native.clearPdfs }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099", getRandomBytesAsync: native.random }));
 vi.mock("expo-file-system", () => ({ File: class { constructor(private directory: string, private name: string) {} get exists() { if (!this.directory.startsWith("file://")) throw new Error("URI is not absolute"); return native.exists || native.files.has(this.name); } } }));
 vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1, getItemAsync: native.get, setItemAsync: native.set, deleteItemAsync: native.delete }));
@@ -129,6 +131,8 @@ it("invalidates handles and erases the account database/key even while actions a
   expect(native.close).toHaveBeenCalled(); expect(native.drop).toHaveBeenCalledWith(`opening-stock-${account}.db`);
   expect(native.delete).toHaveBeenCalledWith(`opening-stock-${account}`, { keychainAccessible: 1 });
   expect(native.legacy.size).toBe(0);
+  // The account's shared bill PDFs go too (#488).
+  expect(native.clearPdfs).toHaveBeenCalled();
 });
 
 it.each(["file", "key"])("keeps the durable block through %s deletion failure and retries after a module restart", async (failure) => {
@@ -147,9 +151,11 @@ it.each(["file", "key"])("keeps the durable block through %s deletion failure an
 it("keeps cleanup blocked until a failed native close can be retried", async () => {
   const { openOpeningStock, offlineStorage } = await import("../src/lib/opening-stock-database");
   await openOpeningStock(account);
-  native.close.mockRejectedValueOnce(new Error("native close busy"));
+  native.close.mockRejectedValueOnce(new Error("native close busy")); native.clearPdfs.mockClear();
   await expect(offlineStorage.erase(account, shop)).rejects.toThrow("native close busy");
   expect(offlineStorage.blocked(account)).toBe(shop);
+  // Bill PDFs are cleared even though the close failed (#488).
+  expect(native.clearPdfs).toHaveBeenCalled();
   await expect(openOpeningStock(account)).rejects.toThrow("cleanup");
   await offlineStorage.erase(account, shop);
   expect(offlineStorage.blocked(account)).toBeUndefined();
