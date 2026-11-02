@@ -120,6 +120,28 @@ describe("Admin resolves held and flagged counter bills (#470)", () => {
     expect(bills.find((found) => found.id === invalidId)).toMatchObject({ heldReason: "invalid", lines: [], invalidPayload: expect.stringContaining('"total":"42"') });
   });
 
+  it("never shows Admin a customer's name, phone or consent, not even in an unreadable bill's payload (#53)", async () => {
+    const { shopId, pack, bill, send, idOf } = await shop();
+    const rice = await pack("5", "50");
+    const line = [{ packId: rice, count: 2, unitPrice: "21" }];
+    const customer = { name: "Meera Kulkarni", phone: "+919876543210", offers: true };
+    // Unreadable for a reason of its own (a repeated pack), with the customer sent where the phone puts it, beside it, and inside a line.
+    const invalid = bill(line, { payload: { lines: [{ ...line[0], customer }, line[0]], total: "42", payment: "cash", customer, customerPhone: "+919876543210", note: "Meera" } });
+    await send([invalid]);
+    const invalidId = await idOf(invalid.id);
+
+    const responses = [await list(shopId), await resolve(shopId, invalidId, "review", "Phone bug, counted by hand"), await list(shopId)];
+    for (const [index, response] of responses.entries()) {
+      expect(response.statusCode).toBe(index === 1 ? 201 : 200);
+      for (const secret of ["Meera", "Kulkarni", "9876543210", "offers"]) expect(response.body).not.toContain(secret);
+    }
+    const { bills } = AdminCounterBillsResponse.parse(responses[0]?.json());
+    const shown = bills.find((found) => found.id === invalidId);
+    expect(JSON.parse(shown?.invalidPayload ?? "")).toEqual({ lines: [{ ...line[0], "[hidden key 4]": "[hidden]" }, line[0]], total: "42", payment: "cash", "[hidden key 4]": "[hidden]", "[hidden key 5]": "[hidden]", "[hidden key 6]": "[hidden]" });
+    // The server keeps what the phone sent.
+    expect((await database.pool.query("SELECT invalid_payload FROM counter_bills WHERE id = $1", [invalidId])).rows[0]?.invalid_payload).toContain("Meera Kulkarni");
+  });
+
   it("numbers a not_listed bill with the shop's next number and takes its stock while its pack is still in the shop", async () => {
     const { shopId, pack, bill, send, stock, idOf, row } = await shop();
     const rice = await pack("1", "10"), withdrawn = await pack("2", "10");
