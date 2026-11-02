@@ -142,6 +142,27 @@ describe("Admin resolves held and flagged counter bills (#470)", () => {
     expect((await database.pool.query("SELECT invalid_payload FROM counter_bills WHERE id = $1", [invalidId])).rows[0]?.invalid_payload).toContain("Meera Kulkarni");
   });
 
+  it("never shows Admin the customer on a bill the server read: flagged, held, or resolved (#53)", async () => {
+    const { shopId, pack, bill, send, idOf } = await shop();
+    const rice = await pack("5", "50");
+    const line = [{ packId: rice, count: 2, unitPrice: "21" }];
+    const customer = { name: "Meera Kulkarni", phone: "+919876543210", offers: true };
+    // One flagged for a wrong total, one held as a repeat of a reference, each with a customer, and a typed line and discount beside it.
+    const flagged = bill(line, { payload: { lines: line, total: "40", payment: "upi", customer } });
+    const first = bill(line, { id: "0f3a91bc-0000-4000-8000-000000000001" });
+    const clash = bill(line, { id: "0f3a91bc-1111-4000-8000-000000000002", payload: { lines: line, manualLines: [{ name: "Rope", count: 1, unitPrice: "30" }], discount: "5", total: "67", payment: "cash", customer } });
+    await send([flagged, first, clash]);
+    const flaggedId = await idOf(flagged.id), clashId = await idOf(clash.id);
+    expect((await database.pool.query("SELECT customer_name, customer_phone, customer_offers FROM counter_bills WHERE id = $1", [flaggedId])).rows[0]).toEqual({ customer_name: "Meera Kulkarni", customer_phone: "+919876543210", customer_offers: true });
+
+    const responses = [await list(shopId), await resolve(shopId, flaggedId, "note", "Total checked by hand"), await resolve(shopId, clashId, "duplicate", "Same bill sent twice"), await list(shopId)];
+    for (const [index, response] of responses.entries()) {
+      expect(response.statusCode).toBe(index === 1 || index === 2 ? 201 : 200);
+      for (const secret of ["Meera", "Kulkarni", "9876543210", "offers", "customer"]) expect(response.body).not.toContain(secret);
+    }
+    expect(AdminCounterBillsResponse.parse(responses[3]?.json()).bills.map((found) => found.id).sort()).toEqual([flaggedId, clashId].sort());
+  });
+
   it("numbers a not_listed bill with the shop's next number and takes its stock while its pack is still in the shop", async () => {
     const { shopId, pack, bill, send, stock, idOf, row } = await shop();
     const rice = await pack("1", "10"), withdrawn = await pack("2", "10");
