@@ -12,7 +12,7 @@ const bill = { lines: [{ packId, count: 3, unitPrice: "21" }], total: "63.00", p
 
 describe("the counter-bill examples on the phone (#468, BIL-9)", () => {
   it.each(COUNTER_BILL_EXAMPLES)("$name", (example) => {
-    expect(counterBillTotal(example.lines)).toBe(example.total);
+    expect(counterBillTotal(example.lines, example.discount)).toBe(example.total);
   });
 });
 

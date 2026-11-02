@@ -10,13 +10,15 @@ const linesOf = (bill: string) => `COALESCE((SELECT json_agg(json_build_object('
     'baseUnit', p.base_unit, 'count', l.count, 'unitPrice', l.unit_price::text) ORDER BY l.position)
   FROM counter_bill_lines l LEFT JOIN packs pk ON pk.id = l.pack_id LEFT JOIN master_products p ON p.id = pk.product_id
   WHERE l.bill_id = ${bill}), '[]'::json)`;
+const manualOf = (bill: string) => `COALESCE((SELECT json_agg(json_build_object('name', m.name, 'count', m.count, 'unitPrice', m.unit_price::text) ORDER BY m.position)
+  FROM counter_bill_manual_lines m WHERE m.bill_id = ${bill}), '[]'::json)`;
 const closing = "r.action <> 'noted'";
 
 const billsSql = `SELECT b.id, b.reference, b.number, b.held_reason AS "heldReason", b.total_mismatch AS "totalMismatch", b.payment,
   b.total::text AS total, b.checked_total::text AS "checkedTotal", b.clock_suspect AS "clockSuspect",
   ${iso("b.made_at")} AS "madeAt", ${iso("b.received_at")} AS "receivedAt", b.invalid_payload AS "invalidPayload",
-  json_build_object('name', a.name, 'role', m.role) AS "madeBy", ${linesOf("b.id")} AS lines,
-  (SELECT json_build_object('id', o.id, 'number', o.number, 'total', o.total::text, 'payment', o.payment, 'madeAt', ${iso("o.made_at")}, 'lines', ${linesOf("o.id")})
+  json_build_object('name', a.name, 'role', m.role) AS "madeBy", ${linesOf("b.id")} AS lines, ${manualOf("b.id")} AS "manualLines", b.discount::text AS discount,
+  (SELECT json_build_object('id', o.id, 'number', o.number, 'total', o.total::text, 'payment', o.payment, 'madeAt', ${iso("o.made_at")}, 'lines', ${linesOf("o.id")}, 'manualLines', ${manualOf("o.id")}, 'discount', o.discount::text)
     FROM counter_bills o WHERE b.held_reason = 'reference_taken' AND o.shop_id = b.shop_id AND o.reference = b.reference AND NOT o.reference_clash) AS original,
   EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id AND ${closing}) AS resolved,
   COALESCE((SELECT json_agg(json_build_object('action', r.action, 'note', r.note, 'stockMoved', r.stock_moved, 'actorName', ra.name,
@@ -115,11 +117,12 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
         FROM counter_bill_lines l LEFT JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = l.pack_id LEFT JOIN packs pk ON pk.id = l.pack_id
         WHERE l.bill_id = $2`, [shopId, billId]);
       if (check && check.lines === check.listed && !check.overflow) {
-        await client.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
+        const moved = await client.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
           SELECT sl.id, $3, $4, 'sale', -(l.count * pk.quantity)
           FROM counter_bill_lines l JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = l.pack_id JOIN packs pk ON pk.id = l.pack_id
           WHERE l.bill_id = $2`, [shopId, billId, bill.actorId, bill.clientId]);
-        stockMoved = true;
+        // A bill of typed lines only (#53) passes the check with no lines and moves nothing.
+        stockMoved = (moved.rowCount ?? 0) > 0;
       }
     }
   }

@@ -14,7 +14,7 @@ const line = { packId: "00000000-0000-4000-8000-000000000701", name: "Toor Dal",
 const bill = (id: number, extra: Partial<AdminCounterBill> = {}): AdminCounterBill => ({
   id: `00000000-0000-4000-8000-00000000090${id}`, reference: `0F3A-91B${id}`, number: null, heldReason: "too_old", totalMismatch: false, payment: "cash",
   total: "42.00", checkedTotal: "42.00", clockSuspect: false, madeAt: "2030-01-01T05:00:00.000Z", receivedAt: "2030-01-02T05:00:00.000Z",
-  madeBy: { name: "Asha", role: "owner" }, lines: [line], invalidPayload: null, original: null, resolved: false, resolutions: [], ...extra,
+  madeBy: { name: "Asha", role: "owner" }, lines: [line], manualLines: [], discount: "0", invalidPayload: null, original: null, resolved: false, resolutions: [], ...extra,
 });
 
 function setup(bills: AdminCounterBill[], resolveCounterBill = vi.fn()) {
@@ -40,10 +40,17 @@ describe("Counter bills screen (#470)", () => {
     expect(screen.getByRole("heading", { name: `${strings.counterBillsOf("Fresh Mart")}` })).toBeTruthy();
   });
 
+  it("shows a typed line and the discount beside the catalog lines, and never the customer (#53)", async () => {
+    setup([bill(1, { manualLines: [{ name: "Loose sugar", count: 3, unitPrice: "12.50" }], discount: "9.50", total: "70.00", checkedTotal: "70.00" })]);
+    const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
+    expect(card.textContent).toContain("Loose sugar (typed) × 3 at ₹12.50");
+    expect(card.textContent).toContain("Discount −₹9.50");
+  });
+
   it("shows very large totals and prices to the last paise, as the server sent them (#475)", async () => {
     const big = { ...line, unitPrice: "4999499999995000.75" };
     setup([bill(1, { heldReason: "reference_taken", total: "9998999999990001.50", checkedTotal: "9998999999990001.55", lines: [big],
-      original: { id: "00000000-0000-4000-8000-000000000999", number: 3, total: "9998999999990001.05", payment: "upi", madeAt: "2030-01-01T04:00:00.000Z", lines: [big] } })]);
+      original: { id: "00000000-0000-4000-8000-000000000999", number: 3, total: "9998999999990001.05", payment: "upi", madeAt: "2030-01-01T04:00:00.000Z", lines: [big], manualLines: [], discount: "0" } })]);
     const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
     expect(card.textContent).toContain("₹9,99,89,99,99,99,90,001.50");
     expect(card.textContent).toContain("₹9,99,89,99,99,99,90,001.55");
@@ -68,7 +75,7 @@ describe("Counter bills screen (#470)", () => {
   });
 
   it("shows the first bill of a clash beside the held one", async () => {
-    setup([bill(1, { heldReason: "reference_taken", original: { id: "00000000-0000-4000-8000-000000000999", number: 3, total: "42.00", payment: "upi", madeAt: "2030-01-01T04:00:00.000Z", lines: [line] } })]);
+    setup([bill(1, { heldReason: "reference_taken", original: { id: "00000000-0000-4000-8000-000000000999", number: 3, total: "42.00", payment: "upi", madeAt: "2030-01-01T04:00:00.000Z", lines: [line], manualLines: [], discount: "0" } })]);
     const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
     expect(card.textContent).toContain(strings.counterBillOriginal);
     expect(card.textContent).toContain(`${strings.counterBillNumbered(3)} · ₹42 · UPI`);

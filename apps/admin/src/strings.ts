@@ -425,6 +425,8 @@ export const strings = {
   counterBillNoNumber: "No number",
   counterBillFlagged: "Total disagrees",
   counterBillClock: "Phone clock looked wrong",
+  counterBillTyped: (name: string) => `${name} (typed)`,
+  counterBillDiscount: (amount: string) => `Discount −${amount}`,
   counterBillPhoneTotal: "Phone's total",
   counterBillServerTotal: "Server's total",
   counterBillPayment: { cash: "Cash", upi: "UPI" },

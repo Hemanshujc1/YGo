@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShopState } from "./shops";
-import { BillAmount, PackQuantity, ShopPrice } from "./fields";
+import { BillAmount, CounterBillName, PackQuantity, Phone, ShopPrice } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
 
 /** Explicit access result: only an authenticated absence/closure ends cached access. */
@@ -33,12 +33,27 @@ export type ShopStockResponse = z.infer<typeof ShopStockResponse>;
  * the phone showed. Amounts are rupees with at most two decimals, so whole paise, like every money field.
  */
 export const CounterBillLine = z.strictObject({ packId: z.uuid(), count: z.number().int().positive().max(9999), unitPrice: ShopPrice });
+/** A line typed at the counter (#53, BIL-1): a name, a count and a unit price. It names no pack and moves no stock. */
+export const CounterBillManualLine = z.strictObject({ name: CounterBillName, count: CounterBillLine.shape.count, unitPrice: ShopPrice });
+/** Who the bill is for: a name, a phone, or both. The offers tick needs a phone to send them to. */
+export const CounterBillCustomer = z.strictObject({ name: CounterBillName.optional(), phone: Phone.optional(), offers: z.boolean() })
+  .refine((customer) => customer.name !== undefined || customer.phone !== undefined)
+  .refine((customer) => !customer.offers || customer.phone !== undefined);
+/**
+ * `discount` is rupees taken off the lines' sum, and `total` is that sum less the discount (BIL-9). Both new
+ * parts are left out of a bill that has none, so a bill queued before #53 is still valid.
+ */
 export const CounterBillPayload = z.strictObject({
-  lines: z.array(CounterBillLine).min(1).max(100).refine((lines) => new Set(lines.map((line) => line.packId)).size === lines.length),
+  lines: z.array(CounterBillLine).max(100),
+  manualLines: z.array(CounterBillManualLine).max(100).optional(),
+  discount: BillAmount.optional(),
+  customer: CounterBillCustomer.optional(),
   total: BillAmount,
   payment: z.enum(["cash", "upi"]),
-});
+}).refine((bill) => new Set(bill.lines.map((line) => line.packId)).size === bill.lines.length)
+  .refine((bill) => bill.lines.length + (bill.manualLines?.length ?? 0) >= 1 && bill.lines.length + (bill.manualLines?.length ?? 0) <= 100);
 export type CounterBillLine = z.infer<typeof CounterBillLine>;
+export type CounterBillManualLine = z.infer<typeof CounterBillManualLine>;
 export type CounterBillPayload = z.infer<typeof CounterBillPayload>;
 /** Why the server kept a bill without a number; Admin resolves it (BIL-5). */
 export const CounterBillHeldReason = z.enum(["reference_taken", "not_listed", "too_old", "too_large", "invalid"]);

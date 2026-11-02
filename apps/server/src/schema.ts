@@ -377,6 +377,12 @@ export const counterBills = pgTable("counter_bills", {
   total: numeric("total", { precision: 20, scale: 2 }),
   checkedTotal: numeric("checked_total", { precision: 20, scale: 2 }),
   totalMismatch: boolean("total_mismatch").notNull().generatedAlwaysAs(sql`COALESCE(total <> checked_total, false)`),
+  // Rupees taken off the lines' sum (#53); the checked total is that sum less this.
+  discount: numeric("discount", { precision: 20, scale: 2 }).notNull().default("0"),
+  // Who the bill is for, if the shop typed it (BIL-1). Never shown to Admin; the offers tick needs a phone.
+  customerName: text("customer_name"),
+  customerPhone: text("customer_phone"),
+  customerOffers: boolean("customer_offers").notNull().default(false),
   clockSuspect: boolean("clock_suspect").notNull(),
   madeAt: timestamp("made_at", { withTimezone: true }).notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
@@ -392,6 +398,22 @@ export const counterBills = pgTable("counter_bills", {
   check("counter_bills_payment_valid", sql`${table.payment} IN ('cash', 'upi')`),
   check("counter_bills_reference_valid", sql`${table.reference} ~ '^[0-9A-F]{4}-[0-9A-F]{4}$'`),
   check("counter_bills_total_valid", sql`${table.total} >= 0 AND ${table.checkedTotal} >= 0`),
+  check("counter_bills_discount_valid", sql`${table.discount} >= 0 AND ${table.discount} <> 'NaN'::numeric`),
+  check("counter_bills_customer_valid", sql`(${table.customerName} IS NOT NULL OR ${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})
+    AND (${table.customerPhone} IS NOT NULL OR NOT ${table.customerOffers})`),
+]);
+
+// A line typed at the counter (#53, BIL-1): named and priced by the shop, tied to no pack, moving no stock.
+export const counterBillManualLines = pgTable("counter_bill_manual_lines", {
+  billId: uuid("bill_id").notNull().references(() => counterBills.id),
+  position: integer("position").notNull(),
+  name: text("name").notNull(),
+  count: integer("count").notNull(),
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.billId, table.position] }),
+  check("counter_bill_manual_lines_valid", sql`${table.position} > 0 AND ${table.count} > 0 AND ${table.unitPrice} >= 0 AND ${table.unitPrice} <> 'NaN'::numeric
+    AND btrim(${table.name}) <> '' AND char_length(${table.name}) <= 80`),
 ]);
 
 export const counterBillLines = pgTable("counter_bill_lines", {

@@ -47,7 +47,7 @@ it("keeps counter bills to whole packs of distinct listings with exact amounts, 
   const bill = { lines: [{ packId: id, count: 2, unitPrice: "99.50" }, { packId: other, count: 1, unitPrice: "0" }], total: "199", payment: "cash" };
   expect(CounterBillPayload.safeParse(bill).success).toBe(true);
   for (const change of [{ lines: [] }, { lines: [bill.lines[0], bill.lines[0]] }, { lines: [{ ...bill.lines[0], count: 1.5 }] },
-    { lines: [{ ...bill.lines[0], unitPrice: "1.005" }] }, { total: "1.005" }, { total: 199 }, { payment: "card" }, { discount: "1" }]) {
+    { lines: [{ ...bill.lines[0], unitPrice: "1.005" }] }, { total: "1.005" }, { total: 199 }, { payment: "card" }, { discount: "1.005" }, { discount: 1 }]) {
     expect(CounterBillPayload.safeParse({ ...bill, ...change }).success).toBe(false);
   }
   // The largest bill: 100 distinct packs, each 9,999 at the largest shop price (#471).
@@ -61,4 +61,23 @@ it("keeps counter bills to whole packs of distinct listings with exact amounts, 
   expect(CounterBillResponse.safeParse({ ...answer, number: null, heldReason: "too_old" }).success).toBe(true);
   expect(CounterBillResponse.safeParse({ ...answer, heldReason: "too_old" }).success).toBe(false);
   expect(CounterBillResponse.safeParse({ ...answer, number: null }).success).toBe(false);
+});
+
+it("takes typed lines, a discount and a customer on a counter bill, and refuses what could not be billed (#53)", async () => {
+  const { CounterBillPayload } = await import("../src/sync");
+  const base = { lines: [{ packId: id, count: 1, unitPrice: "21" }], total: "21", payment: "cash" };
+  const typed = { name: "Loose sugar", count: 3, unitPrice: "12.50" };
+  expect(CounterBillPayload.safeParse({ ...base, lines: [], manualLines: [typed] }).success).toBe(true);
+  expect(CounterBillPayload.safeParse({ ...base, manualLines: [typed], discount: "9.50", customer: { name: "Meena Rao", phone: "98123 45678", offers: true } }).data?.customer?.phone).toBe("+919812345678");
+  expect(CounterBillPayload.safeParse({ ...base, customer: { phone: "+919812345678", offers: false } }).success).toBe(true);
+  for (const change of [{ lines: [], manualLines: [] }, { manualLines: [{ ...typed, name: "  " }] }, { manualLines: [{ ...typed, name: "x".repeat(81) }] },
+    { manualLines: [{ ...typed, name: "a\0b" }] }, { manualLines: [{ ...typed, name: "a\ud800" }] }, { manualLines: [{ ...typed, packId: id }] },
+    { manualLines: [{ ...typed, unitPrice: "1.005" }] }, { customer: { offers: false } }, { customer: { name: "Meena", offers: true } },
+    { customer: { name: "Meena", phone: "12345", offers: false } }, { customer: { name: "M", offers: false, note: "x" } }]) {
+    expect(CounterBillPayload.safeParse({ ...base, ...change }).success).toBe(false);
+  }
+  // One hundred lines in all, catalog and typed together.
+  const many = (length: number) => Array.from({ length }, (_, index) => ({ ...typed, name: `Item ${index}` }));
+  expect(CounterBillPayload.safeParse({ ...base, manualLines: many(99) }).success).toBe(true);
+  expect(CounterBillPayload.safeParse({ ...base, manualLines: many(100) }).success).toBe(false);
 });
