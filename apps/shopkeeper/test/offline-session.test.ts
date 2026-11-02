@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedAccess } from "../src/lib/offline-access";
 
 const mock = vi.hoisted(() => ({ me: vi.fn(), lookup: vi.fn(), signOut: vi.fn(), token: "saved-token" as string | null,
-  record: null as SavedAccess | null, active: undefined as string | undefined, close: vi.fn() }));
+  record: null as SavedAccess | null, active: undefined as string | undefined, close: vi.fn(), clearPdfs: vi.fn() }));
+vi.mock("../src/lib/bill-pdf-files", () => ({ removeAllBillPdfs: mock.clearPdfs }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "1.0.0" } } }));
 vi.mock("@ygo/api-client", () => ({ createApiClient: () => ({ me: mock.me, syncAccess: mock.lookup, signOut: mock.signOut, setTheme: vi.fn() }) }));
 vi.mock("@ygo/mobile", async () => ({
@@ -55,7 +56,16 @@ describe("Shopkeeper launch and session lifecycle", () => {
     const { session, access, accountEpoch } = await import("../src/api");
     await session.check(); const before = accountEpoch(); await session.signOut();
     expect(accountEpoch()).toBeGreaterThan(before); expect(mock.close).toHaveBeenCalledWith(account.id);
+    // Sign-out removes every shared bill PDF (#488).
+    expect(mock.clearPdfs).toHaveBeenCalled();
     session.signedIn({ ...account, id: "00000000-0000-4000-8000-000000000003" });
     expect(access.allowed(account.id, shopId)).toBe(false); expect(mock.record?.account.id).toBe(account.id);
+  });
+  it("removes every shared bill PDF when another account signs in, but not on a plain check (#488)", async () => {
+    const { session } = await import("../src/api");
+    await session.check();
+    expect(mock.clearPdfs).not.toHaveBeenCalled();
+    session.signedIn({ ...account, id: "00000000-0000-4000-8000-000000000003" });
+    expect(mock.clearPdfs).toHaveBeenCalledTimes(1);
   });
 });

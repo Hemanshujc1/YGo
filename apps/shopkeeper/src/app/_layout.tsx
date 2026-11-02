@@ -3,10 +3,13 @@ import { Navigator, Slot } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { StockAccess } from "../components/stock-access";
 import { SignOut } from "../components/sign-out";
+import { removeOldBillPdfs } from "../lib/bill-pdf-files";
 import { strings } from "../strings";
 import "../global.css";
 
 applySavedTheme();
+// Bill PDFs shared over an hour ago (#488); younger ones may still be read by WhatsApp or Gmail.
+removeOldBillPdfs();
 
 export default function Layout() {
   return (

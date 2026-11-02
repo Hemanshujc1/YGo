@@ -2,11 +2,12 @@ import regular from "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf";
 import medium from "@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf";
 import semibold from "@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf";
 import { Asset } from "expo-asset";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { printToFileAsync } from "expo-print";
 import { shareAsync } from "expo-sharing";
 import { strings } from "../strings";
 import { billHtml, type BillPdf } from "./bill-pdf";
+import { billPdfClears, removeOldBillPdfs, shareFolder } from "./bill-pdf-files";
 
 // Read when a bill is shared, not kept in memory: bills are shared now and then.
 async function read(font: number): Promise<string> {
@@ -19,28 +20,38 @@ let queue: Promise<void> = Promise.resolve();
 
 /**
  * Makes the bill's PDF on the phone, offline too, and opens the share sheet (#53). A4 at 72 points an inch.
- * The file is named after the bill so the customer sees "YGo bill A1B2-C3D4.pdf". It holds the customer's name,
- * so the folder is emptied before each share and keeps only the latest.
+ * The file is named after the bill so the customer sees "YGo bill A1B2-C3D4.pdf", in a folder of its own (#488).
+ * Before each share, PDFs over an hour old are deleted; younger ones stay, since a receiving app may read one
+ * after its share sheet closes.
  *
- * Shares run one at a time, so emptying the folder never removes the PDF of a share still in progress.
- * There is no timeout: expo-sharing itself refuses a second share while one is pending, so a stuck sheet
- * would block sharing anyway. This does not cover a receiving app that keeps reading after its share finished.
+ * Shares run one at a time. There is no timeout: expo-sharing itself refuses a second share while one is pending,
+ * so a stuck sheet would block sharing anyway.
  */
 export function shareBill(input: Omit<BillPdf, "fonts">): Promise<void> {
-  const turn = queue.then(() => share(input));
+  // Taken at the tap: a sign-out or account switch before this share's turn or during it means its PDF isn't kept.
+  const clears = billPdfClears();
+  const turn = queue.then(() => share(input, clears));
   queue = turn.catch(() => undefined);
   return turn;
 }
 
-async function share(input: Omit<BillPdf, "fonts">): Promise<void> {
+async function share(input: Omit<BillPdf, "fonts">, clears: number): Promise<void> {
+  const signedOut = () => { if (billPdfClears() !== clears) throw new Error("Signed out while sharing"); };
+  signedOut();
+  removeOldBillPdfs();
   const [r, m, s] = await Promise.all([read(regular), read(medium), read(semibold)]);
   const { uri } = await printToFileAsync({ html: billHtml({ ...input, fonts: { regular: r, medium: m, semibold: s } }), width: 595, height: 842 });
   try {
-    const folder = new Directory(Paths.cache, "bills");
-    if (folder.exists) folder.delete();
-    folder.create();
+    signedOut();
+    const folder = shareFolder();
     const named = new File(folder, `${strings.bill.pdf.file(input.bill.reference)}.pdf`);
-    await new File(uri).move(named);
+    try {
+      await new File(uri).move(named);
+      signedOut();
+    } catch (error) {
+      try { folder.delete(); } catch { /* the next routine cleanup removes it */ }
+      throw error;
+    }
     await shareAsync(named.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf", dialogTitle: strings.bill.share });
   } finally {
     // A failed move leaves the printed PDF, with the customer's name, outside the bills folder.

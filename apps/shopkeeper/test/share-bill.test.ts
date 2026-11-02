@@ -1,70 +1,105 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BillRow } from "../src/lib/opening-stock-queue";
+import { bills, disk } from "./fake-file-system";
 
-// A tiny file system: the paths that exist, a folder delete that removes what's inside, and a share sheet that stays open until told.
-const fs = vi.hoisted(() => ({ files: new Set<string>(), sheets: [] as Array<{ uri: string; existed: () => boolean; close: (error?: Error) => void }>, prints: 0, moveFails: false }));
+// Share sheets stay open until a test closes them, like a sheet the shopkeeper is still using.
+const io = vi.hoisted(() => ({ sheets: [] as Array<{ uri: string; existed: () => boolean; close: (error?: Error) => void }>, prints: 0, printing: null as Promise<void> | null }));
 vi.mock("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf", () => ({ default: 1 }));
 vi.mock("@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf", () => ({ default: 2 }));
 vi.mock("@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf", () => ({ default: 3 }));
 vi.mock("expo-asset", () => ({ Asset: { loadAsync: async (id: number) => [{ localUri: `file:///font-${id}.ttf` }] } }));
-vi.mock("expo-file-system", () => {
-  const path = (parts: Array<string | { uri: string }>) => parts.map((part) => typeof part === "string" ? part : part.uri).join("/");
-  class File {
-    uri: string;
-    constructor(...parts: Array<string | { uri: string }>) { this.uri = path(parts); }
-    async base64() { return "Rk9OVA=="; }
-    get exists() { return fs.files.has(this.uri); }
-    delete() { fs.files.delete(this.uri); }
-    async move(to: { uri: string }) { if (fs.moveFails) throw new Error("disk full"); fs.files.delete(this.uri); fs.files.add(to.uri); }
-  }
-  class Directory {
-    uri: string;
-    constructor(...parts: Array<string | { uri: string }>) { this.uri = path(parts); }
-    get exists() { return [...fs.files].some((file) => file.startsWith(`${this.uri}/`)); }
-    delete() { for (const file of [...fs.files]) if (file.startsWith(`${this.uri}/`)) fs.files.delete(file); }
-    create() {}
-  }
-  return { File, Directory, Paths: { cache: { uri: "file:///cache" } } };
+vi.mock("expo-file-system", () => import("./fake-file-system"));
+vi.mock("expo-print", async () => {
+  const { disk: files } = await import("./fake-file-system");
+  return { printToFileAsync: async () => { await io.printing; const uri = `file:///print-${++io.prints}.pdf`; files.files.set(uri, files.now); return { uri }; } };
 });
-vi.mock("expo-print", () => ({ printToFileAsync: async () => { const uri = `file:///print-${++fs.prints}.pdf`; fs.files.add(uri); return { uri }; } }));
-vi.mock("expo-sharing", () => ({ shareAsync: (uri: string) => new Promise<void>((resolve, reject) => {
-  fs.sheets.push({ uri, existed: () => fs.files.has(uri), close: (error) => error ? reject(error) : resolve() });
-}) }));
+vi.mock("expo-sharing", async () => {
+  const { disk: files } = await import("./fake-file-system");
+  return { shareAsync: (uri: string) => new Promise<void>((resolve, reject) => {
+    io.sheets.push({ uri, existed: () => files.files.has(uri), close: (error) => error ? reject(error) : resolve() });
+  }) };
+});
 
-const bill = (reference: string): BillRow => ({ id: randomish(reference), reference, createdAt: "2026-11-02T06:30:00.000Z", status: "pending", number: null, code: null,
+const hour = 60 * 60 * 1000, start = 1_800_000_000_000;
+const bill = (reference: string): BillRow => ({ id: `${reference.replace("-", "").toLowerCase()}-0000-4000-8000-000000000001`, reference,
+  createdAt: "2026-11-02T06:30:00.000Z", status: "pending", number: null, code: null,
   lines: [], manualLines: [{ name: "Rope", count: 1, unitPrice: "15" }], total: "15.00", payment: "cash" });
-function randomish(reference: string) { return `${reference.replace("-", "").toLowerCase()}-0000-4000-8000-000000000001`; }
 const input = (reference: string) => ({ bill: bill(reference), shopName: "Sai", label: () => null });
-// The open share sheet number n, failing here rather than hanging when it never opened.
+// The share sheet number n, failing here rather than hanging when it never opened.
 async function sheet(n: number) {
-  await vi.waitFor(() => expect(fs.sheets).toHaveLength(n + 1));
-  const open = fs.sheets[n];
+  await vi.waitFor(() => expect(io.sheets).toHaveLength(n + 1));
+  const open = io.sheets[n];
   if (!open) throw new Error(`share sheet ${n} never opened`);
   return open;
 }
+function at(time: number) { disk.now = time; vi.spyOn(Date, "now").mockReturnValue(time); }
+const pdfs = () => [...disk.files.keys()].filter((uri) => uri.startsWith(`${bills}/`));
 
-describe("sharing bill PDFs (#53)", () => {
+describe("sharing bill PDFs (#53, #488)", () => {
   // A fresh module each test, so a sheet left open by one test can't hold the next one's queue.
   let shareBill: typeof import("../src/lib/share-bill").shareBill;
+  let removeAllBillPdfs: typeof import("../src/lib/bill-pdf-files").removeAllBillPdfs;
   beforeEach(async () => {
-    fs.files.clear(); fs.sheets = []; fs.prints = 0; fs.moveFails = false;
+    disk.reset(); io.sheets = []; io.prints = 0; io.printing = null; vi.restoreAllMocks(); at(start);
     vi.resetModules();
     ({ shareBill } = await import("../src/lib/share-bill"));
+    ({ removeAllBillPdfs } = await import("../src/lib/bill-pdf-files"));
   });
 
-  it("waits for an open share sheet before making the next PDF, so emptying the folder never removes the one being shared", async () => {
+  it("keeps a finished share's PDF when the next bill is shared, since the receiving app may not have read it yet", async () => {
+    const first = shareBill(input("AAAA-0001"));
+    const one = await sheet(0);
+    expect(one.uri).toMatch(new RegExp(`^${bills}/\\d+-\\d+/YGo bill AAAA-0001\\.pdf$`));
+    one.close(); await first;
+
+    at(start + 5 * 60_000);
+    const second = shareBill(input("BBBB-0002"));
+    const two = await sheet(1);
+    expect(one.existed()).toBe(true);
+    expect(two.existed()).toBe(true);
+    two.close(); await second;
+  });
+
+  it("shares the same bill twice into two folders with the same file name, neither touching the other", async () => {
+    const first = shareBill(input("AAAA-0001"));
+    const one = await sheet(0);
+    one.close(); await first;
+    const second = shareBill(input("AAAA-0001"));
+    const two = await sheet(1);
+    expect(two.uri).not.toBe(one.uri);
+    expect(two.uri.endsWith("/YGo bill AAAA-0001.pdf")).toBe(true);
+    expect(one.existed() && two.existed()).toBe(true);
+    two.close(); await second;
+  });
+
+  it("deletes PDFs over an hour old before each share, and none younger", async () => {
+    for (const [ago, n] of [[hour + 1, 1], [hour - 1, 2]] as const) {
+      disk.folders.add(bills); disk.folders.add(`${bills}/${start - ago}-${n}`);
+      disk.files.set(`${bills}/${start - ago}-${n}/YGo bill OLD0-000${n}.pdf`, start - ago);
+    }
+    const sharing = shareBill(input("AAAA-0001"));
+    const one = await sheet(0);
+    expect(pdfs().sort()).toEqual([`${bills}/${start - hour + 1}-2/YGo bill OLD0-0002.pdf`, one.uri].sort());
+    one.close(); await sharing;
+  });
+
+  it("still shares when cleanup fails", async () => {
+    disk.folders.add(bills); disk.failList = true;
+    const sharing = shareBill(input("AAAA-0001"));
+    const one = await sheet(0);
+    expect(one.existed()).toBe(true);
+    one.close(); await expect(sharing).resolves.toBeUndefined();
+  });
+
+  it("runs overlapping shares one at a time, and the open sheet's PDF stays", async () => {
     const first = shareBill(input("AAAA-0001")), second = shareBill(input("BBBB-0002"));
     const one = await sheet(0);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.sheets).toHaveLength(1);
-    expect(fs.prints).toBe(1);
-    expect(one.existed()).toBe(true);
-
+    expect(io.sheets).toHaveLength(1);
+    expect(io.prints).toBe(1);
     one.close(); await first;
     const two = await sheet(1);
-    expect(two.uri).toBe("file:///cache/bills/YGo bill BBBB-0002.pdf");
-    // Cleanup still keeps only the latest PDF.
-    expect([...fs.files]).toEqual(["file:///cache/bills/YGo bill BBBB-0002.pdf"]);
+    expect(one.existed() && two.existed()).toBe(true);
     two.close(); await second;
   });
 
@@ -75,9 +110,25 @@ describe("sharing bill PDFs (#53)", () => {
     (await sheet(1)).close(); await expect(second).resolves.toBeUndefined();
   });
 
-  it("removes the printed PDF when it can't be moved into the bills folder", async () => {
-    fs.moveFails = true;
+  it("removes the printed PDF and its empty folder when it can't be moved", async () => {
+    disk.failMove = true;
     await expect(shareBill(input("AAAA-0001"))).rejects.toThrow("disk full");
-    expect([...fs.files]).toEqual([]);
+    expect([...disk.files.keys()]).toEqual([]);
+    expect([...disk.folders].filter((uri) => uri.startsWith(`${bills}/`))).toEqual([]);
+  });
+
+  it("keeps no PDF from a share still printing or waiting when the shopkeeper signs out", async () => {
+    let printed!: () => void;
+    io.printing = new Promise((resolve) => { printed = resolve; });
+    const printing = shareBill(input("AAAA-0001")), waiting = shareBill(input("BBBB-0002"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    removeAllBillPdfs();
+    printed();
+    await expect(printing).rejects.toThrow("Signed out");
+    await expect(waiting).rejects.toThrow("Signed out");
+    // The waiting share stops before printing.
+    expect(io.prints).toBe(1);
+    expect(io.sheets).toHaveLength(0);
+    expect([...disk.files.keys()]).toEqual([]);
   });
 });
