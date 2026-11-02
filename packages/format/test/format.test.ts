@@ -113,6 +113,32 @@ describe("Indian display formats with Android's space after ₹", () => {
   expectIndianFormats();
 });
 
+// Hermes on Android and iOS throws TypeError: Cannot convert BigInt to number when format() receives BigInt (#479).
+describe("Indian display formats on Hermes (no BigInt in Intl)", () => {
+  type Format = (value: number | bigint) => string;
+  const original = Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype, "format") as PropertyDescriptor;
+  const originalGet = original.get as (this: Intl.NumberFormat) => Format;
+
+  beforeAll(() => {
+    Object.defineProperty(Intl.NumberFormat.prototype, "format", {
+      configurable: true,
+      get(this: Intl.NumberFormat) {
+        const format = originalGet.call(this);
+        return ((value) => {
+          if (typeof value === "bigint") throw new TypeError("Cannot convert BigInt to number");
+          return format(value);
+        }) satisfies Format;
+      },
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(Intl.NumberFormat.prototype, "format", original);
+  });
+
+  expectIndianFormats();
+});
+
 describe("phone numbers", () => {
   it("shows a stored Indian number as two groups of five, without +91", () => {
     expect(formatPhone("+919876543210")).toBe("98765 43210");
