@@ -196,6 +196,21 @@ describe("Admin resolves held and flagged counter bills (#470)", () => {
     expect(await movements()).toBe(0);
   });
 
+  it("numbers a held bill of typed lines only and records that no stock moved (#53)", async () => {
+    const { shopId, pack, bill, send, idOf, row } = await shop();
+    await pack("1", "10");
+    const typed = bill([], { createdAt: "2029-12-24T00:00:00.000Z", clockSuspect: true,
+      payload: { lines: [], manualLines: [{ name: "Rope", count: 2, unitPrice: "15" }], total: "30", payment: "cash" } });
+    await send([typed]);
+    expect(await row(typed.id)).toEqual({ number: null, held_reason: "too_old" });
+
+    const done = await resolve(shopId, await idOf(typed.id), "number", "Rope sold at the counter");
+    expect(done.statusCode).toBe(201);
+    expect(done.json()).toMatchObject({ number: 1, heldReason: null, resolved: true, resolutions: [{ action: "numbered", stockMoved: false }] });
+    expect(await movements()).toBe(0);
+    expect((await database.pool.query("SELECT stock_moved FROM counter_bill_resolutions")).rows).toEqual([{ stock_moved: false }]);
+  });
+
   it("numbers a too_old bill and takes its stock, but not a too_large one", async () => {
     const { shopId, pack, bill, send, stock, idOf, row } = await shop();
     const rice = await pack("1", "10"), largest = await pack("999999999.999", "1");

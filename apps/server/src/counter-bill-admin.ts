@@ -117,11 +117,12 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
         FROM counter_bill_lines l LEFT JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = l.pack_id LEFT JOIN packs pk ON pk.id = l.pack_id
         WHERE l.bill_id = $2`, [shopId, billId]);
       if (check && check.lines === check.listed && !check.overflow) {
-        await client.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
+        const moved = await client.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity)
           SELECT sl.id, $3, $4, 'sale', -(l.count * pk.quantity)
           FROM counter_bill_lines l JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = l.pack_id JOIN packs pk ON pk.id = l.pack_id
           WHERE l.bill_id = $2`, [shopId, billId, bill.actorId, bill.clientId]);
-        stockMoved = true;
+        // A bill of typed lines only (#53) passes the check with no lines and moves nothing.
+        stockMoved = (moved.rowCount ?? 0) > 0;
       }
     }
   }
