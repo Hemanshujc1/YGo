@@ -83,6 +83,16 @@ describe("sharing bill PDFs (#53, #488)", () => {
     one.close(); await sharing;
   });
 
+  it("finishes an unfinished sign-out clear before sharing, without restarting the app", async () => {
+    const old = `${bills}/${start - 60_000}-1`;
+    disk.folders.add(bills); disk.folders.add(old); disk.files.set(`${old}/YGo bill OLD0-0001.pdf`, start - 60_000);
+    disk.files.set("file:///documents/bill-pdfs-clear-pending", start - 1); disk.texts.set("file:///documents/bill-pdfs-clear-pending", String(start - 1));
+    const sharing = shareBill(input("AAAA-0001"));
+    const one = await sheet(0);
+    expect(pdfs()).toEqual([one.uri]);
+    one.close(); await sharing;
+  });
+
   it("still shares when cleanup fails", async () => {
     disk.folders.add(bills); disk.failList = true;
     const sharing = shareBill(input("AAAA-0001"));

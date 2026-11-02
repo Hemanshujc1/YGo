@@ -3,12 +3,14 @@ import { Navigator, Slot } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { StockAccess } from "../components/stock-access";
 import { SignOut } from "../components/sign-out";
-import { removeOldBillPdfs } from "../lib/bill-pdf-files";
+import { removeOldBillPdfs, retryBillPdfClear } from "../lib/bill-pdf-files";
 import { strings } from "../strings";
 import "../global.css";
 
 applySavedTheme();
-// Bill PDFs shared over an hour ago (#488); younger ones may still be read by WhatsApp or Gmail.
+// A sign-out clear that left customer PDFs behind is finished first; then bill PDFs shared over an hour ago go (#488).
+// Younger ones may still be read by WhatsApp or Gmail.
+retryBillPdfClear();
 removeOldBillPdfs();
 
 export default function Layout() {

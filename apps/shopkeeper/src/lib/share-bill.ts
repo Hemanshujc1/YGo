@@ -7,7 +7,7 @@ import { printToFileAsync } from "expo-print";
 import { shareAsync } from "expo-sharing";
 import { strings } from "../strings";
 import { billHtml, type BillPdf } from "./bill-pdf";
-import { billPdfClears, removeOldBillPdfs, shareFolder } from "./bill-pdf-files";
+import { billPdfClears, removeOldBillPdfs, retryBillPdfClear, shareFolder } from "./bill-pdf-files";
 
 // Read when a bill is shared, not kept in memory: bills are shared now and then.
 async function read(font: number): Promise<string> {
@@ -38,6 +38,7 @@ export function shareBill(input: Omit<BillPdf, "fonts">): Promise<void> {
 async function share(input: Omit<BillPdf, "fonts">, clears: number): Promise<void> {
   const signedOut = () => { if (billPdfClears() !== clears) throw new Error("Signed out while sharing"); };
   signedOut();
+  retryBillPdfClear();
   removeOldBillPdfs();
   const [r, m, s] = await Promise.all([read(regular), read(medium), read(semibold)]);
   const { uri } = await printToFileAsync({ html: billHtml({ ...input, fonts: { regular: r, medium: m, semibold: s } }), width: 595, height: 842 });

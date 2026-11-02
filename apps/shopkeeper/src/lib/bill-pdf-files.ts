@@ -51,12 +51,82 @@ let clears = 0;
 /** Counts full clears, so a share running across a sign-out can tell and keep nothing. */
 export const billPdfClears = () => clears;
 
-/** On sign-out, account switch and account erase: every bill PDF goes, since each holds a customer's name. */
-export function removeAllBillPdfs(): void {
+// Outside the cache, so it survives the cache being cleared: the time of a full clear that left files behind.
+const pending = () => new File(Paths.document, "bill-pdfs-clear-pending");
+
+// Deletes an entry, falling back to its contents one by one when the whole delete fails.
+// True when no file is left; an empty folder that won't delete holds no customer data.
+function wipe(entry: Directory | File): boolean {
+  try { entry.delete(); return true; } catch { /* fall back below */ }
+  if (!(entry instanceof Directory)) return false;
+  let children: Array<Directory | File>;
+  try { children = entry.list(); } catch { return false; }
+  let gone = true;
+  for (const child of children) gone = wipe(child) && gone;
+  try { entry.delete(); } catch { /* empty or not, its files are what matter */ }
+  return gone;
+}
+
+// The recorded clear time; null when it is missing, blank or unreadable, which means "delete everything".
+function recorded(marker: File): number | null {
+  const at = Number(marker.textSync());
+  return at > 0 && Number.isFinite(at) ? at : null;
+}
+
+function remember(at: number) {
+  try {
+    const marker = pending();
+    if (!marker.exists) marker.create();
+    // Keep the later time, so a second failed clear can't shrink what the retry covers.
+    const before = recorded(marker);
+    marker.write(String(before === null ? at : Math.max(before, at)));
+  } catch { /* nothing more can be done until the next clear */ }
+}
+function forget() {
+  try { const marker = pending(); if (marker.exists) marker.delete(); } catch { /* the next launch retries harmlessly */ }
+}
+
+/**
+ * On sign-out, account switch and account erase: every bill PDF goes, since each holds a customer's name.
+ * A folder that won't delete is emptied file by file. Anything still left is recorded and retried at the next launch.
+ * Returns whether every PDF is gone.
+ */
+export function removeAllBillPdfs(now = Date.now()): boolean {
   clears++;
-  for (const folder of folders()) {
-    try {
-      if (folder.exists) folder.delete();
-    } catch { /* the next routine cleanup tries again */ }
+  const list = folders();
+  let gone = list.length > 0;
+  for (const folder of list) {
+    try { if (folder.exists && !wipe(folder)) gone = false; } catch { gone = false; }
   }
+  if (gone) forget(); else remember(now);
+  return gone;
+}
+
+/**
+ * At launch and before each share: finishes a full clear that left files behind, deleting everything made up to that
+ * clear (and anything of unknown age). PDFs shared since, by whoever signed in next, stay.
+ * Returns whether nothing from it is left.
+ */
+export function retryBillPdfClear(): boolean {
+  let at: number | null;
+  try {
+    const marker = pending();
+    if (!marker.exists) return true;
+    at = recorded(marker);
+  } catch { return false; }
+  const list = folders();
+  // Nothing could be checked, so the record stays.
+  if (list.length === 0) return false;
+  let gone = true;
+  for (const folder of list) {
+    try {
+      if (!folder.exists) continue;
+      for (const entry of folder.list()) {
+        const made = madeAt(entry);
+        if ((made === null || at === null || made <= at) && !wipe(entry)) gone = false;
+      }
+    } catch { gone = false; }
+  }
+  if (gone) forget();
+  return gone;
 }
