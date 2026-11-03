@@ -1,5 +1,5 @@
 {
-  "id": "6864d18d-8681-4226-b94f-b0bc3c1ac910",
+  "id": "3fa6c5eb-015f-4294-aad7-0df4327d0c4f",
   "prevId": "e704e733-1b31-4705-ad6a-db40c2f2b2ed",
   "version": "7",
   "dialect": "postgresql",
@@ -2724,6 +2724,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "send_after": {
           "name": "send_after",
           "type": "timestamp with time zone",
@@ -2736,6 +2742,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "claimed_until": {
+          "name": "claimed_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2744,6 +2756,21 @@
           "columns": [
             {
               "expression": "send_after",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "push_queue_token_idx": {
+          "name": "push_queue_token_idx",
+          "columns": [
+            {
+              "expression": "token",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2768,12 +2795,30 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "push_queue_token_push_tokens_token_fk": {
+          "name": "push_queue_token_push_tokens_token_fk",
+          "tableFrom": "push_queue",
+          "tableTo": "push_tokens",
+          "columnsFrom": [
+            "token"
+          ],
+          "columnsTo": [
+            "token"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "push_queue_tries_valid": {
+          "name": "push_queue_tries_valid",
+          "value": "\"push_queue\".\"tries\" BETWEEN 0 AND 2"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.push_tokens": {

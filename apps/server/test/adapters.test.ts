@@ -171,7 +171,20 @@ describe("Expo push sender (#505)", () => {
     expect(bodies[0]?.[1]).toMatchObject({ sound: "default" });
     expect(bodies[0]?.[1]).not.toHaveProperty("channelId");
     expect(results).toHaveLength(101);
-    expect(results.slice(0, 3)).toEqual(["sent", "dead", "sent"]);
+    expect(results.slice(0, 3)).toEqual(["sent", "dead", "failed"]);
+    expect(new Set(results.slice(3))).toEqual(new Set(["sent"]));
+  });
+
+  it("counts a push as sent only on an ok ticket: a missing ticket or an answer it can't read is failed", async () => {
+    const answers = [
+      Response.json({ data: [{ status: "ok" }] }),
+      Response.json({ errors: [{ code: "PUSH_TOO_MANY_EXPERIENCE_IDS" }] }),
+      new Response("<html>bad gateway</html>", { status: 200 }),
+      Response.json({ data: { status: "ok" } }),
+    ];
+    const sender = createExpoPushSender(async () => answers.shift() ?? Response.json({}));
+    expect(await sender.send([push("ExponentPushToken[a]"), push("ExponentPushToken[b]")])).toEqual(["sent", "failed"]);
+    for (let i = 0; i < 3; i += 1) expect(await sender.send([push("ExponentPushToken[a]")])).toEqual(["failed"]);
   });
 
   it("fails only the messages of a request Expo refused or never answered, so the queue tries those again", async () => {

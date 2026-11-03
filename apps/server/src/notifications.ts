@@ -1,6 +1,6 @@
 import { type NotificationKind, ORDER_ANSWER_SECONDS, type OrderStatus, type RejectReason } from "@ygo/contracts";
 import type { Pool, PoolClient } from "pg";
-import type { Push, PushSender } from "./adapters/push-sender";
+import type { Push, PushResult, PushSender } from "./adapters/push-sender";
 import { withTransaction } from "./db";
 
 type Order = { number: number; shopName: string; reason: RejectReason | null };
@@ -69,50 +69,82 @@ export async function notifyOrderStatus(client: PoolClient, orderId: string, to:
       rule.loud ?? false, at, RE_RING_SECONDS]);
 }
 
-/** A push that can't be sent is tried this many times in all, then dropped (NOT-2). */
+/** A phone's push that fails is tried this many times in all, then dropped (NOT-2). */
 const MAX_TRIES = 3;
 const RETRY_SECONDS = 30;
+/** How long a run may hold its claimed rows while it calls Expo; a run that dies leaves them to the next after this. */
+const CLAIM_SECONDS = 60;
 
 /**
- * Sends the queued pushes due by now to every phone signed in to the recipient's account in that app. A new order's
- * push is dropped once the order has been answered, cancelled or left past its answer time, and a shop's push once its
- * recipient has left the shop. Rows taken here are locked, so two runs never send one twice. Throws, once the retries
- * are recorded, when any push failed, so the caller can log it.
+ * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of
+ * the recipient in that app, a shop recipient is still in the shop, and a new order still waits within its answer time.
+ */
+const stillDue = `EXISTS (SELECT 1 FROM push_tokens t JOIN sessions s ON s.id = t.session_id
+    WHERE t.token = q.token AND t.app = n.app AND s.account_id = n.account_id AND s.expires_at > $1)
+  AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = o.shop_id))
+  AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $2) <= $1))`;
+
+type Claimed = { id: string; app: string; push: Push };
+
+/**
+ * Takes the pushes due by now, one row per phone, and claims them for this run. Notifications not yet fanned out
+ * become a row for each phone signed in to the recipient's account in that app; rows no longer due are dropped.
+ * Short, and done before any call to Expo, so no lock is held while Expo answers.
+ */
+async function claimDuePushes(pool: Pool, now: Date, batch: number): Promise<Claimed[]> {
+  return withTransaction(pool, async (client) => {
+    await client.query(
+      `WITH fresh AS (
+         DELETE FROM push_queue WHERE id IN (SELECT id FROM push_queue WHERE token IS NULL AND send_after <= $1
+           ORDER BY send_after, id LIMIT $2 FOR UPDATE SKIP LOCKED)
+         RETURNING notification_id, send_after)
+       INSERT INTO push_queue (notification_id, token, send_after)
+       SELECT f.notification_id, t.token, f.send_after FROM fresh f JOIN notifications n ON n.id = f.notification_id
+         JOIN push_tokens t ON t.app = n.app JOIN sessions s ON s.id = t.session_id AND s.account_id = n.account_id AND s.expires_at > $1`,
+      [now, batch]);
+    const { rows } = await client.query<{ id: string; due: boolean }>(
+      `SELECT q.id, ${stillDue} AS due FROM push_queue q JOIN notifications n ON n.id = q.notification_id LEFT JOIN orders o ON o.id = n.order_id
+       WHERE q.token IS NOT NULL AND q.send_after <= $1 AND (q.claimed_until IS NULL OR q.claimed_until <= $1)
+       ORDER BY q.send_after, q.id LIMIT $3 FOR UPDATE OF q SKIP LOCKED`, [now, ORDER_ANSWER_SECONDS, batch]);
+    await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[])", [rows.filter((row) => !row.due).map((row) => row.id)]);
+    const { rows: claimed } = await client.query<Claimed>(
+      `UPDATE push_queue q SET claimed_until = $2::timestamptz + make_interval(secs => $3) FROM notifications n
+       WHERE q.id = ANY($1::bigint[]) AND n.id = q.notification_id
+       RETURNING q.id, n.app, json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
+         'data', json_build_object('notificationId', n.id, 'orderId', n.order_id)) AS push`,
+      [rows.filter((row) => row.due).map((row) => row.id), now, CLAIM_SECONDS]);
+    await client.query("COMMIT");
+    return claimed;
+  });
+}
+
+/**
+ * Sends the queued pushes due by now. Each phone's row is finished only when Expo confirms it: a sent push leaves
+ * the queue, a dead token is deleted with its rows, and anything unconfirmed (an error, a missing ticket, no answer)
+ * is tried again after 30 s, three tries in all. Phones already reached are never sent the same push again.
+ * Throws, once the outcome is recorded, when any push failed, so the caller can log it.
  */
 export async function sendDuePushes(pool: Pool, sender: PushSender, now: Date, batch = 100): Promise<void> {
+  const claimed = await claimDuePushes(pool, now, batch);
+  if (claimed.length === 0) return;
+  const outcome = new Map<string, PushResult>();
+  // Expo refuses one request for two apps, as each is its own project.
+  for (const app of new Set(claimed.map((row) => row.app))) {
+    const mine = claimed.filter((row) => row.app === app);
+    const results = await sender.send(mine.map((row) => row.push)).catch((): PushResult[] => []);
+    mine.forEach((row, i) => outcome.set(row.id, results[i] ?? "failed"));
+  }
+  const ids = (result: PushResult) => claimed.filter((row) => outcome.get(row.id) === result).map((row) => row.id);
+  const failed = ids("failed");
   await withTransaction(pool, async (client) => {
-    type Row = { id: string; tries: number; app: string; loud: boolean; pushes: Array<Omit<Push, "loud">> };
-    const { rows } = await client.query<Row>(
-      `SELECT q.id, q.tries, n.app, n.loud, COALESCE((SELECT json_agg(json_build_object('to', t.token, 'title', n.title, 'body', n.body,
-            'data', json_build_object('notificationId', n.id, 'orderId', n.order_id)) ORDER BY t.token)
-          FROM push_tokens t JOIN sessions s ON s.id = t.session_id
-          WHERE s.account_id = n.account_id AND t.app = n.app AND s.expires_at > $1
-            AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))
-            AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = o.shop_id))), '[]') AS pushes
-        FROM push_queue q JOIN notifications n ON n.id = q.notification_id LEFT JOIN orders o ON o.id = n.order_id
-        WHERE q.send_after <= $1 ORDER BY q.send_after, q.id LIMIT $2 FOR UPDATE OF q SKIP LOCKED`, [now, batch, ORDER_ANSWER_SECONDS]);
-    if (rows.length === 0) return;
-    const failedRows: string[] = [];
-    const deadTokens: string[] = [];
-    // Expo refuses one request for two apps, as each is its own project.
-    for (const app of new Set(rows.map((row) => row.app))) {
-      const mine = rows.filter((row) => row.app === app);
-      const pushes = mine.flatMap((row) => row.pushes.map((push) => ({ ...push, loud: row.loud })));
-      const rowOf = mine.flatMap((row) => row.pushes.map(() => row.id));
-      if (pushes.length === 0) continue;
-      const results = await sender.send(pushes).catch(() => pushes.map(() => "failed" as const));
-      pushes.forEach((push, i) => {
-        const row = rowOf[i] ?? "";
-        if (results[i] === "dead") deadTokens.push(push.to);
-        if (results[i] === "failed" && !failedRows.includes(row)) failedRows.push(row);
-      });
-    }
-    const retried = rows.filter((row) => failedRows.includes(row.id) && row.tries + 1 < MAX_TRIES).map((row) => row.id);
-    await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[]) AND NOT id = ANY($2::bigint[])", [rows.map((row) => row.id), retried]);
-    await client.query("UPDATE push_queue SET tries = tries + 1, send_after = $2::timestamptz + make_interval(secs => $3) WHERE id = ANY($1::bigint[])",
-      [retried, now, RETRY_SECONDS]);
-    await client.query("DELETE FROM push_tokens WHERE token = ANY($1::text[])", [deadTokens]);
+    await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[])", [ids("sent")]);
+    // A dead token's other queued rows go with it.
+    await client.query("DELETE FROM push_tokens WHERE token IN (SELECT token FROM push_queue WHERE id = ANY($1::bigint[]))", [ids("dead")]);
+    await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[]) AND tries + 1 >= $2", [failed, MAX_TRIES]);
+    await client.query(
+      "UPDATE push_queue SET tries = tries + 1, send_after = $2::timestamptz + make_interval(secs => $3), claimed_until = NULL WHERE id = ANY($1::bigint[])",
+      [failed, now, RETRY_SECONDS]);
     await client.query("COMMIT");
-    if (failedRows.length > 0) throw new Error(`${failedRows.length} queued pushes could not be sent`);
   });
+  if (failed.length > 0) throw new Error(`${failed.length} pushes could not be sent`);
 }

@@ -4,8 +4,9 @@
  */
 export interface PushSender {
   /**
-   * Sends pushes of one app (Expo refuses a request mixing two projects) and answers, in the same order, "dead" for a
-   * token the phone no longer holds, "failed" for one the service could not take, so the queue tries again, or "sent".
+   * Sends pushes of one app (Expo refuses a request mixing two projects) and answers, in the same order, "sent" only
+   * when the service confirmed it, "dead" for a token the phone no longer holds, or "failed" for anything else, so the
+   * queue tries again.
    */
   send(pushes: Push[]): Promise<PushResult[]>;
 }
@@ -66,18 +67,15 @@ export function createExpoPushSender(
             ? { channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" }
             : { sound: "default" },
         }));
-        // A request that fails fails only its own messages, so those sent before it are not sent again.
+        // A request fails only its own messages, so those already sent are not sent again. Only an "ok" ticket
+        // counts as sent: an error, a missing ticket or an answer that can't be read is tried again (NOT-2).
         const tickets = await post(JSON.stringify(messages))
-          .then(async (response) => response.ok ? (await response.json() as { data: ExpoTicket[] }).data : undefined)
+          .then(async (response) => response.ok ? (await response.json() as { data?: unknown }).data : undefined)
           .catch(() => undefined);
-        if (!tickets) {
-          results.push(...messages.map(() => "failed" as const));
-          continue;
-        }
-        // Any other error drops that one push: a missed push changes nothing (NOT-2).
         results.push(...messages.map((_, i) => {
-          const ticket = tickets[i];
-          return ticket?.status === "error" && ticket.details?.error === "DeviceNotRegistered" ? "dead" as const : "sent" as const;
+          const ticket = Array.isArray(tickets) ? tickets[i] as ExpoTicket | undefined : undefined;
+          if (ticket?.status === "ok") return "sent" as const;
+          return ticket?.status === "error" && ticket.details?.error === "DeviceNotRegistered" ? "dead" as const : "failed" as const;
         }));
       }
       return results;

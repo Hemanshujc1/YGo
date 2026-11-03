@@ -887,7 +887,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
     const down: PushSender = { send: async (pushes) => pushes.map(() => "failed" as const) };
     for (const tries of [1, 2]) {
-      await expect(send(down)).rejects.toThrow("1 queued pushes could not be sent");
+      await expect(send(down)).rejects.toThrow("1 pushes could not be sent");
       expect((await database.pool.query("SELECT tries FROM push_queue ORDER BY send_after LIMIT 1")).rows).toEqual([{ tries }]);
       clock.advance(30_000);
     }
@@ -915,6 +915,74 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     clock.advance(120_000);
     expect(await send()).toEqual([{ to: "ExponentPushToken[owner]", title: "New order #1002", loud: true }]);
     expect((await list(staff)).notifications).toHaveLength(2);
+  });
+
+  it("never rings a removed Owner or Staff member, on the first ring or the 120 s one", async () => {
+    const { shopId, dal, home, staff } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    await database.pool.query("DELETE FROM shop_members WHERE role = 'owner'");
+    expect(await send()).toEqual([{ to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }]);
+    await database.pool.query("DELETE FROM shop_members WHERE role = 'staff'");
+    clock.advance(120_000);
+    expect(await send()).toEqual([]);
+    expect(await queued()).toBe(0);
+    // The list keeps what was already recorded for them.
+    expect((await list(staff)).notifications).toHaveLength(1);
+  });
+
+  it("retries only the phone that failed, so a phone already reached never gets the same push twice", async () => {
+    const { shopId, dal, home } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    const calls: string[][] = [];
+    const ownerOnly: PushSender = { send: async (pushes) => {
+      calls.push(pushes.map((one) => one.to));
+      return pushes.map((one) => one.to === "ExponentPushToken[owner]" ? "sent" as const : "failed" as const);
+    } };
+    await expect(sendDuePushes(database.pool, ownerOnly, clock.now())).rejects.toThrow("1 pushes could not be sent");
+    // Not before its 30 s wait, and then only to the Staff phone.
+    clock.advance(29_000);
+    expect(await send()).toEqual([]);
+    clock.advance(1_000);
+    expect(await send()).toEqual([{ to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }]);
+    expect(await send()).toEqual([]);
+    // The 120 s re-ring reaches each phone once.
+    clock.advance(90_000);
+    expect((await send()).map(({ to }) => to)).toEqual(["ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
+    expect(await queued()).toBe(0);
+    expect(calls).toEqual([["ExponentPushToken[owner]", "ExponentPushToken[staff]"]]);
+  });
+
+  it("calls Expo with no transaction or lock open, and a second run meanwhile takes none of the claimed pushes", async () => {
+    const { shopId, dal, home } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    const seen: Array<{ open: number; other: number; locked: number }> = [];
+    const checking: PushSender = { send: async (pushes) => {
+      const { rows: [open] } = await database.pool.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%'");
+      const other = createLocalPushSender();
+      await sendDuePushes(database.pool, other, clock.now());
+      // Every row can be locked at once without waiting.
+      const { rowCount } = await database.pool.query("SELECT id FROM push_queue FOR UPDATE NOWAIT");
+      seen.push({ open: open?.count ?? -1, other: other.sent.length, locked: rowCount ?? 0 });
+      return pushes.map(() => "sent" as const);
+    } };
+    await sendDuePushes(database.pool, checking, clock.now());
+    // Two claimed phone rows and the two 120 s re-rings not yet fanned out.
+    expect(seen).toEqual([{ open: 0, other: 0, locked: 4 }]);
+  });
+
+  it("sends a push again once a run's claim has lapsed without an answer", async () => {
+    const { shopId, dal, home } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    // A run that claims the pushes and then dies before Expo answers.
+    const dies: PushSender = { send: () => new Promise(() => undefined) };
+    void sendDuePushes(database.pool, dies, clock.now());
+    await expect.poll(async () => Number((await database.pool.query<{ count: string }>(
+      "SELECT count(*) FROM push_queue WHERE claimed_until IS NOT NULL")).rows[0]?.count)).toBe(2);
+    clock.advance(59_000);
+    expect(await send()).toEqual([]);
+    clock.advance(1_000);
+    expect((await send()).map(({ to }) => to)).toEqual(["ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
   });
 
   it("reads one notification on a tap and all of them on Mark all as read, each person and app on its own", async () => {
