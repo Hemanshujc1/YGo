@@ -577,7 +577,11 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [check("sessions_kind_valid", sql`${table.kind} IN ('mobile', 'admin_web')`)],
+  (table) => [
+    check("sessions_kind_valid", sql`${table.kind} IN ('mobile', 'admin_web')`),
+    // The push queue finds each recipient's signed-in phones through this (#505).
+    index("sessions_account_id_idx").on(table.accountId),
+  ],
 );
 
 // Every refresh token a session has been issued, as a keyed hash. The one with
@@ -752,3 +756,53 @@ export const stockSyncItems = pgTable("stock_sync_items", {
   payload: jsonb("payload"),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 }, (table) => [primaryKey({ columns: [table.shopId, table.packId] })]);
+
+// One notification for one person in one app (#505), in the words its push carried (NOT-1). A person reads it
+// by tapping it, or by "Mark all as read" (owner's answer 5 on #55).
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  app: text("app").notNull(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  orderId: uuid("order_id").references(() => orders.id),
+  loud: boolean("loud").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }),
+}, (table) => [
+  index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
+  check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected')`),
+]);
+
+// A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session
+// ending removes it. A token sent again moves to the newest session.
+export const pushTokens = pgTable("push_tokens", {
+  token: text("token").primaryKey(),
+  sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+  app: text("app").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("push_tokens_session_id_idx").on(table.sessionId),
+  check("push_tokens_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
+]);
+
+// A push waiting to go (#505), written with its notification so a crash before sending loses nothing. A row with
+// no token is a notification not yet fanned out; a sender turns it into one row per phone, so each phone's delivery
+// is retried or finished on its own. A run claims a row (`claim_id`) until `claimed_until` while it calls Expo outside
+// any transaction, and records the outcome only for rows it still holds; a claim left by a run that died lapses. A sent or abandoned push leaves
+// the queue; its notification stays.
+export const pushQueue = pgTable("push_queue", {
+  id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+  notificationId: uuid("notification_id").notNull().references(() => notifications.id, { onDelete: "cascade" }),
+  token: text("token").references(() => pushTokens.token, { onDelete: "cascade" }),
+  sendAfter: timestamp("send_after", { withTimezone: true }).notNull(),
+  // Tries started, counted when a run claims the row, so a run that dies still uses one up.
+  tries: integer("tries").notNull().default(0),
+  claimId: uuid("claim_id"),
+  claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+}, (table) => [
+  index("push_queue_send_after_idx").on(table.sendAfter),
+  index("push_queue_token_idx").on(table.token),
+]);

@@ -80,6 +80,12 @@ describe("place search configuration", () => {
     expect(loadConfig(base).GOOGLE_PLACES_API_KEY).toBeUndefined();
     expect(loadConfig({ ...base, GOOGLE_PLACES_API_KEY: "key-1" }).GOOGLE_PLACES_API_KEY).toBe("key-1");
   });
+
+  it("logs pushes unless told to send them through Expo (#505)", () => {
+    expect(loadConfig(base).PUSH_SENDER).toBe("local");
+    expect(loadConfig({ ...base, PUSH_SENDER: "expo" }).PUSH_SENDER).toBe("expo");
+    expect(() => loadConfig({ ...base, PUSH_SENDER: "fcm" })).toThrow();
+  });
 });
 
 
