@@ -1,5 +1,5 @@
 import type { createAdminApiClient } from "@ygo/api-client";
-import { AdminActionReason, type AdminCounterBill, type AdminShopApplication, type CounterBillResolutionAction } from "@ygo/contracts";
+import { AdminActionReason, type AdminCounterBill, type AdminCounterBillVoid, type AdminShopApplication, type CounterBillResolutionAction } from "@ygo/contracts";
 import { formatDateTime, formatMoney, trimDecimal } from "@ygo/format";
 import { useState } from "react";
 import { Link, useLoaderData } from "react-router";
@@ -16,8 +16,18 @@ function Lines({ lines, manualLines, discount }: Pick<AdminCounterBill, "lines" 
   {Number(discount) > 0 && <li>{strings.counterBillDiscount(formatMoney(discount))}</li>}</ul>;
 }
 
-/** What Admin may do with a bill that is still open, from the same rules the server holds it to. */
+function Voided({ voided }: { voided: AdminCounterBillVoid }) {
+  return <div className="mt-2 rounded-lg bg-danger-subtle p-3 text-on-danger-subtle">
+    <p className="font-medium">{strings.counterBillVoided}</p>
+    <p>{strings.counterBillVoidedLine(strings.counterBillVoidReason[voided.reason], voided.note, voided.stockMoved ? strings.counterBillVoidStock.moved : strings.counterBillVoidStock.notMoved)}</p>
+    <p>{strings.counterBillVoidBy(voided.actorName ?? strings.counterBillUnknownPerson, formatDateTime(voided.createdAt))}</p>
+  </div>;
+}
+
+/** What Admin may do with a bill that is still open, from the same rules the server holds it to. A voided bill takes a note only. */
 function actionsFor(bill: AdminCounterBill): CounterBillResolutionAction[] {
+  if (bill.resolutions.some((resolution) => resolution.action !== "noted")) return [];
+  if (bill.voided) return ["note"];
   const actions: CounterBillResolutionAction[] = [];
   if (bill.heldReason && bill.heldReason !== "invalid") actions.push("number");
   if (bill.heldReason === "reference_taken") actions.push("duplicate");
@@ -31,6 +41,7 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const person = bill.madeBy.name ?? strings.counterBillUnknownPerson;
+  const actions = actionsFor(bill);
 
   async function act(action: CounterBillResolutionAction) {
     setError("");
@@ -63,8 +74,10 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
     {(bill.lines.length > 0 || bill.manualLines.length > 0) && <Lines lines={bill.lines} manualLines={bill.manualLines} discount={bill.discount} />}
     {bill.invalidPayload !== null && <details className="mt-2"><summary className="cursor-pointer text-primary">{strings.counterBillPayload}</summary>
       <pre className="mt-1 overflow-x-auto rounded-lg bg-sunken p-3 text-sm">{bill.invalidPayload}</pre></details>}
+    {bill.voided && <Voided voided={bill.voided} />}
     {bill.original && <div className="mt-3 rounded-lg bg-sunken p-3">
       <p className="font-medium">{strings.counterBillOriginal}</p>
+      {bill.original.voided && <Voided voided={bill.original.voided} />}
       <p className="text-muted">{[bill.original.number === null ? strings.counterBillNoNumber : strings.counterBillNumbered(bill.original.number),
         bill.original.total === null ? "" : formatMoney(bill.original.total), bill.original.payment ? strings.counterBillPayment[bill.original.payment] : "", formatDateTime(bill.original.madeAt)].filter(Boolean).join(" · ")}</p>
       <Lines lines={bill.original.lines} manualLines={bill.original.manualLines} discount={bill.original.discount} />
@@ -74,7 +87,7 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
       <p>{resolution.note}</p>
       <p className="text-muted">{strings.counterBillResolutionBy(resolution.actorName, formatDateTime(resolution.createdAt))}</p>
     </li>)}</ul>}
-    {!bill.resolved && <div className="mt-3 border-t border-border pt-3">
+    {actions.length > 0 && <div className="mt-3 border-t border-border pt-3">
       {bill.heldReason && bill.heldReason !== "invalid" && <p className="mb-2 text-muted">{bill.heldReason === "too_large" ? strings.counterBillStock.none : strings.counterBillStock.moves}</p>}
       <label className="block font-medium">{strings.counterBillNote}
         <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} rows={2} aria-describedby={`note-hint-${bill.id}`}
@@ -82,7 +95,7 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
       </label>
       <p id={`note-hint-${bill.id}`} className="text-muted">{strings.counterBillNoteHint}</p>
       {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
-      <div className="mt-3 flex flex-wrap gap-2">{actionsFor(bill).map((action) =>
+      <div className="mt-3 flex flex-wrap gap-2">{actions.map((action) =>
         <button key={action} disabled={busy} onClick={() => void act(action)}
           className={`h-10 rounded-lg px-4 font-medium disabled:opacity-60 ${action === "number" || action === "review" ? "bg-primary text-on-primary" : "border border-border-strong"}`}>
           {busy ? strings.counterBillActionBusy : strings.counterBillActions[action]}</button>)}</div>

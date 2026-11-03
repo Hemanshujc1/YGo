@@ -287,6 +287,44 @@ describe("Admin resolves held and flagged counter bills (#470)", () => {
     expect(await movements()).toBe(1);
   });
 
+  it("shows the Owner's void, files a voided flagged bill as dealt with, and takes a note but no review on it (#495)", async () => {
+    const { owner, shopId, pack, bill, send, idOf } = await shop();
+    const rice = await pack("5", "50");
+    const line = [{ packId: rice, count: 2, unitPrice: "21" }];
+    const flagged = bill(line, { payload: { lines: line, total: "40", payment: "upi" } });
+    const other = bill(line, { payload: { lines: line, total: "40", payment: "upi" } });
+    await send([flagged, other]);
+    const flaggedId = await idOf(flagged.id), otherId = await idOf(other.id);
+    const voided = await app.inject({ method: "POST", url: `/v1/me/counter-bills/${flaggedId}/void`, headers: owner.headers, payload: { reason: "other", note: "Typed the wrong price" } });
+    expect(voided.statusCode).toBe(201);
+
+    const { bills } = AdminCounterBillsResponse.parse((await list(shopId)).json());
+    // Open ones first: the voided bill moves to the end with no review needed.
+    expect(bills.map((found) => found.id)).toEqual([otherId, flaggedId]);
+    expect(bills[0]).toMatchObject({ voided: null, resolved: false });
+    expect(bills[1]).toMatchObject({ resolved: true, resolutions: [], voided: { reason: "other", note: "Typed the wrong price", stockMoved: false, actorName: "Asha Owner", createdAt: clock.now().toISOString() } });
+
+    const review = await resolve(shopId, flaggedId, "review");
+    expect(review.statusCode).toBe(409);
+    expect(review.json()).toMatchObject({ error: { code: "COUNTER_BILL_ACTION_REFUSED" } });
+    expect((await resolve(shopId, flaggedId, "note", "Owner fixed it")).statusCode).toBe(201);
+    expect((await resolve(shopId, otherId, "review")).statusCode).toBe(201);
+  });
+
+  it("shows a void on the first bill of a clash too (#495)", async () => {
+    const { owner, shopId, pack, bill, send, idOf } = await shop();
+    const rice = await pack("5", "50");
+    const line = [{ packId: rice, count: 1, unitPrice: "21" }];
+    const first = bill(line, { id: "0f3a91bc-0000-4000-8000-000000000001", payload: { lines: line, total: "99", payment: "cash" } });
+    const clash = bill(line, { id: "0f3a91bc-1111-4000-8000-000000000002" });
+    await send([first, clash]);
+    // The first bill's total disagrees with its lines, so it moved no stock and its void gives none back.
+    const voided = await app.inject({ method: "POST", url: `/v1/me/counter-bills/${await idOf(first.id)}/void`, headers: owner.headers, payload: { reason: "billed_twice" } });
+    expect(voided.statusCode).toBe(201);
+    const { bills } = AdminCounterBillsResponse.parse((await list(shopId)).json());
+    expect(bills.find((found) => found.heldReason === "reference_taken")?.original).toMatchObject({ voided: { reason: "billed_twice", note: null, stockMoved: false } });
+  });
+
   it("keeps a bill open after a note and closes it once, whatever comes after", async () => {
     const { shopId, pack, bill, send, idOf, stock } = await shop();
     const rice = await pack("1", "10");

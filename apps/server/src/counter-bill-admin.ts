@@ -13,14 +13,18 @@ const linesOf = (bill: string) => `COALESCE((SELECT json_agg(json_build_object('
 const manualOf = (bill: string) => `COALESCE((SELECT json_agg(json_build_object('name', m.name, 'count', m.count, 'unitPrice', m.unit_price::text) ORDER BY m.position)
   FROM counter_bill_manual_lines m WHERE m.bill_id = ${bill}), '[]'::json)`;
 const closing = "r.action <> 'noted'";
+/** A bill's void as Admin reads it (#495): why, when, whether stock came back, and who voided it. */
+const voidOf = (bill: string) => `(SELECT json_build_object('reason', v.reason, 'note', v.note, 'stockMoved', v.stock_moved, 'actorName', va.name, 'createdAt', ${iso("v.created_at")})
+  FROM counter_bill_voids v LEFT JOIN accounts va ON va.id = v.actor_id WHERE v.bill_id = ${bill})`;
 
 const billsSql = `SELECT b.id, b.reference, b.number, b.held_reason AS "heldReason", b.total_mismatch AS "totalMismatch", b.payment,
   b.total::text AS total, b.checked_total::text AS "checkedTotal", b.clock_suspect AS "clockSuspect",
   ${iso("b.made_at")} AS "madeAt", ${iso("b.received_at")} AS "receivedAt", b.invalid_payload AS "invalidPayload",
   json_build_object('name', a.name, 'role', m.role) AS "madeBy", ${linesOf("b.id")} AS lines, ${manualOf("b.id")} AS "manualLines", b.discount::text AS discount,
-  (SELECT json_build_object('id', o.id, 'number', o.number, 'total', o.total::text, 'payment', o.payment, 'madeAt', ${iso("o.made_at")}, 'lines', ${linesOf("o.id")}, 'manualLines', ${manualOf("o.id")}, 'discount', o.discount::text)
+  (SELECT json_build_object('id', o.id, 'number', o.number, 'total', o.total::text, 'payment', o.payment, 'madeAt', ${iso("o.made_at")}, 'lines', ${linesOf("o.id")}, 'manualLines', ${manualOf("o.id")}, 'discount', o.discount::text, 'voided', ${voidOf("o.id")})
     FROM counter_bills o WHERE b.held_reason = 'reference_taken' AND o.shop_id = b.shop_id AND o.reference = b.reference AND NOT o.reference_clash) AS original,
-  EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id AND ${closing}) AS resolved,
+  ${voidOf("b.id")} AS voided,
+  (EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id AND ${closing}) OR EXISTS (SELECT 1 FROM counter_bill_voids v WHERE v.bill_id = b.id)) AS resolved,
   COALESCE((SELECT json_agg(json_build_object('action', r.action, 'note', r.note, 'stockMoved', r.stock_moved, 'actorName', ra.name,
       'createdAt', ${iso("r.created_at")}) ORDER BY r.created_at, r.id)
     FROM counter_bill_resolutions r LEFT JOIN accounts ra ON ra.id = r.actor_id WHERE r.bill_id = b.id), '[]'::json) AS resolutions
@@ -95,10 +99,11 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
   if ((await client.query(`SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = $1 AND ${closing}`, [billId])).rowCount) return { code: "COUNTER_BILL_RESOLVED" };
 
   const held = bill.heldReason;
+  const voided = (await client.query("SELECT 1 FROM counter_bill_voids WHERE bill_id = $1", [billId])).rowCount !== 0;
   const fits = {
-    number: held !== null && held !== "invalid",
-    duplicate: held === "reference_taken",
-    review: held === "invalid" || (bill.number !== null && bill.totalMismatch),
+    number: !voided && held !== null && held !== "invalid",
+    duplicate: !voided && held === "reference_taken",
+    review: !voided && (held === "invalid" || (bill.number !== null && bill.totalMismatch)),
     note: held !== null || bill.totalMismatch,
   }[body.action];
   if (!fits) return { code: "COUNTER_BILL_ACTION_REFUSED" };
