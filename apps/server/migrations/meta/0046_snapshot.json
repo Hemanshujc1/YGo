@@ -1,5 +1,5 @@
 {
-  "id": "3fa6c5eb-015f-4294-aad7-0df4327d0c4f",
+  "id": "dfff7618-4dcc-4e14-bf10-51c2a7adfc70",
   "prevId": "e704e733-1b31-4705-ad6a-db40c2f2b2ed",
   "version": "7",
   "dialect": "postgresql",
@@ -2743,6 +2743,12 @@
           "notNull": true,
           "default": 0
         },
+        "claim_id": {
+          "name": "claim_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "claimed_until": {
           "name": "claimed_until",
           "type": "timestamp with time zone",
@@ -2813,12 +2819,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "push_queue_tries_valid": {
-          "name": "push_queue_tries_valid",
-          "value": "\"push_queue\".\"tries\" BETWEEN 0 AND 2"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.push_tokens": {

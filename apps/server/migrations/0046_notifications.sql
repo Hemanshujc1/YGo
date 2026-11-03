@@ -19,8 +19,8 @@ CREATE TABLE "push_queue" (
 	"token" text,
 	"send_after" timestamp with time zone NOT NULL,
 	"tries" integer DEFAULT 0 NOT NULL,
-	"claimed_until" timestamp with time zone,
-	CONSTRAINT "push_queue_tries_valid" CHECK ("push_queue"."tries" BETWEEN 0 AND 2)
+	"claim_id" uuid,
+	"claimed_until" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "push_tokens" (

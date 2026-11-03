@@ -790,18 +790,19 @@ export const pushTokens = pgTable("push_tokens", {
 
 // A push waiting to go (#505), written with its notification so a crash before sending loses nothing. A row with
 // no token is a notification not yet fanned out; a sender turns it into one row per phone, so each phone's delivery
-// is retried or finished on its own. A run claims a row until `claimed_until` while it calls Expo outside any
-// transaction; a claim left by a run that died lapses and the row is sent again. A sent or abandoned push leaves
+// is retried or finished on its own. A run claims a row (`claim_id`) until `claimed_until` while it calls Expo outside
+// any transaction, and records the outcome only for rows it still holds; a claim left by a run that died lapses. A sent or abandoned push leaves
 // the queue; its notification stays.
 export const pushQueue = pgTable("push_queue", {
   id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
   notificationId: uuid("notification_id").notNull().references(() => notifications.id, { onDelete: "cascade" }),
   token: text("token").references(() => pushTokens.token, { onDelete: "cascade" }),
   sendAfter: timestamp("send_after", { withTimezone: true }).notNull(),
+  // Tries started, counted when a run claims the row, so a run that dies still uses one up.
   tries: integer("tries").notNull().default(0),
+  claimId: uuid("claim_id"),
   claimedUntil: timestamp("claimed_until", { withTimezone: true }),
 }, (table) => [
   index("push_queue_send_after_idx").on(table.sendAfter),
   index("push_queue_token_idx").on(table.token),
-  check("push_queue_tries_valid", sql`${table.tries} BETWEEN 0 AND 2`),
 ]);

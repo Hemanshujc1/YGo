@@ -8,7 +8,7 @@ import { bootstrapAdmin } from "../src/bootstrap";
 import { OrderStatus } from "@ygo/contracts";
 import { connectDatabase } from "../src/db";
 import { stockOf } from "../src/listings";
-import { createLocalPushSender, type PushSender } from "../src/adapters/push-sender";
+import { createLocalPushSender, type PushResult, type PushSender } from "../src/adapters/push-sender";
 import { sendDuePushes } from "../src/notifications";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
@@ -983,6 +983,30 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     expect(await send()).toEqual([]);
     clock.advance(1_000);
     expect((await send()).map(({ to }) => to)).toEqual(["ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
+  });
+
+  it("lets a run whose claim lapsed record nothing over the run that took its pushes over", async () => {
+    const { shopId, dal, home } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    let answer: (results: PushResult[]) => void = () => undefined;
+    const slow: PushSender = { send: () => new Promise((resolve) => { answer = resolve; }) };
+    const late = sendDuePushes(database.pool, slow, clock.now());
+    await expect.poll(async () => (await database.pool.query("SELECT 1 FROM push_queue WHERE claim_id IS NOT NULL")).rowCount).toBe(2);
+    clock.advance(60_000);
+    expect((await send()).map(({ to }) => to)).toEqual(["ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
+    // The first run finally hears back that both failed: the pushes another run sent are not queued again.
+    answer(["failed", "failed"]);
+    await expect(late).rejects.toThrow("2 pushes could not be sent");
+    expect((await database.pool.query("SELECT 1 FROM push_queue WHERE token IS NOT NULL")).rowCount).toBe(0);
+  });
+
+  it("drains every due push in one call, a batch at a time", async () => {
+    const { shopId, dal, home } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    push.sent.length = 0;
+    await sendDuePushes(database.pool, push, clock.now(), 1);
+    expect(push.sent).toHaveLength(4);
   });
 
   it("reads one notification on a tap and all of them on Mark all as read, each person and app on its own", async () => {
