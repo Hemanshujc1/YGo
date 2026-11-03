@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session } from "../api";
 import { ReasonPicker } from "../components/reason-picker";
 import { isCurrentAccount } from "../lib/account";
+import { useAccountRole } from "../lib/account-role";
 import { canVoid, createCounterBillVoids, voidedLine } from "../lib/counter-bill-voids";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
@@ -23,7 +24,7 @@ type Sheet = { bill: ShopCounterBill; reason: CounterBillVoidReason | null; note
 
 const billName = (bill: ShopCounterBill) => (bill.number === null ? words.numberPending : words.number(bill.number));
 
-function BillRow({ bill, onVoid, busy }: { bill: ShopCounterBill; onVoid: () => void; busy: boolean }) {
+function BillRow({ bill, onVoid, busy, mayVoid }: { bill: ShopCounterBill; onVoid: () => void; busy: boolean; mayVoid: boolean }) {
   return (
     <View className="gap-1 rounded-card border border-border bg-surface p-4">
       <View className="flex-row items-center justify-between gap-3">
@@ -36,7 +37,8 @@ function BillRow({ bill, onVoid, busy }: { bill: ShopCounterBill; onVoid: () => 
       {bill.voided ? <Text className="text-secondary font-medium text-text">{voidedLine(bill.voided)}</Text>
         // A bill the server couldn't read can't be numbered (#470), so it promises nothing.
         : bill.number === null ? bill.total !== null && <Text className="text-secondary text-muted">{words.pending}</Text>
-        : canVoid(bill) ? <View className="mt-2"><Button label={words.action} variant="secondary" busy={busy} onPress={onVoid} /></View>
+        // Staff see the bill with no void action (#494).
+        : canVoid(bill) ? mayVoid && <View className="mt-2"><Button label={words.action} variant="secondary" busy={busy} onPress={onVoid} /></View>
         : <Text className="text-secondary text-muted">{words.tooOld}</Text>}
     </View>
   );
@@ -120,6 +122,8 @@ export default function VoidBillScreen() {
     return createCounterBillVoids(api, "account" in identity ? rememberVoids(identity.account.id, accountEpoch()) : undefined);
   });
   const view = useSyncExternalStore(voids.subscribe, voids.get);
+  const role = useAccountRole();
+  const owner = role === "owner";
   useInFront(voids);
   const waiting = useWaitingBills();
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -130,8 +134,11 @@ export default function VoidBillScreen() {
     waited.current = waiting;
   }, [waiting, voids]);
 
+  // A sheet open when the role turns out to be Staff closes for good, so it can't come back if the role flips again (#494).
+  useEffect(() => { if (!owner) setSheet(null); }, [owner]);
+
   async function confirm(body: VoidCounterBillBody) {
-    if (!sheet) return;
+    if (!sheet || !owner) return;
     const id = sheet.bill.id;
     const { close, message } = await voids.voidBill(id, body);
     // Kept open with the reason and note when the void can be tried again; otherwise the list shows why.
@@ -148,6 +155,7 @@ export default function VoidBillScreen() {
       >
         <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
+        {role === "staff" && <Text className="text-body text-muted">{words.staffView}</Text>}
         {waiting > 0 && <Text className="text-body text-muted">{words.waiting(waiting)}</Text>}
         {view.notice && <Text accessibilityLiveRegion="polite" className={`text-body ${view.notice.tone === "success" ? "text-success" : "text-danger"}`}>{view.notice.text}</Text>}
         {view.status === "loading" && (
@@ -160,11 +168,12 @@ export default function VoidBillScreen() {
         {view.status === "failed" && <Button label={words.retry} variant="secondary" onPress={() => void voids.retry()} />}
         {view.bills?.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
         {view.bills?.map((bill) => (
-          <BillRow key={bill.id} bill={bill} busy={view.voiding === bill.id}
+          <BillRow key={bill.id} bill={bill} busy={view.voiding === bill.id} mayVoid={owner}
             onVoid={() => !view.voiding && setSheet({ bill, reason: null, note: "", message: null })} />
         ))}
       </ScrollView>
-      {sheet && (
+      {/* Never for Staff or an unknown role, not even in the render before the effect above clears it (#494). */}
+      {sheet && owner && (
         <VoidSheet
           sheet={sheet}
           busy={view.voiding === sheet.bill.id}

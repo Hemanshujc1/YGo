@@ -9,6 +9,7 @@ import { ApplicationForm } from "../components/application-form";
 import { ApplicationStatus } from "../components/application-status";
 import { OpenSwitch } from "../components/open-switch";
 import { SignOut } from "../components/sign-out";
+import { useAccountRole } from "../lib/account-role";
 import { waiting } from "../lib/application-status";
 import { strings } from "../strings";
 import { SyncStatus } from "../components/sync-status";
@@ -176,6 +177,7 @@ function Waiting({ check }: { check: LiveCheck }) {
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
 function Plain({ children, refreshing = false, onRefresh, stock = false, orders = false }: { stock?: boolean; orders?: boolean; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
+  const owner = useAccountRole(orders) === "owner";
   return (
     <ScrollView
       // The offset keeps Android's spinner below the status bar, as the app draws edge to edge.
@@ -197,8 +199,8 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
           <Text className="text-body font-semibold text-on-primary">{strings.bill.open}</Text>
         </Pressable>
       </Link>}
-      {/* Beside New bill (owner's answer 9 on #54); everyone sees it until Staff screens come with #58. */}
-      {orders && <Link href="/void-bill" asChild>
+      {/* Beside New bill (owner's answer 9 on #54); hidden from Staff and with no shop (#494). */}
+      {orders && owner && <Link href="/void-bill" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
           <Text className="text-body font-semibold text-primary">{strings.voids.open}</Text>
         </Pressable>

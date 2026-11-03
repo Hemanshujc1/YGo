@@ -265,6 +265,7 @@ export const strings = {
     summary: (total: string, payment: string) => `${total} · ${payment}`,
     pending: "Number pending · can be voided once it has a number",
     tooOld: "Older than 24 hours",
+    staffView: "Only the Owner can void a bill.",
     voided: (reason: string) => `Voided · ${reason}`,
     action: "Void",
     done: (bill: string) => `${bill} voided.`,
