@@ -26,6 +26,9 @@ import {
   type RejectOrderBody,
   ShopOrderResponse,
   ShopOrdersResponse,
+  ShopCounterBill,
+  ShopCounterBillsResponse,
+  type VoidCounterBillBody,
   type SaveCartBody,
   type FeedQuery,
   type SearchQuery,
@@ -500,6 +503,16 @@ export function createApiClient({
     /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
     async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
+    },
+
+    /** `GET /v1/me/counter-bills`: S37, the shop's bills of the last 2 days, newest first (#54). */
+    async shopCounterBills(): Promise<ApiResult<ShopCounterBillsResponse>> {
+      return result(await signedIn("GET", "/v1/me/counter-bills"), ShopCounterBillsResponse);
+    },
+
+    /** `POST /v1/me/counter-bills/:id/void`: the Owner voids one bill, online, while the server says it may (#54). */
+    async voidCounterBill(id: string, body: VoidCounterBillBody): Promise<ApiResult<ShopCounterBill>> {
+      return result(await signedIn("POST", `/v1/me/counter-bills/${encodeURIComponent(id)}/void`, body), ShopCounterBill);
     },
 
     /** Shop-scoped durable Stock delta; omit since for the complete projection. */
