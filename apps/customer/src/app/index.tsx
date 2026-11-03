@@ -9,8 +9,7 @@ import { api, session } from "../api";
 import { Bell, Search } from "../components/icons";
 import { ShopCard } from "../components/shop-card";
 import { feedQuery } from "../lib/feed";
-import { createNotifications } from "../lib/notifications";
-import { push } from "../lib/push";
+import { inbox } from "../lib/inbox";
 import { askArea, type AreaAnswer, newestOnly, placeLabel, stale } from "../lib/location-flow";
 import { savedPlace } from "../lib/saved-place";
 import { strings } from "../strings";
@@ -155,10 +154,8 @@ function SearchBox({ query }: { query: FeedQuery }) {
 
 /** The way into C22 (#506), with a dot while anything is unread; read each time Home comes to the front and when a push arrives. */
 function NotificationsBell() {
-  const [list] = useState(() => createNotifications(api));
-  const { unread } = useSyncExternalStore(list.subscribe, list.get);
-  useInFront(list);
-  useEffect(() => push.onReceived(list.pushed), [list]);
+  const { unread } = useSyncExternalStore(inbox.subscribe, inbox.get);
+  useInFront(inbox);
   return (
     <Link href="/notifications" asChild>
       <Pressable

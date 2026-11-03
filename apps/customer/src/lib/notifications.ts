@@ -20,17 +20,21 @@ type Client = {
 };
 
 /**
- * C22 and the Home bell (#506): reads the list each time its screen comes to the front, and again when a push
- * arrives while it is. A tapped row shows as read at once and is marked on the server behind it; one that fails to
- * save shows "New" again at the next read (owner's answer 8 on #506).
+ * C22 and the Home bell (#506), one store for both, so a row read on C22 is read on the bell too. It reads the list
+ * each time either screen comes to the front, and again when a push arrives while one is. A tapped row shows as read
+ * at once and is marked on the server behind it; one that fails to save shows "New" again at the next read (owner's
+ * answer 8 on #506). Rows read here stay read over an answer that left before the server marked them.
  */
 export function createNotifications(client: Client) {
-  let view: NotificationsView = { status: "loading", notifications: null, unread: false, message: null, refreshing: false };
+  const blank: NotificationsView = { status: "loading", notifications: null, unread: false, message: null, refreshing: false };
+  let view = blank;
   // An unread row the server has beyond the 50 shown, which lights the bell all the same.
   let unreadBeyond = false;
-  // Rows read here, kept read over an answer that left before the server marked them.
   const readHere = new Set<string>();
-  let running = false;
+  // While Mark all as read is on its way, an answer's unread flag is out of date.
+  let readingAll = false;
+  // How many screens are in front: Home's bell and C22 hand over as one opens over the other.
+  let inFront = 0;
   let ticket = 0;
   const listeners = new Set<() => void>();
 
@@ -50,7 +54,7 @@ export function createNotifications(client: Client) {
     if (mine !== ticket) return;
     if (answer !== "offline" && answer.ok) {
       // Judged on the server's own rows: a row read here meanwhile is still unread in its answer.
-      unreadBeyond = answer.data.unread && answer.data.notifications.every((row) => row.read);
+      unreadBeyond = !readingAll && answer.data.unread && answer.data.notifications.every((row) => row.read);
       set({ status: "ready", notifications: shown(answer.data.notifications), message: null, refreshing: false });
     } else {
       const message = answer === "offline" ? strings.area.offline : strings.errors[answer.code];
@@ -64,43 +68,63 @@ export function createNotifications(client: Client) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    /** The screen is in front: read now. */
+    /** A screen came to the front: read now. */
     start() {
-      running = true;
+      inFront++;
       void read();
     },
-    /** The screen closed or the app went to the background. */
+    /** A screen closed or the app went to the background. */
     stop() {
-      running = false;
+      inFront = Math.max(0, inFront - 1);
     },
-    /** A push arrived while the app is open: read again if the screen is in front. */
+    /** A push arrived while the app is open: read again if a screen is in front. */
     pushed() {
-      if (running) void read();
+      if (inFront > 0) void read();
+    },
+    /** Another account signed in: nothing of the last one stays. */
+    reset() {
+      ticket++;
+      readHere.clear();
+      unreadBeyond = false;
+      readingAll = false;
+      view = blank;
+      for (const listener of listeners) listener();
     },
     /** Pull to refresh. */
     refresh: () => read(true),
     /** Try again after a failed read. */
     retry: () => read(),
-    /** A tapped row: read at once here, marked on the server behind it. */
+    /** A tapped unread row: read at once here, marked on the server behind it. */
     read(id: string) {
       readHere.add(id);
       if (view.notifications) set({ notifications: shown(view.notifications) });
-      void client.readNotification(id).then((answer) => answer.ok || readHere.delete(id), () => readHere.delete(id));
+      void client.readNotification(id).then(
+        (answer) => {
+          if (!answer.ok) readHere.delete(id);
+          // The last shown unread row: only the server knows whether older ones beyond the 50 are unread.
+          else if (!view.unread) void read();
+        },
+        () => readHere.delete(id),
+      );
     },
     /** "Mark all as read": the rows show read at once, and come back with a message if the server refuses. */
     async readAll() {
-      const before = view.notifications;
-      if (!before) return;
+      const rows = view.notifications;
+      if (!rows) return;
+      const marked = rows.filter((row) => !row.read).map((row) => row.id);
       const beyond = unreadBeyond;
-      ticket++;
+      for (const id of marked) readHere.add(id);
       unreadBeyond = false;
-      set({ notifications: before.map((row) => ({ ...row, read: true })), message: null, refreshing: false });
+      readingAll = true;
+      set({ notifications: shown(rows), message: null });
       const answer = await client.readAllNotifications().catch(() => null);
-      if (answer?.ok) for (const row of before) readHere.add(row.id);
-      else {
-        unreadBeyond = beyond;
-        set({ notifications: shown(before), message: strings.notifications.readAllFailed });
-      }
+      readingAll = false;
+      if (answer?.ok) return;
+      // Only the rows this marked come back, on whatever list is shown now.
+      for (const id of marked) readHere.delete(id);
+      unreadBeyond ||= beyond;
+      const now = view.notifications ?? [];
+      set({ notifications: now.map((row) => (marked.includes(row.id) ? { ...row, read: false } : row)), message: strings.notifications.readAllFailed });
     },
   };
 }

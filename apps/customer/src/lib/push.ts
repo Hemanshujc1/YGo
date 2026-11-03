@@ -9,5 +9,6 @@ export const push = createPush({
   session,
   projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
   channelName: strings.notifications.channel,
-  open: ({ orderId }) => router.push(orderId ? { pathname: "/order/[id]", params: { id: orderId } } : "/notifications"),
+  // navigate, not push: a tap for the screen already in front doesn't open it twice.
+  open: ({ orderId }) => router.navigate(orderId ? { pathname: "/order/[id]", params: { id: orderId } } : "/notifications"),
 });

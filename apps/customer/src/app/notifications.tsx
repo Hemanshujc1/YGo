@@ -2,14 +2,12 @@ import type { Notification } from "@ygo/contracts";
 import { formatDateTime } from "@ygo/format";
 import { Button, Text, useInFront } from "@ygo/mobile";
 import { router } from "expo-router";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "../api";
 import { Bell } from "../components/icons";
 import { TopBar } from "../components/top-bar";
-import { createNotifications } from "../lib/notifications";
-import { push } from "../lib/push";
+import { inbox as list } from "../lib/inbox";
 import { strings } from "../strings";
 
 // C22 Notifications (#506): the server's newest 50, a tap reads one and opens its order (owner's answers 5 and 14 on #55).
@@ -39,14 +37,12 @@ function Row({ row, onPress }: { row: Notification; onPress(): void }) {
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
-  const [list] = useState(() => createNotifications(api));
   const view = useSyncExternalStore(list.subscribe, list.get);
   useInFront(list);
-  useEffect(() => push.onReceived(list.pushed), [list]);
   const rows = view.notifications;
 
   const open = (row: Notification) => {
-    list.read(row.id);
+    if (!row.read) list.read(row.id);
     if (row.orderId) router.push({ pathname: "/order/[id]", params: { id: row.orderId } });
   };
 

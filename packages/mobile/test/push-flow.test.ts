@@ -186,4 +186,14 @@ describe("createPushTaps (#506)", () => {
     await settle();
     expect(open).not.toHaveBeenCalled();
   });
+
+  it("once stopped, a waiting tap is never opened, so a replaced copy can't handle it twice", async () => {
+    const { pushTaps, open, reads, session } = taps({ status: "checking" });
+    pushTaps.tap(tap("t1"));
+    pushTaps.stop();
+    session.move({ status: "signed-in", account: account(asha) });
+    await settle();
+    expect(reads).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
 });

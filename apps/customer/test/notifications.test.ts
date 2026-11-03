@@ -129,4 +129,42 @@ describe("C22 notifications (#506)", () => {
     list.pushed();
     expect(server.reads).toHaveLength(0);
   });
+
+  it("puts back only the rows it marked, on the newer list a push brought meanwhile", async () => {
+    const { list, server } = await loaded({ notifications: [row(1)], unread: true });
+    let refuse: (answer: ApiResult<undefined>) => void = () => {};
+    server.client.readAllNotifications.mockReturnValueOnce(new Promise((resolve) => (refuse = resolve)));
+    const marking = list.readAll();
+    list.pushed();
+    server.answer({ notifications: [row(2), row(1)], unread: true });
+    await settle();
+    refuse(refused);
+    await marking;
+    expect(list.get().notifications?.map((r) => [r.id, r.read])).toEqual([[row(2).id, false], [row(1).id, false]]);
+  });
+
+  it("asks the server again after the last shown unread row is read, for unread ones beyond the 50", async () => {
+    const { list, server } = await loaded({ notifications: [row(1)], unread: true });
+    list.read(row(1).id);
+    expect(list.get().unread).toBe(false);
+    await settle();
+    server.answer({ notifications: [row(1, true)], unread: true });
+    await settle();
+    expect(list.get()).toMatchObject({ unread: true });
+  });
+
+  it("is shared by the bell and C22: a push reads while either is in front", async () => {
+    const { list, server } = await loaded({ notifications: [], unread: false });
+    list.start();
+    list.stop();
+    server.reads.length = 0;
+    list.pushed();
+    expect(server.reads).toHaveLength(1);
+  });
+
+  it("forgets the last account's rows on reset", async () => {
+    const { list } = await loaded({ notifications: [row(1)], unread: true });
+    list.reset();
+    expect(list.get()).toMatchObject({ status: "loading", notifications: null, unread: false });
+  });
 });

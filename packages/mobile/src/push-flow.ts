@@ -68,9 +68,11 @@ export function createPushTaps({ session, read, open }: { session: Session; read
     for (const tap of taps) if (!opening.has(tap.notificationId)) void handle(tap, state.account.id);
   }
 
-  session.subscribe(drain);
+  const stop = session.subscribe(drain);
 
   return {
+    /** Stops waiting on the session. */
+    stop,
     tap(tap: Tap) {
       if (seen.has(tap.key)) return;
       seen.add(tap.key);

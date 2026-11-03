@@ -29,6 +29,12 @@ type PushOptions = {
   open(tap: Tap): void;
 };
 
+/** How long one registration may take before the next may start. */
+const REGISTER_LIMIT_MS = 60_000;
+
+// The newest push's listeners, removed when Fast Refresh runs the app's module again, so a tap is handled once.
+let stopLast = () => {};
+
 const flags = createMMKV({ id: "push" });
 const asked = "asked";
 
@@ -56,16 +62,22 @@ function tapOf(response: NotificationResponse): Tap | null {
  * app is not missed.
  */
 export function createPush({ api, session, projectId, channelName, open }: PushOptions) {
+  stopLast();
   const received = listeners();
-  // One registration at a time, so two can never both show the prompt.
+  // One registration at a time, so two can never both show the prompt; one that never answers (an iPhone that gets
+  // no answer from Apple) lets the next go after a minute.
   let running: Promise<unknown> = Promise.resolve();
   const register = (ask: boolean) => {
-    const next = running.then(() => registerPush(device, projectId, async (token) => (await api.savePushToken({ token })).ok, ask));
+    const next = running.then(() => Promise.race([
+      registerPush(device, projectId, async (token) => (await api.savePushToken({ token })).ok, ask),
+      new Promise((resolve) => setTimeout(resolve, REGISTER_LIMIT_MS)),
+    ]));
     running = next.catch(() => undefined);
     return next;
   };
 
-  const taps = createPushTaps({
+  let askedHere = false;
+  const { stop: stopTaps, ...taps } = createPushTaps({
     session,
     async read(id): Promise<Owner> {
       const answer = await api.readNotification(id);
@@ -86,8 +98,7 @@ export function createPush({ api, session, projectId, channelName, open }: PushO
     const tap = response && tapOf(response);
     if (tap) taps.tap(tap);
   };
-  addNotificationResponseReceivedListener(take);
-  addNotificationReceivedListener(() => received.notify());
+  const subscriptions = [addNotificationResponseReceivedListener(take), addNotificationReceivedListener(() => received.notify())];
   // A cold start: the tap that launched the app. Cleared, so the next launch doesn't open it again.
   take(getLastNotificationResponse());
   clearLastNotificationResponse();
@@ -100,12 +111,24 @@ export function createPush({ api, session, projectId, channelName, open }: PushO
     if (accountId && accountId !== registeredFor) void register(false);
     registeredFor = accountId;
   };
-  session.subscribe(onSession);
+  const stopSession = session.subscribe(onSession);
   onSession();
+  stopLast = () => {
+    for (const subscription of subscriptions) subscription.remove();
+    stopSession();
+    stopTaps();
+  };
 
   return {
-    /** After the first order: shows the system prompt, once per phone (owner's answer 3 on #506). */
-    ask: () => void register(true),
+    /**
+     * After an order: shows the system prompt the first time only (owner's answer 3 on #506). Later orders do
+     * nothing, as the launch and each sign-in already send the token.
+     */
+    ask() {
+      if (askedHere || device.asked.get()) return;
+      askedHere = true;
+      void register(true);
+    },
     /** Called for each push that arrives while the app is open. */
     onReceived: received.add,
   };

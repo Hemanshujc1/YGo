@@ -41,6 +41,11 @@
     "react-native-nitro-modules": "0.35.9",
     "react-native-safe-area-context": "5.7.0"
   },
+  "peerDependenciesMeta": {
+    "expo-notifications": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "26.6.4",
     "@types/react": "19.2.18",
