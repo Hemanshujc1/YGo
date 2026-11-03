@@ -245,7 +245,7 @@ export const strings = {
       number: (number: number) => `Bill ${number}`, numberPending: "Number pending", reference: (reference: string) => `Reference ${reference}`,
       item: "Item", count: "Count", price: "Price", amount: "Amount", items: "Items", discount: "Discount", total: "Total",
       paidBy: (payment: string) => `Paid by ${payment}`, customer: (name: string) => `Customer: ${name}`, unknownItem: "Item",
-      file: (reference: string) => `YGo bill ${reference}`,
+      file: (reference: string) => `YGo bill ${reference}`, voided: (reason: string) => `Voided · ${reason}`,
     },
     status: {
       pending: "Saved on phone · number pending",

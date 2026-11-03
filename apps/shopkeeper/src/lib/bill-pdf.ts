@@ -48,9 +48,11 @@ th.n,td.n{text-align:right;padding-left:16px;white-space:nowrap}
 .sums p{display:flex;justify-content:space-between;padding:4px 0}
 .total{font-size:18px;line-height:26px;font-weight:600;border-top:1px solid ${light("border-strong")};margin-top:4px;padding-top:8px}
 .paid{margin-top:24px}
+.void{color:${light("danger")};font-weight:600}
 </style></head><body>
 ${shopName ? `<h1>${escape(shopName)}</h1>` : ""}
 <p class="head">${bill.number !== null ? words.number(bill.number) : words.numberPending}</p>
+${bill.voided ? `<p class="void">${words.voided(strings.voids.reasons[bill.voided.reason])}</p>` : ""}
 <p class="muted">${words.reference(bill.reference)} · ${formatDateTime(bill.createdAt)}</p>
 ${name ? `<p>${escape(words.customer(name))}</p>` : ""}
 <table><thead><tr><th>${words.item}</th><th class="n">${words.count}</th><th class="n">${words.price}</th><th class="n">${words.amount}</th></tr></thead><tbody>${rows}</tbody></table>

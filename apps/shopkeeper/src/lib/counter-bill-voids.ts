@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { ErrorCode, ShopCounterBill, ShopCounterBillsResponse, VoidCounterBillBody } from "@ygo/contracts";
+import type { CounterBillVoidReason, ErrorCode, ShopCounterBill, ShopCounterBillsResponse, VoidCounterBillBody } from "@ygo/contracts";
 import { strings } from "../strings";
 
 const words = strings.voids;
@@ -16,6 +16,9 @@ const closesSheet = new Set<ErrorCode>(["COUNTER_BILL_VOIDED", "COUNTER_BILL_NOT
 const leavesBill = new Set<ErrorCode>(["VALIDATION_FAILED", "UNAUTHENTICATED", "UPDATE_REQUIRED", "TOO_MANY_REQUESTS"]);
 /** Why a bill the list shows can no longer be voided, once a void's answer was lost. */
 const stillCode = (bill: ShopCounterBill): ErrorCode => (bill.voided ? "COUNTER_BILL_VOIDED" : "COUNTER_BILL_NOT_VOIDABLE");
+
+/** "Voided · Other · Customer changed mind": only Other has a note. Shared by S37 and the phone's bill cards (#493). */
+export const voidedLine = (voided: { reason: CounterBillVoidReason; note: string | null }) => words.voided([words.reasons[voided.reason], voided.note].filter(Boolean).join(" · "));
 
 const failure = (answer: ApiResult<unknown> | "offline") => (answer === "offline" ? words.offline : answer.ok ? null : strings.errors[answer.code]);
 
@@ -40,7 +43,7 @@ type Client = {
  * S37 Void a bill (#492): the shop's bills from the server, read on opening, on pull and after a void whose
  * outcome may have changed the bill; no timer, as the server's answer is the only clock.
  */
-export function createCounterBillVoids(client: Client) {
+export function createCounterBillVoids(client: Client, remember?: (bills: ShopCounterBill[]) => void) {
   let view: VoidsView = { status: "loading", bills: null, message: null, refreshing: false, voiding: null, notice: null };
   const listeners = new Set<() => void>();
   const set = (next: Partial<VoidsView>) => {
@@ -62,7 +65,10 @@ export function createCounterBillVoids(client: Client) {
     else if (!view.bills) set({ status: "loading", message: null });
     const answer = await client.shopCounterBills().catch(() => "offline" as const);
     if (mine !== ticket) return;
-    if (answer !== "offline" && answer.ok) set({ status: "ready", bills: answer.data.bills, message: null, refreshing: false });
+    if (answer !== "offline" && answer.ok) {
+      remember?.(answer.data.bills);
+      set({ status: "ready", bills: answer.data.bills, message: null, refreshing: false });
+    }
     else set({ status: view.bills ? "ready" : "failed", message: failure(answer), refreshing: false });
   }
   /** Reads the list and waits for it, or for a newer read (a pull, a return to the app) sent meanwhile. */
@@ -95,6 +101,7 @@ export function createCounterBillVoids(client: Client) {
     if (answer !== "offline" && answer.ok) {
       ++ticket;
       const saved = answer.data;
+      remember?.([saved]);
       set({
         voiding: null, refreshing: false, message: null,
         bills: view.bills?.map((bill) => (bill.id === id ? saved : bill)) ?? [saved],

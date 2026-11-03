@@ -1,10 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openingStockQueue } from "../src/lib/opening-stock-queue";
+import { billStatus } from "../src/lib/bill-status";
+import { type BillRow, openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
-const mock = vi.hoisted(() => ({ hooks: [] as unknown[], cursor: 0, effects: new Map<number, unknown[]>(), open: vi.fn(), listings: vi.fn(), retry: vi.fn(), share: vi.fn(),
+const mock = vi.hoisted(() => ({ hooks: [] as unknown[], cursor: 0, effects: new Map<number, unknown[]>(), open: vi.fn(), listings: vi.fn(), retry: vi.fn(), share: vi.fn(), bills: vi.fn(),
   status: { running: false, outcome: "done", failures: 0 } as Record<string, unknown>, view: { mode: "online" } as Record<string, unknown> }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
@@ -26,7 +27,7 @@ vi.mock("../src/components/icons", () => ({ Share2: "Share2" }));
 vi.mock("../src/lib/share-bill", () => ({ shareBill: mock.share }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, session: { get: () => ({ account: { id: "account-1" } }) }, supportEmail: "help@example.com",
-  access: { subscribe: vi.fn(), get: () => mock.view, shopName: () => "Sai General Stores" }, api: { shopListings: mock.listings } }));
+  access: { subscribe: vi.fn(), get: () => mock.view, shopName: () => "Sai General Stores" }, api: { shopListings: mock.listings, shopCounterBills: mock.bills } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: vi.fn(), get: () => mock.status, retryNow: mock.retry } }));
 import SyncScreen from "../src/app/sync";
@@ -46,6 +47,8 @@ function texts() {
 function linkTo(label: string) {
   return elements(render()).find((node) => node.props.href && elements(node.props.children).some((child) => child.props.children === label))?.props.href;
 }
+/** The status line each bill card will show (the cards are not drawn in this test). */
+function cardStatuses() { return elements(render()).flatMap((node) => node.props.bill ? [billStatus(node.props.bill as BillRow).text] : []); }
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); render(); await new Promise((resolve) => setTimeout(resolve, 0)); }
 
 describe("S08 Waiting to sync (#395)", () => {
@@ -55,6 +58,7 @@ describe("S08 Waiting to sync (#395)", () => {
     mock.status = { running: false, outcome: "done", failures: 0 };
     db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID);
     mock.open.mockResolvedValue(queue);
+    mock.bills.mockResolvedValue({ ok: true, data: { bills: [] } });
     mock.listings.mockResolvedValue({ ok: true, data: { items: [{ packId: dal, name: "Dal", packQuantity: "0.500", baseUnit: "kg" }] } });
   });
   afterEach(() => db.close());
@@ -123,4 +127,38 @@ describe("S08 Waiting to sync (#395)", () => {
     expect(texts()).toContain("Go online to fix this in Opening stock.");
     expect(elements(render()).some((node) => node.props.href === "/opening-stock")).toBe(false);
   });
+  describe("a voided bill (#493)", () => {
+    const bill = { lines: [{ packId, count: 1, unitPrice: "21" }], total: "21", payment: "cash" as const };
+    function syncedBill() {
+      const saved = queue.saveBill(shopId, bill);
+      if (typeof saved === "string") throw new Error(saved);
+      const batch = queue.batch(shopId), billId = randomUUID();
+      queue.acknowledge(batch, { results: [{ actionId: saved.id, sequence: 1, status: "applied", code: null, clockSuspect: false,
+        result: { billId, reference: saved.reference, number: 12, heldReason: null, totalMismatch: false, recordedAt: new Date().toISOString() } }] });
+      return { saved, billId };
+    }
+    const listed = (billId: string, reference: string) => ({ id: billId, reference, number: 12, total: "21", payment: "cash", madeAt: new Date().toISOString(), receivedAt: new Date().toISOString(),
+      voidUntil: null, voidable: false, voided: { reason: "billed_twice", note: null, createdAt: new Date().toISOString() } });
+
+    it("learns the void from the server when opened online, and redraws the card as Voided", async () => {
+      const { saved, billId } = syncedBill();
+      mock.bills.mockResolvedValue({ ok: true, data: { bills: [listed(billId, saved.reference)] } });
+      render(); await settle(); await settle();
+      expect(cardStatuses()).toEqual(["Voided · Billed twice"]);
+    });
+
+    it("shows nothing new offline, and keeps a void it already knew when the read fails", async () => {
+      const { saved, billId } = syncedBill();
+      queue.saveVoids([listed(billId, saved.reference) as never]);
+      mock.view = { mode: "offline" };
+      render(); await settle();
+      expect(mock.bills).not.toHaveBeenCalled();
+      expect(cardStatuses()).toEqual(["Voided · Billed twice"]);
+      mock.view = { mode: "online" }; mock.hooks = []; mock.effects = new Map();
+      mock.bills.mockResolvedValue({ ok: true, data: { bills: [] } });
+      render(); await settle(); await settle();
+      expect(cardStatuses()).toEqual(["Voided · Billed twice"]);
+    });
+  });
+
 });

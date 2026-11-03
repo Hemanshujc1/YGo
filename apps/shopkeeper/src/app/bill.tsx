@@ -4,12 +4,13 @@ import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { access, accountEpoch, session, supportEmail } from "../api";
+import { access, accountEpoch, api, session, supportEmail } from "../api";
 import { BillCard } from "../components/bill-card";
 import { Minus, Plus, Square, SquareCheck } from "../components/icons";
 import { SyncStatus } from "../components/sync-status";
 import { isCurrentAccount } from "../lib/account";
 import { startOfToday } from "../lib/bill-status";
+import { refreshBillVoids } from "../lib/bill-voids";
 import { type BillCustomer, draftBill, type TypedLine } from "../lib/bill-draft";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
@@ -79,16 +80,24 @@ export default function BillScreen() {
   }, []));
 
   const loaded = load.kind === "loaded" && isCurrentAccount(load.accountId, load.epoch) && access.allowed(load.accountId, load.shopId) ? load : null;
+  // Online, the server's voids are learned once per opening; a new one redraws the cards (#493).
+  const [learned, setLearned] = useState(0);
+  useEffect(() => {
+    if (!loaded || view.mode !== "online") return;
+    let gone = false;
+    void refreshBillVoids(api, loaded.queue, () => isCurrentAccount(loaded.accountId, loaded.epoch) && access.allowed(loaded.accountId, loaded.shopId)).then((found) => { if (found && !gone) setLearned((count) => count + 1); });
+    return () => { gone = true; };
+  }, [loaded, view.mode]);
   // Stock and Today's bills are read from the phone on opening, after a save and after each sync pass, not on every keystroke.
   const read = useMemo(() => {
     try {
       return loaded ? { items: loaded.queue.cache.read(loaded.shopId)?.items.filter((item) => !item.unavailable) ?? [], bills: loaded.queue.bills(loaded.shopId, startOfToday()) } : null;
     } catch { return null; }
-  }, [loaded, status, message]);
+  }, [loaded, status, message, learned]);
   const searching = find.trim() !== "";
   const found = useMemo(() => {
     try { return loaded && searching && find === debouncedFind ? loaded.queue.findBills(loaded.shopId, debouncedFind) : null; } catch { return null; }
-  }, [loaded, status, message, searching, find, debouncedFind]);
+  }, [loaded, status, message, learned, searching, find, debouncedFind]);
 
   const draft = draftBill({ lines: lines.map((line) => ({ packId: line.item.packId, unitPrice: line.item.counterPrice, count: line.count })), typed, discount, customer, payment });
   const wrong = Object.keys(draft.problems.counts).length > 0 || Object.keys(draft.problems.typed).length > 0 || draft.problems.discount !== null || draft.problems.customerName || draft.problems.phone;

@@ -119,7 +119,7 @@ describe("opening-stock durability", () => {
       db = new DatabaseSync(filename);
       const queue = openingStockQueue(adapter(db), randomUUID);
       expect(queue.pending(shopId, packId)).toEqual(entry);
-      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
       db.close();
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
@@ -294,7 +294,7 @@ describe("opening-stock durability", () => {
     const db = new DatabaseSync(":memory:");
     try {
       openingStockQueue(adapter(db), randomUUID).save(shopId, packId, entry);
-      db.exec("PRAGMA user_version = 7");
+      db.exec("PRAGMA user_version = 8");
       expect(() => openingStockQueue(adapter(db), randomUUID)).toThrow("newer app");
       expect(db.prepare("SELECT payload FROM opening_stock").get()?.payload).toBe(JSON.stringify(entry));
     } finally { db.close(); }
@@ -555,9 +555,9 @@ describe("S08 overview and the shared allowance (#395)", () => {
     try {
       const first = openingStockQueue(adapter(db), randomUUID);
       first.saveFlag(shopId, packId, true);
-      db.exec("ALTER TABLE opening_stock_actions DROP COLUMN acknowledged_at; PRAGMA user_version = 5");
+      db.exec("DROP TABLE bill_voids; ALTER TABLE opening_stock_actions DROP COLUMN acknowledged_at; PRAGMA user_version = 5");
       const queue = openingStockQueue(adapter(db), randomUUID);
-      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+      expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
       expect(queue.count()).toBe(1);
       answer(queue, "applied");
       expect(db.prepare("SELECT acknowledged_at FROM opening_stock_actions").get()?.acknowledged_at).toEqual(expect.any(String));

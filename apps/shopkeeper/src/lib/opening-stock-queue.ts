@@ -1,6 +1,6 @@
 import { stockCache } from "./stock-cache";
 import { OFFLINE_LIMITS } from "./offline-limits";
-import { counterBillReference, CounterBillPayload, type CounterBillResponse, OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
+import { counterBillReference, CounterBillPayload, type CounterBillVoidReason, type ShopCounterBill, type CounterBillResponse, OpeningStockPayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import type { SQLiteDatabase } from "expo-sqlite";
 
@@ -19,7 +19,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 6) throw new Error("Opening stock database needs a newer app");
+  if (version > 7) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
@@ -59,6 +59,15 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   // When the server answered, so S08 can list what synced today.
   if (version < 6) db.withTransactionSync(() => db.execSync(`ALTER TABLE opening_stock_actions ADD COLUMN acknowledged_at TEXT;
     CREATE INDEX IF NOT EXISTS opening_stock_actions_pack ON opening_stock_actions (shop_id, pack_id, sequence); PRAGMA user_version = 6;`));
+
+  // What the server says about voided bills (#493): kept for good, as a void can't be undone, and cleared with the rest of this account's database.
+  if (version < 7) db.withTransactionSync(() => db.execSync(`CREATE TABLE bill_voids (bill_id TEXT PRIMARY KEY, reference TEXT NOT NULL, reason TEXT NOT NULL,
+    note TEXT); PRAGMA user_version = 7;`));
+
+  // A bill on this phone is the server's bill only when its answer's bill id and its reference both match: a reference alone
+  // can repeat when two bills clashed (#467).
+  const voidedOf = `(SELECT json_object('reason', v.reason, 'note', v.note) FROM bill_voids v WHERE v.bill_id = json_extract(a.result, '$.result.billId')
+    AND v.reference = upper(substr(replace(a.id, '-', ''), 1, 4) || '-' || substr(replace(a.id, '-', ''), 5, 4))) AS voided`;
 
   // A refusal stays open until a newer change of the same kind to the same pack is accepted. A refused
   // correction closes as soon as a newer correction is queued, even offline, as on Opening stock (#460).
@@ -151,9 +160,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     },
     /** The shop's bills made since `since` (the start of today), and older ones still waiting or refused; newest first. */
     bills(shopId: string, since: Date): BillRow[] {
-      return db.getAllSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
-        WHERE shop_id = ? AND json_extract(action, '$.type') = 'counter_bill' AND (json_extract(action, '$.createdAt') >= ? OR status <> 'applied') ORDER BY sequence DESC`,
-      shopId, since.toISOString()).map((row) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null));
+      return db.getAllSync<BillSql>(`SELECT a.action, a.status, a.result, ${voidedOf} FROM opening_stock_actions a
+        WHERE a.shop_id = ? AND json_extract(a.action, '$.type') = 'counter_bill' AND (json_extract(a.action, '$.createdAt') >= ? OR a.status <> 'applied') ORDER BY a.sequence DESC`,
+      shopId, since.toISOString()).map(fromSql);
     },
     /**
      * The shop's bills on this phone, of any day, found by either identifier (#53): the start of the reference
@@ -164,10 +173,24 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
       const reference = /^[0-9A-F]{1,8}$/.test(typed) ? `${typed}%` : null;
       const number = /^\d{1,9}$/.test(typed) ? Number(typed) : null;
       if (reference === null && number === null) return [];
-      return db.getAllSync<{ action: string; status: string; result: string | null }>(`SELECT action, status, result FROM opening_stock_actions
-        WHERE shop_id = ? AND json_extract(action, '$.type') = 'counter_bill'
-          AND (upper(replace(id, '-', '')) LIKE ? OR (status = 'applied' AND json_extract(result, '$.result.number') = ?)) ORDER BY sequence DESC LIMIT 50`,
-      shopId, reference ?? "", number ?? -1).map((row) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null));
+      return db.getAllSync<BillSql>(`SELECT a.action, a.status, a.result, ${voidedOf} FROM opening_stock_actions a
+        WHERE a.shop_id = ? AND json_extract(a.action, '$.type') = 'counter_bill'
+          AND (upper(replace(a.id, '-', '')) LIKE ? OR (a.status = 'applied' AND json_extract(a.result, '$.result.number') = ?)) ORDER BY a.sequence DESC LIMIT 50`,
+      shopId, reference ?? "", number ?? -1).map(fromSql);
+    },
+    /**
+     * Remember the voids the server's bill list shows (#493). It only adds: a void can't be undone, so a list missing a bill
+     * (older than the list reaches, or a read that came back empty) never forgets one. Returns whether it learned a new void.
+     */
+    saveVoids(bills: ShopCounterBill[]): boolean {
+      let learned = false;
+      db.withTransactionSync(() => {
+        for (const bill of bills) {
+          if (!bill.voided) continue;
+          learned = db.runSync("INSERT OR IGNORE INTO bill_voids (bill_id, reference, reason, note) VALUES (?, ?, ?, ?)", bill.id, bill.reference, bill.voided.reason, bill.voided.note).changes > 0 || learned;
+        }
+      });
+      return learned;
     },
     /**
      * Each pack's latest correction in the shop, by pack. Actions sync in order, so only the latest can still be waiting,
@@ -324,19 +347,19 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     },
     /** S08's three sections; `since` is the start of today on this phone. */
     overview(since: Date): Record<"attention" | "waiting" | "synced", QueueRow[]> {
-      type Raw = { id: string; shop_id: string; pack_id: string; action: string; result: string | null; at: string | null };
+      type Raw = { id: string; shop_id: string; pack_id: string; action: string; result: string | null; at: string | null; voided: string | null };
       const row = (raw: Raw): QueueRow => {
         const action = JSON.parse(raw.action) as SyncAction;
         const payload = action.payload as { quantity?: string; outOfStock?: boolean };
         const result = raw.result ? JSON.parse(raw.result) as SyncActionResult : null;
         if (action.type === "counter_bill") {
           return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type, code: result?.code ?? null, at: raw.at, label: null,
-            bill: billRow(action, result?.status ?? "pending", result) };
+            bill: billRow(action, result?.status ?? "pending", result, raw.voided) };
         }
         return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type === "stock_flag" || action.type === "opening_stock_correction" ? action.type : "opening_stock",
           quantity: payload.quantity, outOfStock: payload.outOfStock, code: result?.code ?? null, at: raw.at, label: label(raw.shop_id, raw.pack_id) };
       };
-      const columns = "a.id, a.shop_id, a.pack_id, a.action, a.result";
+      const columns = `a.id, a.shop_id, a.pack_id, a.action, a.result, ${voidedOf}`;
       const refused = db.getAllSync<Raw>(`SELECT ${columns}, a.acknowledged_at AS at FROM opening_stock_actions a WHERE ${openRefusal} ORDER BY a.sequence`).map(row);
       const held = db.getAllSync<{ id: number; source_key: string; payload: string }>("SELECT rowid AS id, source_key, payload FROM opening_stock_held ORDER BY rowid").map(({ id, source_key, payload }): QueueRow => {
         const [, shopId = "", packId = ""] = source_key.split(":");
@@ -371,13 +394,18 @@ export type QueueRow = { id: string; shopId: string; packId: string; type: "open
   code: string | null; at: string | null; label: PackName | null; bill?: BillRow };
 export type PackName = { name: string; packQuantity: string; baseUnit: "each" | "kg" | "l" };
 /** A counter bill as the phone knows it: waiting, synced with its number (or held for Admin), or refused with the server's code. */
-export type BillRow = CounterBillPayload & { id: string; reference: string; createdAt: string; status: "pending" | "synced" | "held" | "refused"; number: number | null; code: string | null };
+export type BillRow = CounterBillPayload & { id: string; reference: string; createdAt: string; status: "pending" | "synced" | "held" | "refused"; number: number | null; code: string | null;
+  /** The Owner's void, as the server last told this phone (#493). */
+  voided: { reason: CounterBillVoidReason; note: string | null } | null };
 
-function billRow(action: SyncAction, status: string, result: SyncActionResult | null): BillRow {
+type BillSql = { action: string; status: string; result: string | null; voided: string | null };
+const fromSql = (row: BillSql) => billRow(JSON.parse(row.action) as SyncAction, row.status, row.result ? JSON.parse(row.result) as SyncActionResult : null, row.voided);
+
+function billRow(action: SyncAction, status: string, result: SyncActionResult | null, voided: string | null): BillRow {
   const bill = result?.result as CounterBillResponse | null | undefined;
   return { ...(action.payload as CounterBillPayload), id: action.id, reference: counterBillReference(action.id), createdAt: action.createdAt,
     status: status === "rejected" ? "refused" : status !== "applied" || !bill ? "pending" : bill.number === null ? "held" : "synced",
-    number: bill?.number ?? null, code: result?.code ?? null };
+    number: bill?.number ?? null, code: result?.code ?? null, voided: voided ? JSON.parse(voided) as BillRow["voided"] : null };
 }
 
 // The shop's listed packs, or null when the server can't be reached or refuses (#464). The client is
