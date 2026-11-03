@@ -196,4 +196,14 @@ describe("createPushTaps (#506)", () => {
     expect(reads).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
+
+  it("once stopped, a tap the server was already asked about is not opened when the answer comes", async () => {
+    let answer: (owner: Owner) => void = () => {};
+    const { pushTaps, open } = taps({ status: "signed-in", account: account(asha) }, () => new Promise((resolve) => (answer = resolve)));
+    pushTaps.tap(tap("t1"));
+    pushTaps.stop();
+    answer("mine");
+    await settle();
+    expect(open).not.toHaveBeenCalled();
+  });
 });

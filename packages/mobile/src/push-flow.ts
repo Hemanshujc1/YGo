@@ -50,13 +50,15 @@ export function createPushTaps({ session, read, open }: { session: Session; read
   const seen = new Set<string>();
   const opening = new Set<string>();
   let waiting: Tap[] = [];
+  // Set by stop: a replaced copy (Fast Refresh) opens nothing, even for a tap whose server answer comes later.
+  let stopped = false;
 
   async function handle(tap: Tap, accountId: string) {
     opening.add(tap.notificationId);
     const owner = await read(tap.notificationId).catch((): Owner => "unknown");
     opening.delete(tap.notificationId);
     const now = session.get();
-    if (owner === "mine" && now.status === "signed-in" && now.account.id === accountId) open(tap);
+    if (!stopped && owner === "mine" && now.status === "signed-in" && now.account.id === accountId) open(tap);
   }
 
   function drain() {
@@ -68,11 +70,15 @@ export function createPushTaps({ session, read, open }: { session: Session; read
     for (const tap of taps) if (!opening.has(tap.notificationId)) void handle(tap, state.account.id);
   }
 
-  const stop = session.subscribe(drain);
+  const unsubscribe = session.subscribe(drain);
 
   return {
-    /** Stops waiting on the session. */
-    stop,
+    /** Stops waiting on the session, and drops every tap still waiting or being checked. */
+    stop() {
+      stopped = true;
+      waiting = [];
+      unsubscribe();
+    },
     tap(tap: Tap) {
       if (seen.has(tap.key)) return;
       seen.add(tap.key);
