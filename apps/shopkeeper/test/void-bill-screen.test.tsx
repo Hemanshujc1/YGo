@@ -2,7 +2,7 @@ import type { ShopCounterBill } from "@ygo/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
-  list: vi.fn(), send: vi.fn(), waiting: 0, hooks: [] as unknown[], cursor: 0, focused: false, started: false,
+  list: vi.fn(), send: vi.fn(), waiting: 0, role: "owner" as "owner" | "staff" | null, verify: vi.fn(() => Promise.resolve(null)), hooks: [] as unknown[], cursor: 0, focused: false, started: false,
 }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
@@ -33,7 +33,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 vi.mock("../src/api", () => ({
   api: { shopCounterBills: mock.list, voidCounterBill: mock.send }, accountEpoch: () => 0,
   session: { get: () => ({ account: { id: "account-1" } }) },
-  access: { get: () => ({ shopId: "shop-1" }), allowed: () => true },
+  access: { get: () => ({ shopId: "shop-1" }), allowed: () => true, subscribe: () => () => undefined, role: () => mock.role, verify: mock.verify },
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: () => Promise.resolve({ billCount: () => mock.waiting }) }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }) } }));
@@ -72,7 +72,7 @@ async function settle() { for (let i = 0; i < 10; i++) await Promise.resolve(); 
 
 describe("S37 Void a bill (#492)", () => {
   beforeEach(() => {
-    vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false; mock.started = false; mock.waiting = 0;
+    vi.clearAllMocks(); mock.hooks = []; mock.cursor = 0; mock.focused = false; mock.started = false; mock.waiting = 0; mock.role = "owner";
   });
 
   it("shows loading, then a bill within its window with its number, reference, time, total and a Void button", async () => {
@@ -82,6 +82,41 @@ describe("S37 Void a bill (#492)", () => {
     expect(texts()).toEqual(expect.arrayContaining(["Bill 12", "Reference 7D2E9A4C", "₹63 · Cash"]));
     expect(texts()).not.toContain("Loading bills");
     expect(button("Void")).toMatchObject({ variant: "secondary" });
+  });
+
+  it("shows Staff and an account with no role the bills with no Void button and no sheet, and keeps the voided lines (#494)", async () => {
+    mock.list.mockResolvedValue({ ok: true, data: { bills: [bill(), { ...voided(), id: "b2" }, bill({ id: "b3", voidable: false })] } });
+    for (const role of ["staff", null] as const) {
+      mock.role = role; mock.hooks = []; mock.focused = false; mock.started = false;
+      render(); await settle();
+      expect(texts()).toEqual(expect.arrayContaining(["Bill 12", "Voided · Billed twice", "Older than 24 hours"]));
+      expect(texts().includes("Only the Owner can void a bill.")).toBe(role === "staff");
+      expect(all().filter((node) => node.props.label === "Void")).toHaveLength(0);
+      expect(sheetOpen()).toBe(false);
+    }
+    // Only a Staff account is told why; an unknown role is asked about once, and nothing is promised before the answer.
+    mock.role = null; mock.hooks = []; render();
+    expect(texts()).not.toContain("Only the Owner can void a bill.");
+    expect(mock.verify).toHaveBeenCalled();
+    expect(mock.send).not.toHaveBeenCalled();
+    mock.role = "owner"; mock.hooks = []; mock.focused = false; mock.started = false;
+    render(); await settle();
+    expect(texts()).not.toContain("Only the Owner can void a bill.");
+    expect(button("Void")).toBeDefined();
+  });
+
+  it("closes an open void sheet at once when the next check shows the account is Staff (#494)", async () => {
+    mock.list.mockResolvedValue({ ok: true, data: { bills: [bill()] } });
+    render(); await settle();
+    tap("Void");
+    expect(sheetOpen()).toBe(true);
+    mock.role = "staff";
+    render(); // the next render after the role changes clears the sheet
+    expect(sheetOpen()).toBe(false);
+    // The sheet is gone for good: it doesn't come back if the role flips back.
+    mock.role = "owner";
+    expect(sheetOpen()).toBe(false);
+    expect(mock.send).not.toHaveBeenCalled();
   });
 
   it("shows voided bills with their reason, older ones without Void, and a held bill with no amount and no Void", async () => {

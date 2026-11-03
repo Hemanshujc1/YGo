@@ -19,10 +19,10 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
     return withTransaction(pool, async (client) => {
       // Match the shop row lock used by Stock and lifecycle writes, and lock the
       // membership row so a concurrent unlink cannot race a positive answer.
-      const { rows: [shop] } = await client.query(`SELECT s.id, s.state, s.shop_name FROM shops s JOIN shop_members m ON m.shop_id = s.id
+      const { rows: [shop] } = await client.query(`SELECT s.id, s.state, s.shop_name, m.role FROM shops s JOIN shop_members m ON m.shop_id = s.id
         WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR SHARE OF s, m`, [who.accountId]);
       await client.query("COMMIT");
-      return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null, shopName: shop?.shop_name ?? null });
+      return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null, shopName: shop?.shop_name ?? null, role: shop?.role ?? null });
     });
   });
 

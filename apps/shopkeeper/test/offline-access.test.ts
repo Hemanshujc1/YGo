@@ -155,4 +155,32 @@ describe("verified offline shop access", () => {
     const older = readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }));
     expect(older?.shopName).toBeNull();
   });
+  it("keeps the account's role from the last check, reads an older record as Owner, and follows a change at the next check (#494)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff" } });
+    const first = offlineAccess(storage, fetch, () => time);
+    await first.verify(account);
+    expect(first.role()).toBe("staff");
+    fetch.mockRejectedValue(new Error("offline"));
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.role()).toBe("staff");
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }))?.role).toBe("owner");
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "owner" } });
+    await restarted.verify(account);
+    expect(restarted.role()).toBe("owner");
+    fetch.mockResolvedValue({ ok: true, data: { shopId: null, state: null, shopName: null, role: null } });
+    await restarted.verify({ ...account, id: "other-account" });
+    expect(restarted.role()).toBeNull();
+  });
+  it("keeps a changed role saved when an Approved answer leaves the lease as it was (#494)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "owner" } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved", shopName: null, role: "staff" } });
+    const next = offlineAccess(storage, fetch, () => time);
+    await next.verify(account);
+    expect(next.role()).toBe("staff");
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.role()).toBe("staff");
+  });
 });
