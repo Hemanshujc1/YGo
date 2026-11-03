@@ -30,6 +30,8 @@ const BaseEnv = z.object({
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
   // C15's place search (#257); without it, or left empty, the search answers UNAVAILABLE.
   GOOGLE_PLACES_API_KEY: z.string().optional().transform((key) => key || undefined),
+  // Pushes go to Expo's push service with "expo"; "local" only logs them (#505).
+  PUSH_SENDER: z.enum(["local", "expo"]).default("local"),
 });
 
 const Env = z.discriminatedUnion("MAILER", [

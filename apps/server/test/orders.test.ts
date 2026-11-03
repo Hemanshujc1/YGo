@@ -8,6 +8,8 @@ import { bootstrapAdmin } from "../src/bootstrap";
 import { OrderStatus } from "@ygo/contracts";
 import { connectDatabase } from "../src/db";
 import { stockOf } from "../src/listings";
+import { createLocalPushSender, type PushSender } from "../src/adapters/push-sender";
+import { sendDuePushes } from "../src/notifications";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
 
@@ -388,7 +390,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE order_lines, order_status_history, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });
@@ -781,4 +783,140 @@ it("refuses placement after a manual flag without changing stock, and permits it
   await database.pool.query("UPDATE shop_listings SET out_of_stock = false WHERE id = $1", [dal]);
   expect((await place(shopId, { revision: 1, total: cart.quote.total, addressId: home })).statusCode).toBe(201);
   expect((await database.pool.query("SELECT sum(quantity)::text AS quantity FROM stock_movements WHERE listing_id = $1", [dal])).rows[0]?.quantity).toBe("10.000");
+});
+
+describe("Notifications (#505, NOT-1 to NOT-4)", () => {
+  /** `headers` as one of the phone apps sends them. */
+  const as = (headers: Record<string, string>, appName: "customer" | "shopkeeper") => ({ ...headers, "x-ygo-app-name": appName, "x-ygo-app-version": "1.0.0" });
+  const register = (headers: Record<string, string>, token: string) =>
+    app.inject({ method: "PUT", url: "/v1/me/push-token", headers, payload: { token } });
+  const list = async (headers: Record<string, string>) =>
+    (await app.inject({ method: "GET", url: "/v1/me/notifications", headers })).json() as { notifications: Array<Record<string, unknown>>; unread: boolean };
+  const push = createLocalPushSender();
+  const send = async (sender: PushSender = push) => {
+    push.sent.length = 0;
+    await sendDuePushes(database.pool, sender, clock.now());
+    return push.sent.map(({ to, title, loud }) => ({ to, title, loud }));
+  };
+  const queued = async () => Number((await database.pool.query<{ count: string }>("SELECT count(*) FROM push_queue")).rows[0]?.count);
+
+  /** A stocked shop with Staff, and a push token on each of the three phones. */
+  async function phones() {
+    const shop = await stocked();
+    const owner = as(shop.owner, "shopkeeper");
+    const staff = as(await staffOf(shop.shopId), "shopkeeper");
+    const buyer = as(customer, "customer");
+    for (const [headers, token] of [[owner, "ExponentPushToken[owner]"], [staff, "ExponentPushToken[staff]"], [buyer, "ExponentPushToken[buyer]"]] as const) {
+      expect((await register(headers, token)).statusCode).toBe(204);
+    }
+    return { ...shop, owner, staff, buyer };
+  }
+
+  it("rings the Owner's and the Staff's phones for a new order, again at 120 s, and tells the customer the reason it was rejected", async () => {
+    const { shopId, dal, home, owner, staff, buyer } = await phones();
+    const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+
+    const placed = { kind: "order_placed", title: "New order #1001", body: "Accept or reject it within 10 minutes.", orderId: order.id,
+      createdAt: "2030-01-01T00:00:00.000Z", read: false, id: expect.any(String) };
+    expect(await list(owner)).toEqual({ notifications: [placed], unread: true });
+    expect(await list(staff)).toEqual({ notifications: [placed], unread: true });
+    expect(await list(buyer)).toEqual({ notifications: [], unread: false });
+    // The Owner's account in the Customer app hears nothing of its shop.
+    expect(await list(as(owner, "customer"))).toEqual({ notifications: [], unread: false });
+
+    const ring = [{ to: "ExponentPushToken[owner]", title: "New order #1001", loud: true }, { to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }];
+    expect(await send()).toEqual(ring);
+    expect(push.sent[0]?.data).toEqual({ notificationId: (await list(owner)).notifications[0]?.id, orderId: order.id });
+    expect(await send()).toEqual([]);
+    clock.advance(119_000);
+    expect(await send()).toEqual([]);
+    clock.advance(1_000);
+    expect(await send()).toEqual(ring);
+    expect(await queued()).toBe(0);
+
+    expect((await reject(order.id, staff, "out_of_stock")).statusCode).toBe(200);
+    expect(await list(buyer)).toMatchObject({ notifications: [{ kind: "order_rejected", title: "Order #1001 rejected",
+      body: "Sai General Stores could not take your order: Items out of stock.", orderId: order.id, read: false }], unread: true });
+    expect(await send()).toEqual([{ to: "ExponentPushToken[buyer]", title: "Order #1001 rejected", loud: false }]);
+    // Admin is never told (NOT-4).
+    expect(Number((await database.pool.query<{ count: string }>(
+      "SELECT count(*) FROM notifications n JOIN accounts a ON a.id = n.account_id WHERE a.email = $1", [adminEmail])).rows[0]?.count)).toBe(0);
+  });
+
+  it("drops the re-ring once the order is answered or past its time, and tells the customer of an accept and the shop of a cancel", async () => {
+    const { shopId, dal, home, owner, staff, buyer } = await phones();
+    const accepted = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const cancelled = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const late = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    expect(await accept(accepted.id, owner)).toMatchObject({ statusCode: 200 });
+    clock.advance(1_000);
+    expect((await cancel(cancelled.id)).statusCode).toBe(200);
+    expect((await list(buyer)).notifications).toMatchObject([{ kind: "order_accepted", title: "Order #1001 accepted",
+      body: "Sai General Stores is getting your order ready.", orderId: accepted.id }]);
+    for (const shopPhone of [owner, staff]) {
+      // Three orders placed at one moment list in any order among themselves; the later cancel lists first.
+      const rows = (await list(shopPhone)).notifications.map(({ kind, title }) => ({ kind, title }));
+      expect([rows[0], ...rows.slice(1).sort((a, b) => String(a.title).localeCompare(String(b.title)))]).toEqual([
+        { kind: "order_cancelled_by_customer", title: "Order #1002 cancelled" },
+        ...["New order #1001", "New order #1002", "New order #1003"].map((title) => ({ kind: "order_placed", title })),
+      ]);
+    }
+    expect((await send()).map(({ title }) => title).sort()).toEqual([
+      "New order #1003", "New order #1003", "Order #1001 accepted", "Order #1002 cancelled", "Order #1002 cancelled",
+    ]);
+    // Only the unanswered order rings again, and not once it is past its answer time.
+    clock.advance(120_000);
+    expect((await send()).map(({ title }) => title)).toEqual(["New order #1003", "New order #1003"]);
+    await database.pool.query("INSERT INTO push_queue (notification_id, send_after) SELECT id, $2 FROM notifications WHERE order_id = $1", [late.id, clock.now()]);
+    clock.advance(480_000);
+    expect(await send()).toEqual([]);
+    expect(await queued()).toBe(0);
+  });
+
+  it("keeps a token with the newest session, forgets it at sign-out, drops a dead one and retries a failed send twice", async () => {
+    const { shopId, dal, home, owner } = await phones();
+    expect((await register(customer, "ExponentPushToken[x]")).statusCode).toBe(400);
+    expect((await register(owner, "not-a-token")).statusCode).toBe(400);
+    // The phone is handed to the other account: its token now reaches that one.
+    const otherBuyer = as(other, "customer");
+    expect((await register(otherBuyer, "ExponentPushToken[buyer]")).statusCode).toBe(204);
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    await app.inject({ method: "POST", url: "/v1/auth/sign-out", headers: owner });
+    expect(await send()).toEqual([{ to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }]);
+
+    const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    const down: PushSender = { send: () => Promise.reject(new Error("Expo is down")) };
+    for (const tries of [1, 2]) {
+      await expect(send(down)).rejects.toThrow("Expo is down");
+      expect((await database.pool.query("SELECT tries FROM push_queue ORDER BY send_after LIMIT 1")).rows).toEqual([{ tries }]);
+      clock.advance(30_000);
+    }
+    await expect(send(down)).rejects.toThrow("Expo is down");
+    expect((await database.pool.query("SELECT 1 FROM push_queue q JOIN notifications n ON n.id = q.notification_id WHERE n.order_id = $1 AND q.send_after <= $2",
+      [order.id, clock.now()])).rowCount).toBe(0);
+
+    const gone: PushSender = { send: async (pushes) => pushes.map(() => "dead" as const) };
+    clock.advance(120_000);
+    await sendDuePushes(database.pool, gone, clock.now());
+    expect((await database.pool.query("SELECT token FROM push_tokens ORDER BY token")).rows).toEqual([{ token: "ExponentPushToken[buyer]" }]);
+  });
+
+  it("reads one notification on a tap and all of them on Mark all as read, each person and app on its own", async () => {
+    const { shopId, dal, home, owner, staff } = await phones();
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    clock.advance(1_000);
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    const [newest, oldest] = (await list(owner)).notifications;
+    const read = (id: unknown, headers: Record<string, string>) => app.inject({ method: "POST", url: `/v1/me/notifications/${String(id)}/read`, headers });
+    expect((await read(newest?.id, owner)).statusCode).toBe(204);
+    expect((await read(newest?.id, owner)).statusCode).toBe(204);
+    expect((await read(newest?.id, as(owner, "customer"))).statusCode).toBe(404);
+    expect((await read(newest?.id, as(customer, "customer"))).statusCode).toBe(404);
+    expect(await list(owner)).toMatchObject({ notifications: [{ id: newest?.id, read: true }, { id: oldest?.id, read: false }], unread: true });
+    expect((await list(staff)).notifications.map((row) => row.read)).toEqual([false, false]);
+
+    expect((await app.inject({ method: "POST", url: "/v1/me/notifications/read-all", headers: owner })).statusCode).toBe(204);
+    expect(await list(owner)).toMatchObject({ notifications: [{ read: true }, { read: true }], unread: false });
+    expect((await list(staff)).unread).toBe(true);
+  });
 });

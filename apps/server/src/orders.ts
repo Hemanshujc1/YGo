@@ -1,5 +1,6 @@
 import type { OrderStatus } from "@ygo/contracts";
 import type { PoolClient } from "pg";
+import { notifyOrderStatus } from "./notifications";
 
 export type OrderActor = { id: string; role: "customer" | "owner" | "staff" } | { id: null; role: "system" };
 
@@ -18,6 +19,8 @@ export async function recordStatus(
   await client.query(
     "INSERT INTO order_status_history (order_id, from_status, to_status, actor_id, actor_role, at, reason_code) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [orderId, from, to, actor.id, actor.role, at, reasonCode]);
+  // Every status change passes here, so whoever should hear of it is told in the same transaction (#505).
+  await notifyOrderStatus(client, orderId, to, at, reasonCode);
 }
 
 /**

@@ -3,7 +3,7 @@ import { createLocalClock } from "../src/adapters/clock";
 import { createLocalFileStorage } from "../src/adapters/file-storage";
 import { createLocalIdentityVerifier } from "../src/adapters/identity-verifier";
 import { createLocalMailer, createMailpitMailer, createSesMailer } from "../src/adapters/mailer";
-import { createLocalPushSender } from "../src/adapters/push-sender";
+import { createExpoPushSender, createLocalPushSender, type Push } from "../src/adapters/push-sender";
 import { createLocalSmsSender } from "../src/adapters/sms-sender";
 
 afterEach(() => {
@@ -41,11 +41,12 @@ describe("local senders", () => {
     const sms = createLocalSmsSender();
 
     await mailer.send({ to: "asha@example.com", subject: "Code", text: "123456" });
-    await push.send({ to: "ExponentPushToken[x]", title: "New order", body: "#1042" });
+    const push1 = { to: "ExponentPushToken[x]", title: "New order", body: "#1042", data: { notificationId: "n", orderId: null }, loud: true };
+    expect(await push.send([push1])).toEqual(["sent"]);
     await sms.sendCode("+919800000000", "123456");
 
     expect(mailer.sent).toEqual([{ to: "asha@example.com", subject: "Code", text: "123456" }]);
-    expect(push.sent).toEqual([{ to: "ExponentPushToken[x]", title: "New order", body: "#1042" }]);
+    expect(push.sent).toEqual([push1]);
     expect(sms.sent).toEqual([{ to: "+919800000000", code: "123456" }]);
   });
 });
@@ -144,5 +145,37 @@ describe("local FileStorage", () => {
   it("refuses a key that escapes its directory", async () => {
     const storage = createLocalFileStorage("/tmp/ygo-files");
     await expect(storage.downloadUrl("../etc/passwd")).rejects.toThrow("escapes");
+  });
+});
+
+describe("Expo push sender (#505)", () => {
+  const push = (to: string, loud = false): Push => ({ to, title: "Order #1001 accepted", body: "Sai is getting it ready.", data: { notificationId: "n", orderId: "o" }, loud });
+
+  it("sends 100 at a time, marks the loud one for the new-orders channel and reports dead tokens", async () => {
+    const bodies: Array<Array<Record<string, unknown>>> = [];
+    const sender = createExpoPushSender(async (body) => {
+      const messages = JSON.parse(body) as Array<Record<string, unknown>>;
+      bodies.push(messages);
+      return Response.json({ data: messages.map((message) => message.to === "ExponentPushToken[gone]"
+        ? { status: "error", details: { error: "DeviceNotRegistered" } }
+        : message.to === "ExponentPushToken[busy]" ? { status: "error", details: { error: "MessageRateExceeded" } } : { status: "ok" }) });
+    });
+    const pushes = [push("ExponentPushToken[loud]", true), push("ExponentPushToken[gone]"), push("ExponentPushToken[busy]"),
+      ...Array.from({ length: 98 }, (_, i) => push(`ExponentPushToken[${i}]`))];
+
+    const results = await sender.send(pushes);
+
+    expect(bodies.map((batch) => batch.length)).toEqual([100, 1]);
+    expect(bodies[0]?.[0]).toEqual({ to: "ExponentPushToken[loud]", title: "Order #1001 accepted", body: "Sai is getting it ready.", data: { notificationId: "n", orderId: "o" },
+      channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" });
+    expect(bodies[0]?.[1]).toMatchObject({ sound: "default" });
+    expect(bodies[0]?.[1]).not.toHaveProperty("channelId");
+    expect(results).toHaveLength(101);
+    expect(results.slice(0, 3)).toEqual(["sent", "dead", "sent"]);
+  });
+
+  it("throws when Expo answers with an error status, so the queue tries again", async () => {
+    const sender = createExpoPushSender(async () => new Response("down", { status: 503 }));
+    await expect(sender.send([push("ExponentPushToken[x]")])).rejects.toThrow("503");
   });
 });

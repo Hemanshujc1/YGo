@@ -250,3 +250,5 @@ export {
   counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillManualLine, CounterBillPayload, CounterBillResponse,
   ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse,
 } from "./sync";
+
+export { Notification, NotificationKind, NotificationParams, NotificationsResponse, PushTokenBody } from "./notifications";
