@@ -138,7 +138,7 @@ export default function VoidBillScreen() {
   useEffect(() => { if (!owner) setSheet(null); }, [owner]);
 
   async function confirm(body: VoidCounterBillBody) {
-    if (!sheet) return;
+    if (!sheet || !owner) return;
     const id = sheet.bill.id;
     const { close, message } = await voids.voidBill(id, body);
     // Kept open with the reason and note when the void can be tried again; otherwise the list shows why.
@@ -172,7 +172,8 @@ export default function VoidBillScreen() {
             onVoid={() => !view.voiding && setSheet({ bill, reason: null, note: "", message: null })} />
         ))}
       </ScrollView>
-      {sheet && (
+      {/* Never for Staff or an unknown role, not even in the render before the effect above clears it (#494). */}
+      {sheet && owner && (
         <VoidSheet
           sheet={sheet}
           busy={view.voiding === sheet.bill.id}

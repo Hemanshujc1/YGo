@@ -110,8 +110,17 @@ describe("S37 Void a bill (#492)", () => {
     render(); await settle();
     tap("Void");
     expect(sheetOpen()).toBe(true);
+    choose("Billed twice");
+    // The very render after the role changes, before the effect has cleared the sheet state, already draws no sheet.
     mock.role = "staff";
-    render(); // the next render after the role changes clears the sheet
+    expect(sheetOpen()).toBe(false);
+    // No sheet means no Void bill button to tap, for Staff or an unknown role.
+    expect(button("Void bill")).toBeUndefined();
+    mock.role = null;
+    expect(sheetOpen()).toBe(false);
+    expect(button("Void bill")).toBeUndefined();
+    mock.role = "staff";
+    render();
     expect(sheetOpen()).toBe(false);
     // The sheet is gone for good: it doesn't come back if the role flips back.
     mock.role = "owner";
