@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   AdminActionReason,
   AreaName,
+  CounterBillName,
   Email,
   FssaiNumber,
   HandoverOtp,
@@ -39,6 +40,31 @@ describe("AdminActionReason", () => {
 
 describe("AreaName", () => {
   rule(AreaName, { "  Kothrud  ": "Kothrud", ["a".repeat(100)]: "a".repeat(100) }, ["   ", "a".repeat(101)]);
+});
+
+describe("CounterBillName", () => {
+  rule(
+    CounterBillName,
+    {
+      "Rope": "Rope",
+      "  Milk  ": "Milk",
+      "Milk 🥛": "Milk 🥛",
+      ["a".repeat(80)]: "a".repeat(80),
+    },
+    ["", "   ", "a".repeat(81), "rope\0coir", "\ud800"],
+  );
+
+  it("checks well-formedness when isWellFormed is not defined on String.prototype", () => {
+    const original = String.prototype.isWellFormed;
+    try {
+      // @ts-expect-error stubbing for runtime fallback check
+      delete (String.prototype as Record<string, unknown>).isWellFormed;
+      expect(CounterBillName.safeParse("Milk 🥛").success).toBe(true);
+      expect(CounterBillName.safeParse("\ud800").success).toBe(false);
+    } finally {
+      String.prototype.isWellFormed = original;
+    }
+  });
 });
 
 describe("Phone", () => {

@@ -52,6 +52,7 @@ export {
   ServiceRadiusMetres,
   ShopAddress,
   ShopPrice,
+  CounterBillName,
   RatePercentage,
   RateCardVersion,
   percentageUnits,

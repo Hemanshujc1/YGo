@@ -1,4 +1,4 @@
-import { BillAmount, CounterBillLine, CounterBillManualLine, CounterBillPayload, Phone } from "@ygo/contracts";
+import { BillAmount, CounterBillLine, CounterBillManualLine, CounterBillName, CounterBillPayload, Phone } from "@ygo/contracts";
 import { counterBillTotal } from "@ygo/pricing";
 
 /** A typed line as the shopkeeper types it: name, price each and count, all still text. */
@@ -12,8 +12,8 @@ export type DraftInput = {
   payment: "cash" | "upi" | null;
 };
 export type DraftProblems = {
-  /** A catalog line's count is not 1 to 9,999. */
-  counts: boolean;
+  /** A catalog line's count is not 1 to 9,999, by its packId. */
+  counts: Record<string, boolean>;
   /** Each typed line's first wrong field, by its key. */
   typed: Record<string, "name" | "price" | "count">;
   discount: "format" | "tooBig" | null;
@@ -32,16 +32,20 @@ const countFits = (count: string) => CounterBillLine.shape.count.safeParse(count
 export function draftBill(input: DraftInput): { sum: string | null; total: string | null; discount: string; problems: DraftProblems; payload: CounterBillPayload | null } {
   const typed: DraftProblems["typed"] = {};
   for (const line of input.typed) {
-    const field = !CounterBillManualLine.shape.name.safeParse(line.name).success ? "name"
+    const field = !CounterBillName.safeParse(line.name).success ? "name"
       : !CounterBillManualLine.shape.unitPrice.safeParse(line.price).success ? "price" : !countFits(line.count) ? "count" : null;
     if (field) typed[line.key] = field;
   }
-  const counts = !input.lines.every((line) => countFits(line.count));
+  const counts: Record<string, boolean> = {};
+  for (const line of input.lines) {
+    if (!countFits(line.count)) counts[line.packId] = true;
+  }
+  const hasBadCounts = Object.keys(counts).length > 0;
   const discount = input.discount.trim();
   const discountReads = discount === "" || BillAmount.safeParse(discount).success;
   const amounts = [...input.lines.map((line) => ({ unitPrice: line.unitPrice, count: countOf(line.count) })),
     ...input.typed.map((line) => ({ unitPrice: line.price.trim(), count: countOf(line.count) }))];
-  const sum = !counts && Object.keys(typed).length === 0 ? counterBillTotal(amounts) : null;
+  const sum = !hasBadCounts && Object.keys(typed).length === 0 ? counterBillTotal(amounts) : null;
   const total = sum !== null && discountReads ? counterBillTotal(amounts, discount || "0") : null;
 
   const name = input.customer.name.trim(), phone = input.customer.phone.trim();
@@ -49,10 +53,10 @@ export function draftBill(input: DraftInput): { sum: string | null; total: strin
   const problems: DraftProblems = {
     counts, typed,
     discount: !discountReads ? "format" : sum !== null && total === null ? "tooBig" : null,
-    customerName: name !== "" && !CounterBillManualLine.shape.name.safeParse(name).success,
+    customerName: name !== "" && !CounterBillName.safeParse(name).success,
     phone: phone !== "" && !readPhone.success,
   };
-  const wrong = counts || Object.keys(typed).length > 0 || problems.discount !== null || problems.customerName || problems.phone;
+  const wrong = hasBadCounts || Object.keys(typed).length > 0 || problems.discount !== null || problems.customerName || problems.phone;
   if (wrong || total === null || !input.payment || input.lines.length + input.typed.length === 0) return { sum, total, discount, problems, payload: null };
 
   const bill = CounterBillPayload.safeParse({
