@@ -2,6 +2,10 @@ import { z } from "zod";
 import { AdminActionReason } from "./fields";
 import { CounterBillHeldReason } from "./sync";
 
+/** Why the Owner voids a counter bill (S37, BIL-6). Only `other` takes a typed note. */
+export const CounterBillVoidReason = z.enum(["wrong_item", "wrong_price", "billed_twice", "not_taken", "other"]);
+export type CounterBillVoidReason = z.infer<typeof CounterBillVoidReason>;
+
 /** Admin's screen of a shop's held and flagged counter bills (#470, BIL-5, BIL-9). */
 export const AdminCounterBillParams = z.strictObject({ id: z.uuid(), billId: z.uuid() });
 export type AdminCounterBillParams = z.infer<typeof AdminCounterBillParams>;
@@ -41,6 +45,18 @@ export const CounterBillResolution = z.strictObject({
 });
 export type CounterBillResolution = z.infer<typeof CounterBillResolution>;
 
+/** The Owner's void of a bill (#54), as Admin sees it (#495). */
+export const AdminCounterBillVoid = z.strictObject({
+  reason: CounterBillVoidReason,
+  note: z.string().nullable(),
+  /** Whether the void gave stock back. */
+  stockMoved: z.boolean(),
+  /** Null once the person has left the shop. */
+  actorName: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type AdminCounterBillVoid = z.infer<typeof AdminCounterBillVoid>;
+
 /** The first bill that holds a clashing reference, for Admin to compare with. */
 export const CounterBillOriginal = z.strictObject({
   id: z.uuid(),
@@ -51,6 +67,7 @@ export const CounterBillOriginal = z.strictObject({
   lines: z.array(BillLine),
   manualLines: z.array(ManualBillLine),
   discount: z.string(),
+  voided: AdminCounterBillVoid.nullable(),
 });
 
 export const AdminCounterBill = z.strictObject({
@@ -76,7 +93,8 @@ export const AdminCounterBill = z.strictObject({
   /** What the phone sent, as the JSON text it sent, for an `invalid` bill. */
   invalidPayload: z.string().nullable(),
   original: CounterBillOriginal.nullable(),
-  /** True once an action other than a note has closed the bill. */
+  voided: AdminCounterBillVoid.nullable(),
+  /** True once an action other than a note has closed the bill, or the Owner voided it. */
   resolved: z.boolean(),
   resolutions: z.array(CounterBillResolution),
 });
@@ -84,10 +102,6 @@ export type AdminCounterBill = z.infer<typeof AdminCounterBill>;
 
 export const AdminCounterBillsResponse = z.strictObject({ bills: z.array(AdminCounterBill) });
 export type AdminCounterBillsResponse = z.infer<typeof AdminCounterBillsResponse>;
-
-/** Why the Owner voids a counter bill (S37, BIL-6). Only `other` takes a typed note. */
-export const CounterBillVoidReason = z.enum(["wrong_item", "wrong_price", "billed_twice", "not_taken", "other"]);
-export type CounterBillVoidReason = z.infer<typeof CounterBillVoidReason>;
 
 export const CounterBillParams = z.strictObject({ id: z.uuid() });
 export type CounterBillParams = z.infer<typeof CounterBillParams>;

@@ -242,7 +242,7 @@ export {
 } from "./orders";
 
 export {
-  AdminCounterBill, AdminCounterBillParams, AdminCounterBillsResponse, CounterBillOriginal, CounterBillResolution, CounterBillResolutionAction, ResolveCounterBillBody,
+  AdminCounterBill, AdminCounterBillParams, AdminCounterBillVoid, AdminCounterBillsResponse, CounterBillOriginal, CounterBillResolution, CounterBillResolutionAction, ResolveCounterBillBody,
   CounterBillParams, CounterBillVoidReason, ShopCounterBill, ShopCounterBillsResponse, VoidCounterBillBody,
 } from "./counter-bills";
 

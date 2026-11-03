@@ -451,6 +451,13 @@ export const strings = {
   counterBillResolution: {
     numbered: "Numbered", duplicate: "Closed as the same sale", reviewed: "Reviewed", noted: "Note",
   },
+  counterBillVoidReason: {
+    wrong_item: "Wrong item billed", wrong_price: "Wrong price or quantity", billed_twice: "Billed twice", not_taken: "Customer did not take the goods", other: "Other",
+  },
+  counterBillVoided: "Voided by the Owner",
+  counterBillVoidBy: (name: string, when: string) => `${name} · ${when}`,
+  counterBillVoidedLine: (reason: string, note: string | null, stock: string) => `${reason}${note ? ` · ${note}` : ""} · ${stock}`,
+  counterBillVoidStock: { moved: "Stock given back", notMoved: "No stock moved" },
   counterBillResolutionBy: (name: string | null, when: string) => `${name ?? "Admin"} · ${when}`,
   counterBillStockMoved: "Stock moved",
   counterBillStockNotMoved: "No stock moved",
