@@ -22,6 +22,8 @@ import {
   CartResponse,
   OrderResponse,
   OrdersResponse,
+  NotificationsResponse,
+  type PushTokenBody,
   type PlaceOrderBody,
   type RejectOrderBody,
   ShopOrderResponse,
@@ -483,6 +485,26 @@ export function createApiClient({
     /** Stock tools for the linked Owner or Staff member, after going Live. */
     async shopStock(): Promise<ApiResult<ShopStockResponse>> {
       return result(await signedIn("GET", "/v1/me/stock"), ShopStockResponse);
+    },
+
+    /** `PUT /v1/me/push-token`: this phone's Expo push token, kept for this session in this app (#505). */
+    async savePushToken(body: PushTokenBody): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("PUT", "/v1/me/push-token", body));
+    },
+
+    /** `GET /v1/me/notifications`: C22 and S41, the newest 50 for this app, and whether any is unread (#505). */
+    async notifications(): Promise<ApiResult<NotificationsResponse>> {
+      return result(await signedIn("GET", "/v1/me/notifications"), NotificationsResponse);
+    },
+
+    /** `POST /v1/me/notifications/:id/read`: NOT_FOUND when it isn't this account's in this app. */
+    async readNotification(id: string): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("POST", `/v1/me/notifications/${encodeURIComponent(id)}/read`));
+    },
+
+    /** `POST /v1/me/notifications/read-all`: "Mark all as read". */
+    async readAllNotifications(): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("POST", "/v1/me/notifications/read-all"));
     },
 
     /** `GET /v1/me/shop-orders`: S04, the shop's New, Accepted and Done today orders (#425). */

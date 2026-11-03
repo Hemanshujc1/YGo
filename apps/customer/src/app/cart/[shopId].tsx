@@ -14,6 +14,7 @@ import { paramsQuery } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
 import { money } from "../../lib/money";
 import { placeOrder } from "../../lib/order";
+import { push } from "../../lib/push";
 import { addressLine } from "../../lib/saved-addresses";
 import { packLabel, partLabel } from "../../lib/shop-page";
 import { useCart, useDeliverTo } from "../../lib/use-cart";
@@ -239,6 +240,8 @@ export default function CartScreen() {
       case "placed":
         // The server emptied the cart as it placed the order: read it again rather than guess the revision.
         openPlaced(done.order);
+        // The system prompt, the first time only: the order gives it a reason (owner's answer 3 on #506).
+        push.ask();
         cart.retry();
         // In place of the cart, so Back goes to the shop page and not to an empty cart (owner's answer 7 on #427).
         return router.replace({ pathname: "/order/[id]", params: { id: done.order.id, placed: "1" } });

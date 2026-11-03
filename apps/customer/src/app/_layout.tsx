@@ -2,6 +2,8 @@ import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
 import { Stack } from "expo-router";
 import { api, session, supportEmail } from "../api";
 import { strings } from "../strings";
+// At launch, so a tap that opened the app is not missed (#506).
+import "../lib/push";
 import "../global.css";
 
 applySavedTheme();
