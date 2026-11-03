@@ -6,7 +6,7 @@ const rice = "00000000-0000-4000-8000-000000000002", gone = "00000000-0000-4000-
 const fonts = { regular: "UkVH", medium: "TUVE", semibold: "U0VN" };
 const label = (packId: string) => packId === rice ? { name: "Rice", packQuantity: "0.500", baseUnit: "kg" as const } : null;
 const bill: BillRow = {
-  id: "a1b2c3d4-0000-4000-8000-000000000001", reference: "A1B2-C3D4", createdAt: "2026-11-02T06:30:00.000Z", status: "synced", number: 42, code: null,
+  id: "a1b2c3d4-0000-4000-8000-000000000001", reference: "A1B2-C3D4", createdAt: "2026-11-02T06:30:00.000Z", status: "synced", number: 42, code: null, voided: null,
   lines: [{ packId: rice, count: 2, unitPrice: "21.00" }, { packId: gone, count: 1, unitPrice: "10" }],
   manualLines: [{ name: "Rope <thick>", count: 1, unitPrice: "15.50" }], discount: "5",
   customer: { name: "Meera", phone: "+919876543210", offers: true }, total: "62.50", payment: "upi",
@@ -44,5 +44,22 @@ describe("the bill PDF (#53)", () => {
     expect(html).toContain("font-variant-numeric:tabular-nums");
     expect(html).toContain("background:#FFFFFF;color:#0D1A20");
     expect(html).not.toContain("prefers-color-scheme");
+  });
+});
+
+describe("a voided bill's PDF (#493)", () => {
+  it("says Voided and the reason, never the Owner's private note, and keeps the rest of the bill", () => {
+    const plain = text(billHtml({ bill: { ...bill, voided: { reason: "billed_twice", note: null } }, shopName: "Sai", label, fonts }));
+    expect(plain).toContain("Voided · Billed twice");
+    expect(plain).toContain("Bill 42");
+    expect(plain).toContain("Reference A1B2-C3D4");
+    expect(plain).toContain("₹62.50");
+    const other = text(billHtml({ bill: { ...bill, voided: { reason: "other", note: "Customer <left> angry" } }, shopName: "Sai", label, fonts }));
+    expect(other).toContain("Voided · Other");
+    expect(other).not.toMatch(/angry|left/);
+  });
+
+  it("says nothing about a void on a bill that isn't voided", () => {
+    expect(text(billHtml({ bill, shopName: "Sai", label, fonts }))).not.toMatch(/Voided/);
   });
 });

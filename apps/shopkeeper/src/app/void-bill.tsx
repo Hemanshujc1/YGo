@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session } from "../api";
 import { ReasonPicker } from "../components/reason-picker";
 import { isCurrentAccount } from "../lib/account";
-import { canVoid, createCounterBillVoids } from "../lib/counter-bill-voids";
+import { canVoid, createCounterBillVoids, voidedLine } from "../lib/counter-bill-voids";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import type { OpeningStockQueue } from "../lib/opening-stock-queue";
@@ -22,8 +22,6 @@ const words = strings.voids;
 type Sheet = { bill: ShopCounterBill; reason: CounterBillVoidReason | null; note: string; message: string | null };
 
 const billName = (bill: ShopCounterBill) => (bill.number === null ? words.numberPending : words.number(bill.number));
-// "Voided · Other · Customer changed mind": only Other has a note.
-const voidedLine = (voided: NonNullable<ShopCounterBill["voided"]>) => words.voided([words.reasons[voided.reason], voided.note].filter(Boolean).join(" · "));
 
 function BillRow({ bill, onVoid, busy }: { bill: ShopCounterBill; onVoid: () => void; busy: boolean }) {
   return (
@@ -106,9 +104,21 @@ function useWaitingBills() {
   }, [opened, status]);
 }
 
+/** Whatever the list shows as voided is kept on the phone, so the bill cards show it too (#493). A phone database that won't open just keeps nothing. */
+function rememberVoids(accountId: string, epoch: number) {
+  return (bills: ShopCounterBill[]) => {
+    // Only the account that opened this screen: a late answer after a switch is not saved into another account's database.
+    if (!isCurrentAccount(accountId, epoch) || !bills.some((bill) => bill.voided)) return;
+    openOpeningStock(accountId).then((queue) => queue.saveVoids(bills), () => undefined).catch(() => undefined);
+  };
+}
+
 export default function VoidBillScreen() {
   const insets = useSafeAreaInsets();
-  const [voids] = useState(() => createCounterBillVoids(api));
+  const [voids] = useState(() => {
+    const identity = session.get();
+    return createCounterBillVoids(api, "account" in identity ? rememberVoids(identity.account.id, accountEpoch()) : undefined);
+  });
   const view = useSyncExternalStore(voids.subscribe, voids.get);
   useInFront(voids);
   const waiting = useWaitingBills();

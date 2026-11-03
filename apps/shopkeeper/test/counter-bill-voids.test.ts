@@ -196,3 +196,19 @@ describe("S37 Void a bill store (#492)", () => {
     await first;
   });
 });
+
+describe("S37 remembers voids for the bill cards (#493)", () => {
+  it("hands the phone every list it reads and every void it makes, and nothing from a failed read", async () => {
+    const remember = vi.fn();
+    const client = { shopCounterBills: vi.fn(() => Promise.resolve(ok({ bills: [bill()] }))), voidCounterBill: vi.fn(() => Promise.resolve(ok(voided))) };
+    const voids = createCounterBillVoids(client, remember);
+    voids.start(); await settle();
+    expect(remember).toHaveBeenLastCalledWith([bill()]);
+    await voids.voidBill(id, body);
+    expect(remember).toHaveBeenLastCalledWith([voided]);
+    remember.mockClear();
+    client.shopCounterBills.mockImplementation(() => offline() as never);
+    await voids.refresh(); await settle();
+    expect(remember).not.toHaveBeenCalled();
+  });
+});

@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, accountEpoch, api, session, supportEmail } from "../api";
 import { isCurrentAccount } from "../lib/account";
 import { startOfToday } from "../lib/bill-status";
+import { refreshBillVoids } from "../lib/bill-voids";
 import { BillCard } from "../components/bill-card";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import { shareBill } from "../lib/share-bill";
@@ -26,6 +27,7 @@ export default function SyncScreen() {
   const view = useSyncExternalStore(access.subscribe, access.get);
   const [data, setData] = useState<Data | "failed" | null>(null);
   const [names, setNames] = useState<Record<string, Label>>({});
+  const [learned, setLearned] = useState(0);
 
   useEffect(() => {
     if (status.running) return;
@@ -37,7 +39,19 @@ export default function SyncScreen() {
       if (!gone && isCurrentAccount(id, epoch)) setData({ queue, overview: queue.overview(startOfToday()), allowance: queue.allowance() });
     }).catch(() => { if (!gone && isCurrentAccount(id, epoch)) setData("failed"); });
     return () => { gone = true; };
-  }, [status]);
+  }, [status, learned]);
+
+  // Online, the server's voids are learned once per opening; a new one redraws the cards (#493).
+  const queue = data && data !== "failed" ? data.queue : null;
+  useEffect(() => {
+    if (!queue || view.mode !== "online") return;
+    const identity = session.get();
+    if (!("account" in identity)) return;
+    const id = identity.account.id, epoch = accountEpoch();
+    let gone = false;
+    void refreshBillVoids(api, queue, () => isCurrentAccount(id, epoch)).then((found) => { if (found && !gone) setLearned((count) => count + 1); });
+    return () => { gone = true; };
+  }, [queue, view.mode]);
 
   // An Approved shop has no Stock copy on the phone yet: name its rows from the listings while online.
   const unnamed = data && data !== "failed" && Object.values(data.overview).some((rows) => rows.some((row) => !row.bill && !row.label));

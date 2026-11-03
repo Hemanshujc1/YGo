@@ -22,7 +22,7 @@ vi.mock("expo-sharing", async () => {
 
 const hour = 60 * 60 * 1000, start = 1_800_000_000_000;
 const bill = (reference: string): BillRow => ({ id: `${reference.replace("-", "").toLowerCase()}-0000-4000-8000-000000000001`, reference,
-  createdAt: "2026-11-02T06:30:00.000Z", status: "pending", number: null, code: null,
+  createdAt: "2026-11-02T06:30:00.000Z", status: "pending", number: null, code: null, voided: null,
   lines: [], manualLines: [{ name: "Rope", count: 1, unitPrice: "15" }], total: "15.00", payment: "cash" });
 const input = (reference: string) => ({ bill: bill(reference), shopName: "Sai", label: () => null });
 // The share sheet number n, failing here rather than hanging when it never opened.

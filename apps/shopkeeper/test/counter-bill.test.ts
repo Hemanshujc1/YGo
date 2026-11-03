@@ -1,9 +1,10 @@
-import type { CounterBillResponse, SyncActionCode, SyncActionsBody } from "@ygo/contracts";
+import type { CounterBillResponse, ShopCounterBill, SyncActionCode, SyncActionsBody } from "@ygo/contracts";
 import { COUNTER_BILL_EXAMPLES, counterBillTotal } from "@ygo/pricing";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { billStatus } from "../src/lib/bill-status";
+import { refreshBillVoids } from "../src/lib/bill-voids";
 import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
@@ -109,10 +110,99 @@ describe("counter bills in the ordered queue (#468)", () => {
 
 describe("a bill's status line (#468)", () => {
   it("says pending, synced with its number, held for YGo in warning, or refused with the reason in danger", () => {
-    expect(billStatus({ status: "pending", number: null, code: null })).toEqual({ text: "Saved on phone · number pending", tone: "muted" });
-    expect(billStatus({ status: "synced", number: 1042, code: null })).toEqual({ text: "Synced · Bill 1042", tone: "muted" });
-    expect(billStatus({ status: "held", number: null, code: null })).toEqual({ text: "Synced · Number pending · YGo will give this bill a number", tone: "warning" });
-    expect(billStatus({ status: "refused", number: null, code: "SHOP_NOT_BILLING" })).toEqual({
+    expect(billStatus({ status: "pending", number: null, code: null, voided: null })).toEqual({ text: "Saved on phone · number pending", tone: "muted" });
+    expect(billStatus({ status: "synced", number: 1042, code: null, voided: null })).toEqual({ text: "Synced · Bill 1042", tone: "muted" });
+    expect(billStatus({ status: "held", number: null, code: null, voided: null })).toEqual({ text: "Synced · Number pending · YGo will give this bill a number", tone: "warning" });
+    expect(billStatus({ status: "refused", number: null, code: "SHOP_NOT_BILLING", voided: null })).toEqual({
       text: "Not accepted by YGo: Counter billing is open only while your shop is Live or Suspended.", tone: "danger" });
+  });
+});
+
+describe("voids on the phone's own bills (#493)", () => {
+  let db: DatabaseSync, queue: ReturnType<typeof openingStockQueue>;
+  const clock = new Date("2030-01-02T10:00:00.000Z"), today = new Date("2030-01-02T00:00:00.000Z");
+  beforeEach(() => { db = new DatabaseSync(":memory:"); queue = openingStockQueue(adapter(db), randomUUID, () => clock); });
+  afterEach(() => db.close());
+
+  /** Saves a bill and has the server number it, with `billId` as the server's id for it. */
+  function synced(billId: string, number: number | null = 12) {
+    const saved = queue.saveBill(shopId, bill);
+    if (typeof saved === "string") throw new Error(saved);
+    const batch = queue.batch(shopId);
+    const result: CounterBillResponse = { billId, reference: saved.reference, number, heldReason: number ? null : "not_listed", totalMismatch: false, recordedAt: clock.toISOString() };
+    queue.acknowledge(batch, { results: batch.actions.map((action) => ({ actionId: action.id, sequence: action.sequence, status: "applied" as const, code: null, result, clockSuspect: false })) });
+    return saved;
+  }
+  const serverBill = (id: string, reference: string, voided: ShopCounterBill["voided"]): ShopCounterBill => ({ id, reference, number: 12, total: "63", payment: "cash",
+    madeAt: clock.toISOString(), receivedAt: clock.toISOString(), voidUntil: null, voidable: false, voided });
+  const firstBills = (index: number) => { const row = queue.bills(shopId, today)[index]; if (!row) throw new Error("no bill"); return row; };
+  const voidedAt = { reason: "billed_twice" as const, note: null, createdAt: clock.toISOString() };
+
+  it("shows a void the server reported on the bill's card, in Today's bills, search and S08, and only that bill's", () => {
+    const billId = randomUUID(), saved = synced(billId), other = synced(randomUUID(), 13);
+    expect(queue.bills(shopId, today).every((row) => row.voided === null)).toBe(true);
+    expect(queue.saveVoids([serverBill(billId, saved.reference, voidedAt)])).toBe(true);
+    const voided = { reason: "billed_twice", note: null };
+    expect(queue.bills(shopId, today).map((row) => [row.id, row.voided])).toEqual([[other.id, null], [saved.id, voided]]);
+    expect(queue.findBills(shopId, "12").map((row) => row.voided)).toEqual([voided]);
+    expect(queue.findBills(shopId, saved.reference).map((row) => row.voided)).toEqual([voided]);
+    expect(queue.overview(today).synced.filter((row) => row.bill?.voided).map((row) => row.id)).toEqual([saved.id]);
+    expect(billStatus(firstBills(1))).toEqual({ text: "Voided · Billed twice", tone: "danger" });
+  });
+
+  it("keeps an Other note for the card, and never learns the same void twice", () => {
+    const billId = randomUUID(), saved = synced(billId), list = [serverBill(billId, saved.reference, { reason: "other", note: "Customer left", createdAt: clock.toISOString() })];
+    expect(queue.saveVoids(list)).toBe(true);
+    expect(queue.saveVoids(list)).toBe(false);
+    expect(billStatus(firstBills(0)).text).toBe("Voided · Other · Customer left");
+  });
+
+  it("ignores a void that doesn't match a bill on this phone by both its id and its reference", () => {
+    const billId = randomUUID(), saved = synced(billId);
+    // Another bill with the same reference (a clash, #467), the right id with another reference, and a bill from another phone.
+    queue.saveVoids([serverBill(randomUUID(), saved.reference, voidedAt), serverBill(billId, "FFFF-FFFF", voidedAt), serverBill(randomUUID(), "1234-5678", voidedAt)]);
+    expect(firstBills(0).voided).toBeNull();
+  });
+
+  it("never forgets a void: an empty or shorter list leaves what is known", () => {
+    const billId = randomUUID(), saved = synced(billId);
+    queue.saveVoids([serverBill(billId, saved.reference, voidedAt)]);
+    expect(queue.saveVoids([])).toBe(false);
+    expect(queue.saveVoids([serverBill(billId, saved.reference, null)])).toBe(false);
+    expect(firstBills(0).voided).toEqual({ reason: "billed_twice", note: null });
+  });
+
+  it("shows no void on a bill that isn't synced and numbered", () => {
+    const saved = queue.saveBill(shopId, bill);
+    if (typeof saved === "string") throw new Error(saved);
+    expect(billStatus({ status: "pending", number: null, code: null, voided: { reason: "billed_twice", note: null } }).text).toBe("Saved on phone · number pending");
+    expect(firstBills(0).voided).toBeNull();
+  });
+});
+
+describe("refreshing the phone's voids (#493)", () => {
+  const list = (id: string): ShopCounterBill => ({ id, reference: "AAAA-BBBB", number: 1, total: "5", payment: "cash", madeAt: "2030-01-02T10:00:00.000Z", receivedAt: "2030-01-02T10:00:00.000Z",
+    voidUntil: null, voidable: false, voided: { reason: "wrong_item", note: null, createdAt: "2030-01-02T10:00:00.000Z" } });
+  const keeper = () => { const saved: ShopCounterBill[][] = []; return { saved, queue: { saveVoids: (bills: ShopCounterBill[]) => { saved.push(bills); return true; } } }; };
+
+  it("saves a good answer, and does nothing when the phone is offline, the server refuses or the read throws", async () => {
+    const good = keeper();
+    expect(await refreshBillVoids({ shopCounterBills: async () => ({ ok: true, data: { bills: [list("x")] } }) } as never, good.queue)).toBe(true);
+    expect(good.saved).toHaveLength(1);
+    const none = keeper();
+    expect(await refreshBillVoids({ shopCounterBills: async () => ({ ok: false, code: "SHOP_NOT_FOUND" }) } as never, none.queue)).toBe(false);
+    expect(await refreshBillVoids({ shopCounterBills: async () => { throw new Error("offline"); } } as never, none.queue)).toBe(false);
+    expect(none.saved).toEqual([]);
+  });
+
+  it("saves nothing when the account changed while the server answered", async () => {
+    const away = keeper();
+    expect(await refreshBillVoids({ shopCounterBills: async () => ({ ok: true, data: { bills: [list("x")] } }) } as never, away.queue, () => false)).toBe(false);
+    expect(away.saved).toEqual([]);
+  });
+
+  it("says nothing was learned when saving on the phone fails", async () => {
+    const queue = { saveVoids: () => { throw new Error("database closed"); } };
+    expect(await refreshBillVoids({ shopCounterBills: async () => ({ ok: true, data: { bills: [list("x")] } }) } as never, queue)).toBe(false);
   });
 });

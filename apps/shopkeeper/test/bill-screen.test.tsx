@@ -5,7 +5,7 @@ import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
 const mock = vi.hoisted(() => ({
-  get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), share: vi.fn(),
+  get: vi.fn(), open: vi.fn(), allowed: vi.fn(), run: vi.fn(), share: vi.fn(), bills: vi.fn(), mode: "offline",
   hooks: [] as unknown[], effects: [] as (() => void)[],
   cursor: 0, focused: false,
 }));
@@ -42,8 +42,8 @@ vi.mock("../src/lib/share-bill", () => ({ shareBill: mock.share }));
 vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-vi.mock("../src/api", () => ({ accountEpoch: () => 0, supportEmail: "help@example.com", session: { get: mock.get },
-  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: "offline" }) } }));
+vi.mock("../src/api", () => ({ accountEpoch: () => 0, supportEmail: "help@example.com", session: { get: mock.get }, api: { shopCounterBills: mock.bills },
+  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }), run: mock.run } }));
 import BillScreen from "../src/app/bill";
@@ -84,7 +84,7 @@ describe("S06 Counter bill (#468)", () => {
     // Saved before #468: no counter price until the next pull.
     db.prepare("INSERT INTO stock_cache_items (shop_id, pack_id, payload) VALUES (?, ?, ?)").run(shopId, dal,
       JSON.stringify({ ...item, listingId: dal, packId: dal, name: "Dal", counterPrice: undefined }));
-    mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue); mock.allowed.mockReturnValue(true);
+    mock.mode = "offline"; mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue); mock.allowed.mockReturnValue(true);
   });
   afterEach(() => {
     for (const hook of mock.hooks) {
@@ -171,6 +171,35 @@ describe("S06 Counter bill (#468)", () => {
     expect(texts()).toEqual(expect.arrayContaining(["Type a price such as 40 or 39.50.", "Fix the fields marked in red to save.", "Fill in every item to see the total."]));
     expect(find((props) => props.label === "Customer phone")?.message).toBe("Enter a 10-digit mobile number, such as 98765 43210.");
     expect(queue.batch(shopId).actions).toHaveLength(0);
+  });
+
+  it("learns a void from the server when online, shows it on the card and in search, and keeps it when a later read fails or the phone is offline (#493)", async () => {
+    const saved = queue.saveBill(shopId, { lines: [{ packId: rice, count: 1, unitPrice: "21" }], total: "21.00", payment: "cash" });
+    if (typeof saved === "string") throw new Error(saved);
+    const batch = queue.batch(shopId), billId = randomUUID();
+    queue.acknowledge(batch, { results: batch.actions.map((sent) => ({ actionId: sent.id, sequence: sent.sequence, status: "applied", code: null, clockSuspect: false,
+      result: { billId, reference: saved.reference, number: 12, heldReason: null, totalMismatch: false, recordedAt: new Date().toISOString() } })) });
+    const now = new Date().toISOString();
+    mock.mode = "online";
+    mock.bills.mockResolvedValue({ ok: true, data: { bills: [{ id: billId, reference: saved.reference, number: 12, total: "21", payment: "cash", madeAt: now, receivedAt: now, voidUntil: null, voidable: false,
+      voided: { reason: "other", note: "Customer left", createdAt: now } }] } });
+    render(); await settle(); render(); await settle();
+    expect(mock.bills).toHaveBeenCalledTimes(1);
+    expect(texts()).toContain("Voided · Other · Customer left");
+    expect(texts()).not.toContain("Synced · Bill 12");
+    type("Find a bill by reference or number", "12");
+    expect(texts()).toContain("Voided · Other · Customer left");
+
+    // A failed read, an empty list and no connection never take the void back.
+    mock.hooks = []; mock.focused = false; mock.effects = [];
+    mock.bills.mockResolvedValue({ ok: true, data: { bills: [] } });
+    render(); await settle(); render(); await settle();
+    expect(mock.bills).toHaveBeenCalledTimes(2);
+    expect(texts()).toContain("Voided · Other · Customer left");
+    mock.hooks = []; mock.focused = false; mock.effects = []; mock.mode = "offline"; mock.bills.mockClear();
+    render(); await settle();
+    expect(mock.bills).not.toHaveBeenCalled();
+    expect(texts()).toContain("Voided · Other · Customer left");
   });
 
   it("finds an older day's bill by its reference or its number, offline (#53)", async () => {
