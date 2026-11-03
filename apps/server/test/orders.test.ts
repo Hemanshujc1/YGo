@@ -885,13 +885,13 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     expect(await send()).toEqual([{ to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }]);
 
     const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
-    const down: PushSender = { send: () => Promise.reject(new Error("Expo is down")) };
+    const down: PushSender = { send: async (pushes) => pushes.map(() => "failed" as const) };
     for (const tries of [1, 2]) {
-      await expect(send(down)).rejects.toThrow("Expo is down");
+      await expect(send(down)).rejects.toThrow("1 queued pushes could not be sent");
       expect((await database.pool.query("SELECT tries FROM push_queue ORDER BY send_after LIMIT 1")).rows).toEqual([{ tries }]);
       clock.advance(30_000);
     }
-    await expect(send(down)).rejects.toThrow("Expo is down");
+    await expect(send(down)).rejects.toThrow("could not be sent");
     expect((await database.pool.query("SELECT 1 FROM push_queue q JOIN notifications n ON n.id = q.notification_id WHERE n.order_id = $1 AND q.send_after <= $2",
       [order.id, clock.now()])).rowCount).toBe(0);
 
@@ -899,6 +899,22 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     clock.advance(120_000);
     await sendDuePushes(database.pool, gone, clock.now());
     expect((await database.pool.query("SELECT token FROM push_tokens ORDER BY token")).rows).toEqual([{ token: "ExponentPushToken[buyer]" }]);
+  });
+
+  it("sends each app's pushes in a request of their own, and stops ringing someone who has left the shop", async () => {
+    const { shopId, dal, home, owner, staff } = await phones();
+    const first = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    await reject(first.id, owner);
+    const requests: string[][] = [];
+    const recording: PushSender = { send: async (pushes) => { requests.push(pushes.map((one) => one.to)); return pushes.map(() => "sent" as const); } };
+    await sendDuePushes(database.pool, recording, clock.now());
+    expect(requests.map((tokens) => [...new Set(tokens)].sort())).toEqual([["ExponentPushToken[owner]", "ExponentPushToken[staff]"], ["ExponentPushToken[buyer]"]]);
+
+    await database.pool.query("DELETE FROM shop_members WHERE role = 'staff'");
+    clock.advance(120_000);
+    expect(await send()).toEqual([{ to: "ExponentPushToken[owner]", title: "New order #1002", loud: true }]);
+    expect((await list(staff)).notifications).toHaveLength(2);
   });
 
   it("reads one notification on a tap and all of them on Mark all as read, each person and app on its own", async () => {

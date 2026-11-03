@@ -34,4 +34,5 @@ ALTER TABLE "push_queue" ADD CONSTRAINT "push_queue_notification_id_notification
 ALTER TABLE "push_tokens" ADD CONSTRAINT "push_tokens_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "notifications_account_id_app_created_at_idx" ON "notifications" USING btree ("account_id","app","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "push_queue_send_after_idx" ON "push_queue" USING btree ("send_after");--> statement-breakpoint
-CREATE INDEX "push_tokens_session_id_idx" ON "push_tokens" USING btree ("session_id");
+CREATE INDEX "push_tokens_session_id_idx" ON "push_tokens" USING btree ("session_id");--> statement-breakpoint
+CREATE INDEX "sessions_account_id_idx" ON "sessions" USING btree ("account_id");

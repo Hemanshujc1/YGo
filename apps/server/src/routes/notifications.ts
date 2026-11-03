@@ -39,12 +39,15 @@ export function registerNotificationRoutes(app: FastifyInstance, { pool, clock, 
   app.get("/v1/me/notifications", { schema: { response: { 200: NotificationsResponse, ...errors } } }, async (request, reply) => {
     const who = await caller(request, reply);
     if (!who) return reply;
-    const { rows } = await pool.query<Omit<Notification, "createdAt"> & { createdAt: Date }>(
-      `SELECT id, kind, title, body, order_id AS "orderId", created_at AS "createdAt", read_at IS NOT NULL AS read
+    // One statement, so the bell's flag and the rows can't disagree; an unread row beyond the 50 still lights it.
+    const { rows } = await pool.query<Omit<Notification, "createdAt"> & { createdAt: Date; unread: boolean }>(
+      `SELECT id, kind, title, body, order_id AS "orderId", created_at AS "createdAt", read_at IS NOT NULL AS read,
+         EXISTS (SELECT 1 FROM notifications u WHERE u.account_id = $1 AND u.app = $2 AND u.read_at IS NULL) AS unread
        FROM notifications WHERE account_id = $1 AND app = $2 ORDER BY created_at DESC, id LIMIT ${SHOWN}`, [who.accountId, who.app]);
-    const { rows: [unread] } = await pool.query<{ any: boolean }>(
-      "SELECT EXISTS (SELECT 1 FROM notifications WHERE account_id = $1 AND app = $2 AND read_at IS NULL) AS any", [who.accountId, who.app]);
-    return { notifications: rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })), unread: unread?.any ?? false };
+    return {
+      notifications: rows.map(({ id, kind, title, body, orderId, createdAt, read }) => ({ id, kind, title, body, orderId, createdAt: createdAt.toISOString(), read })),
+      unread: rows[0]?.unread ?? false,
+    };
   });
 
   // A tap reads one (owner's answer 5 on #55); reading it again changes nothing.

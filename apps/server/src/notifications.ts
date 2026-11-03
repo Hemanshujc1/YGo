@@ -75,35 +75,44 @@ const RETRY_SECONDS = 30;
 
 /**
  * Sends the queued pushes due by now to every phone signed in to the recipient's account in that app. A new order's
- * push is dropped once the order has been answered, cancelled or left past its answer time. Rows taken here are
- * locked, so two runs never send one twice.
+ * push is dropped once the order has been answered, cancelled or left past its answer time, and a shop's push once its
+ * recipient has left the shop. Rows taken here are locked, so two runs never send one twice. Throws, once the retries
+ * are recorded, when any push failed, so the caller can log it.
  */
 export async function sendDuePushes(pool: Pool, sender: PushSender, now: Date, batch = 100): Promise<void> {
   await withTransaction(pool, async (client) => {
-    type Row = { id: string; tries: number; pushes: Array<Omit<Push, "loud">>; loud: boolean };
+    type Row = { id: string; tries: number; app: string; loud: boolean; pushes: Array<Omit<Push, "loud">> };
     const { rows } = await client.query<Row>(
-      `SELECT q.id, q.tries, n.loud, COALESCE((SELECT json_agg(json_build_object('to', t.token, 'title', n.title, 'body', n.body,
+      `SELECT q.id, q.tries, n.app, n.loud, COALESCE((SELECT json_agg(json_build_object('to', t.token, 'title', n.title, 'body', n.body,
             'data', json_build_object('notificationId', n.id, 'orderId', n.order_id)) ORDER BY t.token)
           FROM push_tokens t JOIN sessions s ON s.id = t.session_id
           WHERE s.account_id = n.account_id AND t.app = n.app AND s.expires_at > $1
-            AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))), '[]') AS pushes
+            AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))
+            AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = o.shop_id))), '[]') AS pushes
         FROM push_queue q JOIN notifications n ON n.id = q.notification_id LEFT JOIN orders o ON o.id = n.order_id
         WHERE q.send_after <= $1 ORDER BY q.send_after, q.id LIMIT $2 FOR UPDATE OF q SKIP LOCKED`, [now, batch, ORDER_ANSWER_SECONDS]);
     if (rows.length === 0) return;
-    const pushes = rows.flatMap((row) => row.pushes.map((push) => ({ ...push, loud: row.loud })));
-    let failure: unknown;
-    const results = pushes.length > 0 ? await sender.send(pushes).catch((error: unknown) => { failure = error; }) : [];
-    if (!results) {
-      const kept = rows.filter((row) => row.tries + 1 < MAX_TRIES).map((row) => row.id);
-      await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[]) AND NOT id = ANY($2::bigint[])", [rows.map((row) => row.id), kept]);
-      await client.query("UPDATE push_queue SET tries = tries + 1, send_after = $2::timestamptz + make_interval(secs => $3) WHERE id = ANY($1::bigint[])",
-        [kept, now, RETRY_SECONDS]);
-    } else {
-      await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[])", [rows.map((row) => row.id)]);
-      await client.query("DELETE FROM push_tokens WHERE token = ANY($1::text[])", [pushes.filter((_, i) => results[i] === "dead").map((push) => push.to)]);
+    const failedRows: string[] = [];
+    const deadTokens: string[] = [];
+    // Expo refuses one request for two apps, as each is its own project.
+    for (const app of new Set(rows.map((row) => row.app))) {
+      const mine = rows.filter((row) => row.app === app);
+      const pushes = mine.flatMap((row) => row.pushes.map((push) => ({ ...push, loud: row.loud })));
+      const rowOf = mine.flatMap((row) => row.pushes.map(() => row.id));
+      if (pushes.length === 0) continue;
+      const results = await sender.send(pushes).catch(() => pushes.map(() => "failed" as const));
+      pushes.forEach((push, i) => {
+        const row = rowOf[i] ?? "";
+        if (results[i] === "dead") deadTokens.push(push.to);
+        if (results[i] === "failed" && !failedRows.includes(row)) failedRows.push(row);
+      });
     }
+    const retried = rows.filter((row) => failedRows.includes(row.id) && row.tries + 1 < MAX_TRIES).map((row) => row.id);
+    await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[]) AND NOT id = ANY($2::bigint[])", [rows.map((row) => row.id), retried]);
+    await client.query("UPDATE push_queue SET tries = tries + 1, send_after = $2::timestamptz + make_interval(secs => $3) WHERE id = ANY($1::bigint[])",
+      [retried, now, RETRY_SECONDS]);
+    await client.query("DELETE FROM push_tokens WHERE token = ANY($1::text[])", [deadTokens]);
     await client.query("COMMIT");
-    // Told to the caller once the retry is recorded, so the loop can log it.
-    if (failure) throw failure;
+    if (failedRows.length > 0) throw new Error(`${failedRows.length} queued pushes could not be sent`);
   });
 }

@@ -174,8 +174,15 @@ describe("Expo push sender (#505)", () => {
     expect(results.slice(0, 3)).toEqual(["sent", "dead", "sent"]);
   });
 
-  it("throws when Expo answers with an error status, so the queue tries again", async () => {
-    const sender = createExpoPushSender(async () => new Response("down", { status: 503 }));
-    await expect(sender.send([push("ExponentPushToken[x]")])).rejects.toThrow("503");
+  it("fails only the messages of a request Expo refused or never answered, so the queue tries those again", async () => {
+    let calls = 0;
+    const sender = createExpoPushSender(async (body) => {
+      calls += 1;
+      if (calls === 2) return new Response("down", { status: 503 });
+      if (calls === 3) throw new Error("timed out");
+      return Response.json({ data: (JSON.parse(body) as unknown[]).map(() => ({ status: "ok" })) });
+    });
+    const results = await sender.send(Array.from({ length: 250 }, (_, i) => push(`ExponentPushToken[${i}]`)));
+    expect([results.slice(0, 100), results.slice(100)].map((part) => [...new Set(part)])).toEqual([["sent"], ["failed"]]);
   });
 });

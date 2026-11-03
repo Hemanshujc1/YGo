@@ -5,7 +5,7 @@ import { buildApp } from "./app";
 import { createMailpitMailer, createSesMailer } from "./adapters/mailer";
 import { createGooglePlaceFinder } from "./adapters/place-finder";
 import { createProductImageStorage, createS3ProductImageClient } from "./adapters/product-images";
-import { createExpoPushSender, type PushSender } from "./adapters/push-sender";
+import { createExpoPushSender, createLoggingPushSender } from "./adapters/push-sender";
 import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
 import { sendDuePushes } from "./notifications";
@@ -51,19 +51,25 @@ const app = buildApp({
 
 // An idle client losing its connection must not crash the process.
 database.pool.on("error", (err) => app.log.error({ err }, "idle database client failed"));
-app.addHook("onClose", () => database.close());
 
-// The push queue is worked every few seconds; a run still sending when the next starts skips the rows it holds (#505).
-const pushSender: PushSender = config.PUSH_SENDER === "expo" ? createExpoPushSender() : {
-  async send(pushes) {
-    app.log.info({ pushes }, "push not sent: PUSH_SENDER is local");
-    return pushes.map(() => "sent" as const);
-  },
+// The push queue is worked every few seconds, one run at a time, and stops before the database closes (#505).
+const pushSender = config.PUSH_SENDER === "expo"
+  ? createExpoPushSender()
+  : createLoggingPushSender((pushes) => app.log.info({ pushes }, "push not sent: PUSH_SENDER is local"));
+let pushRun: Promise<void> = Promise.resolve();
+let pushTimer: NodeJS.Timeout | undefined;
+const workPushQueue = () => {
+  pushRun = sendDuePushes(database.pool, pushSender, clock.now())
+    .catch((err: unknown) => app.log.error({ err }, "push sending failed"))
+    .finally(() => { if (pushTimer) pushTimer = setTimeout(workPushQueue, 5_000); });
 };
-const pushLoop = setInterval(() => {
-  sendDuePushes(database.pool, pushSender, clock.now()).catch((err: unknown) => app.log.error({ err }, "push sending failed"));
-}, 5_000);
-app.addHook("onClose", () => clearInterval(pushLoop));
+pushTimer = setTimeout(workPushQueue, 5_000);
+app.addHook("onClose", async () => {
+  clearTimeout(pushTimer);
+  pushTimer = undefined;
+  await pushRun;
+  await database.close();
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => void app.close());

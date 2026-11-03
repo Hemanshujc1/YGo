@@ -1,5 +1,5 @@
 {
-  "id": "9a662e3c-1257-4c4d-a7ea-004518bb5c4b",
+  "id": "6864d18d-8681-4226-b94f-b0bc3c1ac910",
   "prevId": "e704e733-1b31-4705-ad6a-db40c2f2b2ed",
   "version": "7",
   "dialect": "postgresql",
@@ -3352,7 +3352,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "sessions_account_id_idx": {
+          "name": "sessions_account_id_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "sessions_account_id_accounts_id_fk": {
           "name": "sessions_account_id_accounts_id_fk",

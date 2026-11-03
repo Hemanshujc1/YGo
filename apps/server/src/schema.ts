@@ -577,7 +577,11 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [check("sessions_kind_valid", sql`${table.kind} IN ('mobile', 'admin_web')`)],
+  (table) => [
+    check("sessions_kind_valid", sql`${table.kind} IN ('mobile', 'admin_web')`),
+    // The push queue finds each recipient's signed-in phones through this (#505).
+    index("sessions_account_id_idx").on(table.accountId),
+  ],
 );
 
 // Every refresh token a session has been issued, as a keyed hash. The one with
