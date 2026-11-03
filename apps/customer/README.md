@@ -26,6 +26,10 @@ The theme choice is saved on the phone with MMKV and applied before the first sc
 
 `EXPO_PUBLIC_` variables are written into the bundle at build time, so they are public: never put a secret in one.
 
+## Push
+
+The Home bell opens C22 Notifications, read from the server (#506). After each sign-in and at each launch the phone sends its Expo push token (`PUT /v1/me/push-token`), but only when `EXPO_PUBLIC_EAS_PROJECT_ID` is set and notifications are allowed. The system prompt shows once per phone, after the first order is placed; a person who says no is not asked again. Signing out ends the session on the server, which removes its token. Real pushes also need the server's `PUSH_SENDER=expo` and, on Android, the Firebase project's `google-services.json` in the build: `app.config.ts` takes its path from `GOOGLE_SERVICES_JSON` (in `.env` locally, with the file kept at `apps/customer/google-services.json`, which git ignores; an EAS file variable in a cloud build). Until then getting a token fails quietly and is tried again at the next launch. `expo-notifications` is native code, so adding it needs a new development build.
+
 ## Product photos
 
 C05 shows each product's small photo (#378), loaded from the address the server sends. Locally the photos come from SeaweedFS, so a real phone needs the server's `PRODUCT_IMAGE_LOCAL_BASE_URL` on the Mac's LAN address and SeaweedFS published on all interfaces (`apps/server/README.md`, "Local product images"). Without image storage on the server, or when a photo fails to load, C05 shows a plain square instead.

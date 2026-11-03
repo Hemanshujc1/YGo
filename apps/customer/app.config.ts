@@ -8,14 +8,21 @@ import app from "./app.json";
  * placeholder keeps the map blank, as the Google map stops the app when the
  * key is missing. A release build (YGO_RELEASE_BUILD=1) stops instead,
  * naming the missing key (#315).
+ *
+ * Android gets its push token through Firebase (#506): `GOOGLE_SERVICES_JSON`
+ * is the path to the Firebase project's google-services.json, a git-ignored
+ * file locally or an EAS file variable in a cloud build. Without it the build
+ * has no Firebase, and the phone registers for no push.
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const googleServicesFile = process.env.GOOGLE_SERVICES_JSON || undefined;
   return {
     ...config,
     name: config.name ?? app.expo.name,
     slug: config.slug ?? app.expo.slug,
     ios: { ...config.ios, usesAppleSignIn: true },
+    android: { ...config.android, ...(googleServicesFile ? { googleServicesFile } : {}) },
     plugins: [
       ...(config.plugins ?? []),
       ["react-native-maps", googleMapsKeys(process.env)],

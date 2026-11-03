@@ -13,5 +13,7 @@ declare namespace NodeJS {
     readonly EXPO_PUBLIC_ANDROID_STORE_URL?: string;
     /** This app's App Store page; while unset, the update screen names the stores instead of showing a button. */
     readonly EXPO_PUBLIC_IOS_STORE_URL?: string;
+    /** The Expo project the push token belongs to; while unset, the phone registers for no push (#506). See README.md. */
+    readonly EXPO_PUBLIC_EAS_PROJECT_ID?: string;
   }
 }

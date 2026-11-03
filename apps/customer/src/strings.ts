@@ -334,6 +334,21 @@ export const strings = {
     active: "Active",
     past: "Past orders",
   },
+  // C22 Notifications (#506): the server's own words, "New" on unread rows (design system, Notification row).
+  notifications: {
+    open: "Notifications",
+    unread: "Notifications, some unread",
+    title: "Notifications",
+    loading: "Opening your notifications…",
+    failed: "Couldn't open your notifications",
+    retry: "Try again",
+    empty: "Nothing yet. News about your orders shows here.",
+    new: "New",
+    readAll: "Mark all as read",
+    readAllFailed: "Couldn't mark them as read. Try again.",
+    // What Android's settings call this app's pushes.
+    channel: "Order updates",
+  },
   // C16 Search (#398): no prices on results (owner's answer 13 on #49).
   search: {
     title: "Search",

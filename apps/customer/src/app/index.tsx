@@ -1,14 +1,15 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { FeedQuery, FeedShop, HealthResponse } from "@ygo/contracts";
-import { Button, Text, useSession } from "@ygo/mobile";
+import { Button, Text, useInFront, useSession } from "@ygo/mobile";
 import { Link, router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
-import { Search } from "../components/icons";
+import { Bell, Search } from "../components/icons";
 import { ShopCard } from "../components/shop-card";
 import { feedQuery } from "../lib/feed";
+import { inbox } from "../lib/inbox";
 import { askArea, type AreaAnswer, newestOnly, placeLabel, stale } from "../lib/location-flow";
 import { savedPlace } from "../lib/saved-place";
 import { strings } from "../strings";
@@ -151,6 +152,24 @@ function SearchBox({ query }: { query: FeedQuery }) {
   );
 }
 
+/** The way into C22 (#506), with a dot while anything is unread; read each time Home comes to the front and when a push arrives. */
+function NotificationsBell() {
+  const { unread } = useSyncExternalStore(inbox.subscribe, inbox.get);
+  useInFront(inbox);
+  return (
+    <Link href="/notifications" asChild>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={unread ? strings.notifications.unread : strings.notifications.open}
+        className="size-12 items-center justify-center rounded-full active:bg-primary-subtle"
+      >
+        <Bell className="text-text" />
+        {unread && <View className="absolute right-3 top-3 size-2.5 rounded-full bg-accent" />}
+      </Pressable>
+    </Link>
+  );
+}
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const [result, setResult] = useState<ApiResult<HealthResponse> | "unreachable">();
@@ -175,7 +194,10 @@ export default function Home() {
       contentContainerClassName="px-4"
       contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
     >
-      <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
+      <View className="flex-row items-center justify-between">
+        <Text className="text-title-large font-semibold text-brand">{strings.title}</Text>
+        <NotificationsBell />
+      </View>
       {/* Orders sits beside Account until the tab bar (owner's answer 5 on #426). */}
       <View className="mt-4 flex-row gap-2 self-start">
         <Link href="/orders" asChild>

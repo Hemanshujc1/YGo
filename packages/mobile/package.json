@@ -9,7 +9,8 @@
     "./address-at": "./src/address-at.ts",
     "./pin-map": "./src/pin-map.tsx",
     "./pack-label": "./src/pack-label.ts",
-    "./poller": "./src/poller.ts"
+    "./poller": "./src/poller.ts",
+    "./push": "./src/push.ts"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
@@ -26,6 +27,7 @@
     "expo": "57.0.27",
     "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
+    "expo-notifications": "57.0.24",
     "expo-router": "57.0.25",
     "expo-secure-store": "57.0.4",
     "lucide-react-native": "1.57.0",
@@ -39,6 +41,11 @@
     "react-native-nitro-modules": "0.35.9",
     "react-native-safe-area-context": "5.7.0"
   },
+  "peerDependenciesMeta": {
+    "expo-notifications": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "26.6.4",
     "@types/react": "19.2.18",
@@ -48,6 +55,7 @@
     "expo": "57.0.27",
     "expo-apple-authentication": "57.0.2",
     "expo-navigation-bar": "57.0.3",
+    "expo-notifications": "57.0.24",
     "expo-router": "57.0.25",
     "expo-secure-store": "57.0.4",
     "lucide-react-native": "1.57.0",
