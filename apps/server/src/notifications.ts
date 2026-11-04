@@ -195,8 +195,9 @@ export async function sendDuePushes(pool: Pool, sender: PushSender, now: Date, b
  * any transaction and records outcomes only for tickets it still holds, so a ticket is acted on once even with two
  * workers. A token goes only if its phone did not register it again after the send, decided in the same statement
  * that takes the ticket, so a reinstalled phone keeps its token. An "ok" or other receipt just ends the ticket; a missing
- * one is asked for again after 15 minutes, and dropped once asked for after 24 hours from the send. Throws, once outcomes are recorded, when
- * Expo's answer was missing for any ticket, so the caller can log it.
+ * one is asked for again after 15 minutes, and dropped once asked for after 24 hours from the send. The tickets of a failed
+ * request go back at once, to be asked for on the next pass. Throws, once outcomes are recorded, when any request failed, so
+ * the caller can log it.
  */
 export async function checkPushReceipts(pool: Pool, sender: PushSender, now: Date, batch = 1000): Promise<void> {
   const claimId = randomUUID();
@@ -209,19 +210,20 @@ export async function checkPushReceipts(pool: Pool, sender: PushSender, now: Dat
     await client.query("COMMIT");
     return rows;
   });
-  const found = new Map<string, ReceiptResult>();
+  const found = new Map<string, ReceiptResult | "failed">();
   let cause: unknown;
   // Expo's projects are separate, so each app asks on its own.
   for (const app of new Set(claimed.map((row) => row.app))) {
     const asked = claimed.filter((row) => row.app === app).map((row) => row.ticketId);
     const answer = await sender.receipts(asked).catch((error: unknown) => {
       cause = error;
-      return new Map<string, ReceiptResult>();
+      return new Map(asked.map((id) => [id, "failed" as const]));
     });
     answer.forEach((result, ticketId) => found.set(ticketId, result));
   }
   const withResult = (result: ReceiptResult) => claimed.filter((row) => found.get(row.ticketId) === result).map((row) => row.ticketId);
   const missing = claimed.filter((row) => !found.has(row.ticketId)).map((row) => row.ticketId);
+  const failed = claimed.filter((row) => found.get(row.ticketId) === "failed").map((row) => row.ticketId);
   await withTransaction(pool, async (client) => {
     // One statement takes the held tickets and judges the token against the same rows.
     await client.query(
@@ -233,7 +235,10 @@ export async function checkPushReceipts(pool: Pool, sender: PushSender, now: Dat
     await client.query(
       "UPDATE push_receipts SET check_after = $3::timestamptz + make_interval(secs => $4), claim_id = NULL, claimed_until = NULL WHERE ticket_id = ANY($1::text[]) AND claim_id = $2",
       [missing, claimId, now, RECEIPT_AFTER_SECONDS]);
+    // A failed request says nothing of its receipts: its claim is let go, so the next pass asks again.
+    await client.query("UPDATE push_receipts SET claim_id = NULL, claimed_until = NULL WHERE ticket_id = ANY($1::text[]) AND claim_id = $2", [failed, claimId]);
     await client.query("COMMIT");
   });
-  if (cause) throw new Error("push receipts could not be read", { cause });
+  // Counts only, so no push token reaches the log.
+  if (failed.length > 0) throw new Error(`${failed.length} push receipts could not be read`, { cause });
 }

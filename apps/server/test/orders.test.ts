@@ -1102,15 +1102,38 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
       expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
     });
 
-    it("lets a failed Expo call keep its tickets for the next run", async () => {
+    it("asks again on the next pass, not 15 minutes later, for tickets of a failed request, and logs no token", async () => {
       await placed();
       clock.advance(900_000);
-      const broken: PushSender = { send: async () => [], receipts: async () => { throw new Error("down"); } };
-      await expect(checkPushReceipts(database.pool, broken, clock.now())).rejects.toThrow("push receipts could not be read");
-      expect(await tickets()).toHaveLength(2);
+      const failure = (message: string): PushSender => ({ send: async () => [], receipts: async (ids) => {
+        if (message === "throws") throw new Error("down");
+        return new Map(ids.map((id) => [id, "failed" as const]));
+      } });
+      // An HTTP failure or unreadable answer (the adapter's "failed"), then a network failure that throws: each is read at once next time.
+      for (const how of ["http", "throws"]) {
+        const error = await checkPushReceipts(database.pool, failure(how), clock.now()).catch((thrown: Error) => thrown);
+        expect(error).toMatchObject({ message: "2 push receipts could not be read" });
+        expect(String((error as Error).message)).not.toContain("ExponentPushToken");
+        expect((await database.pool.query("SELECT 1 FROM push_receipts WHERE claim_id IS NOT NULL OR check_after <> $1::timestamptz", [clock.now()])).rowCount).toBe(0);
+      }
+      // The next pass, no time later, asks for the same two and finishes them.
+      const asked: string[][] = [];
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead" }, asked), clock.now());
+      expect(asked).toEqual([["t-ExponentPushToken[owner]", "t-ExponentPushToken[staff]"]]);
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[staff]"]);
+    });
+
+    it("lets only a failed request's tickets go back at once, and a missing receipt waits its 15 minutes", async () => {
+      await placed();
       clock.advance(900_000);
-      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead" }), clock.now());
-      expect(await tokens()).not.toContain("ExponentPushToken[owner]");
+      const mixed: PushSender = { send: async () => [], receipts: async () => new Map([["t-ExponentPushToken[owner]", "failed" as const]]) };
+      await expect(checkPushReceipts(database.pool, mixed, clock.now())).rejects.toThrow("1 push receipts could not be read");
+      const due = async () => (await database.pool.query<{ ticketId: string }>("SELECT ticket_id AS \"ticketId\" FROM push_receipts WHERE check_after <= $1 ORDER BY 1", [clock.now()])).rows.map((row) => row.ticketId);
+      expect(await due()).toEqual(["t-ExponentPushToken[owner]"]);
+      clock.advance(5_000);
+      const asked: string[][] = [];
+      await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      expect(asked).toEqual([["t-ExponentPushToken[owner]"]]);
     });
   });
 

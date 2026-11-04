@@ -11,9 +11,10 @@ export interface PushSender {
   send(pushes: Push[]): Promise<PushResult[]>;
   /**
    * Reads the receipts of tickets of one app, some minutes after sending. A ticket missing from the answer has no
-   * receipt yet or its request failed: ask again later.
+   * receipt yet: ask again later. "failed" marks the tickets of a request that failed (an error, a refusal or an
+   * answer that can't be read): ask again at once.
    */
-  receipts(ticketIds: string[]): Promise<Map<string, ReceiptResult>>;
+  receipts(ticketIds: string[]): Promise<Map<string, ReceiptResult | "failed">>;
 }
 
 export type PushResult = "sent" | "dead" | "failed" | { ticketId: string };
@@ -99,14 +100,16 @@ export function createExpoPushSender(
       return results;
     },
     async receipts(ticketIds: string[]) {
-      const found = new Map<string, ReceiptResult>();
+      const found = new Map<string, ReceiptResult | "failed">();
       for (let start = 0; start < ticketIds.length; start += EXPO_RECEIPT_BATCH) {
         const ids = ticketIds.slice(start, start + EXPO_RECEIPT_BATCH);
-        // A failed request leaves its ids out, so they are asked for again.
         const data = await postReceipts(JSON.stringify({ ids }))
           .then(async (response) => response.ok ? (await response.json() as { data?: unknown }).data : undefined)
           .catch(() => undefined);
-        if (typeof data !== "object" || data === null || Array.isArray(data)) continue;
+        if (typeof data !== "object" || data === null || Array.isArray(data)) {
+          ids.forEach((id) => found.set(id, "failed"));
+          continue;
+        }
         for (const id of ids) {
           const receipt = (data as Record<string, ExpoTicket | undefined>)[id];
           if (receipt?.status === "ok") found.set(id, "ok");
