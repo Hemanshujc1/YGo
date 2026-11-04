@@ -117,30 +117,29 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
            ORDER BY send_after, id LIMIT $2 FOR UPDATE SKIP LOCKED)
          RETURNING notification_id, send_after),
        candidates AS (
-         SELECT f.notification_id, f.send_after, n.order_id, n.kind, t.token, t.platform
+         SELECT f.notification_id, f.send_after, n.order_id, n.kind, t.token, t.platform, gen_random_uuid() AS ring_id
          FROM fresh f
          JOIN notifications n ON n.id = f.notification_id
          JOIN push_tokens t ON t.app = n.app
          JOIN sessions s ON s.id = t.session_id AND s.account_id = n.account_id AND s.expires_at > $1),
        android_rings AS (
-         INSERT INTO ring_attempts (order_id, attempt, token, created_at)
-         SELECT c.order_id, CASE WHEN c.send_after = n.created_at THEN 1 ELSE 2 END, c.token, $1
+         INSERT INTO ring_attempts (id, order_id, attempt, token, created_at)
+         SELECT c.ring_id, c.order_id, CASE WHEN c.send_after <= n.created_at THEN 1 ELSE 2 END, c.token, $1
          FROM candidates c
          JOIN notifications n ON n.id = c.notification_id
          WHERE c.platform = 'android' AND c.kind = 'order_placed' AND c.order_id IS NOT NULL
-         RETURNING id AS ring_attempt_id, order_id, token),
+         RETURNING id),
        android_pushes AS (
          SELECT c.notification_id, c.token,
            unnest(ARRAY[c.send_after, c.send_after + make_interval(secs => $3)]) AS send_after,
-           r.ring_attempt_id,
+           c.ring_id AS ring_attempt_id,
            unnest(ARRAY[false, true]) AS floor
          FROM candidates c
-         JOIN android_rings r ON r.order_id = c.order_id AND r.token = c.token
-         WHERE c.platform = 'android' AND c.kind = 'order_placed'),
+         WHERE c.platform = 'android' AND c.kind = 'order_placed' AND c.order_id IS NOT NULL),
        standard_pushes AS (
          SELECT c.notification_id, c.token, c.send_after, NULL::uuid AS ring_attempt_id, false AS floor
          FROM candidates c
-         WHERE c.platform IS DISTINCT FROM 'android' OR c.kind <> 'order_placed')
+         WHERE c.platform IS DISTINCT FROM 'android' OR c.kind <> 'order_placed' OR c.order_id IS NULL)
        INSERT INTO push_queue (notification_id, token, send_after, ring_attempt_id, floor)
        SELECT notification_id, token, send_after, ring_attempt_id, floor FROM android_pushes
        UNION ALL
@@ -164,7 +163,7 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
              json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud, 'tag', 'order-' || n.order_id::text,
                'data', json_build_object('notificationId', n.id, 'orderId', n.order_id, 'ringAttemptId', q.ring_attempt_id, 'floor', true))
            ELSE
-             json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud, 'tag', 'order-' || n.order_id::text,
+             json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
                'data', json_build_object('notificationId', n.id, 'orderId', n.order_id))
          END AS push`,
       [rows.filter((row) => row.due).map((row) => row.id), now, CLAIM_SECONDS, claimId]);

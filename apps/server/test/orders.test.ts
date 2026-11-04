@@ -1257,6 +1257,46 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
       expect(ackRes.statusCode).toBe(204);
     });
 
+    it("gives each ring its own attempt when both fall due in one pass, and drops the floor once the order is answered", async () => {
+      const shop = await stocked();
+      const owner = as(shop.owner, "shopkeeper");
+      await registerAndroid(owner, "ExponentPushToken[android-late]");
+      const order = (await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home)).json() as { id: string };
+
+      // The worker was down: the ring, its floor and the re-ring all fall due in the first pass.
+      clock.advance(130_000);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      const rings = push.sent.filter((sent) => sent.title === undefined);
+      const floors = push.sent.filter((sent) => sent.title !== undefined);
+      expect(rings).toHaveLength(2);
+      expect(floors).toHaveLength(1);
+      expect(new Set(rings.map((sent) => sent.data.ringAttemptId)).size).toBe(2);
+      expect(rings.map((sent) => sent.data.ringAttemptId)).toContain(floors[0]?.data.ringAttemptId);
+      const { rows } = await database.pool.query("SELECT attempt FROM ring_attempts WHERE order_id = $1 ORDER BY attempt", [order.id]);
+      expect(rows).toEqual([{ attempt: 1 }, { attempt: 2 }]);
+
+      // Answering the order drops the second floor push.
+      expect((await accept(order.id, owner)).statusCode).toBe(200);
+      clock.advance(20_000);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent.filter((sent) => sent.data.floor === true)).toHaveLength(0);
+    });
+
+    it("lets only a member of the order's shop acknowledge its ring attempt", async () => {
+      const shop = await stocked();
+      const owner = as(shop.owner, "shopkeeper");
+      await registerAndroid(owner, "ExponentPushToken[android-member]");
+      await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      const id = push.sent[0]?.data.ringAttemptId as string;
+      const stranger = as(await signIn("/v1/auth", "stranger-shop@example.test"), "shopkeeper");
+      expect((await ack(stranger, id)).statusCode).toBe(404);
+      expect((await ack(owner, id)).statusCode).toBe(204);
+    });
+
     it("validates acknowledgement permissions and unknown attempts", async () => {
       const shop = await stocked();
       const owner = as(shop.owner, "shopkeeper");
