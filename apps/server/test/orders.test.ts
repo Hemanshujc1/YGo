@@ -1019,6 +1019,8 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     });
     const placed = async () => {
       const shop = await phones();
+      // The phones registered before the send: a registration at the very moment of the send is not the same one.
+      clock.advance(1_000);
       await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home);
       await sendDuePushes(database.pool, ticketing(), clock.now());
       return shop;
@@ -1053,6 +1055,16 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
       await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead", "t-ExponentPushToken[staff]": "other" }), clock.now());
       expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
       expect(await tickets()).toEqual([]);
+    });
+
+    it("keeps a token registered at exactly the moment of the send", async () => {
+      const { owner } = await placed();
+      expect((await register(owner, "ExponentPushToken[owner]")).statusCode).toBe(204);
+      const { rows } = await database.pool.query("SELECT 1 FROM push_tokens t JOIN push_receipts r ON r.token = t.token WHERE t.updated_at = r.sent_at");
+      expect(rows).toHaveLength(1);
+      clock.advance(900_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead", "t-ExponentPushToken[staff]": "dead" }), clock.now());
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[owner]"]);
     });
 
     it("asks again every 15 minutes for a receipt that is missing, and drops the ticket 24 hours after the send", async () => {

@@ -228,7 +228,7 @@ export async function checkPushReceipts(pool: Pool, sender: PushSender, now: Dat
     // One statement takes the held tickets and judges the token against the same rows.
     await client.query(
       `WITH held AS (DELETE FROM push_receipts WHERE ticket_id = ANY($1::text[]) AND claim_id = $2 RETURNING ticket_id, token, sent_at)
-       DELETE FROM push_tokens t USING held h WHERE h.ticket_id = ANY($3::text[]) AND t.token = h.token AND t.updated_at <= h.sent_at`,
+       DELETE FROM push_tokens t USING held h WHERE h.ticket_id = ANY($3::text[]) AND t.token = h.token AND t.updated_at < h.sent_at`,
       [[...withResult("ok"), ...withResult("dead"), ...withResult("other")], claimId, withResult("dead")]);
     await client.query("DELETE FROM push_receipts WHERE ticket_id = ANY($1::text[]) AND claim_id = $2 AND sent_at + make_interval(secs => $3) <= $4",
       [missing, claimId, RECEIPT_KEPT_SECONDS, now]);
