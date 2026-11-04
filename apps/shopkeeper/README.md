@@ -60,7 +60,7 @@ A Live or Suspended shop's Home has a bell that opens S41 Notifications, read fr
 
 A new order arrives on Android's "New orders" channel: the highest importance, vibration, shown on the lock screen, with YGo's own tone `assets/sounds/new_order.wav`. `node scripts/make-alert-tone.mjs` writes the tone; commit the file it makes. Android fixes a channel's sound when the app first creates it, so a changed tone reaches a phone only after the app is reinstalled. On an iPhone the same tone plays, and the push is time-sensitive (an entitlement in `app.config.ts`). While the app is open, only the new-order push makes a sound.
 
-S03 shows on Home when notifications are off or the New orders channel is muted or lowered. Its buttons ask for permission, or open Android's settings page for the app or the channel, and "Test the alert" plays the alarm without an order. `expo-notifications` and `expo-application` are native code, so adding them needs a new development build.
+S03 shows on Home when notifications are off or the New orders channel is muted or lowered. Its buttons ask for permission, or open Android's settings page for the app or the channel, and "Test the alert" plays the alarm without an order. On Android 14 and later it also shows when "Show over lock screen" is off, and that row's Open settings goes to the app's Full-screen notifications page (#511). `expo-notifications`, `expo-application` and `expo-intent-launcher` are native code, so adding them needs a new development build.
 
 ## Google and Apple sign-in
 
