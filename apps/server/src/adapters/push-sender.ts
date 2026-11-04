@@ -4,14 +4,22 @@
  */
 export interface PushSender {
   /**
-   * Sends pushes of one app (Expo refuses a request mixing two projects) and answers, in the same order, "sent" only
-   * when the service confirmed it, "dead" for a token the phone no longer holds, or "failed" for anything else, so the
-   * queue tries again.
+   * Sends pushes of one app (Expo refuses a request mixing two projects) and answers, in the same order, "sent" (or
+   * a ticket to read the receipt of later, #509) only when the service confirmed it, "dead" for a token the phone no
+   * longer holds, or "failed" for anything else, so the queue tries again.
    */
   send(pushes: Push[]): Promise<PushResult[]>;
+  /**
+   * Reads the receipts of tickets of one app, some minutes after sending. A ticket missing from the answer has no
+   * receipt yet: ask again later. "failed" marks the tickets of a request that failed (an error, a refusal or an
+   * answer that can't be read): ask again at once.
+   */
+  receipts(ticketIds: string[]): Promise<Map<string, ReceiptResult | "failed">>;
 }
 
-export type PushResult = "sent" | "dead" | "failed";
+export type PushResult = "sent" | "dead" | "failed" | { ticketId: string };
+/** "dead": the phone no longer holds the token; "other": delivery failed for a reason that says nothing of the token. */
+export type ReceiptResult = "ok" | "dead" | "other";
 
 export interface Push {
   /** An Expo push token. */
@@ -33,6 +41,9 @@ export function createLocalPushSender(): PushSender & { sent: Push[] } {
       sent.push(...pushes);
       return pushes.map(() => "sent" as const);
     },
+    async receipts() {
+      return new Map();
+    },
   };
 }
 
@@ -43,19 +54,26 @@ export function createLoggingPushSender(log: (pushes: Push[]) => void): PushSend
       log(pushes);
       return pushes.map(() => "sent" as const);
     },
+    async receipts() {
+      return new Map();
+    },
   };
 }
 
-/** Expo takes at most 100 messages a request. */
+/** Expo takes at most 100 messages a request, and 1000 receipt ids. */
 const EXPO_BATCH = 100;
+const EXPO_RECEIPT_BATCH = 1000;
 
-type ExpoTicket = { status: "ok" } | { status: "error"; details?: { error?: string } };
+type ExpoTicket = { status: "ok"; id?: string } | { status: "error"; details?: { error?: string } };
 
-/** Expo's push service; `post` is swapped in tests. */
+const postToExpo = (path: string) => (body: string) => fetch(`https://exp.host/--/api/v2/push/${path}`, {
+  method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body, signal: AbortSignal.timeout(10_000),
+});
+
+/** Expo's push service; `post` and `postReceipts` are swapped in tests. */
 export function createExpoPushSender(
-  post: (body: string) => Promise<Response> = (body) => fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body, signal: AbortSignal.timeout(10_000),
-  }),
+  post: (body: string) => Promise<Response> = postToExpo("send"),
+  postReceipts: (body: string) => Promise<Response> = postToExpo("getReceipts"),
 ): PushSender {
   return {
     async send(pushes: Push[]) {
@@ -75,11 +93,30 @@ export function createExpoPushSender(
           .catch(() => undefined);
         results.push(...messages.map((_, i) => {
           const ticket = Array.isArray(tickets) ? tickets[i] as ExpoTicket | undefined : undefined;
-          if (ticket?.status === "ok") return "sent" as const;
+          if (ticket?.status === "ok") return ticket.id ? { ticketId: ticket.id } : "sent" as const;
           return ticket?.status === "error" && ticket.details?.error === "DeviceNotRegistered" ? "dead" as const : "failed" as const;
         }));
       }
       return results;
+    },
+    async receipts(ticketIds: string[]) {
+      const found = new Map<string, ReceiptResult | "failed">();
+      for (let start = 0; start < ticketIds.length; start += EXPO_RECEIPT_BATCH) {
+        const ids = ticketIds.slice(start, start + EXPO_RECEIPT_BATCH);
+        const data = await postReceipts(JSON.stringify({ ids }))
+          .then(async (response) => response.ok ? (await response.json() as { data?: unknown }).data : undefined)
+          .catch(() => undefined);
+        if (typeof data !== "object" || data === null || Array.isArray(data)) {
+          ids.forEach((id) => found.set(id, "failed"));
+          continue;
+        }
+        for (const id of ids) {
+          const receipt = (data as Record<string, ExpoTicket | undefined>)[id];
+          if (receipt?.status === "ok") found.set(id, "ok");
+          else if (receipt?.status === "error") found.set(id, receipt.details?.error === "DeviceNotRegistered" ? "dead" : "other");
+        }
+      }
+      return found;
     },
   };
 }

@@ -199,4 +199,38 @@ describe("Expo push sender (#505)", () => {
     const results = await sender.send(Array.from({ length: 250 }, (_, i) => push(`ExponentPushToken[${i}]`)));
     expect([results.slice(0, 100), results.slice(100)].map((part) => [...new Set(part)])).toEqual([["sent"], ["failed"]]);
   });
+
+  it("returns the ticket of a sent push so its receipt can be read later (#509)", async () => {
+    const sender = createExpoPushSender(async () => Response.json({ data: [{ status: "ok", id: "ticket-1" }, { status: "ok" }] }));
+    expect(await sender.send([push("ExponentPushToken[a]"), push("ExponentPushToken[b]")])).toEqual([{ ticketId: "ticket-1" }, "sent"]);
+  });
+
+  it("reads receipts 1000 ids at a time, leaving out a ticket with no receipt and marking the ids of a failed request", async () => {
+    const bodies: string[][] = [];
+    let calls = 0;
+    const sender = createExpoPushSender(async () => Response.json({}), async (body) => {
+      const { ids } = JSON.parse(body) as { ids: string[] };
+      bodies.push(ids);
+      calls += 1;
+      if (calls === 2) return new Response("down", { status: 503 });
+      return Response.json({ data: { a: { status: "ok" }, b: { status: "error", details: { error: "DeviceNotRegistered" } }, c: { status: "error", details: { error: "MessageRateExceeded" } } } });
+    });
+    const ids = ["a", "b", "c", "d", ...Array.from({ length: 2000 }, (_, i) => `x${i}`)];
+    const found = await sender.receipts(ids);
+    expect(bodies.map((batch) => batch.length)).toEqual([1000, 1000, 4]);
+    expect([...found].slice(0, 3)).toEqual([["a", "ok"], ["b", "dead"], ["c", "other"]]);
+    expect(found.has("d")).toBe(false);
+    expect(found.get("x996")).toBe("failed");
+    expect([...found.values()].filter((result) => result === "failed")).toHaveLength(1000);
+  });
+
+  it("marks a receipt request that Expo refused, never answered or answered unreadably as failed, not missing (#509)", async () => {
+    const failing = (post: () => Promise<Response>) => createExpoPushSender(async () => Response.json({}), post).receipts(["a", "b"]);
+    const failed = new Map([["a", "failed"], ["b", "failed"]]);
+    expect(await failing(async () => new Response("down", { status: 503 }))).toEqual(failed);
+    expect(await failing(async () => { throw new Error("timed out"); })).toEqual(failed);
+    expect(await failing(async () => new Response("<html>", { status: 200 }))).toEqual(failed);
+    expect(await failing(async () => Response.json({ data: [] }))).toEqual(failed);
+    expect(await failing(async () => Response.json({ data: {} }))).toEqual(new Map());
+  });
 });
