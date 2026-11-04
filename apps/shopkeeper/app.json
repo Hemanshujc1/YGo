@@ -8,6 +8,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": { "supportsTablet": false },
+    "android": {
+      "permissions": ["android.permission.USE_FULL_SCREEN_INTENT"]
+    },
     "plugins": [
       "expo-router",
       ["expo-notifications", { "sounds": ["./assets/sounds/new_order.wav"] }],

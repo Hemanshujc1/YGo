@@ -386,6 +386,7 @@ export const strings = {
     off: "Off",
     notifications: "Notifications",
     ringing: "Ringing sound",
+    fullScreen: "Show over lock screen",
     allow: "Allow",
     openSettings: "Open settings",
     test: "Test the alert",

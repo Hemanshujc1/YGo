@@ -390,7 +390,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE ring_attempts, order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });
@@ -1166,5 +1166,107 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     expect((await app.inject({ method: "POST", url: "/v1/me/notifications/read-all", headers: owner })).statusCode).toBe(204);
     expect(await list(owner)).toMatchObject({ notifications: [{ read: true }, { read: true }], unread: false });
     expect((await list(staff)).unread).toBe(true);
+  });
+
+  describe("Android ring attempts and floor push (#508)", () => {
+    const registerAndroid = (headers: Record<string, string>, token: string) =>
+      app.inject({ method: "PUT", url: "/v1/me/push-token", headers, payload: { token, platform: "android" } });
+    const ack = (headers: Record<string, string>, id: string) =>
+      app.inject({ method: "POST", url: `/v1/me/ring-attempts/${id}/ack`, headers });
+
+    it("sends a data-only ring push to Android, cancels floor push on acknowledgement, and re-rings at 120 s", async () => {
+      const shop = await stocked();
+      const owner = as(shop.owner, "shopkeeper");
+      const buyer = as(customer, "customer");
+      await registerAndroid(owner, "ExponentPushToken[android-owner]");
+      await register(buyer, "ExponentPushToken[buyer]");
+
+      const order = (await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home)).json() as { id: string };
+
+      // Initial ring push at placed_at
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent).toHaveLength(1);
+      const ringPush = push.sent[0];
+      if (!ringPush) throw new Error("Expected ring push");
+      expect(ringPush.to).toBe("ExponentPushToken[android-owner]");
+      expect(ringPush.title).toBeUndefined();
+      expect(ringPush.body).toBeUndefined();
+      expect(ringPush.loud).toBe(true);
+      expect(ringPush.tag).toBe(`order-${order.id}`);
+      const ringAttemptId = ringPush.data.ringAttemptId as string;
+      expect(ringAttemptId).toBeDefined();
+
+      // Acknowledgement success:
+      const ackRes = await ack(owner, ringAttemptId);
+      expect(ackRes.statusCode).toBe(204);
+
+      // Advance 15 seconds: floor push was cancelled by ack, so nothing sent
+      clock.advance(15_000);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent).toHaveLength(0);
+
+      // Advance to 120 s: attempt 2 re-ring arrives with new attempt ID and same tag
+      clock.advance(105_000);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent).toHaveLength(1);
+      const reringPush = push.sent[0];
+      if (!reringPush) throw new Error("Expected rering push");
+      expect(reringPush.to).toBe("ExponentPushToken[android-owner]");
+      expect(reringPush.title).toBeUndefined();
+      expect(reringPush.tag).toBe(`order-${order.id}`);
+      const reringAttemptId = reringPush.data.ringAttemptId as string;
+      expect(reringAttemptId).toBeDefined();
+      expect(reringAttemptId).not.toBe(ringAttemptId);
+    });
+
+    it("sends floor push with title and body at 15 s when acknowledgement is lost or delayed", async () => {
+      const shop = await stocked();
+      const owner = as(shop.owner, "shopkeeper");
+      await registerAndroid(owner, "ExponentPushToken[android-lost-ack]");
+
+      const order = (await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home)).json() as { id: string };
+
+      // Initial ring push at placed_at
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent).toHaveLength(1);
+      const firstPush = push.sent[0];
+      if (!firstPush) throw new Error("Expected ring push");
+      const ringAttemptId = firstPush.data.ringAttemptId as string;
+
+      // Lost acknowledgement / app force-stopped: advance to +15s
+      clock.advance(15_000);
+      push.sent.length = 0;
+      await sendDuePushes(database.pool, push, clock.now());
+      expect(push.sent).toHaveLength(1);
+      const floorPush = push.sent[0];
+      if (!floorPush) throw new Error("Expected floor push");
+      expect(floorPush.to).toBe("ExponentPushToken[android-lost-ack]");
+      expect(floorPush.title).toBe("New order #1001");
+      expect(floorPush.body).toBe("Accept or reject it within 10 minutes.");
+      expect(floorPush.loud).toBe(true);
+      expect(floorPush.tag).toBe(`order-${order.id}`);
+      expect(floorPush.data.floor).toBe(true);
+
+      // Delayed acknowledgement arrives after floor push was sent
+      clock.advance(5_000);
+      const ackRes = await ack(owner, ringAttemptId);
+      expect(ackRes.statusCode).toBe(204);
+    });
+
+    it("validates acknowledgement permissions and unknown attempts", async () => {
+      const shop = await stocked();
+      const owner = as(shop.owner, "shopkeeper");
+      const buyer = as(customer, "customer");
+
+      // Non-shopkeeper app gets 403
+      expect((await ack(buyer, randomUUID())).statusCode).toBe(403);
+
+      // Unknown attempt ID gets 404
+      expect((await ack(owner, randomUUID())).statusCode).toBe(404);
+    });
   });
 });

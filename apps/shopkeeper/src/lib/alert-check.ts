@@ -14,19 +14,24 @@ export type Channel = { importance: number; sound: string | null } | null;
 /** The phone: on Android, `version` is its API level. */
 export type Phone = { os: "android" | "ios"; version: number };
 
-export type AlertCheck = { notifications: boolean; ringing: boolean; canAsk: boolean };
+export type AlertCheck = { notifications: boolean; ringing: boolean; fullScreen?: boolean; canAsk: boolean };
 
 /**
- * S03's two rows (#507): whether notifications are allowed, and whether a new order still rings: on Android the New
- * orders channel exists and is not muted or lowered below HIGH; on an iPhone sounds are allowed. Before Android 13
- * there is no prompt to show, only the settings.
+ * S03's rows (#507, #508): whether notifications are allowed, whether a new order still rings, and on Android
+ * whether full-screen alert over the lock screen is granted (S01 vs S02). Before Android 13 there is no prompt
+ * to show, only the settings.
  */
-export function alertCheck(permission: Permission, channel: Channel, phone: Phone): AlertCheck {
+export function alertCheck(permission: Permission, channel: Channel, phone: Phone, fullScreen?: boolean): AlertCheck {
   const ringing = phone.os === "ios"
     ? permission.ios?.allowsSound !== false
     : phone.version < CHANNELS_FROM || (channel !== null && channel.importance >= HIGH && channel.sound !== null);
   const canAsk = permission.canAskAgain && (phone.os === "ios" || phone.version >= PROMPT_FROM);
-  return { notifications: permission.granted, ringing, canAsk };
+  return {
+    notifications: permission.granted,
+    ringing,
+    ...(phone.os === "android" && fullScreen !== undefined ? { fullScreen } : {}),
+    canAsk,
+  };
 }
 
 /** S03 shows only when something would keep a new order from ringing. */

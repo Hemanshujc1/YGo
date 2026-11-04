@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 /** `PUT /v1/me/push-token` (#505): the phone's Expo push token, kept for the session that sent it. */
-export const PushTokenBody = z.strictObject({ token: z.string().max(200).regex(/^Expo(nent)?PushToken\[[^\]]+\]$/) });
+export const PushTokenBody = z.strictObject({
+  token: z.string().max(200).regex(/^Expo(nent)?PushToken\[[^\]]+\]$/),
+  platform: z.enum(["android", "ios"]).optional(),
+});
 export type PushTokenBody = z.infer<typeof PushTokenBody>;
 
 /** What a notification reports (CONTEXT.md, Notifications). Later tickets add theirs. */
@@ -26,3 +29,7 @@ export type NotificationsResponse = z.infer<typeof NotificationsResponse>;
 
 export const NotificationParams = z.strictObject({ id: z.uuid() });
 export type NotificationParams = z.infer<typeof NotificationParams>;
+
+/** `POST /v1/me/ring-attempts/:id/ack` (#508): acknowledges a new-order ring attempt on the phone. */
+export const RingAttemptParams = z.strictObject({ id: z.uuid() });
+export type RingAttemptParams = z.infer<typeof RingAttemptParams>;

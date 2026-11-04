@@ -6,6 +6,8 @@ import { SignOut } from "../components/sign-out";
 import { removeOldBillPdfs, retryBillPdfClear } from "../lib/bill-pdf-files";
 // At module level, so the tap that launched the app is not missed (#507).
 import "../lib/push";
+// Catches data-only new-order pushes in background/killed states on Android (#508).
+import "../lib/background-notifications";
 import { strings } from "../strings";
 import "../global.css";
 

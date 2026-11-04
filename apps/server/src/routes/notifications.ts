@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
-import { APP_NAME_HEADER, AppName, ErrorEnvelope, type Notification, NotificationParams, NotificationsResponse, PushTokenBody } from "@ygo/contracts";
+import { APP_NAME_HEADER, AppName, ErrorEnvelope, type Notification, NotificationParams, NotificationsResponse, PushTokenBody, RingAttemptParams } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 
@@ -29,10 +29,30 @@ export function registerNotificationRoutes(app: FastifyInstance, { pool, clock, 
   app.put("/v1/me/push-token", { schema: { body: PushTokenBody, response: errors } }, async (request, reply) => {
     const who = await caller(request, reply);
     if (!who) return reply;
+    const body = request.body as PushTokenBody;
     await pool.query(
-      `INSERT INTO push_tokens (token, session_id, app, updated_at) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (token) DO UPDATE SET session_id = EXCLUDED.session_id, app = EXCLUDED.app, updated_at = EXCLUDED.updated_at`,
-      [(request.body as PushTokenBody).token, who.sessionId, who.app, clock.now()]);
+      `INSERT INTO push_tokens (token, session_id, app, platform, updated_at) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (token) DO UPDATE SET session_id = EXCLUDED.session_id, app = EXCLUDED.app, platform = EXCLUDED.platform, updated_at = EXCLUDED.updated_at`,
+      [body.token, who.sessionId, who.app, body.platform ?? null, clock.now()]);
+    return (reply as FastifyReply).code(204).send();
+  });
+
+  // Acknowledges receipt of a new-order ring attempt on Android (#508); cancels any pending floor push for it.
+  app.post("/v1/me/ring-attempts/:id/ack", { schema: { params: RingAttemptParams, response: errors } }, async (request, reply) => {
+    const who = await caller(request, reply);
+    if (!who) return reply;
+    if (who.app !== "shopkeeper") return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    const id = (request.params as RingAttemptParams).id;
+    // The caller must be a member of the shop for the order.
+    const { rows } = await pool.query<{ orderId: string }>(
+      `SELECT a.order_id AS "orderId"
+       FROM ring_attempts a
+       JOIN orders o ON o.id = a.order_id
+       JOIN shop_members m ON m.shop_id = o.shop_id AND m.account_id = $2
+       WHERE a.id = $1`, [id, who.accountId]);
+    if (rows.length === 0) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    await pool.query("UPDATE ring_attempts SET acknowledged_at = COALESCE(acknowledged_at, $2) WHERE id = $1", [id, clock.now()]);
+    await pool.query("DELETE FROM push_queue WHERE ring_attempt_id = $1 AND floor = true", [id]);
     return (reply as FastifyReply).code(204).send();
   });
 

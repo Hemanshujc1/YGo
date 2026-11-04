@@ -8,6 +8,7 @@ vi.mock("../src/components/stock-access", () => ({ StockAccess: "StockAccess" })
 vi.mock("../src/components/sign-out", () => ({ SignOut: "SignOut" }));
 vi.mock("../src/global.css", () => ({}));
 vi.mock("../src/lib/push", () => ({}));
+vi.mock("../src/lib/background-notifications", () => ({}));
 vi.mock("../src/lib/bill-pdf-files", () => ({ retryBillPdfClear: () => calls.order.push("unfinished clear"), removeOldBillPdfs: () => calls.order.push("old PDFs"), removeAllBillPdfs: vi.fn() }));
 
 it("finishes an unfinished sign-out clear, then deletes bill PDFs over an hour old, when the app starts (#488)", async () => {

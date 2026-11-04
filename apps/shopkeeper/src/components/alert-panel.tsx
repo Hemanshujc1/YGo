@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { Linking, Platform, View } from "react-native";
 import { api } from "../api";
 import { type AlertCheck, alertCheck, type Fix, fixFor, limited, type Phone } from "../lib/alert-check";
+import { checkFullScreenIntent } from "../lib/order-alert";
 import { push } from "../lib/push";
 import { createShopOrders, waitingOrder } from "../lib/shop-orders";
 import { strings } from "../strings";
@@ -20,11 +21,12 @@ const phone: Phone = { os, version: Number(Platform.Version) };
 async function readCheck(): Promise<AlertCheck> {
   // The channel is read once the app has made it, or failed to.
   await push.newOrdersReady;
-  const [permission, channel] = await Promise.all([
+  const [permission, channel, fullScreen] = await Promise.all([
     getPermissionsAsync().catch(() => ({ granted: false, canAskAgain: false })),
     os === "android" ? getNotificationChannelAsync(NEW_ORDERS_CHANNEL).catch(() => null) : null,
+    os === "android" ? checkFullScreenIntent().catch(() => false) : false,
   ]);
-  return alertCheck(permission, channel, phone);
+  return alertCheck(permission, channel, phone, fullScreen);
 }
 
 /** Android's own page for the app's notifications or the New orders channel; any other phone gets the app's settings. */
@@ -114,6 +116,16 @@ export function AlertPanel() {
         <Text className="text-body text-muted">{words.body}</Text>
         <Row label={words.notifications} on={check.notifications} fix={fixFor("notifications", check, phone)} onFix={() => fix("notifications")} />
         <Row label={words.ringing} on={check.ringing} fix={fixFor("ringing", check, phone)} onFix={() => fix("ringing")} />
+        {phone.os === "android" && check.fullScreen !== undefined && (
+          <View className="flex-row items-center justify-between gap-3">
+            <View className="flex-1">
+              <Text className="text-body font-semibold text-text">{words.fullScreen}</Text>
+              <Text className={`text-secondary ${check.fullScreen ? "text-success" : "text-warning"}`}>
+                {check.fullScreen ? words.on : words.off}
+              </Text>
+            </View>
+          </View>
+        )}
         {/* Nothing can show while notifications are off. */}
         {check.notifications && <Button label={words.test} variant="text" onPress={() => void testAlert()} />}
       </View>

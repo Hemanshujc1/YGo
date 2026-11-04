@@ -337,6 +337,13 @@
       "when": 1793777322578,
       "tag": "0047_push_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793778000000,
+      "tag": "0048_ring_attempts",
+      "breakpoints": true
     }
   ]
 }

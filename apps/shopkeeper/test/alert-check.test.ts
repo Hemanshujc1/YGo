@@ -47,4 +47,10 @@ describe("S03 alert check (#507)", () => {
     expect(off.canAsk).toBe(false);
     expect(fixFor("notifications", off, android)).toBe("app-settings");
   });
+
+  it("detects fullScreen on Android (#508)", () => {
+    expect(alertCheck(allowed, loud, android, true).fullScreen).toBe(true);
+    expect(alertCheck(allowed, loud, android, false).fullScreen).toBe(false);
+    expect(alertCheck(allowed, loud, ios, true).fullScreen).toBeUndefined();
+  });
 });
