@@ -57,6 +57,10 @@ export const clockOffset = (serverNow: string, phoneNow: number) => Date.parse(s
 export const secondsLeft = (expiresAt: string, offset: number, phoneNow: number) =>
   Math.max(0, Math.ceil((Date.parse(expiresAt) - (phoneNow + offset)) / 1000));
 
+/** The oldest New order with time left, pinned on S03 (#507): one whose time ran out gives way before the next read. */
+export const waitingOrder = (orders: ShopOrdersResponse | null, offset: number, phoneNow: number) =>
+  orders?.new.find((order) => !order.expiresAt || secondsLeft(order.expiresAt, offset, phoneNow) > 0) ?? null;
+
 /** "7:42". */
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 

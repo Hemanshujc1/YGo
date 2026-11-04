@@ -1,5 +1,6 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { ErrorCode, Notification, NotificationsResponse } from "@ygo/contracts";
+import type { SessionState } from "./session";
 
 export type NotificationsView = {
   status: "loading" | "ready" | "failed";
@@ -129,4 +130,28 @@ export function createNotifications(client: Client, words: NotificationsWords) {
       set({ notifications: now.map((row) => (marked.includes(row.id) ? { ...row, read: false } : row)), message: words.readAllFailed });
     },
   };
+}
+
+export type Inbox = ReturnType<typeof createNotifications>;
+
+/**
+ * An app's one notifications store (#506, #507), shared by the Home bell and the list screen: emptied whenever the
+ * signed-in account changes, and read again when a push arrives while the app is open.
+ */
+export function createInbox(
+  client: Client,
+  words: NotificationsWords,
+  session: { get(): SessionState; subscribe(listener: () => void): () => void },
+  onReceived: (listener: () => void) => unknown,
+): Inbox {
+  const inbox = createNotifications(client, words);
+  let shownFor: string | null = null;
+  session.subscribe(() => {
+    const state = session.get();
+    const accountId = "account" in state ? state.account.id : null;
+    if (accountId !== shownFor) inbox.reset();
+    shownFor = accountId;
+  });
+  onReceived(inbox.pushed);
+  return inbox;
 }

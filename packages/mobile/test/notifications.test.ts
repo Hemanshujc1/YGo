@@ -1,7 +1,9 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { Notification, NotificationsResponse } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createNotifications, type NotificationsWords } from "../src/notifications";
+import { listeners } from "../src/listeners";
+import { createInbox, createNotifications, type NotificationsWords } from "../src/notifications";
+import type { SessionState } from "../src/session";
 
 const row = (n: number, read = false, orderId: string | null = null): Notification => ({
   id: `7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c${String(n).padStart(4, "0")}`, kind: "order_accepted", title: `Order #${1000 + n} accepted`,
@@ -165,6 +167,29 @@ describe("C22 notifications (#506)", () => {
   it("forgets the last account's rows on reset", async () => {
     const { list } = await loaded({ notifications: [row(1)], unread: true });
     list.reset();
+    expect(list.get()).toMatchObject({ status: "loading", notifications: null, unread: false });
+  });
+});
+
+describe("createInbox (#506, #507)", () => {
+  it("empties the list when another account signs in, and reads again on a push while a screen is in front", async () => {
+    const changed = listeners();
+    const pushes = listeners();
+    const signedIn = (id: string) => ({ status: "signed-in", account: { id } }) as unknown as SessionState;
+    let state = signedIn("asha");
+    const server = fakeServer();
+    const list = createInbox(server.client, words, { get: () => state, subscribe: changed.add }, pushes.add);
+    changed.notify();
+    list.start();
+    server.answer({ notifications: [row(1)], unread: true });
+    await settle();
+    pushes.notify();
+    expect(server.client.notifications).toHaveBeenCalledTimes(2);
+    state = signedIn("asha");
+    changed.notify();
+    expect(list.get().notifications).toHaveLength(1);
+    state = signedIn("ravi");
+    changed.notify();
     expect(list.get()).toMatchObject({ status: "loading", notifications: null, unread: false });
   });
 });

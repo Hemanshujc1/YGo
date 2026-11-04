@@ -24,7 +24,8 @@ export type Ask = "no" | "once" | "again";
  * they tap to fix it. A token that can't be had or sent is tried again at the next start.
  */
 export async function registerPush(device: PushDevice, projectId: string | undefined, save: (token: string) => Promise<boolean>, ask: Ask): Promise<Registered> {
-  if (!projectId) return "off";
+  // S03's own tap still shows the prompt without a project, as an alarm needs the permission all the same.
+  if (!projectId && ask !== "again") return "off";
   const now = await device.permission().catch(() => ({ granted: false, canAskAgain: false }));
   let granted = now.granted;
   if (!granted && now.canAskAgain && (ask === "again" || (ask === "once" && !device.asked.get()))) {
@@ -33,6 +34,7 @@ export async function registerPush(device: PushDevice, projectId: string | undef
     granted = await device.request().catch(() => false);
   }
   if (!granted) return "no-permission";
+  if (!projectId) return "off";
   const token = await device.token(projectId).catch(() => null);
   if (!token) return "no-token";
   return (await save(token).catch(() => false)) ? "saved" : "not-saved";

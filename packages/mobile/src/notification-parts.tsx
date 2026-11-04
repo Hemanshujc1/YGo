@@ -3,10 +3,11 @@ import { formatDateTime } from "@ygo/format";
 import { Link } from "expo-router";
 import { Bell } from "lucide-react-native";
 import { useSyncExternalStore } from "react";
-import { Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { colourIcons } from "./icons";
 import { useInFront } from "./in-front";
-import type { createNotifications } from "./notifications";
+import type { Inbox, NotificationsView } from "./notifications";
+import { Button } from "./sign-in-parts";
 import { Text } from "./text";
 
 colourIcons(Bell);
@@ -15,7 +16,7 @@ colourIcons(Bell);
  * One row of C22 or S41 (#506, #507): an icon, the fact in bold, the time, and the app's "New" while unread, as a tint
  * alone is never enough (design system, Notification row).
  */
-export function NotificationRow({ row, newWord, onPress }: { row: Notification; newWord: string; onPress(): void }) {
+function NotificationRow({ row, newWord, onPress }: { row: Notification; newWord: string; onPress(): void }) {
   return (
     <Pressable
       accessibilityRole="button"
@@ -39,7 +40,7 @@ export function NotificationRow({ row, newWord, onPress }: { row: Notification; 
  * The Home bell, the way into C22 or S41 (#506, #507), with a dot while anything is unread; read each time Home comes
  * to the front and when a push arrives.
  */
-export function NotificationsBell({ inbox, words }: { inbox: ReturnType<typeof createNotifications>; words: { open: string; unread: string } }) {
+export function NotificationsBell({ inbox, words }: { inbox: Inbox; words: { open: string; unread: string } }) {
   const { unread } = useSyncExternalStore(inbox.subscribe, inbox.get);
   useInFront(inbox);
   return (
@@ -53,5 +54,32 @@ export function NotificationsBell({ inbox, words }: { inbox: ReturnType<typeof c
         {unread && <View className="absolute right-3 top-3 size-2.5 rounded-full bg-accent" />}
       </Pressable>
     </Link>
+  );
+}
+
+export type NotificationListWords = { loading: string; failed: string; retry: string; empty: string; new: string };
+
+/** The body of C22 or S41 (#506, #507): loading, failed with Try again, a message, none yet, or the rows. */
+export function NotificationList({ view, list, words, onOpen }: { view: NotificationsView; list: Inbox; words: NotificationListWords; onOpen(row: Notification): void }) {
+  const rows = view.notifications;
+  return (
+    <>
+      {view.status === "loading" && (
+        <View className="min-h-12 flex-row items-center gap-2">
+          <ActivityIndicator className="text-primary" />
+          <Text className="text-body text-muted">{words.loading}</Text>
+        </View>
+      )}
+      {view.status === "failed" && (
+        <View className="items-start">
+          <Text className="text-body font-semibold text-text">{words.failed}</Text>
+          <Text className="text-secondary text-muted">{view.message}</Text>
+          <Button label={words.retry} onPress={() => void list.retry()} variant="text" />
+        </View>
+      )}
+      {view.status === "ready" && view.message && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{view.message}</Text>}
+      {rows?.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
+      {rows?.map((row) => <NotificationRow key={row.id} row={row} newWord={words.new} onPress={() => onOpen(row)} />)}
+    </>
   );
 }

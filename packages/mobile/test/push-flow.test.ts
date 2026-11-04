@@ -59,6 +59,11 @@ describe("registerPush (#506)", () => {
     expect(await registerPush(device, "project", save, "once")).toBe("no-permission");
     expect(await registerPush(device, "project", save, "again")).toBe("saved");
     expect(device.request).toHaveBeenCalledTimes(1);
+    // Without a project the prompt still shows, and nothing is sent.
+    const unset = fakeDevice({ allows: true, asked: true }).device;
+    expect(await registerPush(unset, undefined, save, "again")).toBe("off");
+    expect(unset.request).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
     const stopped = fakeDevice({ canAskAgain: false, asked: true }).device;
     expect(await registerPush(stopped, "project", save, "again")).toBe("no-permission");
     expect(stopped.request).not.toHaveBeenCalled();

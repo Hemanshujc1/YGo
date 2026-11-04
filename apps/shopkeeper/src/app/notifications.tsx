@@ -1,9 +1,9 @@
 import type { Notification } from "@ygo/contracts";
 import { Button, Text, useInFront } from "@ygo/mobile";
-import { NotificationRow } from "@ygo/mobile/notification-parts";
+import { NotificationList } from "@ygo/mobile/notification-parts";
 import { Link, router } from "expo-router";
 import { useSyncExternalStore } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { inbox as list } from "../lib/inbox";
 import { strings } from "../strings";
@@ -36,22 +36,7 @@ export default function NotificationsScreen() {
         {view.unread && rows && <Button label={words.readAll} onPress={() => void list.readAll()} variant="text" />}
       </View>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
-      {view.status === "loading" && (
-        <View className="min-h-12 flex-row items-center gap-2">
-          <ActivityIndicator className="text-primary" />
-          <Text className="text-body text-muted">{words.loading}</Text>
-        </View>
-      )}
-      {view.status === "failed" && (
-        <View className="items-start">
-          <Text className="text-body font-semibold text-text">{words.failed}</Text>
-          <Text className="text-secondary text-muted">{view.message}</Text>
-          <Button label={words.retry} onPress={() => void list.retry()} variant="text" />
-        </View>
-      )}
-      {view.status === "ready" && view.message && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{view.message}</Text>}
-      {rows?.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
-      {rows?.map((row) => <NotificationRow key={row.id} row={row} newWord={words.new} onPress={() => open(row)} />)}
+      <NotificationList view={view} list={list} words={words} onOpen={open} />
     </ScrollView>
   );
 }

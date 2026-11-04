@@ -103,8 +103,10 @@ export function createPush({ api, session, projectId, channelName, newOrdersName
   // Expo's push service sends an ordinary push on the "default" channel; this names it in Android's settings.
   if (Platform.OS === "android") void setNotificationChannelAsync("default", { name: channelName, importance: AndroidImportance.DEFAULT }).catch(() => undefined);
   // The alarm: Android fixes a channel's sound and importance when it is first made; the person can only lower them.
+  // S03 waits for it, so a check never reads the channel before it exists.
+  let newOrdersReady: Promise<unknown> = Promise.resolve();
   if (Platform.OS === "android" && newOrdersName) {
-    void setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
+    newOrdersReady = setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
       name: newOrdersName,
       importance: AndroidImportance.MAX,
       sound: NEW_ORDER_SOUND,
@@ -152,6 +154,10 @@ export function createPush({ api, session, projectId, channelName, newOrdersName
     },
     /** S03's fix button (#507): shows the system prompt while the phone still allows it, however often it was shown. */
     askAgain: () => register("again"),
+    /** Sends the token without a prompt, as when notifications were turned on in the phone's settings (#507). */
+    resend: () => register("no"),
+    /** Settles once the New orders channel is made, or failed to be. */
+    newOrdersReady,
     /** Called for each push that arrives while the app is open. */
     onReceived: received.add,
   };
