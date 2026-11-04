@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("react-native", () => ({
-  Platform: { OS: "android", Version: 34 },
-}));
+const platform = vi.hoisted(() => ({ OS: "android", Version: 34 }));
+vi.mock("react-native", () => ({ Platform: platform }));
 
 vi.mock("react-native-notify-kit", () => ({
   default: {
@@ -13,7 +12,7 @@ vi.mock("react-native-notify-kit", () => ({
   },
   AndroidCategory: { ALARM: "alarm" },
   AndroidImportance: { HIGH: 4 },
-  AndroidNotificationSetting: { ENABLED: 1, DISABLED: 0 },
+  AndroidNotificationSetting: { NOT_SUPPORTED: -1, DISABLED: 0, ENABLED: 1 },
 }));
 
 import { buildOrderAlert, checkFullScreenIntent, displayOrderAlert, orderAlertKey } from "../src/lib/order-alert";
@@ -91,6 +90,32 @@ describe("Order Alert Builder (#508)", () => {
     expect(attempt1.android?.tag).toBe(attempt2.android?.tag);
     expect(attempt1.data?.orderId).toBe(attempt2.data?.orderId);
     expect(attempt1.data?.ringAttemptId).not.toBe(attempt2.data?.ringAttemptId);
+  });
+
+  it("reads the lock-screen permission as on, off, or unknown (#508)", async () => {
+    const settings = vi.mocked(notifee.getNotificationSettings);
+    settings.mockResolvedValueOnce({ android: { fullScreenIntent: 1 } } as never);
+    expect(await checkFullScreenIntent()).toBe(true);
+    settings.mockResolvedValueOnce({ android: { fullScreenIntent: 0 } } as never);
+    expect(await checkFullScreenIntent()).toBe(false);
+    settings.mockRejectedValueOnce(new Error("read failed"));
+    expect(await checkFullScreenIntent()).toBeUndefined();
+    settings.mockResolvedValueOnce({ android: { fullScreenIntent: -1 } } as never);
+    expect(await checkFullScreenIntent()).toBeUndefined();
+    platform.OS = "ios";
+    try {
+      settings.mockClear();
+      expect(await checkFullScreenIntent()).toBeUndefined();
+      expect(settings).not.toHaveBeenCalled();
+    } finally {
+      platform.OS = "android";
+    }
+  });
+
+  it("falls back to S02 when the lock-screen permission cannot be read", async () => {
+    vi.mocked(notifee.getNotificationSettings).mockRejectedValueOnce(new Error("read failed"));
+    await displayOrderAlert({ orderId: "ord-5" });
+    expect(vi.mocked(notifee.displayNotification).mock.lastCall?.[0].android?.fullScreenAction).toBeUndefined();
   });
 
   it("checks fullScreenIntent and displays notification through notify-kit", async () => {

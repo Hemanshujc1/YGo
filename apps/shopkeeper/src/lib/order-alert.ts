@@ -21,14 +21,17 @@ export const orderAlertKey = (orderId: string) => `order-${orderId}`;
 /**
  * Checks whether Android allows fullScreenIntent over the lock screen (#508).
  * Android 14+ gives the user a toggle; older versions grant it with USE_FULL_SCREEN_INTENT.
+ * `undefined` when unknown: not Android, a failed read, or an answer that is neither on nor off.
  */
-export async function checkFullScreenIntent(): Promise<boolean> {
-  if (Platform.OS !== "android") return false;
+export async function checkFullScreenIntent(): Promise<boolean | undefined> {
+  if (Platform.OS !== "android") return undefined;
   try {
-    const settings = await notifee.getNotificationSettings();
-    return settings.android?.fullScreenIntent === AndroidNotificationSetting.ENABLED;
+    const setting = (await notifee.getNotificationSettings()).android?.fullScreenIntent;
+    if (setting === AndroidNotificationSetting.ENABLED) return true;
+    if (setting === AndroidNotificationSetting.DISABLED) return false;
+    return undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -81,7 +84,8 @@ export function buildOrderAlert({
 
 /** Displays S01/S02 on Android, returning the displayed notification ID (#508). */
 export async function displayOrderAlert(options: OrderAlertOptions): Promise<string> {
-  const hasFullScreen = options.hasFullScreenIntent ?? (await checkFullScreenIntent());
+  // Unknown counts as not allowed here, so the alert falls back to S02.
+  const hasFullScreen = options.hasFullScreenIntent ?? (await checkFullScreenIntent()) === true;
   const payload = buildOrderAlert({ ...options, hasFullScreenIntent: hasFullScreen });
   return notifee.displayNotification(payload);
 }

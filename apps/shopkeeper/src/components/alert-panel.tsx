@@ -24,7 +24,8 @@ async function readCheck(): Promise<AlertCheck> {
   const [permission, channel, fullScreen] = await Promise.all([
     getPermissionsAsync().catch(() => ({ granted: false, canAskAgain: false })),
     os === "android" ? getNotificationChannelAsync(NEW_ORDERS_CHANNEL).catch(() => null) : null,
-    os === "android" ? checkFullScreenIntent().catch(() => false) : false,
+    // A failed read stays unknown, so S03 shows for it only when Android reports the permission off.
+    os === "android" ? checkFullScreenIntent().catch(() => undefined) : undefined,
   ]);
   return alertCheck(permission, channel, phone, fullScreen);
 }

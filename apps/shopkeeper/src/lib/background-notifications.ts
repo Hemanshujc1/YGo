@@ -26,7 +26,8 @@ if (Platform.OS === "android") {
     const kind = typeof pushData.kind === "string" ? pushData.kind : null;
 
     if (orderId && kind === "order_placed") {
-      const hasFullScreen = await checkFullScreenIntent();
+      // Unknown counts as not allowed here, so the alert falls back to S02.
+      const hasFullScreen = (await checkFullScreenIntent()) === true;
       await displayOrderAlert({
         orderId,
         ringAttemptId: ringAttemptId ?? undefined,

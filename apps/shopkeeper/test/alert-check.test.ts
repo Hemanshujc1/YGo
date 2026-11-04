@@ -20,6 +20,11 @@ describe("S03 alert check (#507)", () => {
     expect(limited(alertCheck(allowed, loud, android))).toBe(false);
   });
 
+  it("does not show on an iPhone, where the lock-screen permission does not exist", () => {
+    expect(limited(alertCheck(allowed, { importance: 0, sound: null }, ios, undefined))).toBe(false);
+    expect(limited(alertCheck(allowed, null, ios, false))).toBe(false);
+  });
+
   it("shows when notifications are off", () => {
     const check = alertCheck({ granted: false, canAskAgain: true }, loud, android);
     expect(check).toEqual({ notifications: false, ringing: true, canAsk: true });
