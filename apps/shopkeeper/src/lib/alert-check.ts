@@ -37,13 +37,15 @@ export function alertCheck(permission: Permission, channel: Channel, phone: Phon
 /** S03 shows when something would keep a new order from ringing, or Android would not show it over the lock screen (#508). */
 export const limited = (check: AlertCheck) => !check.notifications || !check.ringing || check.fullScreen === false;
 
-export type Fix = "ask" | "app-settings" | "channel-settings";
+export type Fix = "ask" | "app-settings" | "channel-settings" | "full-screen-settings";
 
 /**
  * Each row's one button (owner's answers 3 and 5 on #507): the system prompt while the phone still allows it, else the
  * app's settings; a muted alarm opens the New orders channel's own settings on Android, the app's settings on an iPhone.
+ * Showing over the lock screen has no prompt on Android 14+, only YGo's own "Full screen notifications" page (#511).
  */
-export function fixFor(row: "notifications" | "ringing", check: AlertCheck, phone: Phone): Fix {
+export function fixFor(row: "notifications" | "ringing" | "fullScreen", check: AlertCheck, phone: Phone): Fix {
   if (row === "notifications") return check.canAsk ? "ask" : "app-settings";
+  if (row === "fullScreen") return "full-screen-settings";
   return phone.os === "android" ? "channel-settings" : "app-settings";
 }

@@ -55,6 +55,12 @@ describe("S03 alert check (#507)", () => {
     expect(fixFor("ringing", off, ios)).toBe("app-settings");
   });
 
+  it("opens YGo's Full screen notifications page for the lock-screen row, which has no prompt (#511)", () => {
+    const off = alertCheck(allowed, loud, android, false);
+    expect(fixFor("fullScreen", off, android)).toBe("full-screen-settings");
+    expect(fixFor("fullScreen", { ...off, canAsk: true }, android)).toBe("full-screen-settings");
+  });
+
   it("opens settings before Android 13, which has no prompt to show", () => {
     const off = alertCheck({ granted: false, canAskAgain: true }, loud, { os: "android", version: 32 });
     expect(off.canAsk).toBe(false);

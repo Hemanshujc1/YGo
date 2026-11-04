@@ -1,11 +1,11 @@
 import { Button, Text, useInFront } from "@ygo/mobile";
 import { NEW_ORDER_SOUND, NEW_ORDERS_CHANNEL } from "@ygo/mobile/push";
-import { applicationId } from "expo-application";
 import { getNotificationChannelAsync, getPermissionsAsync, scheduleNotificationAsync } from "expo-notifications";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Linking, Platform, View } from "react-native";
+import { Platform, View } from "react-native";
 import { api } from "../api";
 import { type AlertCheck, alertCheck, type Fix, fixFor, limited, type Phone } from "../lib/alert-check";
+import { openSettings } from "../lib/alert-settings";
 import { checkFullScreenIntent } from "../lib/order-alert";
 import { push } from "../lib/push";
 import { createShopOrders, waitingOrder } from "../lib/shop-orders";
@@ -28,20 +28,6 @@ async function readCheck(): Promise<AlertCheck> {
     os === "android" ? checkFullScreenIntent().catch(() => undefined) : undefined,
   ]);
   return alertCheck(permission, channel, phone, fullScreen);
-}
-
-/** Android's own page for the app's notifications or the New orders channel; any other phone gets the app's settings. */
-async function openSettings(fix: Exclude<Fix, "ask">) {
-  if (os === "android" && applicationId) {
-    const extras = [{ key: "android.provider.extra.APP_PACKAGE", value: applicationId }];
-    if (fix === "channel-settings") extras.push({ key: "android.provider.extra.CHANNEL_ID", value: NEW_ORDERS_CHANNEL });
-    const opened = await Linking.sendIntent(
-      fix === "channel-settings" ? "android.settings.CHANNEL_NOTIFICATION_SETTINGS" : "android.settings.APP_NOTIFICATION_SETTINGS",
-      extras,
-    ).then(() => true, () => false);
-    if (opened) return;
-  }
-  await Linking.openSettings();
 }
 
 /** The new-order alarm on demand, so the shopkeeper hears it without a real order; a tap on it opens nothing. */
@@ -104,7 +90,7 @@ export function AlertPanel() {
   useEffect(() => void push.ask().then(asked), [asked]);
 
   if (!check || !limited(check)) return null;
-  const fix = (row: "notifications" | "ringing") => {
+  const fix = (row: "notifications" | "ringing" | "fullScreen") => {
     const chosen = fixFor(row, check, phone);
     if (chosen === "ask") void push.askAgain().then(asked);
     else void openSettings(chosen);
@@ -118,14 +104,7 @@ export function AlertPanel() {
         <Row label={words.notifications} on={check.notifications} fix={fixFor("notifications", check, phone)} onFix={() => fix("notifications")} />
         <Row label={words.ringing} on={check.ringing} fix={fixFor("ringing", check, phone)} onFix={() => fix("ringing")} />
         {phone.os === "android" && check.fullScreen !== undefined && (
-          <View className="flex-row items-center justify-between gap-3">
-            <View className="flex-1">
-              <Text className="text-body font-semibold text-text">{words.fullScreen}</Text>
-              <Text className={`text-secondary ${check.fullScreen ? "text-success" : "text-warning"}`}>
-                {check.fullScreen ? words.on : words.off}
-              </Text>
-            </View>
-          </View>
+          <Row label={words.fullScreen} on={check.fullScreen} fix={fixFor("fullScreen", check, phone)} onFix={() => fix("fullScreen")} />
         )}
         {/* Nothing can show while notifications are off. */}
         {check.notifications && <Button label={words.test} variant="text" onPress={() => void testAlert()} />}
