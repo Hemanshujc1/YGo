@@ -1,7 +1,7 @@
 import { type NotificationKind, ORDER_ANSWER_SECONDS, type OrderStatus, type RejectReason } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import type { Push, PushResult, PushSender } from "./adapters/push-sender";
+import type { Push, PushResult, PushSender, ReceiptResult } from "./adapters/push-sender";
 import { withTransaction } from "./db";
 
 type Order = { number: number; shopName: string; reason: RejectReason | null };
@@ -73,6 +73,10 @@ export async function notifyOrderStatus(client: PoolClient, orderId: string, to:
 /** A phone's push is tried this many times in all, then dropped (NOT-2). */
 const MAX_TRIES = 3;
 const RETRY_SECONDS = 30;
+/** Expo needs a few minutes to have a receipt (#509); one still missing is asked for again this much later. */
+const RECEIPT_AFTER_SECONDS = 15 * 60;
+/** Expo keeps a receipt for 24 hours; after that the ticket is dropped. */
+const RECEIPT_KEPT_SECONDS = 24 * 60 * 60;
 /**
  * How long a run holds its claimed rows while it calls Expo. A run claims at most `batch` (100) rows, so it makes
  * at most one Expo request per app, each cut off at 10 s; a run that dies leaves its rows to the next after this.
@@ -154,11 +158,23 @@ export async function sendDuePushes(pool: Pool, sender: PushSender, now: Date, b
       mine.forEach((row, i) => outcome.set(row.id, results[i] ?? "failed"));
     }
     const ids = (result: PushResult) => claimed.filter((row) => outcome.get(row.id) === result).map((row) => row.id);
+    const ticketed = claimed.flatMap((row) => {
+      const result = outcome.get(row.id);
+      return typeof result === "object" ? [{ id: row.id, ticketId: result.ticketId, token: row.push.to, app: row.app }] : [];
+    });
     const failed = ids("failed");
     failures += failed.length;
     await withTransaction(pool, async (client) => {
       const held = "id = ANY($1::bigint[]) AND claim_id = $2";
-      await client.query(`DELETE FROM push_queue WHERE ${held}`, [ids("sent"), claimId]);
+      // A sent push leaves the queue, and its ticket is kept for the receipt, for the rows this run still holds only.
+      await client.query(
+        `WITH done AS (DELETE FROM push_queue WHERE ${held} RETURNING id),
+           ticketed AS (SELECT * FROM unnest($3::bigint[], $4::text[], $5::text[], $6::text[]) AS t(id, ticket_id, token, app))
+         INSERT INTO push_receipts (ticket_id, token, app, sent_at, check_after)
+         SELECT ticket_id, token, app, $7::timestamptz, $7::timestamptz + make_interval(secs => $8) FROM ticketed JOIN done USING (id)
+         ON CONFLICT DO NOTHING`,
+        [[...ids("sent"), ...ticketed.map((row) => row.id)], claimId, ticketed.map((row) => row.id), ticketed.map((row) => row.ticketId),
+          ticketed.map((row) => row.token), ticketed.map((row) => row.app), now, RECEIPT_AFTER_SECONDS]);
       // A dead token goes with all its queued rows.
       await client.query("DELETE FROM push_tokens WHERE token = ANY($1::text[])",
         [claimed.filter((row) => outcome.get(row.id) === "dead").map((row) => row.push.to)]);
@@ -171,4 +187,53 @@ export async function sendDuePushes(pool: Pool, sender: PushSender, now: Date, b
     if (claimed.length < batch) break;
   }
   if (failures > 0) throw new Error(`${failures} pushes could not be sent`, { cause });
+}
+
+/**
+ * Reads the receipts due by now and deletes the token of each phone Expo says no longer holds it (#509), up to `batch`
+ * tickets a run in all (Expo's limit is 1000 ids a request). Like the sending, a run claims its tickets, calls Expo outside
+ * any transaction and records outcomes only for tickets it still holds, so a ticket is acted on once even with two
+ * workers. A token goes only if its phone did not register it again after the send, decided in the same statement
+ * that takes the ticket, so a reinstalled phone keeps its token. An "ok" or other receipt just ends the ticket; a missing
+ * one is asked for again after 15 minutes, and dropped once asked for after 24 hours from the send. Throws, once outcomes are recorded, when
+ * Expo's answer was missing for any ticket, so the caller can log it.
+ */
+export async function checkPushReceipts(pool: Pool, sender: PushSender, now: Date, batch = 1000): Promise<void> {
+  const claimId = randomUUID();
+  const claimed = await withTransaction(pool, async (client) => {
+    const { rows } = await client.query<{ ticketId: string; app: string }>(
+      `UPDATE push_receipts SET claim_id = $4, claimed_until = $1::timestamptz + make_interval(secs => $3)
+       WHERE ticket_id IN (SELECT ticket_id FROM push_receipts WHERE check_after <= $1 AND (claimed_until IS NULL OR claimed_until <= $1)
+         ORDER BY check_after, ticket_id LIMIT $2 FOR UPDATE SKIP LOCKED)
+       RETURNING ticket_id AS "ticketId", app`, [now, batch, CLAIM_SECONDS, claimId]);
+    await client.query("COMMIT");
+    return rows;
+  });
+  const found = new Map<string, ReceiptResult>();
+  let cause: unknown;
+  // Expo's projects are separate, so each app asks on its own.
+  for (const app of new Set(claimed.map((row) => row.app))) {
+    const asked = claimed.filter((row) => row.app === app).map((row) => row.ticketId);
+    const answer = await sender.receipts(asked).catch((error: unknown) => {
+      cause = error;
+      return new Map<string, ReceiptResult>();
+    });
+    answer.forEach((result, ticketId) => found.set(ticketId, result));
+  }
+  const withResult = (result: ReceiptResult) => claimed.filter((row) => found.get(row.ticketId) === result).map((row) => row.ticketId);
+  const missing = claimed.filter((row) => !found.has(row.ticketId)).map((row) => row.ticketId);
+  await withTransaction(pool, async (client) => {
+    // One statement takes the held tickets and judges the token against the same rows.
+    await client.query(
+      `WITH held AS (DELETE FROM push_receipts WHERE ticket_id = ANY($1::text[]) AND claim_id = $2 RETURNING ticket_id, token, sent_at)
+       DELETE FROM push_tokens t USING held h WHERE h.ticket_id = ANY($3::text[]) AND t.token = h.token AND t.updated_at <= h.sent_at`,
+      [[...withResult("ok"), ...withResult("dead"), ...withResult("other")], claimId, withResult("dead")]);
+    await client.query("DELETE FROM push_receipts WHERE ticket_id = ANY($1::text[]) AND claim_id = $2 AND sent_at + make_interval(secs => $3) <= $4",
+      [missing, claimId, RECEIPT_KEPT_SECONDS, now]);
+    await client.query(
+      "UPDATE push_receipts SET check_after = $3::timestamptz + make_interval(secs => $4), claim_id = NULL, claimed_until = NULL WHERE ticket_id = ANY($1::text[]) AND claim_id = $2",
+      [missing, claimId, now, RECEIPT_AFTER_SECONDS]);
+    await client.query("COMMIT");
+  });
+  if (cause) throw new Error("push receipts could not be read", { cause });
 }

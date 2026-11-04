@@ -8,7 +8,7 @@ import { createProductImageStorage, createS3ProductImageClient } from "./adapter
 import { createExpoPushSender, createLoggingPushSender } from "./adapters/push-sender";
 import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
-import { sendDuePushes } from "./notifications";
+import { checkPushReceipts, sendDuePushes } from "./notifications";
 
 const config = loadConfig();
 const mailer = config.MAILER === "ses"
@@ -61,6 +61,8 @@ let pushTimer: NodeJS.Timeout | undefined;
 const workPushQueue = () => {
   pushRun = sendDuePushes(database.pool, pushSender, clock.now())
     .catch((err: unknown) => app.log.error({ err }, "push sending failed"))
+    .then(() => checkPushReceipts(database.pool, pushSender, clock.now()))
+    .catch((err: unknown) => app.log.error({ err }, "push receipts failed"))
     .finally(() => { if (pushTimer) pushTimer = setTimeout(workPushQueue, 5_000); });
 };
 pushTimer = setTimeout(workPushQueue, 5_000);

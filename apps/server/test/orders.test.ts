@@ -8,8 +8,8 @@ import { bootstrapAdmin } from "../src/bootstrap";
 import { OrderStatus } from "@ygo/contracts";
 import { connectDatabase } from "../src/db";
 import { stockOf } from "../src/listings";
-import { createLocalPushSender, type PushResult, type PushSender } from "../src/adapters/push-sender";
-import { sendDuePushes } from "../src/notifications";
+import { createLocalPushSender, type PushResult, type PushSender, type ReceiptResult } from "../src/adapters/push-sender";
+import { checkPushReceipts, sendDuePushes } from "../src/notifications";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
 
@@ -885,7 +885,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     expect(await send()).toEqual([{ to: "ExponentPushToken[staff]", title: "New order #1001", loud: true }]);
 
     const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
-    const down: PushSender = { send: async (pushes) => pushes.map(() => "failed" as const) };
+    const down: PushSender = { receipts: async () => new Map(), send: async (pushes) => pushes.map(() => "failed" as const) };
     for (const tries of [1, 2]) {
       await expect(send(down)).rejects.toThrow("1 pushes could not be sent");
       expect((await database.pool.query("SELECT tries FROM push_queue ORDER BY send_after LIMIT 1")).rows).toEqual([{ tries }]);
@@ -895,7 +895,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     expect((await database.pool.query("SELECT 1 FROM push_queue q JOIN notifications n ON n.id = q.notification_id WHERE n.order_id = $1 AND q.send_after <= $2",
       [order.id, clock.now()])).rowCount).toBe(0);
 
-    const gone: PushSender = { send: async (pushes) => pushes.map(() => "dead" as const) };
+    const gone: PushSender = { receipts: async () => new Map(), send: async (pushes) => pushes.map(() => "dead" as const) };
     clock.advance(120_000);
     await sendDuePushes(database.pool, gone, clock.now());
     expect((await database.pool.query("SELECT token FROM push_tokens ORDER BY token")).rows).toEqual([{ token: "ExponentPushToken[buyer]" }]);
@@ -907,7 +907,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     await ordered(shopId, [{ listingId: dal, count: 1 }], home);
     await reject(first.id, owner);
     const requests: string[][] = [];
-    const recording: PushSender = { send: async (pushes) => { requests.push(pushes.map((one) => one.to)); return pushes.map(() => "sent" as const); } };
+    const recording: PushSender = { receipts: async () => new Map(), send: async (pushes) => { requests.push(pushes.map((one) => one.to)); return pushes.map(() => "sent" as const); } };
     await sendDuePushes(database.pool, recording, clock.now());
     expect(requests.map((tokens) => [...new Set(tokens)].sort())).toEqual([["ExponentPushToken[owner]", "ExponentPushToken[staff]"], ["ExponentPushToken[buyer]"]]);
 
@@ -934,7 +934,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const { shopId, dal, home } = await phones();
     await ordered(shopId, [{ listingId: dal, count: 1 }], home);
     const calls: string[][] = [];
-    const ownerOnly: PushSender = { send: async (pushes) => {
+    const ownerOnly: PushSender = { receipts: async () => new Map(), send: async (pushes) => {
       calls.push(pushes.map((one) => one.to));
       return pushes.map((one) => one.to === "ExponentPushToken[owner]" ? "sent" as const : "failed" as const);
     } };
@@ -956,7 +956,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const { shopId, dal, home } = await phones();
     await ordered(shopId, [{ listingId: dal, count: 1 }], home);
     const seen: Array<{ open: number; other: number; locked: number }> = [];
-    const checking: PushSender = { send: async (pushes) => {
+    const checking: PushSender = { receipts: async () => new Map(), send: async (pushes) => {
       const { rows: [open] } = await database.pool.query<{ count: number }>(
         "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%'");
       const other = createLocalPushSender();
@@ -975,7 +975,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const { shopId, dal, home } = await phones();
     await ordered(shopId, [{ listingId: dal, count: 1 }], home);
     // A run that claims the pushes and then dies before Expo answers.
-    const dies: PushSender = { send: () => new Promise(() => undefined) };
+    const dies: PushSender = { receipts: async () => new Map(), send: () => new Promise(() => undefined) };
     void sendDuePushes(database.pool, dies, clock.now());
     await expect.poll(async () => Number((await database.pool.query<{ count: string }>(
       "SELECT count(*) FROM push_queue WHERE claimed_until IS NOT NULL")).rows[0]?.count)).toBe(2);
@@ -989,7 +989,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const { shopId, dal, home } = await phones();
     await ordered(shopId, [{ listingId: dal, count: 1 }], home);
     let answer: (results: PushResult[]) => void = () => undefined;
-    const slow: PushSender = { send: () => new Promise((resolve) => { answer = resolve; }) };
+    const slow: PushSender = { receipts: async () => new Map(), send: () => new Promise((resolve) => { answer = resolve; }) };
     const late = sendDuePushes(database.pool, slow, clock.now());
     await expect.poll(async () => (await database.pool.query("SELECT 1 FROM push_queue WHERE claim_id IS NOT NULL")).rowCount).toBe(2);
     clock.advance(60_000);
@@ -1007,6 +1007,111 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     push.sent.length = 0;
     await sendDuePushes(database.pool, push, clock.now(), 1);
     expect(push.sent).toHaveLength(4);
+  });
+
+  describe("push receipts (#509)", () => {
+    const tokens = async () => (await database.pool.query<{ token: string }>("SELECT token FROM push_tokens ORDER BY token")).rows.map((row) => row.token);
+    const tickets = async () => (await database.pool.query<{ ticketId: string }>("SELECT ticket_id AS \"ticketId\" FROM push_receipts ORDER BY ticket_id")).rows.map((row) => row.ticketId);
+    /** Sends with a ticket for each push, then answers receipts as `answers` says (a ticket left out has none yet). */
+    const ticketing = (answers: Record<string, ReceiptResult> = {}, asked: string[][] = []): PushSender => ({
+      send: async (pushes) => pushes.map(({ to }) => ({ ticketId: `t-${to}` })),
+      receipts: async (ids) => { asked.push(ids); return new Map(ids.flatMap((id) => answers[id] ? [[id, answers[id]] as const] : [])); },
+    });
+    const placed = async () => {
+      const shop = await phones();
+      await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home);
+      await sendDuePushes(database.pool, ticketing(), clock.now());
+      return shop;
+    };
+
+    it("keeps each sent push's ticket, and asks for receipts only 15 minutes later", async () => {
+      await placed();
+      expect(await queued()).toBe(2);
+      expect(await tickets()).toEqual(["t-ExponentPushToken[owner]", "t-ExponentPushToken[staff]"]);
+      const asked: string[][] = [];
+      clock.advance(899_000);
+      await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      expect(asked).toEqual([]);
+      clock.advance(1_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[staff]": "ok" }, asked), clock.now());
+      expect(asked).toEqual([["t-ExponentPushToken[owner]", "t-ExponentPushToken[staff]"]]);
+    });
+
+    it("deletes a token the receipt reports dead, and only that one", async () => {
+      await placed();
+      clock.advance(900_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead", "t-ExponentPushToken[staff]": "ok" }), clock.now());
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[staff]"]);
+      expect(await tickets()).toEqual([]);
+    });
+
+    it("keeps the token on any other receipt error, and on a token the phone registered again after the send", async () => {
+      const { owner } = await placed();
+      clock.advance(1_000);
+      expect((await register(owner, "ExponentPushToken[owner]")).statusCode).toBe(204);
+      clock.advance(900_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead", "t-ExponentPushToken[staff]": "other" }), clock.now());
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
+      expect(await tickets()).toEqual([]);
+    });
+
+    it("asks again every 15 minutes for a receipt that is missing, and drops the ticket 24 hours after the send", async () => {
+      await placed();
+      const asked: string[][] = [];
+      for (let i = 0; i < 3; i += 1) {
+        clock.advance(900_000);
+        await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      }
+      expect(asked).toHaveLength(3);
+      expect(await tickets()).toHaveLength(2);
+      // Late, the receipt arrives: a dead token still goes.
+      clock.advance(900_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead" }), clock.now());
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[staff]"]);
+      clock.advance(24 * 3_600_000);
+      await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      expect(await tickets()).toEqual([]);
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[staff]"]);
+    });
+
+    it("asks for each app's tickets in a request of its own", async () => {
+      await database.pool.query(
+        `INSERT INTO push_receipts (ticket_id, token, app, sent_at, check_after) VALUES
+         ('c1', 'ExponentPushToken[c]', 'customer', $1, $1), ('s1', 'ExponentPushToken[s]', 'shopkeeper', $1, $1), ('c2', 'ExponentPushToken[c]', 'customer', $1, $1)`, [clock.now()]);
+      const asked: string[][] = [];
+      await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      expect(asked.map((ids) => [...ids].sort())).toEqual([["c1", "c2"], ["s1"]]);
+    });
+
+    it("checks a ticket once with two workers, and ignores the answer of a run whose claim lapsed", async () => {
+      await placed();
+      clock.advance(900_000);
+      let answer: (found: Map<string, ReceiptResult>) => void = () => undefined;
+      const slow: PushSender = { send: async () => [], receipts: () => new Promise((resolve) => { answer = resolve; }) };
+      const late = checkPushReceipts(database.pool, slow, clock.now());
+      await expect.poll(async () => (await database.pool.query("SELECT 1 FROM push_receipts WHERE claim_id IS NOT NULL")).rowCount).toBe(2);
+      // A second worker meanwhile finds nothing to ask for.
+      const asked: string[][] = [];
+      await checkPushReceipts(database.pool, ticketing({}, asked), clock.now());
+      expect(asked).toEqual([]);
+      // Its claim lapsed: another run takes the tickets over and ends them as ok.
+      clock.advance(60_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "ok", "t-ExponentPushToken[staff]": "ok" }), clock.now());
+      answer(new Map([["t-ExponentPushToken[owner]", "dead"]]));
+      await late;
+      expect(await tokens()).toEqual(["ExponentPushToken[buyer]", "ExponentPushToken[owner]", "ExponentPushToken[staff]"]);
+    });
+
+    it("lets a failed Expo call keep its tickets for the next run", async () => {
+      await placed();
+      clock.advance(900_000);
+      const broken: PushSender = { send: async () => [], receipts: async () => { throw new Error("down"); } };
+      await expect(checkPushReceipts(database.pool, broken, clock.now())).rejects.toThrow("push receipts could not be read");
+      expect(await tickets()).toHaveLength(2);
+      clock.advance(900_000);
+      await checkPushReceipts(database.pool, ticketing({ "t-ExponentPushToken[owner]": "dead" }), clock.now());
+      expect(await tokens()).not.toContain("ExponentPushToken[owner]");
+    });
   });
 
   it("reads one notification on a tap and all of them on Mark all as read, each person and app on its own", async () => {

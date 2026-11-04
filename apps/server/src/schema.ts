@@ -806,3 +806,20 @@ export const pushQueue = pgTable("push_queue", {
   index("push_queue_send_after_idx").on(table.sendAfter),
   index("push_queue_token_idx").on(table.token),
 ]);
+
+// The ticket Expo gave a sent push (#509), kept to read its receipt about 15 minutes later: Expo often reports
+// DeviceNotRegistered only there. No reference to `push_tokens`: a token that has left needs no check. `sent_at`
+// tells whether the phone registered the token again after the send (it then stays), and ends the asking
+// at Expo's 24 hours. A run claims a row as for `push_queue`.
+export const pushReceipts = pgTable("push_receipts", {
+  ticketId: text("ticket_id").primaryKey(),
+  token: text("token").notNull(),
+  app: text("app").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+  checkAfter: timestamp("check_after", { withTimezone: true }).notNull(),
+  claimId: uuid("claim_id"),
+  claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+}, (table) => [
+  index("push_receipts_check_after_idx").on(table.checkAfter),
+  check("push_receipts_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
+]);
