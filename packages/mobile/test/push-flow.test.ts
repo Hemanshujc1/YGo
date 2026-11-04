@@ -1,7 +1,7 @@
 import type { Account } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { listeners } from "../src/listeners";
-import { createPushTaps, type Owner, type PushDevice, registerPush, type Tap } from "../src/push-flow";
+import { createPushTaps, type Owner, type PushDevice, registerPush, ringsInFront, type Tap } from "../src/push-flow";
 import type { SessionState } from "../src/session";
 
 const token = "ExponentPushToken[abc]";
@@ -21,7 +21,7 @@ describe("registerPush (#506)", () => {
   it("does nothing without a project ID", async () => {
     const { device } = fakeDevice({ granted: true });
     const save = vi.fn(async () => true);
-    expect(await registerPush(device, undefined, save, true)).toBe("off");
+    expect(await registerPush(device, undefined, save, "once")).toBe("off");
     expect(device.permission).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
   });
@@ -29,7 +29,7 @@ describe("registerPush (#506)", () => {
   it("sends the token once permission exists", async () => {
     const { device } = fakeDevice({ granted: true });
     const save = vi.fn(async () => true);
-    expect(await registerPush(device, "project", save, false)).toBe("saved");
+    expect(await registerPush(device, "project", save, "no")).toBe("saved");
     expect(device.token).toHaveBeenCalledWith("project");
     expect(save).toHaveBeenCalledWith(token);
     expect(device.request).not.toHaveBeenCalled();
@@ -38,7 +38,7 @@ describe("registerPush (#506)", () => {
   it("never prompts at launch or after sign-in", async () => {
     const { device } = fakeDevice();
     const save = vi.fn(async () => true);
-    expect(await registerPush(device, "project", save, false)).toBe("no-permission");
+    expect(await registerPush(device, "project", save, "no")).toBe("no-permission");
     expect(device.request).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
   });
@@ -46,39 +46,59 @@ describe("registerPush (#506)", () => {
   it("prompts once per phone, and a no is never asked again", async () => {
     const { device, flag } = fakeDevice({ allows: false });
     const save = vi.fn(async () => true);
-    expect(await registerPush(device, "project", save, true)).toBe("no-permission");
+    expect(await registerPush(device, "project", save, "once")).toBe("no-permission");
     expect(flag.asked).toBe(true);
-    expect(await registerPush(device, "project", save, true)).toBe("no-permission");
+    expect(await registerPush(device, "project", save, "once")).toBe("no-permission");
     expect(device.request).toHaveBeenCalledTimes(1);
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("prompts again when the person taps S03's fix, while the phone still allows asking (#507)", async () => {
+    const { device } = fakeDevice({ allows: true, asked: true });
+    const save = vi.fn(async () => true);
+    expect(await registerPush(device, "project", save, "once")).toBe("no-permission");
+    expect(await registerPush(device, "project", save, "again")).toBe("saved");
+    expect(device.request).toHaveBeenCalledTimes(1);
+    const stopped = fakeDevice({ canAskAgain: false, asked: true }).device;
+    expect(await registerPush(stopped, "project", save, "again")).toBe("no-permission");
+    expect(stopped.request).not.toHaveBeenCalled();
+  });
+
   it("does not prompt when the phone no longer allows asking", async () => {
     const { device } = fakeDevice({ canAskAgain: false });
-    expect(await registerPush(device, "project", async () => true, true)).toBe("no-permission");
+    expect(await registerPush(device, "project", async () => true, "once")).toBe("no-permission");
     expect(device.request).not.toHaveBeenCalled();
   });
 
   it("sends the token once the person allows it", async () => {
     const { device } = fakeDevice({ allows: true });
     const save = vi.fn(async () => true);
-    expect(await registerPush(device, "project", save, true)).toBe("saved");
+    expect(await registerPush(device, "project", save, "once")).toBe("saved");
     expect(save).toHaveBeenCalledWith(token);
   });
 
   it("gives up quietly when the token or the save fails, to try again at the next start", async () => {
     const { device } = fakeDevice({ granted: true });
     device.token.mockRejectedValueOnce(new Error("no Firebase"));
-    expect(await registerPush(device, "project", async () => true, false)).toBe("no-token");
-    expect(await registerPush(device, "project", async () => false, false)).toBe("not-saved");
-    expect(await registerPush(device, "project", () => Promise.reject(new Error("offline")), false)).toBe("not-saved");
+    expect(await registerPush(device, "project", async () => true, "no")).toBe("no-token");
+    expect(await registerPush(device, "project", async () => false, "no")).toBe("not-saved");
+    expect(await registerPush(device, "project", () => Promise.reject(new Error("offline")), "no")).toBe("not-saved");
   });
 
   it("counts a permission check that fails as no permission", async () => {
     const { device } = fakeDevice();
     device.permission.mockRejectedValueOnce(new Error("broken"));
-    expect(await registerPush(device, "project", async () => true, true)).toBe("no-permission");
+    expect(await registerPush(device, "project", async () => true, "once")).toBe("no-permission");
     expect(device.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("ringsInFront (#507)", () => {
+  it("rings only for the push the server marks loud", () => {
+    expect(ringsInFront({ notificationId: "n", orderId: "o", loud: true })).toBe(true);
+    expect(ringsInFront({ notificationId: "n", orderId: "o" })).toBe(false);
+    expect(ringsInFront({ loud: "true" })).toBe(false);
+    expect(ringsInFront(null)).toBe(false);
   });
 });
 

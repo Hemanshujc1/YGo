@@ -1,6 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { Notification, NotificationsResponse } from "@ygo/contracts";
-import { strings } from "../strings";
+import type { ErrorCode, Notification, NotificationsResponse } from "@ygo/contracts";
 
 export type NotificationsView = {
   status: "loading" | "ready" | "failed";
@@ -19,13 +18,16 @@ type Client = {
   readAllNotifications(): Promise<ApiResult<undefined>>;
 };
 
+/** Each app's own words for what went wrong. */
+export type NotificationsWords = { offline: string; errors: Record<ErrorCode, string>; readAllFailed: string };
+
 /**
- * C22 and the Home bell (#506), one store for both, so a row read on C22 is read on the bell too. It reads the list
+ * C22 or S41 and the Home bell (#506, #507), one store for both, so a row read on C22 is read on the bell too. It reads the list
  * each time either screen comes to the front, and again when a push arrives while one is. A tapped row shows as read
  * at once and is marked on the server behind it; one that fails to save shows "New" again at the next read (owner's
  * answer 8 on #506). Rows read here stay read over an answer that left before the server marked them.
  */
-export function createNotifications(client: Client) {
+export function createNotifications(client: Client, words: NotificationsWords) {
   const blank: NotificationsView = { status: "loading", notifications: null, unread: false, message: null, refreshing: false };
   let view = blank;
   // An unread row the server has beyond the 50 shown, which lights the bell all the same.
@@ -57,7 +59,7 @@ export function createNotifications(client: Client) {
       unreadBeyond = !readingAll && answer.data.unread && answer.data.notifications.every((row) => row.read);
       set({ status: "ready", notifications: shown(answer.data.notifications), message: null, refreshing: false });
     } else {
-      const message = answer === "offline" ? strings.area.offline : strings.errors[answer.code];
+      const message = answer === "offline" ? words.offline : words.errors[answer.code];
       set({ status: view.notifications ? "ready" : "failed", message, refreshing: false });
     }
   }
@@ -124,7 +126,7 @@ export function createNotifications(client: Client) {
       for (const id of marked) readHere.delete(id);
       unreadBeyond ||= beyond;
       const now = view.notifications ?? [];
-      set({ notifications: now.map((row) => (marked.includes(row.id) ? { ...row, read: false } : row)), message: strings.notifications.readAllFailed });
+      set({ notifications: now.map((row) => (marked.includes(row.id) ? { ...row, read: false } : row)), message: words.readAllFailed });
     },
   };
 }

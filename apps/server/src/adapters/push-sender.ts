@@ -62,10 +62,11 @@ export function createExpoPushSender(
       const results: PushResult[] = [];
       for (let start = 0; start < pushes.length; start += EXPO_BATCH) {
         const messages = pushes.slice(start, start + EXPO_BATCH).map(({ to, title, body, data, loud }) => ({
-          to, title, body, data,
+          to, title, body,
+          // `loud` in the data too: the open app reads it to ring for this push only (owner's answer 9 on #507).
           ...loud
-            ? { channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" }
-            : { sound: "default" },
+            ? { data: { ...data, loud: true }, channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" }
+            : { data, sound: "default" },
         }));
         // A request fails only its own messages, so those already sent are not sent again. Only an "ok" ticket
         // counts as sent: an error, a missing ticket or an answer that can't be read is tried again (NOT-2).

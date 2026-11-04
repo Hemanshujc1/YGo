@@ -1,17 +1,21 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { PushTokenBody } from "@ygo/contracts";
 import {
-  addNotificationReceivedListener, addNotificationResponseReceivedListener, AndroidImportance, clearLastNotificationResponse,
+  addNotificationReceivedListener, addNotificationResponseReceivedListener, AndroidImportance, AndroidNotificationVisibility, clearLastNotificationResponse,
   getExpoPushTokenAsync, getLastNotificationResponse, getPermissionsAsync, type NotificationResponse, requestPermissionsAsync,
   setNotificationChannelAsync, setNotificationHandler,
 } from "expo-notifications";
 import { Platform } from "react-native";
 import { createMMKV } from "react-native-mmkv";
 import { listeners } from "./listeners";
-import { createPushTaps, type Owner, registerPush, type Tap } from "./push-flow";
+import { type Ask, createPushTaps, type Owner, registerPush, ringsInFront, type Tap } from "./push-flow";
 import type { SessionState } from "./session";
 
 export type { Tap } from "./push-flow";
+
+/** The Android channel and tone of the new-order alarm, as the server's loud push names them (#505, NOT-3). */
+export const NEW_ORDERS_CHANNEL = "new-orders";
+export const NEW_ORDER_SOUND = "new_order.wav";
 
 type PushApi = {
   savePushToken(body: PushTokenBody): Promise<ApiResult<undefined>>;
@@ -25,6 +29,8 @@ type PushOptions = {
   projectId: string | undefined;
   /** The name Android's settings show for the app's ordinary pushes. */
   channelName: string;
+  /** The Shopkeeper app's alarm channel, by the name Android's settings show (#507); the Customer app gets no loud push. */
+  newOrdersName?: string;
   /** Opens what a tap points at, once the server confirmed it is this account's. */
   open(tap: Tap): void;
 };
@@ -61,13 +67,13 @@ function tapOf(response: NotificationResponse): Tap | null {
  * listeners of each push that arrives while the app is open. Call once, at module level, so a tap that launched the
  * app is not missed.
  */
-export function createPush({ api, session, projectId, channelName, open }: PushOptions) {
+export function createPush({ api, session, projectId, channelName, newOrdersName, open }: PushOptions) {
   stopLast();
   const received = listeners();
   // One registration at a time, so two can never both show the prompt; one that never answers (an iPhone that gets
   // no answer from Apple) lets the next go after a minute.
   let running: Promise<unknown> = Promise.resolve();
-  const register = (ask: boolean) => {
+  const register = (ask: Ask) => {
     const next = running.then(() => Promise.race([
       registerPush(device, projectId, async (token) => (await api.savePushToken({ token })).ok, ask),
       new Promise((resolve) => setTimeout(resolve, REGISTER_LIMIT_MS)),
@@ -87,12 +93,26 @@ export function createPush({ api, session, projectId, channelName, open }: PushO
     open,
   });
 
-  // While the app is open a push shows as a banner, without sound (owner's answer 15 on #55).
+  // While the app is open a push shows as a banner, without sound (owner's answer 15 on #55), apart from the new-order
+  // alarm, which rings (#507). The phone plays the push's own sound, once; the app adds none of its own.
   setNotificationHandler({
-    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
+    handleNotification: async (notification) => ({
+      shouldShowBanner: true, shouldShowList: true, shouldPlaySound: ringsInFront(notification.request.content.data), shouldSetBadge: false,
+    }),
   });
   // Expo's push service sends an ordinary push on the "default" channel; this names it in Android's settings.
   if (Platform.OS === "android") void setNotificationChannelAsync("default", { name: channelName, importance: AndroidImportance.DEFAULT }).catch(() => undefined);
+  // The alarm: Android fixes a channel's sound and importance when it is first made; the person can only lower them.
+  if (Platform.OS === "android" && newOrdersName) {
+    void setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
+      name: newOrdersName,
+      importance: AndroidImportance.MAX,
+      sound: NEW_ORDER_SOUND,
+      enableVibrate: true,
+      vibrationPattern: [0, 500, 250, 500, 250, 500],
+      lockscreenVisibility: AndroidNotificationVisibility.PUBLIC,
+    }).catch(() => undefined);
+  }
 
   const take = (response: NotificationResponse | null) => {
     const tap = response && tapOf(response);
@@ -108,7 +128,7 @@ export function createPush({ api, session, projectId, channelName, open }: PushO
   const onSession = () => {
     const state = session.get();
     const accountId = state.status === "signed-in" ? state.account.id : null;
-    if (accountId && accountId !== registeredFor) void register(false);
+    if (accountId && accountId !== registeredFor) void register("no");
     registeredFor = accountId;
   };
   const stopSession = session.subscribe(onSession);
@@ -121,14 +141,17 @@ export function createPush({ api, session, projectId, channelName, open }: PushO
 
   return {
     /**
-     * After an order: shows the system prompt the first time only (owner's answer 3 on #506). Later orders do
-     * nothing, as the launch and each sign-in already send the token.
+     * The app's own moment to ask, after a Customer's order or a Shopkeeper's first Live Home: shows the system prompt
+     * the first time only (owner's answer 3 on #506 and 3 on #507). Later calls do nothing, as the launch and each
+     * sign-in already send the token. Settles once the prompt is answered.
      */
-    ask() {
-      if (askedHere || device.asked.get()) return;
+    ask(): Promise<unknown> {
+      if (askedHere || device.asked.get()) return Promise.resolve();
       askedHere = true;
-      void register(true);
+      return register("once");
     },
+    /** S03's fix button (#507): shows the system prompt while the phone still allows it, however often it was shown. */
+    askAgain: () => register("again"),
     /** Called for each push that arrives while the app is open. */
     onReceived: received.add,
   };

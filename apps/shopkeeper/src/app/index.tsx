@@ -1,16 +1,19 @@
 import type { LiveCheck, ShopApplication } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
+import { NotificationsBell } from "@ygo/mobile/notification-parts";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
+import { AlertPanel } from "../components/alert-panel";
 import { ApplicationForm } from "../components/application-form";
 import { ApplicationStatus } from "../components/application-status";
 import { OpenSwitch } from "../components/open-switch";
 import { SignOut } from "../components/sign-out";
 import { useAccountRole } from "../lib/account-role";
 import { waiting } from "../lib/application-status";
+import { inbox } from "../lib/inbox";
 import { strings } from "../strings";
 import { SyncStatus } from "../components/sync-status";
 
@@ -102,6 +105,8 @@ export default function Home() {
     const answersOrders = application.state === "live" || application.state === "suspended";
     return (
       <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+        {/* S03 (#507): where orders can arrive, so the alarm must ring. */}
+        {answersOrders && <AlertPanel />}
         {application.state === "live" && <OpenSwitch />}
         {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
         {(answersOrders || application.state === "approved") && <SyncStatus />}
@@ -186,6 +191,8 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
       contentContainerClassName="grow justify-center gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
     >
+      {/* S41's bell, only where orders and their notifications arrive (owner's answer 6 on #507). */}
+      {orders && <View className="flex-row justify-end"><NotificationsBell inbox={inbox} words={strings.notifications} /></View>}
       {/* At the top, with no count (#431); a Suspended shop still answers its orders (owner's answer 13 on #425). */}
       {orders && <Link href="/orders" asChild>
         <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">

@@ -13,15 +13,21 @@ export interface PushDevice {
 export type Registered = "off" | "no-permission" | "no-token" | "saved" | "not-saved";
 
 /**
- * Sends the phone's Expo push token to the server (#506). Nothing happens without a project ID or permission. `ask`
- * shows the system prompt, but only once per phone and only while the phone still allows asking: a person who said
- * no is never asked again. A token that can't be had or sent is tried again at the next start.
+ * Whether to show the system prompt: "no" at launch and sign-in, "once" for the app's own moment, shown once per phone
+ * (#506), and "again" when the person taps S03's fix button themselves (owner's answer 3 on #507).
  */
-export async function registerPush(device: PushDevice, projectId: string | undefined, save: (token: string) => Promise<boolean>, ask: boolean): Promise<Registered> {
+export type Ask = "no" | "once" | "again";
+
+/**
+ * Sends the phone's Expo push token to the server (#506). Nothing happens without a project ID or permission. `ask`
+ * shows the system prompt, and only while the phone still allows asking: a person who said no is asked again only when
+ * they tap to fix it. A token that can't be had or sent is tried again at the next start.
+ */
+export async function registerPush(device: PushDevice, projectId: string | undefined, save: (token: string) => Promise<boolean>, ask: Ask): Promise<Registered> {
   if (!projectId) return "off";
   const now = await device.permission().catch(() => ({ granted: false, canAskAgain: false }));
   let granted = now.granted;
-  if (!granted && ask && now.canAskAgain && !device.asked.get()) {
+  if (!granted && now.canAskAgain && (ask === "again" || (ask === "once" && !device.asked.get()))) {
     // Set first, so a prompt that never answers is still not shown twice.
     device.asked.set();
     granted = await device.request().catch(() => false);
@@ -31,6 +37,9 @@ export async function registerPush(device: PushDevice, projectId: string | undef
   if (!token) return "no-token";
   return (await save(token).catch(() => false)) ? "saved" : "not-saved";
 }
+
+/** While the app is open, only the new-order alarm rings: the server marks it `loud` in the push's data (#507). */
+export const ringsInFront = (data: unknown) => (data as { loud?: unknown } | null)?.loud === true;
 
 /** A tapped push: `key` is the tap's own identifier, the rest is the push's data (#505). */
 export type Tap = { key: string; notificationId: string; orderId: string | null };

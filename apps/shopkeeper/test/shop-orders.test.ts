@@ -112,6 +112,14 @@ describe("S04 Orders (#431)", () => {
     orders.stop();
     expect(pending.size).toBe(0);
   });
+
+  it("keeps how far the server's clock is ahead, for the countdown pinned on S03 (#507)", async () => {
+    const phoneNow = Date.parse(list.now) - 4_000;
+    const orders = createShopOrders({ shopOrders: async () => ok(list) }, fakeTimers().timers, 15_000, () => phoneNow);
+    orders.start();
+    await settle();
+    expect(orders.get()).toMatchObject({ status: "ready", offset: 4_000 });
+  });
 });
 
 describe("S05 New order (#431)", () => {

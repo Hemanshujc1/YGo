@@ -1,9 +1,10 @@
+import { createNotifications } from "@ygo/mobile/notifications";
 import { api, session } from "../api";
-import { createNotifications } from "./notifications";
+import { strings } from "../strings";
 import { push } from "./push";
 
 /** The one C22 store, shared by the Home bell and C22 (#506), emptied whenever the signed-in account changes. */
-export const inbox = createNotifications(api);
+export const inbox = createNotifications(api, { offline: strings.area.offline, errors: strings.errors, readAllFailed: strings.notifications.readAllFailed });
 
 let shownFor: string | null = null;
 session.subscribe(() => {

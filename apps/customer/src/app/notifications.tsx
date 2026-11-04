@@ -1,11 +1,10 @@
 import type { Notification } from "@ygo/contracts";
-import { formatDateTime } from "@ygo/format";
 import { Button, Text, useInFront } from "@ygo/mobile";
+import { NotificationRow } from "@ygo/mobile/notification-parts";
 import { router } from "expo-router";
 import { useSyncExternalStore } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Bell } from "../components/icons";
 import { TopBar } from "../components/top-bar";
 import { inbox as list } from "../lib/inbox";
 import { strings } from "../strings";
@@ -13,27 +12,6 @@ import { strings } from "../strings";
 // C22 Notifications (#506): the server's newest 50, a tap reads one and opens its order (owner's answers 5 and 14 on #55).
 
 const words = strings.notifications;
-
-/** An icon, the fact in bold, the time, and "New" while unread: a tint alone is never enough (design system, Notification row). */
-function Row({ row, onPress }: { row: Notification; onPress(): void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      className={`flex-row gap-3 rounded-card border bg-surface p-4 active:bg-primary-subtle ${row.read ? "border-border" : "border-primary"}`}
-    >
-      <Bell className={row.read ? "text-muted" : "text-primary"} size={20} />
-      <View className="flex-1 gap-1">
-        <View className="flex-row items-start justify-between gap-3">
-          <Text className={`flex-1 text-body text-text ${row.read ? "font-medium" : "font-semibold"}`}>{row.title}</Text>
-          {!row.read && <Text className="text-label font-semibold text-primary">{words.new}</Text>}
-        </View>
-        <Text className="text-secondary text-text">{row.body}</Text>
-        <Text className="text-secondary tabular-nums text-muted">{formatDateTime(row.createdAt)}</Text>
-      </View>
-    </Pressable>
-  );
-}
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
@@ -72,7 +50,7 @@ export default function NotificationsScreen() {
         )}
         {view.status === "ready" && view.message && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{view.message}</Text>}
         {rows?.length === 0 && <Text className="text-body text-muted">{words.empty}</Text>}
-        {rows?.map((row) => <Row key={row.id} row={row} onPress={() => open(row)} />)}
+        {rows?.map((row) => <NotificationRow key={row.id} row={row} newWord={words.new} onPress={() => open(row)} />)}
       </ScrollView>
     </View>
   );

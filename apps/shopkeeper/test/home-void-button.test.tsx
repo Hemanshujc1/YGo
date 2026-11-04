@@ -22,6 +22,9 @@ vi.mock("../src/components/application-status", () => ({ ApplicationStatus: "App
 vi.mock("../src/components/open-switch", () => ({ OpenSwitch: "OpenSwitch" }));
 vi.mock("../src/components/sign-out", () => ({ SignOut: "SignOut" }));
 vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
+vi.mock("../src/components/alert-panel", () => ({ AlertPanel: "AlertPanel" }));
+vi.mock("../src/lib/inbox", () => ({ inbox: {} }));
+vi.mock("@ygo/mobile/notification-parts", () => ({ NotificationsBell: "NotificationsBell" }));
 import Home from "../src/app/index";
 
 function elements(node: unknown): Array<{ type: unknown; props: Record<string, unknown> }> {
@@ -31,13 +34,14 @@ function elements(node: unknown): Array<{ type: unknown; props: Record<string, u
   if (typeof element.type === "function") return elements((element.type as (props: unknown) => unknown)(element.props));
   return [element, ...elements(element.props.children)];
 }
-const links = (state = "live") => {
+const rendered = (state: string) => {
   mock.cursor = 0; mock.hooks = [];
   Home(); // the first render registers the load state
   mock.hooks[0] = { kind: "loaded", application: { state }, liveCheck: null };
   mock.cursor = 0;
-  return elements(Home()).filter((node) => node.type === "Link").map((node) => node.props.href);
+  return elements(Home());
 };
+const links = (state = "live") => rendered(state).filter((node) => node.type === "Link").map((node) => node.props.href);
 
 describe("Home's Void a bill button (#494)", () => {
   beforeEach(() => { mock.role = "owner"; mock.verify.mockClear(); });
@@ -68,5 +72,19 @@ describe("Home's Void a bill button (#494)", () => {
 
   it("never shows it before the shop is Live or Suspended", () => {
     expect(links("approved")).not.toContain("/void-bill");
+  });
+});
+
+describe("Home's bell and S03 (#507)", () => {
+  const shown = (state: string) => rendered(state).map((node) => node.type).filter((type) => type === "NotificationsBell" || type === "AlertPanel");
+
+  it("shows both on a Live or Suspended shop, where orders arrive", () => {
+    expect(shown("live")).toEqual(["NotificationsBell", "AlertPanel"]);
+    expect(shown("suspended")).toEqual(["NotificationsBell", "AlertPanel"]);
+  });
+
+  it("shows neither before the shop is Live", () => {
+    expect(shown("approved")).toEqual([]);
+    expect(shown("submitted")).toEqual([]);
   });
 });
