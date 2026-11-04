@@ -10,7 +10,10 @@
     "./pin-map": "./src/pin-map.tsx",
     "./pack-label": "./src/pack-label.ts",
     "./poller": "./src/poller.ts",
-    "./push": "./src/push.ts"
+    "./push": "./src/push.ts",
+    "./notifications": "./src/notifications.ts",
+    "./notification-parts": "./src/notification-parts.tsx",
+    "./google-services": "./google-services.config.js"
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",

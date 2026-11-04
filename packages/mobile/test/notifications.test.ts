@@ -1,8 +1,9 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { Notification, NotificationsResponse } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createNotifications } from "../src/lib/notifications";
-import { strings } from "../src/strings";
+import { listeners } from "../src/listeners";
+import { createInbox, createNotifications, type NotificationsWords } from "../src/notifications";
+import type { SessionState } from "../src/session";
 
 const row = (n: number, read = false, orderId: string | null = null): Notification => ({
   id: `7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c${String(n).padStart(4, "0")}`, kind: "order_accepted", title: `Order #${1000 + n} accepted`,
@@ -11,6 +12,7 @@ const row = (n: number, read = false, orderId: string | null = null): Notificati
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
 const done = ok(undefined);
 const refused: ApiResult<undefined> = { ok: false, status: 503, code: "UNAVAILABLE" };
+const words = { offline: "offline", errors: { UNAVAILABLE: "unavailable" }, readAllFailed: "not read" } as unknown as NotificationsWords;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function fakeServer() {
@@ -25,7 +27,7 @@ function fakeServer() {
 
 async function loaded(data: NotificationsResponse) {
   const server = fakeServer();
-  const list = createNotifications(server.client);
+  const list = createNotifications(server.client, words);
   list.start();
   server.answer(data);
   await settle();
@@ -35,7 +37,7 @@ async function loaded(data: NotificationsResponse) {
 describe("C22 notifications (#506)", () => {
   it("loads, then shows the rows and lights the bell while any is unread", async () => {
     const server = fakeServer();
-    const list = createNotifications(server.client);
+    const list = createNotifications(server.client, words);
     list.start();
     expect(list.get().status).toBe("loading");
     server.answer({ notifications: [row(2), row(1, true)], unread: true });
@@ -56,11 +58,11 @@ describe("C22 notifications (#506)", () => {
 
   it("fails with the error's words, and Try again reads again", async () => {
     const server = fakeServer();
-    const list = createNotifications(server.client);
+    const list = createNotifications(server.client, words);
     list.start();
     server.reads.shift()?.({ ok: false, status: 503, code: "UNAVAILABLE" });
     await settle();
-    expect(list.get()).toMatchObject({ status: "failed", message: strings.errors.UNAVAILABLE });
+    expect(list.get()).toMatchObject({ status: "failed", message: words.errors.UNAVAILABLE });
     void list.retry();
     server.answer({ notifications: [row(1)], unread: true });
     await settle();
@@ -114,7 +116,7 @@ describe("C22 notifications (#506)", () => {
     const { list, server } = await loaded({ notifications: [row(2), row(1, true)], unread: true });
     server.client.readAllNotifications.mockResolvedValueOnce(refused);
     await list.readAll();
-    expect(list.get()).toMatchObject({ unread: true, message: strings.notifications.readAllFailed });
+    expect(list.get()).toMatchObject({ unread: true, message: words.readAllFailed });
     expect(list.get().notifications?.map((r) => r.read)).toEqual([false, true]);
   });
 
@@ -165,6 +167,29 @@ describe("C22 notifications (#506)", () => {
   it("forgets the last account's rows on reset", async () => {
     const { list } = await loaded({ notifications: [row(1)], unread: true });
     list.reset();
+    expect(list.get()).toMatchObject({ status: "loading", notifications: null, unread: false });
+  });
+});
+
+describe("createInbox (#506, #507)", () => {
+  it("empties the list when another account signs in, and reads again on a push while a screen is in front", async () => {
+    const changed = listeners();
+    const pushes = listeners();
+    const signedIn = (id: string) => ({ status: "signed-in", account: { id } }) as unknown as SessionState;
+    let state = signedIn("asha");
+    const server = fakeServer();
+    const list = createInbox(server.client, words, { get: () => state, subscribe: changed.add }, pushes.add);
+    changed.notify();
+    list.start();
+    server.answer({ notifications: [row(1)], unread: true });
+    await settle();
+    pushes.notify();
+    expect(server.client.notifications).toHaveBeenCalledTimes(2);
+    state = signedIn("asha");
+    changed.notify();
+    expect(list.get().notifications).toHaveLength(1);
+    state = signedIn("ravi");
+    changed.notify();
     expect(list.get()).toMatchObject({ status: "loading", notifications: null, unread: false });
   });
 });

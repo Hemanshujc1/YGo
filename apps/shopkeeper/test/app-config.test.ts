@@ -45,4 +45,14 @@ describe("app.config", () => {
     expect(config).toMatchObject({ name: "YGo Shopkeeper", slug: "ygo-shopkeeper" });
     expect(config.plugins?.slice(0, app.expo.plugins.length)).toEqual(app.expo.plugins);
   });
+
+  it("adds Firebase from GOOGLE_SERVICES_JSON, the time-sensitive entitlement and the alarm tone (#507)", () => {
+    vi.stubEnv("GOOGLE_SERVICES_JSON", "./google-services.json");
+    const config = appConfig({ config: app.expo } as Parameters<typeof appConfig>[0]);
+    expect(config.android?.googleServicesFile).toBe("./google-services.json");
+    expect(config.ios?.entitlements).toMatchObject({ "com.apple.developer.usernotifications.time-sensitive": true });
+    expect(config.plugins).toContainEqual(["expo-notifications", { sounds: ["./assets/sounds/new_order.wav"] }]);
+    vi.stubEnv("GOOGLE_SERVICES_JSON", "");
+    expect(appConfig({ config: app.expo } as Parameters<typeof appConfig>[0]).android).not.toHaveProperty("googleServicesFile");
+  });
 });

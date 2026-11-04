@@ -166,9 +166,10 @@ describe("Expo push sender (#505)", () => {
     const results = await sender.send(pushes);
 
     expect(bodies.map((batch) => batch.length)).toEqual([100, 1]);
-    expect(bodies[0]?.[0]).toEqual({ to: "ExponentPushToken[loud]", title: "Order #1001 accepted", body: "Sai is getting it ready.", data: { notificationId: "n", orderId: "o" },
+    expect(bodies[0]?.[0]).toEqual({ to: "ExponentPushToken[loud]", title: "Order #1001 accepted", body: "Sai is getting it ready.", data: { notificationId: "n", orderId: "o", loud: true },
       channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" });
-    expect(bodies[0]?.[1]).toMatchObject({ sound: "default" });
+    expect(bodies[0]?.[1]).toMatchObject({ sound: "default", data: { notificationId: "n", orderId: "o" } });
+    expect(bodies[0]?.[1]?.data).not.toHaveProperty("loud");
     expect(bodies[0]?.[1]).not.toHaveProperty("channelId");
     expect(results).toHaveLength(101);
     expect(results.slice(0, 3)).toEqual(["sent", "dead", "failed"]);

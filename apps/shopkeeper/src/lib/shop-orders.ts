@@ -57,6 +57,10 @@ export const clockOffset = (serverNow: string, phoneNow: number) => Date.parse(s
 export const secondsLeft = (expiresAt: string, offset: number, phoneNow: number) =>
   Math.max(0, Math.ceil((Date.parse(expiresAt) - (phoneNow + offset)) / 1000));
 
+/** The oldest New order with time left, pinned on S03 (#507): one whose time ran out gives way before the next read. */
+export const waitingOrder = (orders: ShopOrdersResponse | null, offset: number, phoneNow: number) =>
+  orders?.new.find((order) => !order.expiresAt || secondsLeft(order.expiresAt, offset, phoneNow) > 0) ?? null;
+
 /** "7:42". */
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
@@ -73,11 +77,18 @@ function listeners() {
   };
 }
 
-export type ListView = { status: "loading" | "ready" | "failed"; orders: ShopOrdersResponse | null; message: string | null; refreshing: boolean };
+export type ListView = {
+  status: "loading" | "ready" | "failed";
+  orders: ShopOrdersResponse | null;
+  /** ms the server's clock is ahead of the phone's, from the last answer, for the countdown pinned on S03 (#507). */
+  offset: number;
+  message: string | null;
+  refreshing: boolean;
+};
 
-/** S04: reads the three groups now and every `every` ms while started. */
-export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery) {
-  let view: ListView = { status: "loading", orders: null, message: null, refreshing: false };
+/** S04, and the order pinned on S03 (#507): reads the three groups now and every `every` ms while started. */
+export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery, now = Date.now) {
+  let view: ListView = { status: "loading", orders: null, offset: 0, message: null, refreshing: false };
   const { notify, subscribe } = listeners();
   const set = (next: Partial<ListView>) => {
     view = { ...view, ...next };
@@ -92,7 +103,7 @@ export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopO
     else if (!view.orders) set({ status: "loading", message: null });
     const answer = await client.shopOrders().catch(() => "offline" as const);
     if (!latest()) return;
-    if (answer !== "offline" && answer.ok) set({ status: "ready", orders: answer.data, message: null, refreshing: false });
+    if (answer !== "offline" && answer.ok) set({ status: "ready", orders: answer.data, offset: clockOffset(answer.data.now, now()), message: null, refreshing: false });
     else set({ status: view.orders ? "ready" : "failed", message: failure(answer), refreshing: false });
     poller.schedule();
   }

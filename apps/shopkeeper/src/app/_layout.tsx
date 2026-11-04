@@ -4,6 +4,8 @@ import { api, session, supportEmail } from "../api";
 import { StockAccess } from "../components/stock-access";
 import { SignOut } from "../components/sign-out";
 import { removeOldBillPdfs, retryBillPdfClear } from "../lib/bill-pdf-files";
+// At module level, so the tap that launched the app is not missed (#507).
+import "../lib/push";
 import { strings } from "../strings";
 import "../global.css";
 

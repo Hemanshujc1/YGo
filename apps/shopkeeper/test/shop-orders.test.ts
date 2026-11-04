@@ -2,7 +2,7 @@ import type { ApiResult } from "@ygo/api-client";
 import type { ShopOrderResponse, ShopOrdersResponse, ShortLine } from "@ygo/contracts";
 import type { Timers } from "@ygo/mobile/poller";
 import { describe, expect, it } from "vitest";
-import { clock, clockOffset, createShopOrder, createShopOrders, lineLabel, secondsLeft, shortLabel } from "../src/lib/shop-orders";
+import { clock, clockOffset, createShopOrder, createShopOrders, lineLabel, secondsLeft, shortLabel, waitingOrder } from "../src/lib/shop-orders";
 import { strings } from "../src/strings";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
@@ -111,6 +111,14 @@ describe("S04 Orders (#431)", () => {
     expect(orders.get()).toMatchObject({ status: "ready", orders: list, message: words.offline });
     orders.stop();
     expect(pending.size).toBe(0);
+  });
+
+  it("keeps how far the server's clock is ahead, for the countdown pinned on S03 (#507)", async () => {
+    const phoneNow = Date.parse(list.now) - 4_000;
+    const orders = createShopOrders({ shopOrders: async () => ok(list) }, fakeTimers().timers, 15_000, () => phoneNow);
+    orders.start();
+    await settle();
+    expect(orders.get()).toMatchObject({ status: "ready", offset: 4_000 });
   });
 });
 
@@ -301,5 +309,21 @@ describe("S05 New order (#431)", () => {
     reads.shift()?.(ok(order()));
     await settle();
     expect(one.get().order?.status).toBe("accepted");
+  });
+});
+
+describe("S03's pinned order (#507)", () => {
+  const summary = (number: number, expiresAt: string): ShopOrdersResponse["new"][number] => ({
+    id: `${id.slice(0, -4)}${String(number).padStart(4, "0")}`, number, status: "placed", placedAt: "2030-01-01T00:00:00.000Z", expiresAt,
+    itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null },
+  });
+
+  it("pins the oldest New order with time left, and none when there is none", () => {
+    const now = Date.parse(list.now);
+    const orders = { ...list, new: [summary(1, "2030-01-01T00:02:18.000Z"), summary(2, "2030-01-01T00:05:00.000Z")] };
+    expect(waitingOrder(orders, 0, now)?.number).toBe(2);
+    expect(waitingOrder(orders, 0, now - 1_000)?.number).toBe(1);
+    expect(waitingOrder(list, 0, now)).toBeNull();
+    expect(waitingOrder(null, 0, now)).toBeNull();
   });
 });

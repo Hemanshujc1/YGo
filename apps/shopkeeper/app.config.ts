@@ -1,5 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 import googleMapsKeys from "@ygo/mobile/google-maps-keys";
+import googleServices from "@ygo/mobile/google-services";
 import app from "./app.json";
 
 /**
@@ -7,6 +8,10 @@ import app from "./app.json";
  * or the build's environment, never the repo. Without one, a placeholder keeps
  * the map blank, as the Google map stops the app when the key is missing. A
  * release build (YGO_RELEASE_BUILD=1) stops instead, naming the missing key (#315).
+ *
+ * Android gets its push token through Firebase (#507), from the file
+ * `GOOGLE_SERVICES_JSON` names (README, Push). The new-order push is
+ * time-sensitive on an iPhone, which needs its entitlement.
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
@@ -14,7 +19,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: config.name ?? app.expo.name,
     slug: config.slug ?? app.expo.slug,
-    ios: { ...config.ios, usesAppleSignIn: true },
+    ios: {
+      ...config.ios,
+      usesAppleSignIn: true,
+      entitlements: { ...config.ios?.entitlements, "com.apple.developer.usernotifications.time-sensitive": true },
+    },
+    android: { ...config.android, ...googleServices(process.env) },
     plugins: [
       ...(config.plugins ?? []),
       ["react-native-maps", googleMapsKeys(process.env)],

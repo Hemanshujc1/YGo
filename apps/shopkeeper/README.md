@@ -54,6 +54,14 @@ The theme (System, Light or Dark) is chosen at the end of the shop application s
 
 NativeWind classes over `@ygo/tokens` roles only, such as `bg-surface` and `text-muted`. `tailwind.config.js` loads the same `@ygo/tokens/tailwind` plugin as the web apps, which replaces Tailwind's palette and switches to the dark values with the theme in use. `metro.config.js` sets 1rem to 16, as on the web, so the spacing scale matches the design system. Inline `style` is only for values known at runtime, such as safe-area insets.
 
+## Push
+
+A Live or Suspended shop's Home has a bell that opens S41 Notifications, read from the server (#507). The phone registers its Expo push token the same way as the Customer app (`apps/customer/README.md`, Push), with this app's own `EXPO_PUBLIC_EAS_PROJECT_ID` and `GOOGLE_SERVICES_JSON` (the file kept at `apps/shopkeeper/google-services.json`, which git ignores). The system prompt shows once per phone, the first time Home shows a Live or Suspended shop.
+
+A new order arrives on Android's "New orders" channel: the highest importance, vibration, shown on the lock screen, with YGo's own tone `assets/sounds/new_order.wav`. `node scripts/make-alert-tone.mjs` writes the tone; commit the file it makes. Android fixes a channel's sound when the app first creates it, so a changed tone reaches a phone only after the app is reinstalled. On an iPhone the same tone plays, and the push is time-sensitive (an entitlement in `app.config.ts`). While the app is open, only the new-order push makes a sound.
+
+S03 shows on Home when notifications are off or the New orders channel is muted or lowered. Its buttons ask for permission, or open Android's settings page for the app or the channel, and "Test the alert" plays the alarm without an order. `expo-notifications` and `expo-application` are native code, so adding them needs a new development build.
+
 ## Google and Apple sign-in
 
 See [provider setup and device checks](../../docs/operations/social-sign-in.md). Both apps need a new native build after installing these sign-in modules.
