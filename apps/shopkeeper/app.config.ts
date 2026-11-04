@@ -24,7 +24,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       usesAppleSignIn: true,
       entitlements: { ...config.ios?.entitlements, "com.apple.developer.usernotifications.time-sensitive": true },
     },
-    android: { ...config.android, ...googleServices(process.env) },
+    android: {
+      ...config.android,
+      ...googleServices(process.env),
+      permissions: [
+        ...(config.android?.permissions ?? []),
+        "android.permission.USE_FULL_SCREEN_INTENT",
+      ],
+    },
     plugins: [
       ...(config.plugins ?? []),
       ["react-native-maps", googleMapsKeys(process.env)],

@@ -24,12 +24,14 @@ export type ReceiptResult = "ok" | "dead" | "other";
 export interface Push {
   /** An Expo push token. */
   to: string;
-  title: string;
-  body: string;
-  /** What a tap opens (#506, #507). */
-  data: { notificationId: string; orderId: string | null };
+  title?: string;
+  body?: string;
+  /** What a tap opens (#506, #507) or ring payload (#508). */
+  data: Record<string, unknown>;
   /** The new-order alarm (NOT-3): the "new-orders" channel and its tone, which the Shopkeeper app sets up (#507). */
-  loud: boolean;
+  loud?: boolean;
+  /** Android notification tag for identity replacement / floor pushes (#508). */
+  tag?: string;
 }
 
 /** Records what would have been sent. */
@@ -79,12 +81,17 @@ export function createExpoPushSender(
     async send(pushes: Push[]) {
       const results: PushResult[] = [];
       for (let start = 0; start < pushes.length; start += EXPO_BATCH) {
-        const messages = pushes.slice(start, start + EXPO_BATCH).map(({ to, title, body, data, loud }) => ({
-          to, title, body,
+        const messages = pushes.slice(start, start + EXPO_BATCH).map(({ to, title, body, data, loud, tag }) => ({
+          to,
+          ...(title !== undefined ? { title } : {}),
+          ...(body !== undefined ? { body } : {}),
+          ...(tag ? { tag } : {}),
           // `loud` in the data too: the open app reads it to ring for this push only (owner's answer 9 on #507).
-          ...loud
-            ? { data: { ...data, loud: true }, channelId: "new-orders", sound: "new_order.wav", priority: "high", interruptionLevel: "time-sensitive" }
-            : { data, sound: "default" },
+          ...(loud
+            ? { data: { ...data, loud: true }, channelId: "new-orders", sound: "new_order.wav", priority: "high" as const, interruptionLevel: "time-sensitive" as const }
+            : title || body
+              ? { data, sound: "default" as const }
+              : { data, priority: "high" as const }),
         }));
         // A request fails only its own messages, so those already sent are not sent again. Only an "ok" ticket
         // counts as sent: an error, a missing ticket or an answer that can't be read is tried again (NOT-2).

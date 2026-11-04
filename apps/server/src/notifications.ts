@@ -43,6 +43,8 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
 
 /** The new-order alarm rings again this long after placing, while the order still waits (ORD-2, owner's answer 8 on #55). */
 export const RE_RING_SECONDS = 120;
+/** The safety-net floor push goes this long after an unacknowledged ring push (#508). */
+export const FLOOR_SECONDS = 15;
 
 /**
  * Records the notification for an order's move to `to`, with its pushes queued, in the caller's transaction:
@@ -89,20 +91,22 @@ const staffKinds = Object.values(rules).filter((rule) => rule.to === "shop" && r
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of
  * the recipient in that app, a shop recipient is still in the shop in a role that hears this kind, and a new order
- * still waits within its answer time.
+ * still waits within its answer time. An acknowledged ring attempt drops its floor push (#508).
  */
 const stillDue = `EXISTS (SELECT 1 FROM push_tokens t JOIN sessions s ON s.id = t.session_id
     WHERE t.token = q.token AND t.app = n.app AND s.account_id = n.account_id AND s.expires_at > $1)
   AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = o.shop_id
     AND (m.role = 'owner' OR n.kind = ANY($2::text[]))))
-  AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))`;
+  AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))
+  AND NOT (q.floor AND EXISTS (SELECT 1 FROM ring_attempts a WHERE a.id = q.ring_attempt_id AND a.acknowledged_at IS NOT NULL))`;
 
 type Claimed = { id: string; app: string; push: Push };
 
 /**
  * Takes the pushes due by now, one row per phone, and claims them for this run as `claimId`, counting a try.
  * Notifications not yet fanned out become a row for each phone signed in to the recipient's account in that app;
- * rows no longer due, or out of tries, are dropped. Short, and done before any call to Expo, so no lock is held
+ * Android phones receiving a new-order alarm get a ring attempt and a 15 s floor push (#508).
+ * Rows no longer due, or out of tries, are dropped. Short, and done before any call to Expo, so no lock is held
  * while Expo answers.
  */
 async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: string): Promise<Claimed[]> {
@@ -111,11 +115,36 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
       `WITH fresh AS (
          DELETE FROM push_queue WHERE id IN (SELECT id FROM push_queue WHERE token IS NULL AND send_after <= $1
            ORDER BY send_after, id LIMIT $2 FOR UPDATE SKIP LOCKED)
-         RETURNING notification_id, send_after)
-       INSERT INTO push_queue (notification_id, token, send_after)
-       SELECT f.notification_id, t.token, f.send_after FROM fresh f JOIN notifications n ON n.id = f.notification_id
-         JOIN push_tokens t ON t.app = n.app JOIN sessions s ON s.id = t.session_id AND s.account_id = n.account_id AND s.expires_at > $1`,
-      [now, batch]);
+         RETURNING notification_id, send_after),
+       candidates AS (
+         SELECT f.notification_id, f.send_after, n.order_id, n.kind, t.token, t.platform, gen_random_uuid() AS ring_id
+         FROM fresh f
+         JOIN notifications n ON n.id = f.notification_id
+         JOIN push_tokens t ON t.app = n.app
+         JOIN sessions s ON s.id = t.session_id AND s.account_id = n.account_id AND s.expires_at > $1),
+       android_rings AS (
+         INSERT INTO ring_attempts (id, order_id, attempt, token, created_at)
+         SELECT c.ring_id, c.order_id, CASE WHEN c.send_after <= n.created_at THEN 1 ELSE 2 END, c.token, $1
+         FROM candidates c
+         JOIN notifications n ON n.id = c.notification_id
+         WHERE c.platform = 'android' AND c.kind = 'order_placed' AND c.order_id IS NOT NULL
+         RETURNING id),
+       android_pushes AS (
+         SELECT c.notification_id, c.token,
+           unnest(ARRAY[c.send_after, c.send_after + make_interval(secs => $3)]) AS send_after,
+           c.ring_id AS ring_attempt_id,
+           unnest(ARRAY[false, true]) AS floor
+         FROM candidates c
+         WHERE c.platform = 'android' AND c.kind = 'order_placed' AND c.order_id IS NOT NULL),
+       standard_pushes AS (
+         SELECT c.notification_id, c.token, c.send_after, NULL::uuid AS ring_attempt_id, false AS floor
+         FROM candidates c
+         WHERE c.platform IS DISTINCT FROM 'android' OR c.kind <> 'order_placed' OR c.order_id IS NULL)
+       INSERT INTO push_queue (notification_id, token, send_after, ring_attempt_id, floor)
+       SELECT notification_id, token, send_after, ring_attempt_id, floor FROM android_pushes
+       UNION ALL
+       SELECT notification_id, token, send_after, ring_attempt_id, floor FROM standard_pushes`,
+      [now, batch, FLOOR_SECONDS]);
     const { rows } = await client.query<{ id: string; due: boolean }>(
       `SELECT q.id, q.tries < ${MAX_TRIES} AND ${stillDue} AS due
        FROM push_queue q JOIN notifications n ON n.id = q.notification_id LEFT JOIN orders o ON o.id = n.order_id
@@ -125,8 +154,18 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
     const { rows: claimed } = await client.query<Claimed>(
       `UPDATE push_queue q SET tries = q.tries + 1, claim_id = $4, claimed_until = $2::timestamptz + make_interval(secs => $3)
        FROM notifications n WHERE q.id = ANY($1::bigint[]) AND n.id = q.notification_id
-       RETURNING q.id, n.app, json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
-         'data', json_build_object('notificationId', n.id, 'orderId', n.order_id)) AS push`,
+       RETURNING q.id, n.app,
+         CASE
+           WHEN q.ring_attempt_id IS NOT NULL AND NOT q.floor THEN
+             json_build_object('to', q.token, 'loud', true, 'tag', 'order-' || n.order_id::text,
+               'data', json_build_object('notificationId', n.id, 'orderId', n.order_id, 'ringAttemptId', q.ring_attempt_id, 'kind', n.kind, 'loud', true))
+           WHEN q.ring_attempt_id IS NOT NULL AND q.floor THEN
+             json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud, 'tag', 'order-' || n.order_id::text,
+               'data', json_build_object('notificationId', n.id, 'orderId', n.order_id, 'ringAttemptId', q.ring_attempt_id, 'floor', true))
+           ELSE
+             json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
+               'data', json_build_object('notificationId', n.id, 'orderId', n.order_id))
+         END AS push`,
       [rows.filter((row) => row.due).map((row) => row.id), now, CLAIM_SECONDS, claimId]);
     await client.query("COMMIT");
     return claimed;

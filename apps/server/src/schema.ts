@@ -782,10 +782,26 @@ export const pushTokens = pgTable("push_tokens", {
   token: text("token").primaryKey(),
   sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
   app: text("app").notNull(),
+  platform: text("platform"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 }, (table) => [
   index("push_tokens_session_id_idx").on(table.sessionId),
   check("push_tokens_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
+  check("push_tokens_platform_valid", sql`${table.platform} IS NULL OR ${table.platform} IN ('android', 'ios')`),
+]);
+
+// A new-order ring attempt on Android (#508): attempt 1 at placed, attempt 2 at placed + 120s.
+// A phone that catches the data-only push displays S01/S02 and sends an acknowledgement;
+// 15 s after each ring the floor push goes to unacknowledged phones while the order still waits.
+export const ringAttempts = pgTable("ring_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  attempt: integer("attempt").notNull(),
+  token: text("token").references(() => pushTokens.token, { onDelete: "cascade" }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("ring_attempts_order_id_idx").on(table.orderId),
 ]);
 
 // A push waiting to go (#505), written with its notification so a crash before sending loses nothing. A row with
@@ -802,9 +818,12 @@ export const pushQueue = pgTable("push_queue", {
   tries: integer("tries").notNull().default(0),
   claimId: uuid("claim_id"),
   claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+  ringAttemptId: uuid("ring_attempt_id").references(() => ringAttempts.id, { onDelete: "cascade" }),
+  floor: boolean("floor").notNull().default(false),
 }, (table) => [
   index("push_queue_send_after_idx").on(table.sendAfter),
   index("push_queue_token_idx").on(table.token),
+  index("push_queue_ring_attempt_id_idx").on(table.ringAttemptId),
 ]);
 
 // The ticket Expo gave a sent push (#509), kept to read its receipt about 15 minutes later: Expo often reports

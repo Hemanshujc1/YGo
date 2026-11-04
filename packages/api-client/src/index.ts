@@ -507,6 +507,11 @@ export function createApiClient({
       return empty(await signedIn("POST", "/v1/me/notifications/read-all"));
     },
 
+    /** `POST /v1/me/ring-attempts/:id/ack`: acknowledges receipt of a new-order ring attempt on Android (#508). */
+    async ackRingAttempt(id: string): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("POST", `/v1/me/ring-attempts/${encodeURIComponent(id)}/ack`));
+    },
+
     /** `GET /v1/me/shop-orders`: S04, the shop's New, Accepted and Done today orders (#425). */
     async shopOrders(): Promise<ApiResult<ShopOrdersResponse>> {
       return result(await signedIn("GET", "/v1/me/shop-orders"), ShopOrdersResponse);

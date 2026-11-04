@@ -75,7 +75,10 @@ export function createPush({ api, session, projectId, channelName, newOrdersName
   let running: Promise<unknown> = Promise.resolve();
   const register = (ask: Ask) => {
     const next = running.then(() => Promise.race([
-      registerPush(device, projectId, async (token) => (await api.savePushToken({ token })).ok, ask),
+      registerPush(device, projectId, async (token) => (await api.savePushToken({
+        token,
+        platform: Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : undefined,
+      })).ok, ask),
       new Promise((resolve) => setTimeout(resolve, REGISTER_LIMIT_MS)),
     ]));
     running = next.catch(() => undefined);

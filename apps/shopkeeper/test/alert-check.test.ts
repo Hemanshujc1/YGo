@@ -12,6 +12,19 @@ describe("S03 alert check (#507)", () => {
     expect(limited(alertCheck(allowed, { importance: 6, sound: "custom" }, android))).toBe(false);
   });
 
+  it("shows when only the lock-screen permission is off on Android, and not when it is on or unknown", () => {
+    const off = alertCheck(allowed, loud, android, false);
+    expect(off).toMatchObject({ notifications: true, ringing: true, fullScreen: false });
+    expect(limited(off)).toBe(true);
+    expect(limited(alertCheck(allowed, loud, android, true))).toBe(false);
+    expect(limited(alertCheck(allowed, loud, android))).toBe(false);
+  });
+
+  it("does not show on an iPhone, where the lock-screen permission does not exist", () => {
+    expect(limited(alertCheck(allowed, { importance: 0, sound: null }, ios, undefined))).toBe(false);
+    expect(limited(alertCheck(allowed, null, ios, false))).toBe(false);
+  });
+
   it("shows when notifications are off", () => {
     const check = alertCheck({ granted: false, canAskAgain: true }, loud, android);
     expect(check).toEqual({ notifications: false, ringing: true, canAsk: true });
@@ -46,5 +59,11 @@ describe("S03 alert check (#507)", () => {
     const off = alertCheck({ granted: false, canAskAgain: true }, loud, { os: "android", version: 32 });
     expect(off.canAsk).toBe(false);
     expect(fixFor("notifications", off, android)).toBe("app-settings");
+  });
+
+  it("detects fullScreen on Android (#508)", () => {
+    expect(alertCheck(allowed, loud, android, true).fullScreen).toBe(true);
+    expect(alertCheck(allowed, loud, android, false).fullScreen).toBe(false);
+    expect(alertCheck(allowed, loud, ios, true).fullScreen).toBeUndefined();
   });
 });
