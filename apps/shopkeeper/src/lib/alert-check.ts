@@ -34,8 +34,8 @@ export function alertCheck(permission: Permission, channel: Channel, phone: Phon
   };
 }
 
-/** S03 shows only when something would keep a new order from ringing. */
-export const limited = (check: AlertCheck) => !check.notifications || !check.ringing;
+/** S03 shows when something would keep a new order from ringing, or Android would not show it over the lock screen (#508). */
+export const limited = (check: AlertCheck) => !check.notifications || !check.ringing || check.fullScreen === false;
 
 export type Fix = "ask" | "app-settings" | "channel-settings";
 

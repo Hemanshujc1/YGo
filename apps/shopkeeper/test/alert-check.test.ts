@@ -12,6 +12,14 @@ describe("S03 alert check (#507)", () => {
     expect(limited(alertCheck(allowed, { importance: 6, sound: "custom" }, android))).toBe(false);
   });
 
+  it("shows when only the lock-screen permission is off on Android, and not when it is on or unknown", () => {
+    const off = alertCheck(allowed, loud, android, false);
+    expect(off).toMatchObject({ notifications: true, ringing: true, fullScreen: false });
+    expect(limited(off)).toBe(true);
+    expect(limited(alertCheck(allowed, loud, android, true))).toBe(false);
+    expect(limited(alertCheck(allowed, loud, android))).toBe(false);
+  });
+
   it("shows when notifications are off", () => {
     const check = alertCheck({ granted: false, canAskAgain: true }, loud, android);
     expect(check).toEqual({ notifications: false, ringing: true, canAsk: true });
