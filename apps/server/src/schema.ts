@@ -610,7 +610,12 @@ export const jobRuns = pgTable(
     status: text("status", { enum: ["running", "ok", "failed"] }).notNull(),
     errorText: varchar("error_text", { length: 200 }),
   },
-  (table) => [index("job_runs_job_name_started_at_idx").on(table.jobName, table.startedAt)],
+  // The checker (job-check.ts) reads the latest finished run and the latest ok run of a job.
+  (table) => [
+    index("job_runs_job_name_finished_at_idx").on(table.jobName, table.finishedAt.desc().nullsFirst()),
+    index("job_runs_ok_job_name_finished_at_idx").on(table.jobName, table.finishedAt.desc().nullsFirst())
+      .where(sql`${table.status} = 'ok'`),
+  ],
 );
 
 export const emailCodeSends = pgTable(
