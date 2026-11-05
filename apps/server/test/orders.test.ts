@@ -779,6 +779,29 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await database.pool.query("SELECT id FROM delivery_photo_uploads WHERE id = $1", [uploadId])).rowCount).toBe(0);
   });
 
+  it("leaves an expired upload alone while a delivery holds its row lock (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>(
+      "SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    const uploadId = randomUUID();
+    await database.pool.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at)
+      VALUES ($1, $2, $3, 100, $4)`, [uploadId, orderId, member?.accountId, new Date(clock.now().getTime() - 1)]);
+    const holder = await database.pool.connect();
+    const deleted: string[] = [];
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1 FOR UPDATE", [uploadId]);
+      await cleanupDeliveryUploads(database, clock, { deleteUpload: async (_order: string, _account: string, id: string) => { deleted.push(id); },
+        deleteStagedProof: async () => undefined } as unknown as DeliveryPhotoStorage);
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
+    expect(deleted).toEqual([]);
+    expect((await database.pool.query("SELECT id FROM delivery_photo_uploads WHERE id = $1", [uploadId])).rowCount).toBe(1);
+  });
+
   it("preserves a staged proof referenced by an order while cleaning the expired upload", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const orderId = await readyAtDoor(shopId, dal, home, owner);
@@ -843,6 +866,49 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       await database.pool.query(`DROP TRIGGER ${functionName} ON orders`);
       await database.pool.query(`DROP FUNCTION ${functionName}()`);
     }
+  });
+
+  it("refuses a proof exception until a call attempt is recorded, then allows it with no wait (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const upload = await photo(orderId, owner);
+    const payload = { reason: "customer_phone_unavailable", payment: "cash", photoUploadId: upload.id };
+    const refused = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/proof-exception`, headers: owner, payload });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: { code: "PROOF_EXCEPTION_CALL_REQUIRED" } });
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/call-attempt`, headers: owner })).statusCode).toBe(200);
+    const done = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/proof-exception`, headers: owner, payload });
+    expect(done.statusCode).toBe(200);
+    expect(done.json()).toMatchObject({ status: "delivered" });
+  });
+
+  it("makes a code for an order accepted before codes existed instead of failing, and counts no attempt (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner, true);
+    await database.pool.query("UPDATE orders SET items_checked_at = $2 WHERE id = $1", [orderId, new Date("2030-01-01T00:00:00.000Z")]);
+    const upload = await photo(orderId, owner);
+    const first = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+      payload: { handoverCode: "0000", payment: "cash", photoUploadId: upload.id } });
+    expect(first.statusCode).toBe(400);
+    expect(first.json()).toEqual({ error: { code: "HANDOVER_CODE_WRONG" } });
+    expect((await database.pool.query("SELECT handover_code_hash IS NOT NULL AS made, handover_code_attempts AS attempts FROM orders WHERE id = $1", [orderId])).rows)
+      .toEqual([{ made: true, attempts: 0 }]);
+    const code = (await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json().handoverCode as string;
+    expect(code).toMatch(/^\d{4}$/);
+    const second = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+      payload: { handoverCode: code, payment: "cash", photoUploadId: upload.id } });
+    expect(second.statusCode).toBe(200);
+  });
+
+  it("holds at most five unexpired photo uploads per order (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    for (let count = 0; count < 5; count += 1) await photo(orderId, owner);
+    const sixth = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivery-photo-upload`, headers: owner,
+      payload: { contentType: "image/jpeg", byteLength: 100 } });
+    expect(sixth.statusCode).toBe(400);
+    expect(sixth.json()).toEqual({ error: { code: "DELIVERY_PHOTO_INVALID" } });
   });
 });
 

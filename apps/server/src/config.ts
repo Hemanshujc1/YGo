@@ -94,3 +94,14 @@ export function loadOrderTiming(env: NodeJS.ProcessEnv = process.env): { reRingS
   const timing = OrderTimingEnv.parse(env);
   return { reRingSeconds: timing.ORDER_REALERT_SECONDS, expireSeconds: timing.ORDER_EXPIRE_SECONDS };
 }
+
+const DeliveryPhotoEnv = z.object({
+  VISIT_PHOTO_BUCKET: BaseEnv.shape.VISIT_PHOTO_BUCKET,
+  S3_REGION: BaseEnv.shape.S3_REGION,
+  S3_ENDPOINT: BaseEnv.shape.S3_ENDPOINT,
+});
+
+/** The private photo bucket alone, for the session cleanup job, which reads no other setting. */
+export function loadDeliveryPhotoSettings(env: NodeJS.ProcessEnv = process.env) {
+  return DeliveryPhotoEnv.parse(env);
+}

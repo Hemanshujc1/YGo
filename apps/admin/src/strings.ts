@@ -625,6 +625,7 @@ export const strings = {
     DELIVERY_PHOTO_INVALID: "The delivery proof photo is invalid.",
     ITEM_CHECK_WAIT: "The customer needs time to check the items.",
     DELIVERY_FAILURE_CALL_REQUIRED: "A call attempt is required before marking delivery failed.",
+    PROOF_EXCEPTION_CALL_REQUIRED: "A call attempt is required before recording a proof exception.",
     DELIVERY_FAILURE_WAIT: "The delivery failure wait has not elapsed.",
     ORDER_EXPIRED: "This order expired before the shop answered it.",
     NOT_ENOUGH_STOCK: "The shop doesn't have enough stock for this order.",

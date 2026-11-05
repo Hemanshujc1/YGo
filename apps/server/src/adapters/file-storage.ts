@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createReadStream } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pathToFileURL } from "node:url";
@@ -34,7 +34,7 @@ export function createLocalFileStorage(root: string): FileStorage {
     uploadUrl: url, downloadUrl: url,
     read: (key, maxBytes) => readBounded(createReadStream(resolve(key)), maxBytes),
     async delete(key) {
-      try { await (await import("node:fs/promises")).unlink(resolve(key)); }
+      try { await unlink(resolve(key)); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     },
     async write(key, source) {
