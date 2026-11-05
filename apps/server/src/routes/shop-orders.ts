@@ -250,10 +250,11 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
   // while storage is slow. A photo left behind when the second one refuses is removed with its upload row.
   const savePhoto = async (orderId: string, accountId: string, uploadId: string, byteLength: number) => {
     if (!photos) return "UNAVAILABLE" as const;
-    // The save must end well inside the 5-minute lease, so cleanup never meets a photo that is still being processed.
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("photo save timed out")), photoSaveTimeoutMs); });
-    try { return await Promise.race([photos.save(orderId, accountId, uploadId, byteLength), timeout]); }
+    // The save is stopped through the signal and awaited, so when this returns nothing of it is still running
+    // and cleanup, which waits for the 5-minute lease, never meets a photo being processed.
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), photoSaveTimeoutMs);
+    try { return await photos.save(orderId, accountId, uploadId, byteLength, stop.signal); }
     catch (error) {
       if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
       return "UNAVAILABLE" as const;

@@ -13,8 +13,9 @@ import { pathToFileURL } from "node:url";
 export interface FileStorage {
   uploadUrl(key: string, contentType: string, options?: { byteLength?: number; expiresIn?: number }): Promise<string>;
   downloadUrl(key: string, options?: { expiresIn?: number; cacheControl?: string }): Promise<string>;
-  read(key: string, maxBytes: number): Promise<Buffer>;
-  write(key: string, source: Buffer, contentType: string): Promise<void>;
+  /** The signal stops the transfer: the request is aborted and the stream destroyed. */
+  read(key: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer>;
+  write(key: string, source: Buffer, contentType: string, signal?: AbortSignal): Promise<void>;
   delete(key: string): Promise<void>;
 }
 
@@ -32,15 +33,16 @@ export function createLocalFileStorage(root: string): FileStorage {
   const url = async (key: string) => pathToFileURL(resolve(key)).href;
   return {
     uploadUrl: url, downloadUrl: url,
-    read: (key, maxBytes) => readBounded(createReadStream(resolve(key)), maxBytes),
+    read: (key, maxBytes, signal) => readBounded(createReadStream(resolve(key), { signal }), maxBytes, signal),
     async delete(key) {
       try { await unlink(resolve(key)); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     },
-    async write(key, source) {
+    async write(key, source, _contentType, signal) {
       const file = resolve(key);
+      signal?.throwIfAborted();
       await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, source);
+      await writeFile(file, source, { signal });
     },
   };
 }
@@ -71,37 +73,43 @@ export function createS3FileStorage(options: { bucket: string; region: string; e
         Bucket: options.bucket, Key: key, ResponseCacheControl: signing.cacheControl,
       }), { expiresIn: signing.expiresIn ?? 300 });
     },
-    async read(key, maxBytes) {
-      const object = await client.send(new GetObjectCommand({ Bucket: options.bucket, Key: key }));
+    async read(key, maxBytes, signal) {
+      const object = await client.send(new GetObjectCommand({ Bucket: options.bucket, Key: key }), { abortSignal: signal });
       if (!object.Body) throw new Error("Stored file has no body");
       const stream = object.Body as AsyncIterable<Uint8Array> & { destroy(): void };
       if (object.ContentLength !== undefined && object.ContentLength > maxBytes) {
         stream.destroy();
         throw new FileTooLargeError();
       }
-      return readBounded(stream, maxBytes);
+      return readBounded(stream, maxBytes, signal);
     },
-    async write(key, source, contentType) {
+    async write(key, source, contentType, signal) {
       await client.send(new PutObjectCommand({
         Bucket: options.bucket, Key: key, Body: source,
         ContentType: contentType, CacheControl: "private, no-store",
-      }));
+      }), { abortSignal: signal });
     },
     async delete(key) { await client.send(new DeleteObjectCommand({ Bucket: options.bucket, Key: key })); },
   };
 }
 
-async function readBounded(stream: AsyncIterable<Uint8Array> & { destroy(): void }, maxBytes: number): Promise<Buffer> {
+async function readBounded(stream: AsyncIterable<Uint8Array> & { destroy(): void }, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let length = 0;
+  const stop = () => stream.destroy();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
+    signal?.throwIfAborted();
     for await (const chunk of stream) {
+      signal?.throwIfAborted();
       length += chunk.byteLength;
       if (length > maxBytes) throw new FileTooLargeError();
       chunks.push(Buffer.from(chunk));
     }
+    signal?.throwIfAborted();
     return Buffer.concat(chunks);
   } finally {
+    signal?.removeEventListener("abort", stop);
     stream.destroy();
   }
 }

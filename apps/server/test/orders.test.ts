@@ -863,7 +863,11 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
     const upload = await photo(orderId, owner);
     const save = deliveryPhotos.save;
-    deliveryPhotos.save = () => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 2000));
+    let stoppedBySignal = false;
+    deliveryPhotos.save = (_o: string, _a: string, _id: string, _n: number, signal?: AbortSignal) => new Promise<string>((resolve, reject) => {
+      const late = setTimeout(() => resolve("late"), 2000);
+      signal?.addEventListener("abort", () => { stoppedBySignal = true; clearTimeout(late); reject(signal.reason); });
+    });
     try {
       const started = Date.now();
       const complete = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
@@ -871,6 +875,7 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       expect(Date.now() - started).toBeLessThan(1500);
       expect(complete.statusCode).toBe(503);
       expect(complete.json()).toEqual({ error: { code: "UNAVAILABLE" } });
+      expect(stoppedBySignal).toBe(true);
     } finally { deliveryPhotos.save = save; }
     expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status).toBe("arrived");
     // The upload is still leased, so cleanup leaves it alone even once it has expired.
