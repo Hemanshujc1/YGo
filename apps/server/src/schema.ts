@@ -227,6 +227,7 @@ export const shopMembers = pgTable("shop_members", {
   accountId: uuid("account_id").primaryKey().references(() => accounts.id),
   shopId: uuid("shop_id").notNull().references(() => shops.id),
   role: text("role").notNull(),
+  canDeliver: boolean("can_deliver").notNull().default(false),
 }, (table) => [
   check("shop_members_role_valid", sql`${table.role} IN ('owner', 'staff')`),
   index("shop_members_shop_id_idx").on(table.shopId),
@@ -681,12 +682,28 @@ export const orders = pgTable("orders", {
   rateCardVersion: bigint("rate_card_version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version),
   // The pricing engine's whole result: commission, shares and the floor, which the Customer never sees.
   quote: jsonb("quote").notNull(),
+  delivererId: uuid("deliverer_id").references(() => accounts.id),
+  handoverCodeHash: text("handover_code_hash"),
+  handoverCodeSalt: text("handover_code_salt"),
+  handoverCodeCiphertext: text("handover_code_ciphertext"),
+  handoverCodeAttempts: integer("handover_code_attempts").notNull().default(0),
+  handoverCodeBlockedUntil: timestamp("handover_code_blocked_until", { withTimezone: true }),
+  itemsCheckedAt: timestamp("items_checked_at", { withTimezone: true }),
+  deliveryPhotoKey: text("delivery_photo_key"),
+  deliveryPhotoExpiresAt: timestamp("delivery_photo_expires_at", { withTimezone: true }),
+  deliveryPayment: text("delivery_payment"),
+  proofException: boolean("proof_exception").notNull().default(false),
+  proofExceptionReason: text("proof_exception_reason"),
+  failedDeliveryReason: text("failed_delivery_reason"),
+  deliveryCallAttemptAt: timestamp("delivery_call_attempt_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("orders_number_idx").on(table.number),
   index("orders_account_id_placed_at_idx").on(table.accountId, table.placedAt.desc()),
   index("orders_shop_id_status_idx").on(table.shopId, table.status),
   check("orders_status_valid", sql`${table.status} IN (${orderStatuses})`),
   check("orders_address_label_valid", sql`${table.addressLabel} IN ('home', 'work', 'other')`),
+  check("orders_handover_code_pair", sql`(${table.handoverCodeHash} IS NULL) = (${table.handoverCodeSalt} IS NULL) AND (${table.handoverCodeHash} IS NULL) = (${table.handoverCodeCiphertext} IS NULL)`),
+  check("orders_delivery_payment_valid", sql`${table.deliveryPayment} IS NULL OR ${table.deliveryPayment} IN ('cash', 'upi')`),
 ]);
 
 // A line as it was priced at placement. `stock_quantity` is what it takes from the listing's stock,
@@ -729,6 +746,18 @@ export const orderStatusHistory = pgTable("order_status_history", {
   check("order_status_history_role_valid", sql`${table.actorRole} IN ('customer', 'owner', 'staff', 'system')`),
   check("order_status_history_actor_valid", sql`(${table.actorRole} = 'system') = (${table.actorId} IS NULL)`),
   check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
+]);
+
+export const deliveryPhotoUploads = pgTable("delivery_photo_uploads", {
+  id: uuid("id").primaryKey(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  byteLength: integer("byte_length").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("delivery_photo_uploads_order_id_idx").on(table.orderId),
+  index("delivery_photo_uploads_expires_at_idx").on(table.expiresAt),
+  check("delivery_photo_uploads_byte_length_valid", sql`${table.byteLength} BETWEEN 1 AND 5000000`),
 ]);
 
 export const syncDevices = pgTable("sync_devices", {

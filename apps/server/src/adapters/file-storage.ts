@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createReadStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pathToFileURL } from "node:url";
 
@@ -15,6 +15,7 @@ export interface FileStorage {
   downloadUrl(key: string, options?: { expiresIn?: number; cacheControl?: string }): Promise<string>;
   read(key: string, maxBytes: number): Promise<Buffer>;
   write(key: string, source: Buffer, contentType: string): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 /**
@@ -32,6 +33,10 @@ export function createLocalFileStorage(root: string): FileStorage {
   return {
     uploadUrl: url, downloadUrl: url,
     read: (key, maxBytes) => readBounded(createReadStream(resolve(key)), maxBytes),
+    async delete(key) {
+      try { await (await import("node:fs/promises")).unlink(resolve(key)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    },
     async write(key, source) {
       const file = resolve(key);
       await mkdir(path.dirname(file), { recursive: true });
@@ -82,6 +87,7 @@ export function createS3FileStorage(options: { bucket: string; region: string; e
         ContentType: contentType, CacheControl: "private, no-store",
       }));
     },
+    async delete(key) { await client.send(new DeleteObjectCommand({ Bucket: options.bucket, Key: key })); },
   };
 }
 

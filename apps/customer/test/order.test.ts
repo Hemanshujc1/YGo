@@ -14,6 +14,7 @@ const order = (status: OrderStatus = "placed"): OrderResponse => ({
   address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
   productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
+  handoverCode: null, itemsCheckedAt: null,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
@@ -49,11 +50,13 @@ function fakeTimers() {
 function fakeServer() {
   const reads: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const cancels: Array<(answer: ApiResult<OrderResponse>) => void> = [];
+  const itemChecks: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const client = {
     order: () => new Promise<ApiResult<OrderResponse>>((resolve) => reads.push(resolve)),
     cancelOrder: () => new Promise<ApiResult<OrderResponse>>((resolve) => cancels.push(resolve)),
+    confirmOrderItems: () => new Promise<ApiResult<OrderResponse>>((resolve) => itemChecks.push(resolve)),
   };
-  return { client, reads, cancels };
+  return { client, reads, cancels, itemChecks };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -96,6 +99,16 @@ describe("order statuses (design system section 6)", () => {
 });
 
 describe("C09/C19 order (#427)", () => {
+  it("confirms the customer's item check before exposing the handover code", async () => {
+    const server = fakeServer();
+    const store = createOrder(server.client, id, order("arrived"), fakeTimers().timers);
+    const checking = store.confirmItems();
+    expect(store.get().confirmingItems).toBe(true);
+    server.itemChecks.shift()?.(ok({ ...order("arrived"), handoverCode: "0427", itemsCheckedAt: "2030-01-01T00:02:18.000Z" }));
+    await checking;
+    expect(store.get()).toMatchObject({ confirmingItems: false, order: { handoverCode: "0427", itemsCheckedAt: "2030-01-01T00:02:18.000Z" } });
+  });
+
   it("opens on the placed order, then reads it every 10 s while the screen is in front", async () => {
     const server = fakeServer();
     const clock = fakeTimers();

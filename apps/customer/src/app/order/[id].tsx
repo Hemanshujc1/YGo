@@ -142,6 +142,24 @@ export default function OrderScreen() {
         )}
         {shown && <Detail order={shown} placed={placed === "1"} />}
 
+        {shown?.status === "arrived" && (
+          <View className="items-center gap-3 rounded-card border border-primary bg-surface p-5">
+            {shown.handoverCode ? (
+              <>
+                <Text className="text-body font-semibold text-text">{words.handoverCode}</Text>
+                <Text selectable accessibilityRole="text" className="text-display font-bold tabular-nums tracking-widest text-primary">{shown.handoverCode}</Text>
+              </>
+            ) : (
+              <>
+                <Text className="text-body text-text">{words.itemCheck}</Text>
+                <Button label={view.confirmingItems ? words.checkingItems : words.itemsOk} busy={view.confirmingItems} onPress={() => void order.confirmItems()} />
+                {view.notice && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{view.notice}</Text>}
+                <Text className="text-secondary text-muted">{words.codeSoon}</Text>
+              </>
+            )}
+          </View>
+        )}
+
         {phone !== undefined && (
           <View className="gap-2.5">
             <CallShop phone={phone} />

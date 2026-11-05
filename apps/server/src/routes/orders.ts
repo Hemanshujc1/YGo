@@ -6,6 +6,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
+import { createHandoverCode, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, revealHandoverCode } from "../delivery";
 import { moveOrder, recordStatus } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -38,13 +39,35 @@ export const answerExpired = (o: string, now: string) =>
   `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${orderTiming.expireSeconds}) <= ${now}::timestamptz)`;
 
 /** C09 and C19: one of the Customer's orders as it was frozen. */
-async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date): Promise<OrderResponse | undefined> {
-  const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt"> & { placedAt: Date }>(
-    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, ${frozenOrder("o")},
+async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, secret: string): Promise<OrderResponse | undefined> {
+  const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null }>(
+    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", o.items_checked_at AS "itemsCheckedAt",
+        o.handover_code_ciphertext AS "handoverCodeCiphertext", ${shopOf("s")} AS shop, ${frozenOrder("o")},
         ${answerExpired("o", "$3")} AS "answerExpired"
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
-  return row && { ...row, placedAt: row.placedAt.toISOString() };
+  if (!row) return undefined;
+  // Existing active orders from before DLV-2's migration have no saved code. Create one atomically
+  // on first arrival read so an in-flight delivery can still be completed after deployment.
+  if (row.status === "arrived" && !row.handoverCodeCiphertext) {
+    const generated = createHandoverCode(secret);
+    const { rows: [saved] } = await client.query<{ ciphertext: string }>(
+      `UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4
+       WHERE id = $1 AND status = 'arrived' AND handover_code_hash IS NULL RETURNING handover_code_ciphertext AS ciphertext`,
+      [orderId, generated.hash, generated.salt, generated.ciphertext]);
+    if (saved) row.handoverCodeCiphertext = saved.ciphertext;
+    else {
+      const { rows: [current] } = await client.query<{ ciphertext: string | null }>("SELECT handover_code_ciphertext AS ciphertext FROM orders WHERE id = $1", [orderId]);
+      row.handoverCodeCiphertext = current?.ciphertext ?? null;
+    }
+  }
+  const mayReveal = row.status === "arrived" && (row.itemsCheckedAt !== null || now.getTime() >= row.statusChangedAt.getTime() + ITEMS_CHECK_SECONDS * 1000);
+  const { statusChangedAt, handoverCodeCiphertext, ...response } = row;
+  void statusChangedAt;
+  return {
+    ...response, placedAt: row.placedAt.toISOString(), itemsCheckedAt: row.itemsCheckedAt?.toISOString() ?? null,
+    handoverCode: mayReveal && handoverCodeCiphertext ? revealHandoverCode(secret, handoverCodeCiphertext) : null,
+  };
 }
 
 /** C18 shows this many past orders, with no paging yet (owner's answer 2 on #426). */
@@ -125,7 +148,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       return { id: order.id };
     });
     if (placed === "CHANGED") return changed();
-    return reply.code(201).send(await orderView(pool, placed.id, who.accountId, clock.now()));
+    return reply.code(201).send(await orderView(pool, placed.id, who.accountId, clock.now(), secret));
   });
 
   // C18 (#426): the Customer's own orders, active ones first.
@@ -151,8 +174,47 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
   app.get("/v1/orders/:id", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const order = await orderView(pool, (request.params as OrderParams).id, who.accountId, clock.now());
+    const order = await orderView(pool, (request.params as OrderParams).id, who.accountId, clock.now(), secret);
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
+  });
+
+  app.post("/v1/orders/:id/items-ok", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus }>(
+        "SELECT status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
+      await client.query("UPDATE orders SET items_checked_at = COALESCE(items_checked_at, $2) WHERE id = $1", [id, clock.now()]);
+      await client.query("COMMIT");
+      return "OK" as const;
+    });
+    if (result !== "OK") return reply.code(result === "NOT_FOUND" ? 404 : 409).send({ error: { code: result } });
+    return orderView(pool, id, who.accountId, clock.now(), secret);
+  });
+
+  // A Customer who has checked the items may rotate a permanently locked code.
+  app.post("/v1/orders/:id/handover-code/recover", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus; itemsCheckedAt: Date | null; attempts: number }>(
+        `SELECT status, items_checked_at AS "itemsCheckedAt", handover_code_attempts AS attempts
+         FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      if (order.status !== "arrived" || !order.itemsCheckedAt || order.attempts < HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
+      const generated = createHandoverCode(secret);
+      await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4,
+        handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1`, [id, generated.hash, generated.salt, generated.ciphertext]);
+      await client.query("COMMIT");
+      return "OK" as const;
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
+    if (result === "HANDOVER_CODE_LOCKED") return reply.code(409).send({ error: { code: result } });
+    return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 
   // Cancel on C09/C19: free and with no reason while the shop hasn't answered (ORD-5).
@@ -174,6 +236,6 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       return "MOVED";
     });
     if (moved !== "MOVED") return reply.code(moved === "NOT_FOUND" ? 404 : 409).send({ error: { code: moved } });
-    return orderView(pool, id, who.accountId, clock.now());
+    return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 }

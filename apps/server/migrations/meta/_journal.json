@@ -358,6 +358,27 @@
       "when": 1793877377862,
       "tag": "0050_job_runs_retention_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793876865648,
+      "tag": "0051_order_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793878321023,
+      "tag": "0052_delivery_upload_expiry_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793878938217,
+      "tag": "0053_delivery_proof_retention",
+      "breakpoints": true
     }
   ]
 }

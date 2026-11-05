@@ -74,6 +74,7 @@ export type OrderView = {
   /** A pull to refresh is on its way. */
   refreshing: boolean;
   cancelling: boolean;
+  confirmingItems: boolean;
   /** Why Cancel didn't go through. */
   notice: string | null;
 };
@@ -81,6 +82,7 @@ export type OrderView = {
 type Client = {
   order(id: string): Promise<ApiResult<OrderResponse>>;
   cancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
+  confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>>;
 };
 
 /**
@@ -88,7 +90,7 @@ type Client = {
  * once the status is final (owner's improvement on #52); `seed` is the order placement answered with.
  */
 export function createOrder(client: Client, id: string, seed?: OrderResponse, timers: Timers = phoneTimers, every = pollEvery) {
-  let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, notice: null };
+  let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, confirmingItems: false, notice: null };
   // Each read and Cancel takes a ticket, so an older answer never replaces a newer one.
   const poller = createPoller(() => void read(), every, timers);
   const listeners = new Set<() => void>();
@@ -102,7 +104,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
 
   async function read(pull = false) {
     // Cancel's answer is the newest word on the order; a read waits until it lands.
-    if (view.cancelling) return;
+    if (view.cancelling || view.confirmingItems) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
@@ -160,6 +162,23 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ notice: answer === "offline" ? strings.order.cancelOffline : strings.errors[answer.code] });
         // A read dropped while Cancel was on its way didn't set the next one.
         schedule();
+      }
+    },
+
+    async confirmItems() {
+      if (view.confirmingItems || view.order?.status !== "arrived") return;
+      poller.ticket();
+      poller.unschedule();
+      set({ confirmingItems: true, notice: null });
+      const answer = await client.confirmOrderItems(id).catch(() => "offline" as const);
+      set({ confirmingItems: false, refreshing: false });
+      if (answer !== "offline" && answer.ok) {
+        set({ status: "ready", order: answer.data });
+        schedule();
+      } else {
+        set({ notice: answer === "offline" ? strings.order.itemsOffline : strings.errors[answer.code] });
+        if (answer !== "offline" && answer.code === "ORDER_STATUS_CHANGED") await read();
+        else schedule();
       }
     },
   };
