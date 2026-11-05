@@ -203,14 +203,22 @@ export default function OrderScreen() {
             if (!proofReason || !photoUploadId) return;
             setWorking(true); void api.completeDeliveryProofException(shown.id, { reason: proofReason, photoUploadId, payment }).then((result) => { setWorking(false); if (result.ok) { setDeliveryMessage(words.proofExceptionRecorded); void order.refresh(); } else setDeliveryMessage(strings.errors[result.code]); });
           }} />
-          {shown.customer?.phone && <Button label={words.callCustomer} variant="secondary" busy={working} onPress={() => {
-            setWorking(true); void api.markDeliveryCallAttempt(shown.id).then(async (result) => {
-              setWorking(false);
-              if (!result.ok) return setDeliveryMessage(strings.errors[result.code]);
-              void order.refresh();
-              try { await Linking.openURL(`tel:${shown.customer?.phone}`); } catch { setDeliveryMessage(words.customer); }
-            });
-          }} />}
+          {shown.customer?.phone
+            ? <Button label={words.callCustomer} variant="secondary" busy={working} onPress={() => {
+              setWorking(true); void api.markDeliveryCallAttempt(shown.id).then(async (result) => {
+                setWorking(false);
+                if (!result.ok) return setDeliveryMessage(strings.errors[result.code]);
+                void order.refresh();
+                try { await Linking.openURL(`tel:${shown.customer?.phone}`); } catch { setDeliveryMessage(words.customer); }
+              });
+            }} />
+            // No number to dial (#523): record the attempt on its own so the wait can still start.
+            : <Button label={words.markCallAttempt} variant="secondary" busy={working} onPress={() => {
+              setWorking(true); void api.markDeliveryCallAttempt(shown.id).then((result) => {
+                setWorking(false);
+                if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]);
+              });
+            }} />}
           {failureSeconds !== null && failureSeconds > 0 && <Countdown seconds={failureSeconds} />}
           {([ ["no_one_at_address", words.failureNoOne], ["customer_refused", words.failureRefused], ["address_not_found", words.failureAddress], ["other", words.failureOther] ] as const).map(([reason, label]) => <Pressable key={reason} accessibilityRole="radio" accessibilityState={{ checked: failureReason === reason }} onPress={() => setFailureReason(reason)} className={`rounded-button border px-3 py-2 ${failureReason === reason ? "border-primary" : "border-border"}`}><Text className="text-body text-text">{label}</Text></Pressable>)}
           <Button label={words.sendFailure} variant="destructive" disabled={failureSeconds !== 0 || !failureReason || !photoUploadId} busy={working} onPress={() => {

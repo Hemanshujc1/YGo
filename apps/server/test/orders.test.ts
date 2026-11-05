@@ -719,6 +719,25 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect(await left(dal)).toBe("10");
   });
 
+  it("closes a failed delivery for a Customer with no phone number once the attempt is recorded without a call (#523)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    await database.pool.query("UPDATE accounts SET phone = NULL WHERE email = 'customer@example.com'");
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const view = (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner })).json();
+    expect(view.customer.phone).toBeNull();
+    const failure = (uploadId: string) => app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivery-failed`, headers: owner,
+      payload: { reason: "address_not_found", photoUploadId: uploadId } });
+    expect((await failure(randomUUID())).json()).toMatchObject({ error: { code: "DELIVERY_FAILURE_CALL_REQUIRED" } });
+    const recorded = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/call-attempt`, headers: owner });
+    expect(recorded.statusCode).toBe(200);
+    expect(recorded.json().deliveryFailureReadyAt).toBe("2030-01-01T00:02:00.000Z");
+    expect((await failure(randomUUID())).json()).toMatchObject({ error: { code: "DELIVERY_FAILURE_WAIT" } });
+    at("2030-01-01T00:02:00.000Z");
+    const failed = await failure((await photo(orderId, owner)).id);
+    expect(failed.statusCode).toBe(200);
+    expect(failed.json()).toMatchObject({ status: "delivery_failed" });
+  });
+
   it("allows a call attempt only after the deliverer has arrived", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const orderId = await readyAtDoor(shopId, dal, home, owner);
