@@ -69,6 +69,7 @@ export interface AppOptions {
   /** How long after the server receives a counter bill the Owner may void it (BIL-6). */
   counterBillVoidSeconds?: number;
   deliveryFailureWaitSeconds?: number;
+  deliveryPhotoSaveTimeoutMs?: number;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -103,6 +104,7 @@ export function buildApp({
   syncClockSkewSeconds = 300,
   counterBillVoidSeconds = 86400,
   deliveryFailureWaitSeconds = 120,
+  deliveryPhotoSaveTimeoutMs,
   logger = false,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
@@ -161,7 +163,7 @@ export function buildApp({
     registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds });
+    registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
     registerNotificationRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

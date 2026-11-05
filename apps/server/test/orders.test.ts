@@ -54,7 +54,7 @@ beforeEach(async () => {
   mailer.sent.length = 0;
   deletedUploads.length = 0;
   savedProofs.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, deliveryPhotos });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, deliveryPhotos, deliveryPhotoSaveTimeoutMs: 300 });
   admin = await signIn("/v1/admin/auth", adminEmail);
   customer = await signIn("/v1/auth", "customer@example.com");
   other = await signIn("/v1/auth", "other@example.com");
@@ -834,6 +834,50 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     } finally { deliveryPhotos.save = save; }
     expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status).toBe("arrived");
     expect((await database.pool.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1", [upload.id])).rowCount).toBe(1);
+  });
+
+  it("never saves a photo when the processing lease cannot be taken (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const upload = await photo(orderId, owner);
+    // A trigger that swallows the lease update makes it touch zero rows, as if cleanup had removed the upload.
+    await database.pool.query(`CREATE FUNCTION skip_lease() RETURNS trigger AS $$ BEGIN RETURN NULL; END $$ LANGUAGE plpgsql`);
+    await database.pool.query("CREATE TRIGGER skip_lease BEFORE UPDATE ON delivery_photo_uploads FOR EACH ROW EXECUTE FUNCTION skip_lease()");
+    savedProofs.length = 0;
+    try {
+      const complete = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+        payload: { handoverCode: checked.json().handoverCode, payment: "cash", photoUploadId: upload.id } });
+      expect(complete.statusCode).toBe(400);
+      expect(complete.json()).toEqual({ error: { code: "DELIVERY_PHOTO_INVALID" } });
+    } finally {
+      await database.pool.query("DROP TRIGGER skip_lease ON delivery_photo_uploads");
+      await database.pool.query("DROP FUNCTION skip_lease()");
+    }
+    expect(savedProofs).toEqual([]);
+  });
+
+  it("ends a photo save that outlasts its limit, inside the lease, so cleanup never meets live processing (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const upload = await photo(orderId, owner);
+    const save = deliveryPhotos.save;
+    deliveryPhotos.save = () => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 2000));
+    try {
+      const started = Date.now();
+      const complete = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+        payload: { handoverCode: checked.json().handoverCode, payment: "cash", photoUploadId: upload.id } });
+      expect(Date.now() - started).toBeLessThan(1500);
+      expect(complete.statusCode).toBe(503);
+      expect(complete.json()).toEqual({ error: { code: "UNAVAILABLE" } });
+    } finally { deliveryPhotos.save = save; }
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status).toBe("arrived");
+    // The upload is still leased, so cleanup leaves it alone even once it has expired.
+    await database.pool.query("UPDATE delivery_photo_uploads SET expires_at = $2 WHERE id = $1", [upload.id, new Date(clock.now().getTime() - 1)]);
+    const deleted: string[] = [];
+    await cleanupDeliveryUploads(database, clock, { deleteUpload: async (_o: string, _a: string, id: string) => { deleted.push(id); }, deleteStagedProof: async () => undefined } as unknown as DeliveryPhotoStorage);
+    expect(deleted).toEqual([]);
   });
 
   it("preserves a staged proof referenced by an order while cleaning the expired upload", async () => {

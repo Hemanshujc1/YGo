@@ -33,7 +33,7 @@ async function shopOrderView(client: Pool | PoolClient, orderId: string, account
   return row && { ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt), now: now.toISOString(), deliveryFailureReadyAt: row.deliveryFailureReadyAt?.toISOString() ?? null };
 }
 
-export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number }): void {
+export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope };
   const refusalStatus = { NOT_FOUND: 404, UNAVAILABLE: 503, DELIVERY_PHOTO_INVALID: 400, HANDOVER_CODE_WRONG: 400, HANDOVER_CODE_LOCKED: 429 } as const;
@@ -250,16 +250,21 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
   // while storage is slow. A photo left behind when the second one refuses is removed with its upload row.
   const savePhoto = async (orderId: string, accountId: string, uploadId: string, byteLength: number) => {
     if (!photos) return "UNAVAILABLE" as const;
-    try { return await photos.save(orderId, accountId, uploadId, byteLength); }
+    // The save must end well inside the 5-minute lease, so cleanup never meets a photo that is still being processed.
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("photo save timed out")), photoSaveTimeoutMs); });
+    try { return await Promise.race([photos.save(orderId, accountId, uploadId, byteLength), timeout]); }
     catch (error) {
       if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
       return "UNAVAILABLE" as const;
-    }
+    } finally { clearTimeout(timer); }
   };
   /** Holds the upload against cleanup while the photo is read and saved, which happens outside any lock. */
   const PHOTO_SAVE_LEASE_MS = 5 * 60_000;
-  const leaseUpload = (client: PoolClient, uploadId: string, now: Date) =>
-    client.query("UPDATE delivery_photo_uploads SET processing_until = $2 WHERE id = $1", [uploadId, new Date(now.getTime() + PHOTO_SAVE_LEASE_MS)]);
+  const leaseUpload = async (client: PoolClient, uploadId: string, now: Date) => {
+    const leased = await client.query("UPDATE delivery_photo_uploads SET processing_until = $2 WHERE id = $1", [uploadId, new Date(now.getTime() + PHOTO_SAVE_LEASE_MS)]);
+    return leased.rowCount === 1;
+  };
   /** Locks the arrived order of this deliverer and the upload they chose, for the second transaction. */
   const lockArrived = async (client: PoolClient, orderId: string, accountId: string, uploadId: string) => {
     const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff" }>(
@@ -316,7 +321,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" as const : "HANDOVER_CODE_WRONG" as const;
         }
       }
-      await leaseUpload(client, body.photoUploadId, now);
+      if (!await leaseUpload(client, body.photoUploadId, now)) return "DELIVERY_PHOTO_INVALID" as const;
       await client.query("COMMIT");
       return { byteLength: upload.byteLength };
     });
@@ -381,7 +386,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
          WHERE id = $1 AND order_id = $2 AND account_id = $3`, [body.photoUploadId, id, who.accountId]);
       if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
-      await leaseUpload(client, body.photoUploadId, now);
+      if (!await leaseUpload(client, body.photoUploadId, now)) return "DELIVERY_PHOTO_INVALID" as const;
       await client.query("COMMIT");
       return { byteLength: upload.byteLength };
     });
