@@ -21,7 +21,7 @@ const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ?
 async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, failureWaitSeconds: number): Promise<ShopOrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; deliveryFailureReadyAt: Date | null }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o")}, o.deliverer_id AS "delivererId",
-        CASE WHEN o.deliverer_id = $2 THEN json_build_object('name', a.name, 'phone', a.phone) END AS customer,
+        json_build_object('name', a.name, 'phone', CASE WHEN o.deliverer_id = $2 THEN a.phone END) AS customer,
         CASE WHEN o.deliverer_id = $2 THEN s.upi_id END AS "shopUpiId", (o.delivery_photo_key IS NOT NULL) AS "deliveryPhotoAvailable",
         CASE WHEN o.deliverer_id = $2 AND o.delivery_call_attempt_at IS NOT NULL THEN o.delivery_call_attempt_at + make_interval(secs => $3) END AS "deliveryFailureReadyAt"
       FROM orders o JOIN shops s ON s.id = o.shop_id JOIN shop_members m ON m.shop_id = o.shop_id

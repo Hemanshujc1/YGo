@@ -104,7 +104,7 @@ export default function OrderScreen() {
   const shown = view.order;
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
-  const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? null, shown ? Date.parse(shown.now) - Date.now() : 0);
+  const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? null, view.offset);
   const timeUp = view.expired || seconds === 0;
   const done = (answered: boolean) => answered && router.replace("/orders");
 
@@ -126,6 +126,7 @@ export default function OrderScreen() {
       >
         <Link href="/orders" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{shown ? words.detailTitle(shown.number) : words.titleLoading}</Text>
+        {shown?.customer?.name && <Text className="text-body text-text">{words.customer}: {shown.customer.name}{shown.customer.phone ? ` · ${shown.customer.phone}` : ""}</Text>}
         {isNew && seconds !== null && <Countdown seconds={timeUp ? 0 : seconds} />}
         {view.status === "loading" && (
           <View className="min-h-12 flex-row items-center gap-2">
@@ -171,7 +172,6 @@ export default function OrderScreen() {
           setWorking(true); void api.advanceShopOrder(shown.id, "arrived").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
         }} />}
         {shown && shown.delivererId === accountId && shown.status === "arrived" && <View className="gap-2 rounded-card border border-border bg-surface p-4">
-          {shown.customer?.phone && <Text className="text-body text-text">{words.customer}: {shown.customer.name ?? ""} · {shown.customer.phone}</Text>}
           <Text className="text-body font-semibold text-text">{words.code}</Text>
           <TextInput accessibilityLabel={words.code} keyboardType="number-pad" maxLength={4} value={handoverCode} onChangeText={setHandoverCode} editable={photoUploadId !== null} className="rounded-input border border-border-strong bg-bg px-3 py-3 text-title text-text" />
           <Text className="text-body font-semibold text-text">{words.payment}</Text>
@@ -253,7 +253,8 @@ export default function OrderScreen() {
         />
       )}
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>
-        <CameraView ref={setCamera} className="flex-1" facing="back">
+        {/* CameraView is not a NativeWind component, so className would be ignored and it would collapse to nothing. */}
+        <CameraView ref={setCamera} style={{ flex: 1 }} facing="back">
           <View className="flex-1 justify-end gap-3 bg-transparent p-5" style={{ paddingBottom: insets.bottom + 20 }}>
             <Button label={words.takePhoto} busy={working} onPress={() => {
               const orderId = shown?.id;

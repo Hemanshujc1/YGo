@@ -677,6 +677,19 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect(await left(dal)).toBe("9");
   });
 
+  it("shows the shop the Customer's name from the start, and the phone only to the assigned deliverer (DLV-7)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    await database.pool.query("UPDATE accounts SET name = 'Meera', phone = '+919876500002' WHERE email = 'customer@example.com'");
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    const read = async () => (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: owner })).json().customer;
+    expect(await read()).toEqual({ name: "Meera", phone: null });
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>("SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: member?.accountId } });
+    expect(await read()).toEqual({ name: "Meera", phone: "+919876500002" });
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

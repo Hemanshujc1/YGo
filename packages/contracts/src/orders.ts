@@ -130,7 +130,7 @@ export const ShopOrdersResponse = z.strictObject({
 });
 export type ShopOrdersResponse = z.infer<typeof ShopOrdersResponse>;
 
-/** S05: one of the shop's orders, as it was frozen. No Customer phone (owner's answer 11 on #425). */
+/** S05: one of the shop's orders, as it was frozen. The Customer's name for the shop and the deliverer; the phone only for the assigned deliverer (DLV-7). */
 export const ShopOrderResponse = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
