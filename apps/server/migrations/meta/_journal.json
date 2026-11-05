@@ -351,6 +351,13 @@
       "when": 1793866148421,
       "tag": "0049_order_expired_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793877377862,
+      "tag": "0050_job_runs_retention_indexes",
+      "breakpoints": true
     }
   ]
 }
