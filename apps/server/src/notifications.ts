@@ -5,6 +5,15 @@ import type { Push, PushResult, PushSender, ReceiptResult } from "./adapters/pus
 import { withTransaction } from "./db";
 import { orderTiming } from "./order-timing";
 
+// "10 minutes", "90 seconds", "1 minute 30 seconds": exact for any ORDER_EXPIRE_SECONDS.
+export function spokenDuration(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const part = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  if (minutes === 0) return part(seconds, "second");
+  return seconds === 0 ? part(minutes, "minute") : `${part(minutes, "minute")} ${part(seconds, "second")}`;
+}
+
 type Order = { number: number; shopName: string; reason: RejectReason | null };
 
 /** The customer reads the same reason C19 shows (owner's answer 3 on #425). */
@@ -23,7 +32,7 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   words: (order: Order) => { title: string; body: string } }>> = {
   placed: {
     kind: "order_placed", to: "shop", staff: true, loud: true,
-    words: ({ number }) => ({ title: `New order #${number}`, body: `Accept or reject it within ${Math.round(orderTiming.expireSeconds / 60)} minutes.` }),
+    words: ({ number }) => ({ title: `New order #${number}`, body: `Accept or reject it within ${spokenDuration(orderTiming.expireSeconds)}.` }),
   },
   cancelled_by_customer: {
     kind: "order_cancelled_by_customer", to: "shop", staff: true,

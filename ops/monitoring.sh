@@ -80,11 +80,18 @@ alarm ap-south-1 "$mumbai_topic" off-aws-copy --namespace YGo --metric-name OffA
   --statistic Minimum --period 86400 --evaluation-periods 1 --threshold 1 \
   --comparison-operator LessThanThreshold --treat-missing-data breaching
 
-for job in backup-nightly cleanup-sessions expire-orders snapshot-weekly; do
+for job in backup-nightly cleanup-sessions snapshot-weekly; do
   alarm ap-south-1 "$mumbai_topic" "job-$job" --namespace YGo --metric-name JobHealthy \
     --dimensions "Name=JobName,Value=$job" --statistic Minimum --period 86400 \
     --evaluation-periods 1 --threshold 1 --comparison-operator LessThanThreshold \
     --treat-missing-data breaching
 done
+
+# expire-orders is checked every 5 minutes (ygo-job-check-expire-orders.timer); two bad
+# or missing 5-minute points in a row (10 minutes) raise the alarm.
+alarm ap-south-1 "$mumbai_topic" job-expire-orders --namespace YGo --metric-name JobHealthy \
+  --dimensions "Name=JobName,Value=expire-orders" --statistic Minimum --period 300 \
+  --evaluation-periods 2 --threshold 1 --comparison-operator LessThanThreshold \
+  --treat-missing-data breaching
 
 echo "Monitoring definitions created. Confirm both SNS email subscriptions before relying on alarms."

@@ -70,7 +70,9 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             for job in ("backup-nightly", "cleanup-sessions", "expire-orders", "snapshot-weekly"):
                 alarm = alarms[f"ygo-job-{job}"]
                 self.assertIn(f"Name=JobName,Value={job}", alarm)
-                self.assertEqual(alarm[alarm.index("--period") + 1], "86400")
+                fast = job == "expire-orders"
+                self.assertEqual(alarm[alarm.index("--period") + 1], "300" if fast else "86400")
+                self.assertEqual(alarm[alarm.index("--evaluation-periods") + 1], "2" if fast else "1")
                 self.assertEqual(alarm[alarm.index("--treat-missing-data") + 1], "breaching")
 
 

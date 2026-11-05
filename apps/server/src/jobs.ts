@@ -5,7 +5,7 @@ import { expireUnansweredOrders } from "./order-expiry";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
-export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26, "expire-orders": 1, "snapshot-weekly": 8 * 24 } as const;
+export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26, "expire-orders": 0.25, "snapshot-weekly": 8 * 24 } as const;
 export type JobName = keyof typeof jobMaxAgeHours;
 
 export function isJobName(name: string): name is JobName {
