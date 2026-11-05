@@ -1,0 +1,1 @@
+ALTER TABLE "delivery_photo_uploads" ADD COLUMN "processing_until" timestamp with time zone;

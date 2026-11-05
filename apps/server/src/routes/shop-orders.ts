@@ -256,6 +256,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       return "UNAVAILABLE" as const;
     }
   };
+  /** Holds the upload against cleanup while the photo is read and saved, which happens outside any lock. */
+  const PHOTO_SAVE_LEASE_MS = 5 * 60_000;
+  const leaseUpload = (client: PoolClient, uploadId: string, now: Date) =>
+    client.query("UPDATE delivery_photo_uploads SET processing_until = $2 WHERE id = $1", [uploadId, new Date(now.getTime() + PHOTO_SAVE_LEASE_MS)]);
   /** Locks the arrived order of this deliverer and the upload they chose, for the second transaction. */
   const lockArrived = async (client: PoolClient, orderId: string, accountId: string, uploadId: string) => {
     const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff" }>(
@@ -263,7 +267,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
        WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [orderId, accountId]);
     if (!order) return "NOT_FOUND" as const;
     if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
-    const upload = await client.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1 AND order_id = $2 AND account_id = $3 FOR UPDATE", [uploadId, orderId, accountId]);
+    const upload = await client.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1 AND order_id = $2 AND account_id = $3 AND expires_at > $4 FOR UPDATE", [uploadId, orderId, accountId, clock.now()]);
     if (!upload.rowCount) return "DELIVERY_PHOTO_INVALID" as const;
     return order;
   };
@@ -312,6 +316,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" as const : "HANDOVER_CODE_WRONG" as const;
         }
       }
+      await leaseUpload(client, body.photoUploadId, now);
+      await client.query("COMMIT");
       return { byteLength: upload.byteLength };
     });
     if (typeof checked === "string") return sendRefusal(reply, checked);
@@ -375,6 +381,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
          WHERE id = $1 AND order_id = $2 AND account_id = $3`, [body.photoUploadId, id, who.accountId]);
       if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
+      await leaseUpload(client, body.photoUploadId, now);
+      await client.query("COMMIT");
       return { byteLength: upload.byteLength };
     });
     if (typeof checked === "string") return sendRefusal(reply, checked);

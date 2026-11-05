@@ -29,14 +29,14 @@ export async function cleanupDeliveryProofs(database: Database, clock: Clock, ph
 }
 
 export async function cleanupDeliveryUploads(database: Database, clock: Clock, photos: DeliveryPhotoStorage): Promise<void> {
-  const { rows } = await database.pool.query<{ id: string }>("SELECT id FROM delivery_photo_uploads WHERE expires_at <= $1", [clock.now()]);
+  const { rows } = await database.pool.query<{ id: string }>("SELECT id FROM delivery_photo_uploads WHERE expires_at <= $1 AND (processing_until IS NULL OR processing_until <= $1)", [clock.now()]);
   for (const { id } of rows) {
     // One transaction per upload, so the row lock lasts through the storage deletes and a delivery
     // saving this photo at the same moment waits for it.
     try {
       await withTransaction(database.pool, async (client) => {
         const { rows: [upload] } = await client.query<{ orderId: string; accountId: string }>(
-          `SELECT order_id AS "orderId", account_id AS "accountId" FROM delivery_photo_uploads WHERE id = $1 AND expires_at <= $2 FOR UPDATE SKIP LOCKED`, [id, clock.now()]);
+          `SELECT order_id AS "orderId", account_id AS "accountId" FROM delivery_photo_uploads WHERE id = $1 AND expires_at <= $2 AND (processing_until IS NULL OR processing_until <= $2) FOR UPDATE SKIP LOCKED`, [id, clock.now()]);
         if (!upload) return;
         const stagedKey = `delivery-proofs/${upload.orderId}/${id}.jpg`;
         const referenced = await client.query("SELECT 1 FROM orders WHERE delivery_photo_key = $1 LIMIT 1", [stagedKey]);

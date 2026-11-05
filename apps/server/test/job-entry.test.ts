@@ -25,6 +25,10 @@ it("runs expire-orders and cleanup-sessions with only DATABASE_URL set", async (
   expect([await okRuns("expire-orders"), await okRuns("cleanup-sessions")]).toEqual([expireBefore + 1, cleanupBefore + 1]);
 }, 60_000);
 
+it("fails cleanup-sessions when the private photo bucket is the public image bucket", async () => {
+  expect(await entry("cleanup-sessions", { VISIT_PHOTO_BUCKET: "same-bucket", PRODUCT_IMAGE_BUCKET: "same-bucket" })).toBe(1);
+}, 60_000);
+
 it("fails only cleanup-sessions when the photo bucket settings are invalid", async () => {
   const bad = { VISIT_PHOTO_BUCKET: "private-photos", S3_ENDPOINT: "not a url" };
   expect(await entry("cleanup-sessions", bad)).toBe(1);

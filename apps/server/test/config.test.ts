@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig, loadOrderTiming } from "../src/config";
+import { loadConfig, loadDeliveryPhotoSettings, loadOrderTiming } from "../src/config";
 
 const database = {
   DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo",
@@ -96,6 +96,10 @@ describe("visit photo configuration", () => {
   });
   it("rejects sharing the public product image bucket", () => {
     expect(() => loadConfig({ ...base, VISIT_PHOTO_BUCKET: "images", PRODUCT_IMAGE_BUCKET: "images", PRODUCT_IMAGE_CLOUDFRONT_DOMAIN: "images.example.com" })).toThrow("must be separate");
+  });
+  it("rejects the same bucket in the job loader too (#524)", () => {
+    expect(() => loadDeliveryPhotoSettings({ VISIT_PHOTO_BUCKET: "images", PRODUCT_IMAGE_BUCKET: "images" })).toThrow("must be separate");
+    expect(loadDeliveryPhotoSettings({ VISIT_PHOTO_BUCKET: "private-visits", PRODUCT_IMAGE_BUCKET: "images" }).VISIT_PHOTO_BUCKET).toBe("private-visits");
   });
 });
 

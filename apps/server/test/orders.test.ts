@@ -802,6 +802,40 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await database.pool.query("SELECT id FROM delivery_photo_uploads WHERE id = $1", [uploadId])).rowCount).toBe(1);
   });
 
+  it("leaves an expired upload alone while a delivery holds its processing lease (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>(
+      "SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    const uploadId = randomUUID();
+    await database.pool.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at, processing_until)
+      VALUES ($1, $2, $3, 100, $4, $5)`, [uploadId, orderId, member?.accountId, new Date(clock.now().getTime() - 1), new Date(clock.now().getTime() + 60_000)]);
+    const deleted: string[] = [];
+    const storage = { deleteUpload: async (_order: string, _account: string, id: string) => { deleted.push(id); }, deleteStagedProof: async () => undefined } as unknown as DeliveryPhotoStorage;
+    await cleanupDeliveryUploads(database, clock, storage);
+    expect(deleted).toEqual([]);
+    clock.set(new Date(clock.now().getTime() + 61_000));
+    await cleanupDeliveryUploads(database, clock, storage);
+    expect(deleted).toEqual([uploadId]);
+  });
+
+  it("refuses a delivery whose upload expired while the photo was being saved, and cleanup removes it later (#524)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const upload = await photo(orderId, owner);
+    const save = deliveryPhotos.save;
+    deliveryPhotos.save = async (...args: Parameters<typeof save>) => { clock.set(new Date(clock.now().getTime() + 16 * 60_000)); return save(...args); };
+    try {
+      const complete = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+        payload: { handoverCode: checked.json().handoverCode, payment: "cash", photoUploadId: upload.id } });
+      expect(complete.statusCode).toBe(400);
+      expect(complete.json()).toEqual({ error: { code: "DELIVERY_PHOTO_INVALID" } });
+    } finally { deliveryPhotos.save = save; }
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status).toBe("arrived");
+    expect((await database.pool.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1", [upload.id])).rowCount).toBe(1);
+  });
+
   it("preserves a staged proof referenced by an order while cleaning the expired upload", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const orderId = await readyAtDoor(shopId, dal, home, owner);
