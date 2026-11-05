@@ -9,6 +9,11 @@ const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArr
   // Free while the shop hasn't answered (ORD-5); the shop's Owner or Staff answers it (#425).
   // Only the timed job (#57, ORD-2) expires an order: `system` is never the role of a signed-in request.
   placed: { cancelled_by_customer: ["customer"], accepted: ["owner", "staff"], rejected_by_shop: ["owner", "staff"], expired: ["system"] },
+  accepted: { preparing: ["owner", "staff"], ready: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
+  preparing: { ready: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
+  ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
+  out_for_delivery: { arrived: ["owner", "staff"] },
+  arrived: { delivered: ["owner", "staff"], delivery_failed: ["owner", "staff"] },
 };
 
 export const canMove = (from: OrderStatus, to: OrderStatus, role: OrderActor["role"]) => MOVES[from]?.[to]?.includes(role) ?? false;

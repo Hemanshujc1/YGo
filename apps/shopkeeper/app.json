@@ -13,6 +13,7 @@
     },
     "plugins": [
       "expo-router",
+      ["expo-camera", { "cameraPermission": "YGo uses the camera to record delivery proof.", "recordAudioAndroid": false }],
       ["expo-notifications", { "sounds": ["./assets/sounds/new_order.wav"] }],
       ["expo-sqlite", { "useSQLCipher": true }],
       ["expo-navigation-bar", { "enforceContrast": false }],

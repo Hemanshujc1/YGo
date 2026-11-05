@@ -1,5 +1,6 @@
 import { and, desc, eq, isNotNull, lt, lte, ne, notInArray, or } from "drizzle-orm";
 import type { Clock } from "./adapters/clock";
+import type { DeliveryPhotoStorage } from "./adapters/delivery-photos";
 import type { Database } from "./db";
 import { expireUnansweredOrders } from "./order-expiry";
 import { jobRuns, refreshTokens, sessions } from "./schema";
@@ -11,6 +12,37 @@ export const JOB_RUN_OK_KEEP_DAYS = 30;
 export const JOB_RUN_FAILED_KEEP_DAYS = 180;
 const DAY_MS = 24 * 60 * 60 * 1000;
 export type JobName = keyof typeof jobMaxAgeHours;
+
+export async function cleanupDeliveryProofs(database: Database, clock: Clock, photos: DeliveryPhotoStorage): Promise<void> {
+  const { rows } = await database.pool.query<{ id: string; key: string }>(
+    `SELECT id, delivery_photo_key AS key FROM orders
+     WHERE delivery_photo_key IS NOT NULL AND delivery_photo_expires_at <= $1`, [clock.now()]);
+  for (const order of rows) {
+    try {
+      await photos.deleteProof(order.key);
+      await database.pool.query(`UPDATE orders SET delivery_photo_key = NULL, delivery_photo_expires_at = NULL
+        WHERE id = $1 AND delivery_photo_key = $2`, [order.id, order.key]);
+    } catch {
+      // Keep the key when storage or the database is unavailable; the next job retries it.
+    }
+  }
+}
+
+export async function cleanupDeliveryUploads(database: Database, clock: Clock, photos: DeliveryPhotoStorage): Promise<void> {
+  const { rows } = await database.pool.query<{ id: string; orderId: string; accountId: string }>(
+    `SELECT id, order_id AS "orderId", account_id AS "accountId" FROM delivery_photo_uploads WHERE expires_at <= $1 FOR UPDATE`, [clock.now()]);
+  for (const upload of rows) {
+    const stagedKey = `delivery-proofs/${upload.orderId}/${upload.id}.jpg`;
+    try {
+      const referenced = await database.pool.query("SELECT 1 FROM orders WHERE delivery_photo_key = $1 LIMIT 1", [stagedKey]);
+      if (!referenced.rowCount) await photos.deleteStagedProof(upload.orderId, upload.id);
+      await photos.deleteUpload(upload.orderId, upload.accountId, upload.id);
+      await database.pool.query("DELETE FROM delivery_photo_uploads WHERE id = $1", [upload.id]);
+    } catch {
+      // Keep this upload row until both storage deletes and row cleanup succeed.
+    }
+  }
+}
 
 export function isJobName(name: string): name is JobName {
   return Object.hasOwn(jobMaxAgeHours, name);
@@ -48,6 +80,7 @@ export async function runJob(
   database: Database, name: string, clock: Clock,
   backupNightly?: () => Promise<void>,
   snapshotWeekly?: () => Promise<void>,
+  deliveryPhotos?: DeliveryPhotoStorage,
 ): Promise<void> {
   if (!isJobName(name)) throw new Error("Unknown job name");
   const now = clock.now();
@@ -76,6 +109,10 @@ export async function runJob(
           lt(refreshTokens.replacedAt, new Date(now.getTime() - REFRESH_TTL_MS)),
         ));
       });
+      if (deliveryPhotos) {
+        await cleanupDeliveryUploads(database, clock, deliveryPhotos);
+        await cleanupDeliveryProofs(database, clock, deliveryPhotos);
+      }
       // Its own transaction after the session cleanup, so a failure here cannot undo that work.
       await deleteOldJobRuns(database, now);
     }

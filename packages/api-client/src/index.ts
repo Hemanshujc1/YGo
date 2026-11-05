@@ -26,6 +26,16 @@ import {
   type PushTokenBody,
   type PlaceOrderBody,
   type RejectOrderBody,
+  type AssignDelivererBody,
+  type CompleteDeliveryBody,
+  type DeliveryPhotoUploadBody,
+  type ProofExceptionBody,
+  type FailDeliveryBody,
+  type SetStaffCanDeliverBody,
+  DeliveryPhotoUpload,
+  SetStaffCanDeliverResponse,
+  ShopDeliverersResponse,
+  ShopStaffResponse,
   ShopOrderResponse,
   ShopOrdersResponse,
   ShopCounterBill,
@@ -403,6 +413,10 @@ export function createApiClient({
       return result(await signedIn("GET", `/v1/orders/${encodeURIComponent(id)}`), OrderResponse);
     },
 
+    async confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/items-ok`), OrderResponse);
+    },
+
     /** `POST /v1/orders/:id/cancel`: free while the shop hasn't answered (ORD-5); ORDER_STATUS_CHANGED once it has. */
     async cancelOrder(id: string): Promise<ApiResult<OrderResponse>> {
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel`), OrderResponse);
@@ -530,6 +544,47 @@ export function createApiClient({
     /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
     async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
+    },
+
+    /** Advances a shop order through its delivery lifecycle (#56). */
+    async advanceShopOrder(id: string, step: "preparing" | "out-for-delivery" | "arrived"): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/${step}`), ShopOrderResponse);
+    },
+
+    async readyShopOrder(id: string, body: AssignDelivererBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("PUT", `/v1/me/shop-orders/${encodeURIComponent(id)}/ready`, body), ShopOrderResponse);
+    },
+
+    async setStaffCanDeliver(accountId: string, body: SetStaffCanDeliverBody): Promise<ApiResult<SetStaffCanDeliverResponse>> {
+      return result(await signedIn("PUT", `/v1/me/shop-staff/${encodeURIComponent(accountId)}/can-deliver`, body), SetStaffCanDeliverResponse);
+    },
+
+    async shopDeliverers(): Promise<ApiResult<ShopDeliverersResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-deliverers"), ShopDeliverersResponse);
+    },
+
+    async shopStaff(): Promise<ApiResult<ShopStaffResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-staff"), ShopStaffResponse);
+    },
+
+    async deliveryPhotoUpload(id: string, body: DeliveryPhotoUploadBody): Promise<ApiResult<DeliveryPhotoUpload>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/delivery-photo-upload`, body), DeliveryPhotoUpload);
+    },
+
+    async completeDelivery(id: string, body: CompleteDeliveryBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/delivered`, body), ShopOrderResponse);
+    },
+
+    async completeDeliveryProofException(id: string, body: ProofExceptionBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/proof-exception`, body), ShopOrderResponse);
+    },
+
+    async markDeliveryCallAttempt(id: string): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/call-attempt`), ShopOrderResponse);
+    },
+
+    async failDelivery(id: string, body: FailDeliveryBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/delivery-failed`, body), ShopOrderResponse);
     },
 
     /** `GET /v1/me/counter-bills`: S37, the shop's bills of the last 2 days, newest first (#54). */

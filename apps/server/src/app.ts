@@ -16,6 +16,7 @@ import type { Mailer } from "./adapters/mailer";
 import type { PlaceFinder } from "./adapters/place-finder";
 import type { Clock } from "./adapters/clock";
 import type { VisitPhotoStorage } from "./adapters/visit-photos";
+import type { DeliveryPhotoStorage } from "./adapters/delivery-photos";
 import { registerShopVisitRoutes } from "./routes/shop-visits";
 import { registerCounterBillRoutes } from "./routes/counter-bills";
 import { registerFeedRoutes } from "./routes/feed";
@@ -58,6 +59,7 @@ export interface AppOptions {
   adminCookieDomain?: string;
   productImages?: ProductImageStorage;
   visitPhotos?: VisitPhotoStorage;
+  deliveryPhotos?: DeliveryPhotoStorage;
   /** C15's place search (#257); without it the search answers UNAVAILABLE. */
   places?: PlaceFinder;
   /** The oldest version of each app still served (Q-7); older ones are told to update. */
@@ -66,6 +68,7 @@ export interface AppOptions {
   syncClockSkewSeconds?: number;
   /** How long after the server receives a counter bill the Owner may void it (BIL-6). */
   counterBillVoidSeconds?: number;
+  deliveryFailureWaitSeconds?: number;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -93,11 +96,13 @@ export function buildApp({
   adminCookieDomain,
   productImages,
   visitPhotos,
+  deliveryPhotos,
   places,
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   syncMaxAgeSeconds = 7 * 86400,
   syncClockSkewSeconds = 300,
   counterBillVoidSeconds = 86400,
+  deliveryFailureWaitSeconds = 120,
   logger = false,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
@@ -156,7 +161,7 @@ export function buildApp({
     registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds });
     registerNotificationRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

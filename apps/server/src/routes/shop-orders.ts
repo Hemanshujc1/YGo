@@ -1,11 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  ErrorEnvelope, OrderParams, type OrderStatus, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary,
-  ShopOrdersResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
+  AssignDelivererBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
+  ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
+import { InvalidDeliveryPhotoError, type DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { withTransaction } from "../db";
+import { createHandoverCode, HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN, HANDOVER_CODE_COOLDOWN_MS, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, matchesHandoverCode, recordDeliverySale } from "../delivery";
 import { stockOf } from "../listings";
 import { moveOrder } from "../orders";
 import { orderTiming } from "../order-timing";
@@ -16,29 +18,43 @@ import { answerExpired, frozenOrder } from "./orders";
 const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ? new Date(placedAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
 
 /** S05: one order of the shop the account is Owner or Staff of, whether or not the shop is Live now (owner's answer 13 on #425). */
-async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date): Promise<ShopOrderResponse | undefined> {
-  const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now"> & { placedAt: Date }>(
-    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o")}
-      FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
-      WHERE o.id = $1 AND m.account_id = $2`, [orderId, accountId]);
-  return row && { ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt), now: now.toISOString() };
+async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, failureWaitSeconds: number): Promise<ShopOrderResponse | undefined> {
+  const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; deliveryFailureReadyAt: Date | null }>(
+    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o")}, o.deliverer_id AS "delivererId",
+        json_build_object('name', a.name, 'phone', CASE WHEN o.deliverer_id = $2 THEN a.phone END) AS customer,
+        CASE WHEN o.deliverer_id = $2 THEN s.upi_id END AS "shopUpiId", (o.delivery_photo_key IS NOT NULL) AS "deliveryPhotoAvailable",
+        CASE WHEN o.deliverer_id = $2 AND o.delivery_call_attempt_at IS NOT NULL THEN o.delivery_call_attempt_at + make_interval(secs => $3) END AS "deliveryFailureReadyAt"
+      FROM orders o JOIN shops s ON s.id = o.shop_id JOIN shop_members m ON m.shop_id = o.shop_id
+      JOIN accounts a ON a.id = o.account_id
+      WHERE o.id = $1 AND m.account_id = $2`, [orderId, accountId, failureWaitSeconds]);
+  return row && { ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt), now: now.toISOString(), deliveryFailureReadyAt: row.deliveryFailureReadyAt?.toISOString() ?? null };
 }
 
-export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
-  const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
+  const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope };
+  const removeDeliveryUpload = async (orderId: string, accountId: string, uploadId: string) => {
+    if (!photos) return;
+    try {
+      await photos.deleteUpload(orderId, accountId, uploadId);
+      await pool.query("DELETE FROM delivery_photo_uploads WHERE id = $1", [uploadId]);
+    } catch {
+      // Keep the row when either deletion step fails; the cleanup job retries it.
+    }
+  };
+  const proofExpiresAt = (at: Date) => new Date(at.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   // S04: the shop's orders in three groups (owner's answers 5 and 8 on #425).
   app.get("/v1/me/shop-orders", { schema: { response: { 200: ShopOrdersResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const { rows: [member] } = await pool.query<{ shopId: string }>('SELECT shop_id AS "shopId" FROM shop_members WHERE account_id = $1', [who.accountId]);
+    const { rows: [member] } = await pool.query<{ shopId: string; canDeliver: boolean }>('SELECT shop_id AS "shopId", (role = \'owner\' OR can_deliver) AS "canDeliver" FROM shop_members WHERE account_id = $1', [who.accountId]);
     if (!member) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     const now = clock.now();
     type Row = Omit<ShopOrderSummary, "placedAt" | "expiresAt"> & { placedAt: Date };
     // A placed order past its time is in no group until #57 moves it to Expired, so no Accept shows that can't work.
     const { rows } = await pool.query<Row>(
-      `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.total::text AS total,
+      `SELECT o.id, o.number, o.status, o.deliverer_id AS "delivererId", o.placed_at AS "placedAt", o.total::text AS total,
           (SELECT count(*)::int FROM order_lines l WHERE l.order_id = o.id) AS "itemCount",
           json_build_object('flat', o.address_flat, 'areaLine', o.address_area_line) AS address
         FROM orders o
@@ -51,16 +67,30 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const summary = (row: Row): ShopOrderSummary => ({ ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt) });
     return {
       now: now.toISOString(),
+      canDeliver: member.canDeliver,
       new: rows.filter((row) => row.status === "placed").map(summary),
       accepted: rows.filter((row) => STOCK_HOLDING_ORDER_STATUSES.includes(row.status)).map(summary),
       doneToday: rows.filter((row) => TERMINAL_ORDER_STATUSES.includes(row.status)).map(summary),
+      myDeliveries: rows.filter((row) => row.delivererId === who.accountId && ["ready", "out_for_delivery", "arrived"].includes(row.status)).map(summary),
     };
+  });
+
+  app.get("/v1/me/shop-deliverers", { schema: { response: { 200: ShopDeliverersResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { rows: [member] } = await pool.query<{ shopId: string }>("SELECT shop_id AS \"shopId\" FROM shop_members WHERE account_id = $1", [who.accountId]);
+    if (!member) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const { rows } = await pool.query<ShopDeliverersResponse["deliverers"][number]>(
+      `SELECT m.account_id AS "accountId", a.name, m.role, (m.role = 'owner' OR m.can_deliver) AS "canDeliver"
+       FROM shop_members m JOIN accounts a ON a.id = m.account_id
+       WHERE m.shop_id = $1 AND (m.role = 'owner' OR m.can_deliver) ORDER BY m.role DESC, lower(a.name)`, [member.shopId]);
+    return { deliverers: rows };
   });
 
   app.get("/v1/me/shop-orders/:id", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const order = await shopOrderView(pool, (request.params as OrderParams).id, who.accountId, clock.now());
+    const order = await shopOrderView(pool, (request.params as OrderParams).id, who.accountId, clock.now(), failureWaitSeconds);
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
   });
 
@@ -98,14 +128,229 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         if (shortLines.length > 0) return { code: "NOT_ENOUGH_STOCK", shortLines };
       }
       if (!await moveOrder(client, order, to, { id: who.accountId, role: order.role }, now, reason)) return { code: "ORDER_STATUS_CHANGED" };
+      if (to === "accepted") {
+        const code = createHandoverCode(secret);
+        await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4
+          WHERE id = $1`, [id, code.hash, code.salt, code.ciphertext]);
+      }
       await client.query("COMMIT");
       return { now };
     });
     if (!("now" in outcome)) return reply.code(outcome.code === "NOT_FOUND" ? 404 : 409).send({ error: outcome });
-    return shopOrderView(pool, id, who.accountId, outcome.now);
+    return shopOrderView(pool, id, who.accountId, outcome.now, failureWaitSeconds);
   };
 
   app.post("/v1/me/shop-orders/:id/accept", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, answer("accepted"));
   app.post("/v1/me/shop-orders/:id/reject", { schema: { params: OrderParams, body: RejectOrderBody, response: { 200: ShopOrderResponse, ...errors } } },
     answer("rejected_by_shop"));
+
+  const move = (to: Extract<OrderStatus, "preparing" | "out_for_delivery" | "arrived">) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const now = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff" }>(
+        `SELECT o.id, o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      const at = clock.now();
+      if (to !== "preparing" && (await client.query("SELECT 1 FROM orders WHERE id = $1 AND deliverer_id = $2", [id, who.accountId])).rowCount === 0) return "NOT_ASSIGNED" as const;
+      if (!await moveOrder(client, order, to, { id: who.accountId, role: order.role }, at)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query("COMMIT");
+      return at;
+    });
+    if (now === "NOT_FOUND") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (now === "NOT_ASSIGNED") return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    if (now === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: now } });
+    return shopOrderView(pool, id, who.accountId, now, failureWaitSeconds);
+  };
+  app.post("/v1/me/shop-orders/:id/preparing", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, move("preparing"));
+  app.post("/v1/me/shop-orders/:id/out-for-delivery", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, move("out_for_delivery"));
+  app.post("/v1/me/shop-orders/:id/arrived", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, move("arrived"));
+
+  app.put("/v1/me/shop-orders/:id/ready", { schema: { params: OrderParams, body: AssignDelivererBody, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const { accountId } = request.body as AssignDelivererBody;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; shopId: string; status: OrderStatus; role: "owner" | "staff" }>(
+        `SELECT o.id, o.shop_id AS "shopId", o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      const { rows: [deliverer] } = await client.query<{ role: "owner" | "staff"; canDeliver: boolean }>(
+        `SELECT role, can_deliver AS "canDeliver" FROM shop_members WHERE shop_id = $1 AND account_id = $2 FOR SHARE`, [order.shopId, accountId]);
+      if (!deliverer || (deliverer.role !== "owner" && !deliverer.canDeliver)) return "DELIVERER_NOT_ELIGIBLE" as const;
+      const now = clock.now();
+      if (!await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query("UPDATE orders SET deliverer_id = $2 WHERE id = $1", [id, accountId]);
+      await client.query("COMMIT");
+      return now;
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
+    if (result === "DELIVERER_NOT_ELIGIBLE") return reply.code(409).send({ error: { code: result } });
+    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
+  });
+
+  // Owners manage the per-staff delivery capability; Owner accounts always qualify without a flag.
+  app.put("/v1/me/shop-staff/:id/can-deliver", { schema: { params: OrderParams, body: SetStaffCanDeliverBody, response: { 200: SetStaffCanDeliverResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const { canDeliver } = request.body as SetStaffCanDeliverBody;
+    const { rows: [updated] } = await pool.query<{ accountId: string; canDeliver: boolean }>(
+      `UPDATE shop_members target SET can_deliver = $3 FROM shop_members owner
+       WHERE owner.account_id = $1 AND owner.role = 'owner' AND target.account_id = $2
+         AND target.shop_id = owner.shop_id AND target.role = 'staff'
+       RETURNING target.account_id AS "accountId", target.can_deliver AS "canDeliver"`, [who.accountId, id, canDeliver]);
+    return updated ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
+  });
+
+  app.get("/v1/me/shop-staff", { schema: { response: { 200: ShopStaffResponse, 403: ErrorEnvelope, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { rows: [owner] } = await pool.query<{ shopId: string }>(
+      "SELECT shop_id AS \"shopId\" FROM shop_members WHERE account_id = $1 AND role = 'owner'", [who.accountId]);
+    if (!owner) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
+    const { rows } = await pool.query<ShopStaffResponse["staff"][number]>(
+      `SELECT m.account_id AS "accountId", a.name, m.can_deliver AS "canDeliver" FROM shop_members m
+       JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = $1 AND m.role = 'staff' ORDER BY lower(a.name)`, [owner.shopId]);
+    return { staff: rows };
+  });
+
+  app.post("/v1/me/shop-orders/:id/delivery-photo-upload", { schema: { params: OrderParams, body: DeliveryPhotoUploadBody, response: { 201: DeliveryPhotoUpload, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    if (!photos) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
+    const { id } = request.params as OrderParams;
+    const body = request.body as DeliveryPhotoUploadBody;
+    return withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ shopId: string }>(
+        `SELECT shop_id AS "shopId" FROM orders WHERE id = $1 AND deliverer_id = $2 AND status = 'arrived' FOR UPDATE`, [id, who.accountId]);
+      if (!order) return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
+      const upload = await photos.createUpload(id, who.accountId, body);
+      await client.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at)
+        VALUES ($1, $2, $3, $4, $5)`, [upload.id, id, who.accountId, body.byteLength, new Date(clock.now().getTime() + 15 * 60_000)]);
+      await client.query("COMMIT");
+      return reply.code(201).send(upload);
+    });
+  });
+
+  const complete = (proofException: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    if (!photos) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
+    const { id } = request.params as OrderParams;
+    const body = request.body as CompleteDeliveryBody | ProofExceptionBody;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; statusChangedAt: Date; handoverCodeHash: string; handoverCodeSalt: string; handoverCodeAttempts: number; handoverCodeBlockedUntil: Date | null; itemsCheckedAt: Date | null }>(
+        `SELECT o.id, o.status, m.role, o.status_changed_at AS "statusChangedAt", o.handover_code_hash AS "handoverCodeHash", o.handover_code_salt AS "handoverCodeSalt",
+          o.handover_code_attempts AS "handoverCodeAttempts", o.handover_code_blocked_until AS "handoverCodeBlockedUntil", o.items_checked_at AS "itemsCheckedAt"
+         FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id AND m.account_id = $2
+         WHERE o.id = $1 AND o.deliverer_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      const now = clock.now();
+      if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
+      if (!order.itemsCheckedAt && now.getTime() < order.statusChangedAt.getTime() + ITEMS_CHECK_SECONDS * 1000) return "ITEM_CHECK_WAIT" as const;
+      const { rows: [upload] } = await client.query<{ byteLength: number; expiresAt: Date }>(
+        `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
+         WHERE id = $1 AND order_id = $2 AND account_id = $3 FOR UPDATE`, [body.photoUploadId, id, who.accountId]);
+      if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
+      if (!proofException) {
+        if (order.handoverCodeBlockedUntil && order.handoverCodeBlockedUntil > now) return "HANDOVER_CODE_LOCKED" as const;
+        if (order.handoverCodeAttempts >= HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
+        const { handoverCode } = body as CompleteDeliveryBody;
+        if (!matchesHandoverCode(handoverCode, order.handoverCodeSalt, order.handoverCodeHash)) {
+          const attempts = order.handoverCodeAttempts + 1;
+          const blockedUntil = attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN ? new Date(now.getTime() + HANDOVER_CODE_COOLDOWN_MS) : order.handoverCodeBlockedUntil;
+          await client.query("UPDATE orders SET handover_code_attempts = $2, handover_code_blocked_until = $3 WHERE id = $1", [id, attempts, blockedUntil]);
+          await client.query("COMMIT");
+          return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" as const : "HANDOVER_CODE_WRONG" as const;
+        }
+      }
+      let photoKey: string;
+      try { photoKey = await photos.save(id, who.accountId, body.photoUploadId, upload.byteLength); }
+      catch (error) {
+        if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
+        return "UNAVAILABLE" as const;
+      }
+      if (!await moveOrder(client, order, "delivered", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query(`UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, delivery_payment = $4, proof_exception = $5,
+        proof_exception_reason = $6, handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1`,
+      [id, photoKey, proofExpiresAt(now), body.payment, proofException, proofException ? (body as ProofExceptionBody).reason : null]);
+      await recordDeliverySale(client, id, who.accountId, now);
+      await client.query("COMMIT");
+      return { now, uploadId: body.photoUploadId };
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (result === "UNAVAILABLE") return reply.code(503).send({ error: { code: result } });
+    if (result === "DELIVERY_PHOTO_INVALID") return reply.code(400).send({ error: { code: result } });
+    if (result === "HANDOVER_CODE_WRONG") return reply.code(400).send({ error: { code: result } });
+    if (result === "HANDOVER_CODE_LOCKED") return reply.code(429).send({ error: { code: result } });
+    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    if (result === "ITEM_CHECK_WAIT") return reply.code(409).send({ error: { code: result } });
+    await removeDeliveryUpload(id, who.accountId, result.uploadId);
+    return shopOrderView(pool, id, who.accountId, result.now, failureWaitSeconds);
+  };
+  app.post("/v1/me/shop-orders/:id/delivered", { schema: { params: OrderParams, body: CompleteDeliveryBody, response: { 200: ShopOrderResponse, ...errors } } }, complete(false));
+  app.post("/v1/me/shop-orders/:id/proof-exception", { schema: { params: OrderParams, body: ProofExceptionBody, response: { 200: ShopOrderResponse, ...errors } } }, complete(true));
+
+  app.post("/v1/me/shop-orders/:id/call-attempt", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff" }>(
+        `SELECT o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
+      const now = clock.now();
+      await client.query("UPDATE orders SET delivery_call_attempt_at = COALESCE(delivery_call_attempt_at, $2) WHERE id = $1", [id, now]);
+      await client.query("COMMIT");
+      return now;
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
+    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
+  });
+
+  app.post("/v1/me/shop-orders/:id/delivery-failed", { schema: { params: OrderParams, body: FailDeliveryBody, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    if (!photos) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
+    const { id } = request.params as OrderParams;
+    const body = request.body as FailDeliveryBody;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff"; callAttemptAt: Date | null }>(
+        `SELECT o.status, o.delivery_call_attempt_at AS "callAttemptAt", m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      const now = clock.now();
+      if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
+      if (!order.callAttemptAt) return "DELIVERY_FAILURE_CALL_REQUIRED" as const;
+      if (now.getTime() < order.callAttemptAt.getTime() + failureWaitSeconds * 1000) return "DELIVERY_FAILURE_WAIT" as const;
+      const { rows: [upload] } = await client.query<{ byteLength: number; expiresAt: Date }>(
+        `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
+         WHERE id = $1 AND order_id = $2 AND account_id = $3 FOR UPDATE`, [body.photoUploadId, id, who.accountId]);
+      if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
+      let photoKey: string;
+      try { photoKey = await photos.save(id, who.accountId, body.photoUploadId, upload.byteLength); }
+      catch (error) {
+        if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
+        return "UNAVAILABLE" as const;
+      }
+      if (!await moveOrder(client, { id, status: order.status }, "delivery_failed", { id: who.accountId, role: order.role }, now, body.reason)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query("UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, failed_delivery_reason = $4 WHERE id = $1", [id, photoKey, proofExpiresAt(now), body.reason]);
+      await client.query("COMMIT");
+      return { now, uploadId: body.photoUploadId };
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
+    if (result === "UNAVAILABLE") return reply.code(503).send({ error: { code: result } });
+    if (result === "DELIVERY_PHOTO_INVALID") return reply.code(400).send({ error: { code: result } });
+    if (result === "DELIVERY_FAILURE_CALL_REQUIRED" || result === "DELIVERY_FAILURE_WAIT" || result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    await removeDeliveryUpload(id, who.accountId, result.uploadId);
+    return shopOrderView(pool, id, who.accountId, result.now, failureWaitSeconds);
+  });
 }

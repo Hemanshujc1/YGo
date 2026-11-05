@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
+import type { DeliveryPhotoStorage } from "../src/adapters/delivery-photos";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
@@ -10,7 +11,7 @@ import { connectDatabase } from "../src/db";
 import { stockOf } from "../src/listings";
 import { createLocalPushSender, type PushResult, type PushSender, type ReceiptResult } from "../src/adapters/push-sender";
 import { checkPushReceipts, sendDuePushes } from "../src/notifications";
-import { runJob } from "../src/jobs";
+import { cleanupDeliveryProofs, cleanupDeliveryUploads, runJob } from "../src/jobs";
 import { setOrderTiming } from "../src/order-timing";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
@@ -28,6 +29,15 @@ let customer: { authorization: string };
 let other: { authorization: string };
 
 const codeFor = (email: string) => mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1];
+const deliveryPhotos = {
+  createUpload: async () => ({ id: randomUUID(), uploadUrl: "https://upload.example.test/photo" }),
+  save: async (orderId: string, _accountId: string, id: string) => { savedProofs.push(id); return `delivery-proofs/${orderId}/${id}.jpg`; },
+  deleteUpload: async (_orderId: string, _accountId: string, id: string) => { deletedUploads.push(id); },
+  deleteProof: async () => {},
+  deleteStagedProof: async () => {},
+} as DeliveryPhotoStorage;
+const deletedUploads: string[] = [];
+const savedProofs: string[] = [];
 
 async function signIn(path: string, email: string) {
   await app.inject({ method: "POST", url: `${path}/code`, payload: { email } });
@@ -42,7 +52,9 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  deletedUploads.length = 0;
+  savedProofs.length = 0;
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, deliveryPhotos });
   admin = await signIn("/v1/admin/auth", adminEmail);
   customer = await signIn("/v1/auth", "customer@example.com");
   other = await signIn("/v1/auth", "other@example.com");
@@ -174,6 +186,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
       productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null, answerExpired: false,
+      handoverCode: null, itemsCheckedAt: null,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: other })).statusCode).toBe(404);
@@ -392,7 +405,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE ring_attempts, order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });
@@ -405,6 +418,13 @@ describe("Order transitions (#9)", () => {
     expect(allowed).toEqual([
       "placed → accepted by owner", "placed → accepted by staff", "placed → rejected_by_shop by owner", "placed → rejected_by_shop by staff",
       "placed → expired by system", "placed → cancelled_by_customer by customer",
+      "accepted → preparing by owner", "accepted → preparing by staff", "accepted → ready by owner", "accepted → ready by staff",
+      "accepted → cancelled_by_shop by owner", "accepted → cancelled_by_shop by staff",
+      "preparing → ready by owner", "preparing → ready by staff", "preparing → cancelled_by_shop by owner", "preparing → cancelled_by_shop by staff",
+      "ready → out_for_delivery by owner", "ready → out_for_delivery by staff", "ready → picked_up by owner", "ready → picked_up by staff",
+      "ready → cancelled_by_shop by owner", "ready → cancelled_by_shop by staff",
+      "out_for_delivery → arrived by owner", "out_for_delivery → arrived by staff",
+      "arrived → delivered by owner", "arrived → delivered by staff", "arrived → delivery_failed by owner", "arrived → delivery_failed by staff",
     ]);
   });
 });
@@ -602,9 +622,208 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
     expect(listed.new).toEqual([{
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:11:00.000Z", expiresAt: "2030-01-01T00:21:00.000Z",
       itemCount: 1, total: "435.00", address: { flat: "Flat 4B", areaLine: "Kothrud" },
+      delivererId: null,
     }]);
     expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
     expect(listed.doneToday?.map((row) => row.id)).toEqual([rejected.id, cancelled.id]);
+  });
+});
+
+describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
+  async function readyAtDoor(shopId: string, dal: string, home: string, owner: Record<string, string>, legacy = false) {
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    if (legacy) await database.pool.query("UPDATE orders SET handover_code_hash = NULL, handover_code_salt = NULL, handover_code_ciphertext = NULL WHERE id = $1", [placed.id]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>("SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: member?.accountId } });
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: owner });
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/arrived`, headers: owner });
+    return placed.id;
+  }
+
+  async function photo(orderId: string, owner: Record<string, string>) {
+    const answer = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivery-photo-upload`, headers: owner,
+      payload: { contentType: "image/jpeg", byteLength: 100 } });
+    expect(answer.statusCode).toBe(201);
+    return answer.json() as { id: string; uploadUrl: string };
+  }
+
+  it("confirms the item check, completes handover with a proof photo, and records one stock sale", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const before = await shopSees(dal, owner);
+    const orderId = await readyAtDoor(shopId, dal, home, owner, true);
+    expect((await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json().handoverCode).toBeNull();
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const handoverCode = checked.json().handoverCode as string;
+    expect(handoverCode).toMatch(/^\d{4}$/);
+    const upload = await photo(orderId, owner);
+    const complete = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+      payload: { handoverCode, payment: "cash", photoUploadId: upload.id } });
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json()).toMatchObject({ status: "delivered", deliveryPhotoAvailable: true, deliveryFailureReadyAt: null });
+    expect(deletedUploads).toContain(upload.id);
+    expect((await database.pool.query("SELECT delivery_photo_expires_at FROM orders WHERE id = $1", [orderId])).rows[0]?.delivery_photo_expires_at)
+      .toEqual(new Date("2030-01-31T00:00:00.000Z"));
+    expect(await shopSees(dal, owner, before.cursor)).toMatchObject({
+      listings: { stock: "9.000", held: "0" }, stock: { quantity: "9.000", held: "0" }, sync: [{ quantity: "9.000", held: "0" }],
+    });
+    const customerPage = (await app.inject({ method: "GET", url: `/v1/shops/${shopId}?pincode=411038&latitude=18.5&longitude=73.8`, headers: customer })).json() as {
+      groups: Array<{ products: Array<{ packs: Array<{ listingId: string; outOfStock: boolean }> }> }> };
+    expect(customerPage.groups.flatMap((group) => group.products).flatMap((product) => product.packs)
+      .find((pack) => pack.listingId === dal)?.outOfStock).toBe(false);
+    const sales = await database.pool.query<{ quantity: string }>("SELECT quantity FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId]);
+    expect(sales.rows).toEqual([{ quantity: "-1.000" }]);
+    expect(await left(dal)).toBe("9");
+  });
+
+  it("shows the shop the Customer's name from the start, and the phone only to the assigned deliverer (DLV-7)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    await database.pool.query("UPDATE accounts SET name = 'Meera', phone = '+919876500002' WHERE email = 'customer@example.com'");
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    const read = async () => (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: owner })).json().customer;
+    expect(await read()).toEqual({ name: "Meera", phone: null });
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>("SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: member?.accountId } });
+    expect(await read()).toEqual({ name: "Meera", phone: "+919876500002" });
+  });
+
+  it("waits after a call, then closes a failed delivery without recording a sale", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const before = await shopSees(dal, owner);
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const called = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/call-attempt`, headers: owner });
+    expect(called.json().deliveryFailureReadyAt).toBe("2030-01-01T00:02:00.000Z");
+    const tooSoon = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivery-failed`, headers: owner,
+      payload: { reason: "no_one_at_address", photoUploadId: randomUUID() } });
+    expect(tooSoon.json()).toMatchObject({ error: { code: "DELIVERY_FAILURE_WAIT" } });
+    at("2030-01-01T00:02:00.000Z");
+    const upload = await photo(orderId, owner);
+    const failed = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivery-failed`, headers: owner,
+      payload: { reason: "no_one_at_address", photoUploadId: upload.id } });
+    expect(failed.statusCode).toBe(200);
+    expect(failed.json()).toMatchObject({ status: "delivery_failed", deliveryPhotoAvailable: true });
+    expect(deletedUploads).toContain(upload.id);
+    expect((await database.pool.query("SELECT delivery_photo_expires_at FROM orders WHERE id = $1", [orderId])).rows[0]?.delivery_photo_expires_at)
+      .toEqual(new Date("2030-01-31T00:02:00.000Z"));
+    expect(await shopSees(dal, owner, before.cursor)).toMatchObject({
+      listings: { stock: "10.000", held: "0" }, stock: { quantity: "10.000", held: "0" }, sync: [],
+    });
+    const customerPage = (await app.inject({ method: "GET", url: `/v1/shops/${shopId}?pincode=411038&latitude=18.5&longitude=73.8`, headers: customer })).json() as {
+      groups: Array<{ products: Array<{ packs: Array<{ listingId: string; outOfStock: boolean }> }> }> };
+    expect(customerPage.groups.flatMap((group) => group.products).flatMap((product) => product.packs)
+      .find((pack) => pack.listingId === dal)?.outOfStock).toBe(false);
+    expect((await database.pool.query("SELECT 1 FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rowCount).toBe(0);
+    expect(await left(dal)).toBe("10");
+  });
+
+  it("allows a call attempt only after the deliverer has arrived", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    await database.pool.query("UPDATE orders SET status = 'out_for_delivery' WHERE id = $1", [orderId]);
+    const response = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/call-attempt`, headers: owner });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: { code: "ORDER_STATUS_CHANGED" } });
+    expect((await database.pool.query("SELECT delivery_call_attempt_at FROM orders WHERE id = $1", [orderId])).rows[0]?.delivery_call_attempt_at).toBeNull();
+  });
+
+  it("lets the customer recover a permanently locked handover code after checking items", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const oldCode = checked.json().handoverCode as string;
+    await database.pool.query("UPDATE orders SET handover_code_attempts = 6 WHERE id = $1", [orderId]);
+    const recovered = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/handover-code/recover`, headers: customer });
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json().handoverCode).toMatch(/^\d{4}$/);
+    expect(recovered.json().handoverCode).not.toBe(oldCode);
+    expect((await database.pool.query("SELECT handover_code_attempts, handover_code_blocked_until FROM orders WHERE id = $1", [orderId])).rows)
+      .toEqual([{ handover_code_attempts: 0, handover_code_blocked_until: null }]);
+  });
+
+  it("cleans expired delivery uploads and their temporary object", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>(
+      "SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    const uploadId = randomUUID();
+    await database.pool.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at)
+      VALUES ($1, $2, $3, 100, $4)`, [uploadId, orderId, member?.accountId, new Date(clock.now().getTime() - 1)]);
+    const deleted: string[] = [];
+    const deletedStaged: string[] = [];
+    await cleanupDeliveryUploads(database, clock, { deleteUpload: async (_order, _account, id) => { deleted.push(id); },
+      deleteStagedProof: async (order, id) => { deletedStaged.push(`delivery-proofs/${order}/${id}.jpg`); } } as DeliveryPhotoStorage);
+    expect(deleted).toEqual([uploadId]);
+    expect(deletedStaged).toEqual([`delivery-proofs/${orderId}/${uploadId}.jpg`]);
+    expect((await database.pool.query("SELECT id FROM delivery_photo_uploads WHERE id = $1", [uploadId])).rowCount).toBe(0);
+  });
+
+  it("preserves a staged proof referenced by an order while cleaning the expired upload", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const { rows: [member] } = await database.pool.query<{ accountId: string }>(
+      "SELECT account_id AS \"accountId\" FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId]);
+    const uploadId = randomUUID();
+    const stagedKey = `delivery-proofs/${orderId}/${uploadId}.jpg`;
+    await database.pool.query("UPDATE orders SET delivery_photo_key = $2 WHERE id = $1", [orderId, stagedKey]);
+    await database.pool.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at)
+      VALUES ($1, $2, $3, 100, $4)`, [uploadId, orderId, member?.accountId, new Date(clock.now().getTime() - 1)]);
+    const deletedProofs: string[] = [];
+    const deletedUploads: string[] = [];
+    await cleanupDeliveryUploads(database, clock, { deleteStagedProof: async (_order, id) => { deletedProofs.push(id); },
+      deleteUpload: async (_order, _account, id) => { deletedUploads.push(id); } } as DeliveryPhotoStorage);
+    expect(deletedProofs).toEqual([]);
+    expect(deletedUploads).toEqual([uploadId]);
+    expect((await database.pool.query("SELECT delivery_photo_key FROM orders WHERE id = $1", [orderId])).rows[0]?.delivery_photo_key).toBe(stagedKey);
+  });
+
+  it("retains proof at the boundary, cleans it at expiry, and retries storage failures", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const key = `delivery-proofs/${orderId}/proof.jpg`;
+    const expiresAt = new Date(clock.now().getTime() + 1000);
+    await database.pool.query("UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3 WHERE id = $1", [orderId, key, expiresAt]);
+    const deleted: string[] = [];
+    let attempts = 0;
+    const photos = { deleteProof: async (proof: string) => { attempts += 1; if (attempts === 1) throw new Error("storage down"); deleted.push(proof); } } as DeliveryPhotoStorage;
+    const saved = async () => (await database.pool.query("SELECT delivery_photo_key, delivery_photo_expires_at FROM orders WHERE id = $1", [orderId])).rows[0];
+
+    await cleanupDeliveryProofs(database, clock, photos);
+    expect(attempts).toBe(0);
+    expect((await saved()).delivery_photo_key).toBe(key);
+
+    clock.set(expiresAt);
+    await cleanupDeliveryProofs(database, clock, photos);
+    expect(attempts).toBe(1);
+    expect((await saved()).delivery_photo_key).toBe(key);
+
+    await cleanupDeliveryProofs(database, clock, photos);
+    expect(deleted).toEqual([key]);
+    expect(await saved()).toEqual({ delivery_photo_key: null, delivery_photo_expires_at: null });
+  });
+
+  it("keeps the upload when the delivery transaction fails after permanent save", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const orderId = await readyAtDoor(shopId, dal, home, owner);
+    const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+    const upload = await photo(orderId, owner);
+    const suffix = randomUUID().replaceAll("-", "");
+    const functionName = `fail_delivery_${suffix}`;
+    await database.pool.query(`CREATE FUNCTION ${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'delivery commit failed'; END $$`);
+    await database.pool.query(`CREATE TRIGGER ${functionName} BEFORE UPDATE ON orders FOR EACH ROW WHEN (NEW.id = '${orderId}'::uuid AND NEW.status = 'delivered') EXECUTE FUNCTION ${functionName}()`);
+    try {
+      const response = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+        payload: { handoverCode: checked.json().handoverCode, payment: "cash", photoUploadId: upload.id } });
+      expect(response.statusCode).toBe(500);
+      expect(savedProofs).toContain(upload.id);
+      expect(deletedUploads).not.toContain(upload.id);
+      expect((await database.pool.query("SELECT id FROM delivery_photo_uploads WHERE id = $1", [upload.id])).rowCount).toBe(1);
+    } finally {
+      await database.pool.query(`DROP TRIGGER ${functionName} ON orders`);
+      await database.pool.query(`DROP FUNCTION ${functionName}()`);
+    }
   });
 });
 
@@ -644,6 +863,11 @@ describe("Shopkeeper sees stock left after accepted orders, with the held amount
     expect(await shopSees(dal, owner, first.cursor)).toMatchObject({
       listings: { stock: "1.000", held: "2.000" }, stock: { quantity: "1.000", held: "2.000" }, sync: [{ quantity: "1.000", held: "2.000" }],
     });
+    const customerPage = (await app.inject({ method: "GET", url: `/v1/shops/${shopId}?pincode=411038&latitude=18.5&longitude=73.8`, headers: customer })).json() as {
+      groups: Array<{ products: Array<{ packs: Array<{ listingId: string; outOfStock: boolean }> }> }> };
+    const customerPack = customerPage.groups.flatMap((group) => group.products).flatMap((product) => product.packs)
+      .find((pack) => pack.listingId === dal);
+    expect(customerPack?.outOfStock).toBe(false);
     expect(await left(dal)).toBe("1");
     // Opening stock still records what's on hand.
     expect((await database.pool.query("SELECT kind, quantity FROM stock_movements WHERE listing_id = $1", [dal])).rows).toEqual([{ kind: "opening", quantity: "3.000" }]);

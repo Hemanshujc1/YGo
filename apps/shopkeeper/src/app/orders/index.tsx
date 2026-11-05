@@ -31,6 +31,7 @@ export default function OrdersScreen() {
     >
       <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
+      {shown?.canDeliver && <Link href="/deliveries" asChild><Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3"><Text className="text-body font-semibold text-primary">{words.groups.myDeliveries}</Text></Pressable></Link>}
       {view.status === "loading" && (
         <View className="min-h-12 flex-row items-center gap-2">
           <ActivityIndicator className="text-primary" />

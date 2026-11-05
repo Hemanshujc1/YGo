@@ -66,6 +66,8 @@ export const OrderResponse = z.strictObject({
    * moment before the `expire-orders` job (#57, every minute) moves it to Expired, C18 and C19 show "Shop did not answer" from this (owner's answer 4 on #426).
    */
   answerExpired: z.boolean(),
+  handoverCode: z.string().regex(/^\d{4}$/).nullable(),
+  itemsCheckedAt: z.iso.datetime().nullable(),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;
 
@@ -107,6 +109,7 @@ export const ShopOrderSummary = z.strictObject({
   itemCount: z.number().int().positive(),
   total: Amount,
   address: z.strictObject({ flat: z.string(), areaLine: z.string().nullable() }),
+  delivererId: z.uuid().nullable(),
 });
 export type ShopOrderSummary = z.infer<typeof ShopOrderSummary>;
 
@@ -119,13 +122,15 @@ export type ShopOrderSummary = z.infer<typeof ShopOrderSummary>;
  */
 export const ShopOrdersResponse = z.strictObject({
   now: z.iso.datetime(),
+  canDeliver: z.boolean(),
   new: z.array(ShopOrderSummary),
   accepted: z.array(ShopOrderSummary),
   doneToday: z.array(ShopOrderSummary),
+  myDeliveries: z.array(ShopOrderSummary),
 });
 export type ShopOrdersResponse = z.infer<typeof ShopOrdersResponse>;
 
-/** S05: one of the shop's orders, as it was frozen. No Customer phone (owner's answer 11 on #425). */
+/** S05: one of the shop's orders, as it was frozen. The Customer's name for the shop and the deliverer; the phone only for the assigned deliverer (DLV-7). */
 export const ShopOrderResponse = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
@@ -141,8 +146,41 @@ export const ShopOrderResponse = z.strictObject({
   /** To collect at the door (MNY-1). */
   total: Amount,
   rejectReason: RejectReason.nullable(),
+  delivererId: z.uuid().nullable(),
+  customer: z.strictObject({ name: z.string().nullable(), phone: z.string().nullable() }).nullable(),
+  shopUpiId: z.string().nullable(),
+  deliveryPhotoAvailable: z.boolean(),
+  deliveryFailureReadyAt: z.iso.datetime().nullable(),
 });
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
+
+export const AssignDelivererBody = z.strictObject({ accountId: z.uuid() });
+export type AssignDelivererBody = z.infer<typeof AssignDelivererBody>;
+export const SetStaffCanDeliverBody = z.strictObject({ canDeliver: z.boolean() });
+export type SetStaffCanDeliverBody = z.infer<typeof SetStaffCanDeliverBody>;
+export const SetStaffCanDeliverResponse = z.strictObject({ accountId: z.uuid(), canDeliver: z.boolean() });
+export type SetStaffCanDeliverResponse = z.infer<typeof SetStaffCanDeliverResponse>;
+export const ShopDeliverer = z.strictObject({ accountId: z.uuid(), name: z.string().nullable(), role: z.enum(["owner", "staff"]), canDeliver: z.boolean() });
+export type ShopDeliverer = z.infer<typeof ShopDeliverer>;
+export const ShopDeliverersResponse = z.strictObject({ deliverers: z.array(ShopDeliverer) });
+export type ShopDeliverersResponse = z.infer<typeof ShopDeliverersResponse>;
+export const ShopStaff = z.strictObject({ accountId: z.uuid(), name: z.string().nullable(), canDeliver: z.boolean() });
+export type ShopStaff = z.infer<typeof ShopStaff>;
+export const ShopStaffResponse = z.strictObject({ staff: z.array(ShopStaff) });
+export type ShopStaffResponse = z.infer<typeof ShopStaffResponse>;
+export const DELIVERY_PHOTO_MAX_BYTES = 5_000_000;
+export const DeliveryPhotoUploadBody = z.strictObject({ contentType: z.literal("image/jpeg"), byteLength: z.number().int().min(1).max(DELIVERY_PHOTO_MAX_BYTES) });
+export type DeliveryPhotoUploadBody = z.infer<typeof DeliveryPhotoUploadBody>;
+export const DeliveryPhotoUpload = z.strictObject({ id: z.uuid(), uploadUrl: z.url() });
+export type DeliveryPhotoUpload = z.infer<typeof DeliveryPhotoUpload>;
+export const CompleteDeliveryBody = z.strictObject({ handoverCode: z.string().regex(/^\d{4}$/), payment: z.enum(["cash", "upi"]), photoUploadId: z.uuid() });
+export type CompleteDeliveryBody = z.infer<typeof CompleteDeliveryBody>;
+export const ProofExceptionBody = z.strictObject({ reason: z.enum(["customer_phone_unavailable", "customer_phone_not_present", "someone_else_receiving", "other"]), photoUploadId: z.uuid(), payment: z.enum(["cash", "upi"]) });
+export type ProofExceptionBody = z.infer<typeof ProofExceptionBody>;
+export const DeliveryFailureReason = z.enum(["no_one_at_address", "customer_refused", "address_not_found", "other"]);
+export type DeliveryFailureReason = z.infer<typeof DeliveryFailureReason>;
+export const FailDeliveryBody = z.strictObject({ reason: DeliveryFailureReason, photoUploadId: z.uuid() });
+export type FailDeliveryBody = z.infer<typeof FailDeliveryBody>;
 
 /**
  * A line Accept can't fill from the stock left (NOT_ENOUGH_STOCK). `available` is what is left in the base unit, never packs:
