@@ -773,7 +773,7 @@ export const notifications = pgTable("notifications", {
 }, (table) => [
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session

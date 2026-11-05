@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  CartParams, ErrorEnvelope, ORDER_ANSWER_SECONDS, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody,
+  CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody,
   TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { moveOrder, recordStatus } from "../orders";
+import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { packsOf, pricedCart, savedCart } from "./cart";
 import { servingShops } from "./feed";
@@ -34,7 +35,7 @@ const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.sho
  * listing it as New (owner's answer 4 on #426). The one place the 600 s cut-off is written in SQL.
  */
 export const answerExpired = (o: string, now: string) =>
-  `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${ORDER_ANSWER_SECONDS}) <= ${now}::timestamptz)`;
+  `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${orderTiming.expireSeconds}) <= ${now}::timestamptz)`;
 
 /** C09 and C19: one of the Customer's orders as it was frozen. */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date): Promise<OrderResponse | undefined> {

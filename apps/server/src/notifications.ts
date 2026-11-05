@@ -1,8 +1,9 @@
-import { type NotificationKind, ORDER_ANSWER_SECONDS, type OrderStatus, type RejectReason } from "@ygo/contracts";
+import type { NotificationKind, OrderStatus, RejectReason } from "@ygo/contracts";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Push, PushResult, PushSender, ReceiptResult } from "./adapters/push-sender";
 import { withTransaction } from "./db";
+import { orderTiming } from "./order-timing";
 
 type Order = { number: number; shopName: string; reason: RejectReason | null };
 
@@ -22,7 +23,7 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   words: (order: Order) => { title: string; body: string } }>> = {
   placed: {
     kind: "order_placed", to: "shop", staff: true, loud: true,
-    words: ({ number }) => ({ title: `New order #${number}`, body: `Accept or reject it within ${ORDER_ANSWER_SECONDS / 60} minutes.` }),
+    words: ({ number }) => ({ title: `New order #${number}`, body: `Accept or reject it within ${Math.round(orderTiming.expireSeconds / 60)} minutes.` }),
   },
   cancelled_by_customer: {
     kind: "order_cancelled_by_customer", to: "shop", staff: true,
@@ -31,6 +32,11 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   accepted: {
     kind: "order_accepted", to: "customer",
     words: ({ number, shopName }) => ({ title: `Order #${number} accepted`, body: `${shopName} is getting your order ready.` }),
+  },
+  // ORD-2: the shop never answered; nobody is charged anything. Only the customer hears of it.
+  expired: {
+    kind: "order_expired", to: "customer",
+    words: ({ number, shopName }) => ({ title: `Order #${number} expired`, body: `${shopName} didn't answer in time. You were not charged.` }),
   },
   rejected_by_shop: {
     kind: "order_rejected", to: "customer",
@@ -41,8 +47,6 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   },
 };
 
-/** The new-order alarm rings again this long after placing, while the order still waits (ORD-2, owner's answer 8 on #55). */
-export const RE_RING_SECONDS = 120;
 /** The safety-net floor push goes this long after an unacknowledged ring push (#508). */
 export const FLOOR_SECONDS = 15;
 
@@ -69,7 +73,7 @@ export async function notifyOrderStatus(client: PoolClient, orderId: string, to:
      SELECT id, send_after FROM added CROSS JOIN unnest(CASE WHEN $9 THEN ARRAY[$10::timestamptz, $10::timestamptz + make_interval(secs => $11)]
        ELSE ARRAY[$10::timestamptz] END) AS send_after`,
     [order.accountId, order.shopId, rule.staff ?? false, rule.to === "customer" ? "customer" : "shopkeeper", rule.kind, title, body, orderId,
-      rule.loud ?? false, at, RE_RING_SECONDS]);
+      rule.loud ?? false, at, orderTiming.reRingSeconds]);
 }
 
 /** A phone's push is tried this many times in all, then dropped (NOT-2). */
@@ -91,7 +95,7 @@ const staffKinds = Object.values(rules).filter((rule) => rule.to === "shop" && r
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of
  * the recipient in that app, a shop recipient is still in the shop in a role that hears this kind, and a new order
- * still waits within its answer time. An acknowledged ring attempt drops its floor push (#508).
+ * still waits within its answer time (`ORDER_EXPIRE_SECONDS`). An acknowledged ring attempt drops its floor push (#508).
  */
 const stillDue = `EXISTS (SELECT 1 FROM push_tokens t JOIN sessions s ON s.id = t.session_id
     WHERE t.token = q.token AND t.app = n.app AND s.account_id = n.account_id AND s.expires_at > $1)
@@ -149,7 +153,7 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
       `SELECT q.id, q.tries < ${MAX_TRIES} AND ${stillDue} AS due
        FROM push_queue q JOIN notifications n ON n.id = q.notification_id LEFT JOIN orders o ON o.id = n.order_id
        WHERE q.token IS NOT NULL AND q.send_after <= $1 AND (q.claimed_until IS NULL OR q.claimed_until <= $1)
-       ORDER BY q.send_after, q.id LIMIT $4 FOR UPDATE OF q SKIP LOCKED`, [now, staffKinds, ORDER_ANSWER_SECONDS, batch]);
+       ORDER BY q.send_after, q.id LIMIT $4 FOR UPDATE OF q SKIP LOCKED`, [now, staffKinds, orderTiming.expireSeconds, batch]);
     await client.query("DELETE FROM push_queue WHERE id = ANY($1::bigint[])", [rows.filter((row) => !row.due).map((row) => row.id)]);
     const { rows: claimed } = await client.query<Claimed>(
       `UPDATE push_queue q SET tries = q.tries + 1, claim_id = $4, claimed_until = $2::timestamptz + make_interval(secs => $3)

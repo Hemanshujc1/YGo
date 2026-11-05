@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config";
+import { loadConfig, loadOrderTiming } from "../src/config";
 
 const database = {
   DATABASE_URL: "postgres://ygo:ygo@localhost:5432/ygo",
@@ -107,4 +107,21 @@ it("configures the sync age and clock-skew bounds", () => {
   expect(loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "3600" })).toMatchObject({ COUNTER_BILL_VOID_SECONDS: 3600 });
   expect(() => loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "0" })).toThrow();
   expect(() => loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "0" })).toThrow();
+});
+
+describe("order timers (#57, ORD-2)", () => {
+  const mail = { ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
+
+  it("rings again at 120 s and expires at 600 s unless set otherwise", () => {
+    expect(loadConfig(mail)).toMatchObject({ ORDER_REALERT_SECONDS: 120, ORDER_EXPIRE_SECONDS: 600 });
+    expect(loadOrderTiming({})).toEqual({ reRingSeconds: 120, expireSeconds: 600 });
+    expect(loadOrderTiming({ ORDER_REALERT_SECONDS: "30", ORDER_EXPIRE_SECONDS: "900" })).toEqual({ reRingSeconds: 30, expireSeconds: 900 });
+  });
+
+  it("refuses a re-alert that is not before the expiry, and numbers that are not positive whole seconds", () => {
+    for (const bad of [{ ORDER_REALERT_SECONDS: "600" }, { ORDER_REALERT_SECONDS: "700" }, { ORDER_EXPIRE_SECONDS: "0" }, { ORDER_EXPIRE_SECONDS: "1.5" }, { ORDER_REALERT_SECONDS: "-1" }]) {
+      expect(() => loadConfig({ ...mail, ...bad })).toThrow();
+      expect(() => loadOrderTiming(bad)).toThrow();
+    }
+  });
 });

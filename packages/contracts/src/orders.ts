@@ -62,8 +62,8 @@ export const OrderResponse = z.strictObject({
   /** Why the shop rejected it, shown on C19 in the Customer's own words (owner's answer 3 on #425); null otherwise. */
   rejectReason: RejectReason.nullable(),
   /**
-   * Still placed, but past ORDER_ANSWER_SECONDS by the server's clock: the shop can no longer answer. Until #57 moves
-   * such an order to Expired, C18 and C19 show "Shop did not answer" from this, and the status stays as stored (owner's answer 4 on #426).
+   * Still placed, but past ORDER_ANSWER_SECONDS by the server's clock: the shop can no longer answer. For the
+   * moment before the `expire-orders` job (#57, every minute) moves it to Expired, C18 and C19 show "Shop did not answer" from this (owner's answer 4 on #426).
    */
   answerExpired: z.boolean(),
 });
@@ -84,7 +84,9 @@ export type OrdersResponse = z.infer<typeof OrdersResponse>;
 
 /**
  * A placed order the shop hasn't answered expires this long after placement (ORD-2). Accept and Reject refuse
- * from this moment with ORDER_EXPIRED; #57's worker moves it to Expired. One value, so it can be changed in one place.
+ * from this moment with ORDER_EXPIRED; the `expire-orders` job (#57) moves it to Expired. The server reads its own
+ * setting, `ORDER_EXPIRE_SECONDS`; the apps count down from this constant. Changing the setting therefore needs an
+ * app update that changes this value, until the order responses carry the server's deadline.
  */
 export const ORDER_ANSWER_SECONDS = 600;
 

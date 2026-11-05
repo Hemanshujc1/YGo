@@ -26,14 +26,18 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
 
   const yesterday = new Date(now.getTime() - 25 * 60 * 60 * 1000);
+  const halfHourAgo = new Date(now.getTime() - 30 * 60 * 1000);
   await database.db.insert(jobRuns).values([
     { jobName: "backup-nightly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "cleanup-sessions", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "snapshot-weekly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
+    // expire-orders runs every minute, so it counts as stale after an hour.
+    { jobName: "expire-orders", startedAt: halfHourAgo, finishedAt: halfHourAgo, status: "ok" },
   ]);
   expect(await check()).toBe(true);
   expect(reports.every((report) => report.healthy)).toBe(true);
@@ -52,6 +56,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: true },
   ]);
 });
@@ -67,6 +72,7 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
   await expect(checkJobs(broken, clock, async () => { throw new Error("AWS failed"); }))

@@ -10,6 +10,8 @@ import { connectDatabase } from "../src/db";
 import { stockOf } from "../src/listings";
 import { createLocalPushSender, type PushResult, type PushSender, type ReceiptResult } from "../src/adapters/push-sender";
 import { checkPushReceipts, sendDuePushes } from "../src/notifications";
+import { runJob } from "../src/jobs";
+import { setOrderTiming } from "../src/order-timing";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
 
@@ -402,7 +404,7 @@ describe("Order transitions (#9)", () => {
       roles.filter((role) => canMove(from, to, role)).map((role) => `${from} → ${to} by ${role}`)));
     expect(allowed).toEqual([
       "placed → accepted by owner", "placed → accepted by staff", "placed → rejected_by_shop by owner", "placed → rejected_by_shop by staff",
-      "placed → cancelled_by_customer by customer",
+      "placed → expired by system", "placed → cancelled_by_customer by customer",
     ]);
   });
 });
@@ -1308,5 +1310,145 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
       // Unknown attempt ID gets 404
       expect((await ack(owner, randomUUID())).statusCode).toBe(404);
     });
+  });
+});
+
+describe("Order timers: unanswered orders expire (#57, ORD-2)", () => {
+  const as = (headers: Record<string, string>, appName: "customer" | "shopkeeper") => ({ ...headers, "x-ygo-app-name": appName, "x-ygo-app-version": "1.0.0" });
+  const expire = () => runJob(database, "expire-orders", clock);
+  const statusOf = async (orderId: string) => (await database.pool.query<{ status: string }>("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status;
+  const expiredNotices = async () => (await database.pool.query<{ kind: string; app: string; title: string; body: string; order_id: string }>(
+    "SELECT kind, app, title, body, order_id FROM notifications WHERE kind = 'order_expired'")).rows;
+  const runs = async () => (await database.pool.query<{ status: string; error_text: string | null }>(
+    "SELECT status, error_text FROM job_runs WHERE job_name = 'expire-orders' ORDER BY started_at, finished_at")).rows;
+  /** An order placed at `iso`. */
+  async function placedAt(shop: Awaited<ReturnType<typeof stocked>>, iso: string) {
+    at(iso);
+    return ((await ordered(shop.shopId, [{ listingId: shop.dal, count: 1 }], shop.home)).json() as { id: string }).id;
+  }
+
+  it("expires an order at 600 s and not at 599 s, and at 601 s too, with its history and one notice for the customer", async () => {
+    const shop = await stocked();
+    const older = await placedAt(shop, "2029-12-31T23:59:59.000Z");
+    const exact = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    const young = await placedAt(shop, "2030-01-01T00:00:01.000Z");
+    at("2030-01-01T00:10:00.000Z");
+    await expire();
+    expect([await statusOf(older), await statusOf(exact), await statusOf(young)]).toEqual(["expired", "expired", "placed"]);
+    at("2030-01-01T00:10:00.999Z");
+    await expire();
+    expect(await statusOf(young)).toBe("placed");
+    at("2030-01-01T00:10:01.000Z");
+    await expire();
+    expect(await statusOf(young)).toBe("expired");
+    expect(await history(exact)).toEqual([{ from_status: "placed", to_status: "expired", actor_role: "system", reason_code: "no_answer" }]);
+    expect((await database.pool.query("SELECT actor_id, at FROM order_status_history WHERE order_id = $1 AND to_status = 'expired'", [exact])).rows)
+      .toEqual([{ actor_id: null, at: new Date("2030-01-01T00:10:00.000Z") }]);
+    expect(await expiredNotices()).toHaveLength(3);
+    expect((await runs()).map(({ status }) => status)).toEqual(["ok", "ok", "ok"]);
+  });
+
+  it("tells only the customer, once, however often the job runs or runs at once, and drops the shop's re-ring", async () => {
+    const shop = await stocked();
+    const owner = as(shop.owner, "shopkeeper");
+    const buyer = as(customer, "customer");
+    for (const [headers, token] of [[owner, "ExponentPushToken[owner]"], [buyer, "ExponentPushToken[buyer]"]] as const) {
+      expect((await app.inject({ method: "PUT", url: "/v1/me/push-token", headers, payload: { token } })).statusCode).toBe(204);
+    }
+    const id = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    at("2030-01-01T00:10:00.000Z");
+    await Promise.all([expire(), expire(), expire()]);
+    await expire();
+    expect(await expiredNotices()).toEqual([{ kind: "order_expired", app: "customer", title: "Order #1001 expired",
+      body: "Sai General Stores didn't answer in time. You were not charged.", order_id: id }]);
+    expect(await history(id)).toHaveLength(1);
+    const customerList = (await app.inject({ method: "GET", url: "/v1/me/notifications", headers: buyer })).json() as { notifications: Array<{ kind: string }> };
+    expect(customerList.notifications.map(({ kind }) => kind)).toEqual(["order_expired"]);
+    const ownerList = (await app.inject({ method: "GET", url: "/v1/me/notifications", headers: owner })).json() as { notifications: Array<{ kind: string }> };
+    expect(ownerList.notifications.map(({ kind }) => kind)).toEqual(["order_placed"]);
+    const push = createLocalPushSender();
+    await sendDuePushes(database.pool, push, clock.now());
+    expect(push.sent.map(({ to, title }) => `${to} ${title}`)).toEqual(["ExponentPushToken[buyer] Order #1001 expired"]);
+    expect((await database.pool.query<{ count: string }>("SELECT count(*) FROM push_queue")).rows[0]?.count).toBe("0");
+  });
+
+  it("leaves answered orders alone, and a shop can no longer answer one that expired", async () => {
+    const shop = await stocked();
+    const accepted = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    const rejected = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    const cancelled = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    const silent = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    expect((await accept(accepted, shop.owner)).statusCode).toBe(200);
+    expect((await reject(rejected, shop.owner)).statusCode).toBe(200);
+    expect((await cancel(cancelled)).statusCode).toBe(200);
+    at("2030-01-01T00:10:00.000Z");
+    await expire();
+    expect([await statusOf(accepted), await statusOf(rejected), await statusOf(cancelled), await statusOf(silent)])
+      .toEqual(["accepted", "rejected_by_shop", "cancelled_by_customer", "expired"]);
+    expect((await accept(silent, shop.owner)).statusCode).toBe(409);
+    expect((await cancel(silent)).statusCode).toBe(409);
+    expect(await left(shop.dal)).toBe("9");
+  });
+
+  it("is a move no request can make: only the system role, which no signed-in request has", async () => {
+    const shop = await stocked();
+    const id = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    at("2030-01-01T00:10:00.000Z");
+    for (const role of ["customer", "owner", "staff"] as const) expect(canMove("placed", "expired", role)).toBe(false);
+    for (const url of ["accept", "reject"]) {
+      const response = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/${url}`, headers: shop.owner, payload: { reason: "too_busy" } });
+      expect(response.statusCode).toBe(409);
+    }
+    expect(await statusOf(id)).toBe("placed");
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/expire`, headers: shop.owner })).statusCode).toBe(404);
+  });
+
+  it("records a failed run durably, rolls the failing order back whole, and still expires the others", async () => {
+    const shop = await stocked();
+    const bad = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    const good = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    await database.pool.query(`CREATE FUNCTION fail_expiry() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.status = 'expired' AND OLD.id = '${bad}' THEN RAISE EXCEPTION 'expiry blocked for test'; END IF; RETURN NEW; END $$`);
+    await database.pool.query("CREATE TRIGGER fail_expiry BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION fail_expiry()");
+    at("2030-01-01T00:10:00.000Z");
+    await expect(expire()).rejects.toThrow("Some orders could not be expired");
+    expect([await statusOf(bad), await statusOf(good)]).toEqual(["placed", "expired"]);
+    expect(await history(bad)).toEqual([]);
+    expect((await expiredNotices()).map(({ order_id }) => order_id)).toEqual([good]);
+    expect(await runs()).toEqual([{ status: "failed", error_text: "expiry failed" }]);
+    await database.pool.query("DROP TRIGGER fail_expiry ON orders");
+    at("2030-01-01T00:11:00.000Z");
+    await expire();
+    expect([await statusOf(bad), await statusOf(good)]).toEqual(["expired", "expired"]);
+    expect((await expiredNotices()).map(({ order_id }) => order_id).sort()).toEqual([bad, good].sort());
+    expect((await runs()).map(({ status }) => status)).toEqual(["failed", "ok"]);
+  });
+
+  it("keeps the status, history and notice of one order together when the notice cannot be written", async () => {
+    const shop = await stocked();
+    const id = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    await database.pool.query("ALTER TABLE notifications ADD CONSTRAINT block_expired CHECK (kind <> 'order_expired')");
+    at("2030-01-01T00:10:00.000Z");
+    await expect(expire()).rejects.toThrow("Some orders could not be expired");
+    expect(await statusOf(id)).toBe("placed");
+    expect(await history(id)).toEqual([]);
+    expect(await expiredNotices()).toEqual([]);
+    expect(await runs()).toEqual([{ status: "failed", error_text: "expiry failed" }]);
+  });
+
+  it("follows ORDER_EXPIRE_SECONDS and ORDER_REALERT_SECONDS", async () => {
+    const shop = await stocked();
+    const id = await placedAt(shop, "2030-01-01T00:00:00.000Z");
+    setOrderTiming({ reRingSeconds: 60, expireSeconds: 300 });
+    try {
+      at("2030-01-01T00:04:59.000Z");
+      await expire();
+      expect(await statusOf(id)).toBe("placed");
+      at("2030-01-01T00:05:00.000Z");
+      await expire();
+      expect(await statusOf(id)).toBe("expired");
+    } finally {
+      setOrderTiming({ reRingSeconds: 120, expireSeconds: 600 });
+    }
   });
 });
