@@ -8,10 +8,11 @@ export async function checkJobs(
   database: Database,
   clock: Clock,
   publish: (name: JobName, healthy: boolean) => Promise<void>,
+  names: readonly JobName[] = Object.keys(jobMaxAgeHours) as JobName[],
 ): Promise<boolean> {
   let allHealthy = true;
   let publishFailed = false;
-  for (const name of Object.keys(jobMaxAgeHours) as JobName[]) {
+  for (const name of names) {
     let healthy = false;
     try {
       const [latest] = await database.db.select().from(jobRuns)

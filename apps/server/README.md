@@ -101,6 +101,8 @@ The two addresses do different jobs:
 | `MIN_CUSTOMER_VERSION` | no | `0.0.0`; an older Customer app gets `426 UPDATE_REQUIRED` |
 | `SYNC_MAX_AGE_SECONDS` | no | `604800` (7 days); oldest new sync action accepted |
 | `SYNC_CLOCK_SKEW_SECONDS` | no | `300` (5 minutes); clock differences beyond this are flagged |
+| `ORDER_REALERT_SECONDS` | no | `120`; how long after placing a new order the shop's alarm rings again (ORD-2). Must be less than `ORDER_EXPIRE_SECONDS`. The `expire-orders` job and the server both read it |
+| `ORDER_EXPIRE_SECONDS` | no | `600`; how long a `placed` order waits for the shop before the `expire-orders` job moves it to Expired and the API refuses Accept, Reject and Cancel. The apps count down from `ORDER_ANSWER_SECONDS` (600) in `@ygo/contracts`, so changing this needs an app update that changes that constant, until the order responses carry the server's deadline |
 | `COUNTER_BILL_VOID_SECONDS` | no | `86400` (24 hours); how long after a counter bill gets its number (on arrival, or when Admin numbers a held bill) the Owner may void it, on the server's clock |
 | `MIN_SHOPKEEPER_VERSION` | no | `0.0.0`; an older Shopkeeper app gets `426 UPDATE_REQUIRED` |
 

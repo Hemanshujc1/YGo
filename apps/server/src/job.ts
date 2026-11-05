@@ -1,5 +1,6 @@
-import { loadDatabaseUrl } from "./config";
+import { loadDatabaseUrl, loadOrderTiming } from "./config";
 import { connectDatabase, type Database } from "./db";
+import { setOrderTiming } from "./order-timing";
 import { isJobName, runJob } from "./jobs";
 import { runNightlyBackup, runWeeklySnapshot } from "./adapters/backup";
 
@@ -11,6 +12,7 @@ if (!name || !isJobName(name) || process.argv.length !== 3) {
   let database: Database | undefined;
   try {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is missing");
+    setOrderTiming(loadOrderTiming());
     database = connectDatabase(loadDatabaseUrl());
     await runJob(database, name, { now: () => new Date() }, runNightlyBackup, runWeeklySnapshot);
   } catch (error) {

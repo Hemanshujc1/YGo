@@ -1,20 +1,19 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  ErrorEnvelope, ORDER_ANSWER_SECONDS, OrderParams, type OrderStatus, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary,
+  ErrorEnvelope, OrderParams, type OrderStatus, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary,
   ShopOrdersResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { stockOf } from "../listings";
 import { moveOrder } from "../orders";
+import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { answerExpired, frozenOrder } from "./orders";
 
-const answerMs = ORDER_ANSWER_SECONDS * 1000;
-
 /** Until when the shop can answer, while the order still waits for it. */
-const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ? new Date(placedAt.getTime() + answerMs).toISOString() : null;
+const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ? new Date(placedAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
 
 /** S05: one order of the shop the account is Owner or Staff of, whether or not the shop is Live now (owner's answer 13 on #425). */
 async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date): Promise<ShopOrderResponse | undefined> {
@@ -83,7 +82,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       if (order.status !== "placed") return { code: "ORDER_STATUS_CHANGED" };
       // Read after the lock, so a wait on it can't stamp an earlier time.
       const now = clock.now();
-      if (now.getTime() >= order.placedAt.getTime() + answerMs) return { code: "ORDER_EXPIRED" };
+      if (now.getTime() >= order.placedAt.getTime() + orderTiming.expireSeconds * 1000) return { code: "ORDER_EXPIRED" };
       if (to === "accepted") {
         // A listing switched off or repriced since placement doesn't block Accept: the order keeps its price (answer 14).
         // NO KEY UPDATE queues behind placement's FOR SHARE and other Accepts, but not behind cart saves' key checks.

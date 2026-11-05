@@ -8,9 +8,11 @@ import { createProductImageStorage, createS3ProductImageClient } from "./adapter
 import { createExpoPushSender, createLoggingPushSender } from "./adapters/push-sender";
 import { loadConfig } from "./config";
 import { connectDatabase } from "./db";
+import { setOrderTiming } from "./order-timing";
 import { checkPushReceipts, sendDuePushes } from "./notifications";
 
 const config = loadConfig();
+setOrderTiming({ reRingSeconds: config.ORDER_REALERT_SECONDS, expireSeconds: config.ORDER_EXPIRE_SECONDS });
 const mailer = config.MAILER === "ses"
   ? createSesMailer(config.MAIL_FROM, config.AWS_REGION)
   : createMailpitMailer(config.MAIL_FROM, config.MAILPIT_URL);

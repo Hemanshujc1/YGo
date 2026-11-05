@@ -87,4 +87,12 @@ for job in backup-nightly cleanup-sessions snapshot-weekly; do
     --treat-missing-data breaching
 done
 
+# expire-orders is checked every 5 minutes (ygo-job-check-expire-orders.timer); two bad
+# or missing 5-minute points in a row raise the alarm: a failed run in about 10-15 minutes,
+# an overdue run (last success over 15 minutes old) in about 25-30 minutes.
+alarm ap-south-1 "$mumbai_topic" job-expire-orders --namespace YGo --metric-name JobHealthy \
+  --dimensions "Name=JobName,Value=expire-orders" --statistic Minimum --period 300 \
+  --evaluation-periods 2 --threshold 1 --comparison-operator LessThanThreshold \
+  --treat-missing-data breaching
+
 echo "Monitoring definitions created. Confirm both SNS email subscriptions before relying on alarms."

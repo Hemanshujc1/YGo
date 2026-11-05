@@ -26,14 +26,18 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
 
   const yesterday = new Date(now.getTime() - 25 * 60 * 60 * 1000);
+  const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
   await database.db.insert(jobRuns).values([
     { jobName: "backup-nightly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "cleanup-sessions", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "snapshot-weekly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
+    // expire-orders runs every minute, so it counts as stale after 15 minutes.
+    { jobName: "expire-orders", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
   ]);
   expect(await check()).toBe(true);
   expect(reports.every((report) => report.healthy)).toBe(true);
@@ -52,6 +56,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: true },
   ]);
 });
@@ -67,6 +72,7 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
   await expect(checkJobs(broken, clock, async () => { throw new Error("AWS failed"); }))
@@ -119,4 +125,19 @@ it("reports a weekly snapshot healthy through day eight, then unhealthy", async 
     { jobName: "snapshot-weekly", startedAt: new Date(failed.getTime() + 1), status: "running" },
   ]);
   expect(await check()).toBe(false);
+});
+
+it("checks only the named job, and expire-orders goes stale after 15 minutes", async () => {
+  const now = new Date("2041-01-02T01:30:00.000Z");
+  const clock = createLocalClock(now);
+  const reports: { name: JobName; healthy: boolean }[] = [];
+  const publish = async (name: JobName, healthy: boolean) => { reports.push({ name, healthy }); };
+  const ago = (minutes: number) => new Date(now.getTime() - minutes * 60 * 1000);
+  await database.db.insert(jobRuns).values({ jobName: "expire-orders", startedAt: ago(14), finishedAt: ago(14), status: "ok" });
+  expect(await checkJobs(database, clock, publish, ["expire-orders"])).toBe(true);
+  expect(reports).toEqual([{ name: "expire-orders", healthy: true }]);
+  clock.advance(2 * 60 * 1000);
+  reports.length = 0;
+  expect(await checkJobs(database, clock, publish, ["expire-orders"])).toBe(false);
+  expect(reports).toEqual([{ name: "expire-orders", healthy: false }]);
 });
