@@ -17,6 +17,9 @@ import { answerExpired, frozenOrder } from "./orders";
 /** Until when the shop can answer, while the order still waits for it. */
 const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ? new Date(placedAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
 
+/** Unexpired photo uploads one order may hold at once; retakes after a failed try fit, a flood does not. */
+const DELIVERY_PHOTO_OPEN_UPLOADS_MAX = 5;
+
 /** S05: one order of the shop the account is Owner or Staff of, whether or not the shop is Live now (owner's answer 13 on #425). */
 async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, failureWaitSeconds: number): Promise<ShopOrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; deliveryFailureReadyAt: Date | null }>(
@@ -30,9 +33,12 @@ async function shopOrderView(client: Pool | PoolClient, orderId: string, account
   return row && { ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt), now: now.toISOString(), deliveryFailureReadyAt: row.deliveryFailureReadyAt?.toISOString() ?? null };
 }
 
-export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number }): void {
+export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope, 429: ErrorEnvelope, 503: ErrorEnvelope };
+  const refusalStatus = { NOT_FOUND: 404, UNAVAILABLE: 503, DELIVERY_PHOTO_INVALID: 400, HANDOVER_CODE_WRONG: 400, HANDOVER_CODE_LOCKED: 429 } as const;
+  const sendRefusal = (reply: FastifyReply, code: string) =>
+    reply.code(refusalStatus[code as keyof typeof refusalStatus] ?? 409).send({ error: { code } });
   const removeDeliveryUpload = async (orderId: string, accountId: string, uploadId: string) => {
     if (!photos) return;
     try {
@@ -229,6 +235,9 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       const { rows: [order] } = await client.query<{ shopId: string }>(
         `SELECT shop_id AS "shopId" FROM orders WHERE id = $1 AND deliverer_id = $2 AND status = 'arrived' FOR UPDATE`, [id, who.accountId]);
       if (!order) return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
+      const { rows: [open] } = await client.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM delivery_photo_uploads WHERE order_id = $1 AND expires_at > $2", [id, clock.now()]);
+      if (open && open.count >= DELIVERY_PHOTO_OPEN_UPLOADS_MAX) return reply.code(400).send({ error: { code: "DELIVERY_PHOTO_INVALID" } });
       const upload = await photos.createUpload(id, who.accountId, body);
       await client.query(`INSERT INTO delivery_photo_uploads (id, order_id, account_id, byte_length, expires_at)
         VALUES ($1, $2, $3, $4, $5)`, [upload.id, id, who.accountId, body.byteLength, new Date(clock.now().getTime() + 15 * 60_000)]);
@@ -237,16 +246,49 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     });
   });
 
+  // The photo is read, transcoded and written between two short transactions, so no order row stays locked
+  // while storage is slow. A photo left behind when the second one refuses is removed with its upload row.
+  const savePhoto = async (orderId: string, accountId: string, uploadId: string, byteLength: number) => {
+    if (!photos) return "UNAVAILABLE" as const;
+    // The save is stopped through the signal and awaited, so when this returns nothing of it is still running
+    // and cleanup, which waits for the 5-minute lease, never meets a photo being processed.
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), photoSaveTimeoutMs);
+    try { return await photos.save(orderId, accountId, uploadId, byteLength, stop.signal); }
+    catch (error) {
+      if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
+      return "UNAVAILABLE" as const;
+    } finally { clearTimeout(timer); }
+  };
+  /** Holds the upload against cleanup while the photo is read and saved, which happens outside any lock. */
+  const PHOTO_SAVE_LEASE_MS = 5 * 60_000;
+  const leaseUpload = async (client: PoolClient, uploadId: string, now: Date) => {
+    const leased = await client.query("UPDATE delivery_photo_uploads SET processing_until = $2 WHERE id = $1", [uploadId, new Date(now.getTime() + PHOTO_SAVE_LEASE_MS)]);
+    return leased.rowCount === 1;
+  };
+  /** Locks the arrived order of this deliverer and the upload they chose, for the second transaction. */
+  const lockArrived = async (client: PoolClient, orderId: string, accountId: string, uploadId: string) => {
+    const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff" }>(
+      `SELECT o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+       WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [orderId, accountId]);
+    if (!order) return "NOT_FOUND" as const;
+    if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
+    const upload = await client.query("SELECT 1 FROM delivery_photo_uploads WHERE id = $1 AND order_id = $2 AND account_id = $3 AND expires_at > $4 FOR UPDATE", [uploadId, orderId, accountId, clock.now()]);
+    if (!upload.rowCount) return "DELIVERY_PHOTO_INVALID" as const;
+    return order;
+  };
+
   const complete = (proofException: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     if (!photos) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
     const { id } = request.params as OrderParams;
     const body = request.body as CompleteDeliveryBody | ProofExceptionBody;
-    const result = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; statusChangedAt: Date; handoverCodeHash: string; handoverCodeSalt: string; handoverCodeAttempts: number; handoverCodeBlockedUntil: Date | null; itemsCheckedAt: Date | null }>(
-        `SELECT o.id, o.status, m.role, o.status_changed_at AS "statusChangedAt", o.handover_code_hash AS "handoverCodeHash", o.handover_code_salt AS "handoverCodeSalt",
-          o.handover_code_attempts AS "handoverCodeAttempts", o.handover_code_blocked_until AS "handoverCodeBlockedUntil", o.items_checked_at AS "itemsCheckedAt"
+    const checked = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; statusChangedAt: Date; handoverCodeHash: string | null; handoverCodeSalt: string | null; handoverCodeAttempts: number; handoverCodeBlockedUntil: Date | null; itemsCheckedAt: Date | null; callAttemptAt: Date | null }>(
+        `SELECT o.id, o.status, o.status_changed_at AS "statusChangedAt", o.handover_code_hash AS "handoverCodeHash", o.handover_code_salt AS "handoverCodeSalt",
+          o.handover_code_attempts AS "handoverCodeAttempts", o.handover_code_blocked_until AS "handoverCodeBlockedUntil", o.items_checked_at AS "itemsCheckedAt",
+          o.delivery_call_attempt_at AS "callAttemptAt"
          FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id AND m.account_id = $2
          WHERE o.id = $1 AND o.deliverer_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
@@ -255,11 +297,22 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       if (!order.itemsCheckedAt && now.getTime() < order.statusChangedAt.getTime() + ITEMS_CHECK_SECONDS * 1000) return "ITEM_CHECK_WAIT" as const;
       const { rows: [upload] } = await client.query<{ byteLength: number; expiresAt: Date }>(
         `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
-         WHERE id = $1 AND order_id = $2 AND account_id = $3 FOR UPDATE`, [body.photoUploadId, id, who.accountId]);
+         WHERE id = $1 AND order_id = $2 AND account_id = $3`, [body.photoUploadId, id, who.accountId]);
       if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
-      if (!proofException) {
+      if (proofException) {
+        // A deliverer who cannot get the code must have tried to reach the Customer first (no wait, unlike a failed delivery).
+        if (!order.callAttemptAt) return "PROOF_EXCEPTION_CALL_REQUIRED" as const;
+      } else {
         if (order.handoverCodeBlockedUntil && order.handoverCodeBlockedUntil > now) return "HANDOVER_CODE_LOCKED" as const;
         if (order.handoverCodeAttempts >= HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
+        if (!order.handoverCodeHash || !order.handoverCodeSalt) {
+          // An order accepted before the code existed: make one now, so the Customer can read it, and count nothing against the deliverer.
+          const generated = createHandoverCode(secret);
+          await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4
+            WHERE id = $1 AND handover_code_hash IS NULL`, [id, generated.hash, generated.salt, generated.ciphertext]);
+          await client.query("COMMIT");
+          return "HANDOVER_CODE_WRONG" as const;
+        }
         const { handoverCode } = body as CompleteDeliveryBody;
         if (!matchesHandoverCode(handoverCode, order.handoverCodeSalt, order.handoverCodeHash)) {
           const attempts = order.handoverCodeAttempts + 1;
@@ -269,13 +322,18 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" as const : "HANDOVER_CODE_WRONG" as const;
         }
       }
-      let photoKey: string;
-      try { photoKey = await photos.save(id, who.accountId, body.photoUploadId, upload.byteLength); }
-      catch (error) {
-        if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
-        return "UNAVAILABLE" as const;
-      }
-      if (!await moveOrder(client, order, "delivered", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      if (!await leaseUpload(client, body.photoUploadId, now)) return "DELIVERY_PHOTO_INVALID" as const;
+      await client.query("COMMIT");
+      return { byteLength: upload.byteLength };
+    });
+    if (typeof checked === "string") return sendRefusal(reply, checked);
+    const photoKey = await savePhoto(id, who.accountId, body.photoUploadId, checked.byteLength);
+    if (photoKey === "UNAVAILABLE" || photoKey === "DELIVERY_PHOTO_INVALID") return sendRefusal(reply, photoKey);
+    const result = await withTransaction(pool, async (client) => {
+      const order = await lockArrived(client, id, who.accountId, body.photoUploadId);
+      if (typeof order === "string") return order;
+      const now = clock.now();
+      if (!await moveOrder(client, { id, status: order.status }, "delivered", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
       await client.query(`UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, delivery_payment = $4, proof_exception = $5,
         proof_exception_reason = $6, handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1`,
       [id, photoKey, proofExpiresAt(now), body.payment, proofException, proofException ? (body as ProofExceptionBody).reason : null]);
@@ -283,13 +341,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       await client.query("COMMIT");
       return { now, uploadId: body.photoUploadId };
     });
-    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    if (result === "UNAVAILABLE") return reply.code(503).send({ error: { code: result } });
-    if (result === "DELIVERY_PHOTO_INVALID") return reply.code(400).send({ error: { code: result } });
-    if (result === "HANDOVER_CODE_WRONG") return reply.code(400).send({ error: { code: result } });
-    if (result === "HANDOVER_CODE_LOCKED") return reply.code(429).send({ error: { code: result } });
-    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
-    if (result === "ITEM_CHECK_WAIT") return reply.code(409).send({ error: { code: result } });
+    if (typeof result === "string") return sendRefusal(reply, result);
     await removeDeliveryUpload(id, who.accountId, result.uploadId);
     return shopOrderView(pool, id, who.accountId, result.now, failureWaitSeconds);
   };
@@ -322,9 +374,9 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     if (!photos) return reply.code(503).send({ error: { code: "UNAVAILABLE" } });
     const { id } = request.params as OrderParams;
     const body = request.body as FailDeliveryBody;
-    const result = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff"; callAttemptAt: Date | null }>(
-        `SELECT o.status, o.delivery_call_attempt_at AS "callAttemptAt", m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+    const checked = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus; callAttemptAt: Date | null }>(
+        `SELECT o.status, o.delivery_call_attempt_at AS "callAttemptAt" FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
          WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
       const now = clock.now();
@@ -333,23 +385,25 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       if (now.getTime() < order.callAttemptAt.getTime() + failureWaitSeconds * 1000) return "DELIVERY_FAILURE_WAIT" as const;
       const { rows: [upload] } = await client.query<{ byteLength: number; expiresAt: Date }>(
         `SELECT byte_length AS "byteLength", expires_at AS "expiresAt" FROM delivery_photo_uploads
-         WHERE id = $1 AND order_id = $2 AND account_id = $3 FOR UPDATE`, [body.photoUploadId, id, who.accountId]);
+         WHERE id = $1 AND order_id = $2 AND account_id = $3`, [body.photoUploadId, id, who.accountId]);
       if (!upload || upload.expiresAt <= now) return "DELIVERY_PHOTO_INVALID" as const;
-      let photoKey: string;
-      try { photoKey = await photos.save(id, who.accountId, body.photoUploadId, upload.byteLength); }
-      catch (error) {
-        if (error instanceof InvalidDeliveryPhotoError || (error as { name?: string }).name === "NoSuchKey") return "DELIVERY_PHOTO_INVALID" as const;
-        return "UNAVAILABLE" as const;
-      }
+      if (!await leaseUpload(client, body.photoUploadId, now)) return "DELIVERY_PHOTO_INVALID" as const;
+      await client.query("COMMIT");
+      return { byteLength: upload.byteLength };
+    });
+    if (typeof checked === "string") return sendRefusal(reply, checked);
+    const photoKey = await savePhoto(id, who.accountId, body.photoUploadId, checked.byteLength);
+    if (photoKey === "UNAVAILABLE" || photoKey === "DELIVERY_PHOTO_INVALID") return sendRefusal(reply, photoKey);
+    const result = await withTransaction(pool, async (client) => {
+      const order = await lockArrived(client, id, who.accountId, body.photoUploadId);
+      if (typeof order === "string") return order;
+      const now = clock.now();
       if (!await moveOrder(client, { id, status: order.status }, "delivery_failed", { id: who.accountId, role: order.role }, now, body.reason)) return "ORDER_STATUS_CHANGED" as const;
       await client.query("UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, failed_delivery_reason = $4 WHERE id = $1", [id, photoKey, proofExpiresAt(now), body.reason]);
       await client.query("COMMIT");
       return { now, uploadId: body.photoUploadId };
     });
-    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
-    if (result === "UNAVAILABLE") return reply.code(503).send({ error: { code: result } });
-    if (result === "DELIVERY_PHOTO_INVALID") return reply.code(400).send({ error: { code: result } });
-    if (result === "DELIVERY_FAILURE_CALL_REQUIRED" || result === "DELIVERY_FAILURE_WAIT" || result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    if (typeof result === "string") return sendRefusal(reply, result);
     await removeDeliveryUpload(id, who.accountId, result.uploadId);
     return shopOrderView(pool, id, who.accountId, result.now, failureWaitSeconds);
   });

@@ -754,6 +754,8 @@ export const deliveryPhotoUploads = pgTable("delivery_photo_uploads", {
   accountId: uuid("account_id").notNull().references(() => accounts.id),
   byteLength: integer("byte_length").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  // While a delivery reads and saves this photo, cleanup leaves the upload alone until this time passes.
+  processingUntil: timestamp("processing_until", { withTimezone: true }),
 }, (table) => [
   index("delivery_photo_uploads_order_id_idx").on(table.orderId),
   index("delivery_photo_uploads_expires_at_idx").on(table.expiresAt),

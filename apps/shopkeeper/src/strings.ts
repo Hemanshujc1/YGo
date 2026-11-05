@@ -700,6 +700,7 @@ export const strings = {
     DELIVERY_PHOTO_INVALID: "Take a clear proof photo and try again.",
     ITEM_CHECK_WAIT: "The customer needs time to check the items.",
     DELIVERY_FAILURE_CALL_REQUIRED: "Call the customer before marking this delivery failed.",
+    PROOF_EXCEPTION_CALL_REQUIRED: "Call the customer before recording a proof exception.",
     DELIVERY_FAILURE_WAIT: "Wait before marking this delivery failed.",
     ORDER_EXPIRED: "This order expired before it was answered.",
     NOT_ENOUGH_STOCK: "There isn't enough stock left for this order.",

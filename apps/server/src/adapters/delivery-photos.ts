@@ -10,6 +10,9 @@ export class InvalidDeliveryPhotoError extends Error {
   }
 }
 
+/** Longest a transcode may run; Sharp stops it there. */
+const TRANSCODE_TIMEOUT_SECONDS = 20;
+
 /** Private proof storage. Upload and validation keys are scoped to the order and assigned account. */
 export function createDeliveryPhotoStorage(files: FileStorage) {
   const uploadKey = (orderId: string, accountId: string, id: string) => `delivery-uploads/${orderId}/${accountId}/${id}.jpg`;
@@ -29,23 +32,30 @@ export function createDeliveryPhotoStorage(files: FileStorage) {
       const uploadUrl = await files.uploadUrl(uploadKey(orderId, accountId, id), body.contentType, { byteLength: body.byteLength, expiresIn: 15 * 60 });
       return { id, uploadUrl };
     },
-    async save(orderId: string, accountId: string, id: string, byteLength: number) {
+    /**
+     * Reads, transcodes and writes the proof. The signal stops it: a transfer is aborted, the transcode is
+     * bounded by Sharp's own timeout, and nothing is written once the signal has fired. When save returns or
+     * throws, nothing of it is still running.
+     */
+    async save(orderId: string, accountId: string, id: string, byteLength: number, signal?: AbortSignal) {
       let source: Buffer;
-      try { source = await files.read(uploadKey(orderId, accountId, id), DELIVERY_PHOTO_MAX_BYTES); }
+      try { source = await files.read(uploadKey(orderId, accountId, id), DELIVERY_PHOTO_MAX_BYTES, signal); }
       catch (error) {
         if (error instanceof FileTooLargeError) throw new InvalidDeliveryPhotoError({ cause: error });
         throw error;
       }
+      signal?.throwIfAborted();
       if (source.length !== byteLength) throw new InvalidDeliveryPhotoError();
       let proof: Buffer;
       try {
-        const image = sharp(source, { failOn: "warning" });
+        const image = sharp(source, { failOn: "warning" }).timeout({ seconds: TRANSCODE_TIMEOUT_SECONDS });
         const metadata = await image.metadata();
         if (metadata.format !== "jpeg") throw new Error("Not JPEG");
         proof = await image.rotate().resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer();
       } catch (error) { throw new InvalidDeliveryPhotoError({ cause: error }); }
+      signal?.throwIfAborted();
       const key = `delivery-proofs/${orderId}/${id}.jpg`;
-      await files.write(key, proof, "image/jpeg");
+      await files.write(key, proof, "image/jpeg", signal);
       return key;
     },
   };

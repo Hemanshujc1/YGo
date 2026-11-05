@@ -379,6 +379,13 @@
       "when": 1793878938217,
       "tag": "0053_delivery_proof_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793890877310,
+      "tag": "0054_delivery_upload_lease",
+      "breakpoints": true
     }
   ]
 }
