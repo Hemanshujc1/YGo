@@ -5,7 +5,8 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 
 const { TabBar } = await import("../src/tab-bar");
 
-type Node = { type: unknown; props: Record<string, any> };
+type Props = { children?: unknown; style?: unknown; accessibilityLabel?: string; accessibilityRole?: string; accessibilityState: { selected: boolean }; onPress: () => void };
+type Node = { type: unknown; props: Props };
 const elements = (node: unknown): Node[] => {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
