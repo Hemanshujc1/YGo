@@ -818,6 +818,33 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await assign(owner, ownerId)).json()).toMatchObject({ error: { code: "ORDER_STATUS_CHANGED" } });
   });
 
+  it.each(["out_for_delivery", "arrived"] as const)("refuses to deactivate Staff who are %s with an order, and allows it once it is closed (#535)", async (status) => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } });
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: staff });
+    if (status === "arrived") await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/arrived`, headers: staff });
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [placed.id])).rows[0]?.status).toBe(status);
+    const deactivate = (headers: typeof owner) => app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers });
+    // Staff cannot deactivate anyone, and the Owner is refused with a clear reason; nothing changes.
+    expect((await deactivate(staff)).statusCode).toBe(404);
+    const refused = await deactivate(owner);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
+    expect((await database.pool.query("SELECT 1 FROM shop_members WHERE account_id = $1", [staffId])).rowCount).toBe(1);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: staff })).statusCode).toBe(200);
+    // Once the order is no longer active, the Owner can deactivate.
+    await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [placed.id]);
+    expect((await deactivate(owner)).statusCode).toBe(204);
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

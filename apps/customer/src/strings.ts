@@ -426,6 +426,7 @@ export const strings = {
     HANDOVER_CODE_WRONG: "That code doesn’t match. Ask the deliverer to try again.",
     HANDOVER_CODE_LOCKED: "Too many tries. Wait two minutes, then try again.",
     DELIVERER_NOT_ELIGIBLE: "Choose the Owner or a Staff member who can deliver.",
+    STAFF_HAS_ACTIVE_DELIVERY: "This person is delivering an order now.",
     DELIVERY_PHOTO_INVALID: "Take a clear proof photo and try again.",
     ITEM_CHECK_WAIT: "The customer needs time to check the items.",
     DELIVERY_FAILURE_CALL_REQUIRED: "Call the customer before marking this delivery failed.",
