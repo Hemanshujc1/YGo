@@ -234,6 +234,7 @@ export {
   ShopOpenStatus,
   Weekday,
 } from "./shop-hours";
+export { ReceiptResponse } from "./receipt";
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
 export {
