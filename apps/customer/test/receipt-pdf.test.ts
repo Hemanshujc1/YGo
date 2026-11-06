@@ -7,6 +7,7 @@ const fonts = { regular: "UkVH", medium: "TUVE", semibold: "U0VN" };
 const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
   number: 1042, placedAt: "2030-01-01T04:30:00.000Z",
   shop: { name: "Sai General Stores", address: "Shop 3, Paud Road", pincode: "411038" },
+  address: { label: "home", areaLine: "Kothrud" },
   lines: [
     { name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1.000", count: 2, part: null, unitPrice: "150.00", lineTotal: "300.00" },
     { name: "Atta", brand: null, baseUnit: "kg", quantity: "5.000", count: 1, part: "0.500", unitPrice: "30.00", lineTotal: "30.00" },
@@ -29,6 +30,8 @@ describe("receipt PDF (#61)", () => {
     expect(html).toContain("<h1>Sai General Stores</h1>");
     expect(html).toContain("Shop 3, Paud Road");
     expect(html).toContain("Order #1042");
+    expect(html).toContain("Delivered to: Home · Kothrud");
+    expect(html).not.toMatch(/\+91|phone/i);
     expect(html).toContain("Tata · 2 × 1 kg");
     expect(html).toContain("500 g of a 5 kg pack");
     for (const text of ["₹150", "₹300", "₹330", "₹20", "₹10.50", "₹360.50", "Paid by UPI"]) expect(html).toContain(text);
@@ -56,7 +59,7 @@ describe("receipt PDF (#61)", () => {
   it("escapes every value the shop or the catalogue wrote", () => {
     const evil = `<img src=x onerror="alert('1')"> & Co`;
     const out = receiptHtml({
-      receipt: receipt({ shop: { name: evil, address: evil, pincode: "<b>" }, lines: [{ name: evil, brand: evil, baseUnit: "each", quantity: "1", count: 1, part: null, unitPrice: "5", lineTotal: "5" }] }),
+      receipt: receipt({ shop: { name: evil, address: evil, pincode: "<b>" }, address: { label: "home", areaLine: evil }, lines: [{ name: evil, brand: evil, baseUnit: "each", quantity: "1", count: 1, part: null, unitPrice: "5", lineTotal: "5" }] }),
       fonts,
     });
     expect(out).not.toContain("<img");

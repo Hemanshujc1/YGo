@@ -696,7 +696,7 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       expect(answer.statusCode).toBe(200);
       const frozen = (await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json();
       expect(answer.json()).toEqual({
-        number: frozen.number, placedAt: frozen.placedAt, shop: { name: frozen.shop.name, address: "Shop 3, Paud Road", pincode: "411038" },
+        number: frozen.number, placedAt: frozen.placedAt, address: { label: frozen.address.label, areaLine: frozen.address.areaLine }, shop: { name: frozen.shop.name, address: "Shop 3, Paud Road", pincode: "411038" },
         lines: frozen.lines, productValue: frozen.productValue, deliveryFee: frozen.deliveryFee, smallCartFee: frozen.smallCartFee, total: frozen.total, payment: "upi",
       });
     });

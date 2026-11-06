@@ -11,9 +11,9 @@ export async function makeReceipt(
   id: string,
   share: (receipt: ReceiptResponse) => Promise<void> = shareReceipt,
 ): Promise<"shared" | "failed"> {
-  const result = await client.receipt(id);
-  if (!result.ok) return "failed";
   try {
+    const result = await client.receipt(id);
+    if (!result.ok) return "failed";
     await share(result.data);
     return "shared";
   } catch {

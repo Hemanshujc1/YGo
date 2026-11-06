@@ -20,7 +20,7 @@ vi.mock("expo-sharing", () => ({ shareAsync: async (uri: string) => { if (io.fai
 
 const start = 1_800_000_000_000, hour = 60 * 60 * 1000;
 const receipt = { number: 1042, placedAt: "2030-01-01T04:30:00.000Z", shop: { name: "Sai", address: "Paud Road", pincode: "411038" },
-  lines: [], productValue: "10", deliveryFee: "0", smallCartFee: null, total: "10", payment: null } as ReceiptResponse;
+  address: { label: "home", areaLine: null }, lines: [], productValue: "10", deliveryFee: "0", smallCartFee: null, total: "10", payment: null } as ReceiptResponse;
 const stray = "file:///cache/Print/other-app-file.pdf";
 
 describe("sharing receipt PDFs (#61)", () => {

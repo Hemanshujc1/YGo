@@ -52,6 +52,7 @@ th.n,td.n{text-align:right;padding-left:16px;white-space:nowrap}
 <p>${escapeHtml(receipt.shop.address)} · ${escapeHtml(words.pincode(receipt.shop.pincode))}</p>
 <p class="head">${words.number(receipt.number)}</p>
 <p class="muted">${formatDateTime(receipt.placedAt)}</p>
+<p>${words.deliveredTo}: ${escapeHtml(strings.confirm[receipt.address.label])}${receipt.address.areaLine ? ` · ${escapeHtml(receipt.address.areaLine)}` : ""}</p>
 <table><thead><tr><th>${words.item}</th><th class="n">${words.price}</th><th class="n">${words.amount}</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="sums">
 ${sum(words.items, receipt.productValue)}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AddressLabel } from "./addresses";
 import { OrderLine } from "./orders";
 import { Amount } from "./pricing";
 
@@ -13,6 +14,8 @@ export const ReceiptResponse = z.strictObject({
   number: z.number().int().positive(),
   placedAt: z.iso.datetime(),
   shop: z.strictObject({ name: z.string(), address: z.string(), pincode: z.string() }),
+  /** Where it was delivered, as frozen: the label and area line only, never the Customer's phone. */
+  address: z.strictObject({ label: AddressLabel, areaLine: z.string().nullable() }),
   lines: z.array(OrderLine),
   productValue: Amount,
   deliveryFee: Amount,

@@ -28,6 +28,12 @@ describe("receipt action on C19 (#61)", () => {
     expect(share).not.toHaveBeenCalled();
   });
 
+  it("fails, rather than throwing, when the request itself throws", async () => {
+    const share = vi.fn(async () => undefined);
+    expect(await makeReceipt({ receipt: async () => { throw new Error("Network request failed"); } }, "o1", share)).toBe("failed");
+    expect(share).not.toHaveBeenCalled();
+  });
+
   it("fails when the PDF or the share sheet throws", async () => {
     expect(await makeReceipt(client({ ok: true, data }), "o1", async () => { throw new Error("print failed"); })).toBe("failed");
   });
