@@ -194,10 +194,14 @@ describe("verified offline shop access", () => {
   it("keeps a renamed shop saved when an Approved answer leaves the lease as it was (#547)", async () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", role: "owner" } });
     await offlineAccess(storage, fetch, () => time).verify(account);
+    const original = record;
+    if (!original) throw new Error("no saved record");
+    time += 3600_000;
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved", shopName: "Sai Fresh", role: "owner" } });
     const next = offlineAccess(storage, fetch, () => time);
     await next.verify(account);
     expect(next.shopName()).toBe("Sai Fresh");
+    expect(record).toMatchObject({ shopName: "Sai Fresh", verifiedAt: original.verifiedAt, stockAllowed: true, shopId: original.shopId });
     fetch.mockRejectedValue(new Error("offline"));
     const restarted = offlineAccess(storage, fetch, () => time);
     await restarted.restore();
