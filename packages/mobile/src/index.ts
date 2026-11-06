@@ -3,6 +3,8 @@ export { Confirm } from "./confirm";
 export { useInFront } from "./in-front";
 export { StatusChip, type Treatment } from "./status-chip";
 export { findPlace, type Found, type Locator } from "./find-place";
+export { JoinShop, type JoinShopWords } from "./join-shop";
+export { cleanCode, type JoinProblem } from "./join-shop-flow";
 export { Profile, type ProfileProps, type ProfileWords } from "./profile";
 export { colourIcons } from "./icons";
 export { createSession, useSession, type AppSession, type SessionState } from "./session";

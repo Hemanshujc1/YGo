@@ -806,6 +806,25 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
   });
 
+  it("keeps Staff without can deliver out of deliveries, however the order is reached (DLV-1, #536)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: false } });
+    expect((await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } })).statusCode).toBe(200);
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    // The list tells the phone to hide Deliveries, and the delivery routes refuse the same person.
+    const list = (await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: staff })).json();
+    expect(list.canDeliver).toBe(false);
+    expect(list.myDeliveries).toEqual([]);
+    for (const step of ["out-for-delivery", "arrived"]) {
+      expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/${step}`, headers: staff })).json().error.code).toBe("FORBIDDEN");
+    }
+    // The Owner's own screens stay the Owner's.
+    expect((await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: staff, payload: { phone: "+919800000009", canDeliver: true } })).statusCode).toBe(404);
+  });
+
   it("keeps an order assigned to Staff after they are deactivated, and refuses them the order (ACC-11)", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const staff = await signIn("/v1/auth", "staff@example.com");

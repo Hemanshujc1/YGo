@@ -40,6 +40,8 @@ import {
   StaffInviteResponse,
   StaffInvitesResponse,
   type InviteStaffBody,
+  type JoinShopBody,
+  JoinShopResponse,
   ShopOrderResponse,
   ShopOrdersResponse,
   ShopCounterBill,
@@ -584,6 +586,11 @@ export function createApiClient({
     /** `POST /v1/me/staff-invites`: invites or re-invites a number; the one-time code is in the answer and never read again (S20). */
     async inviteStaff(body: InviteStaffBody): Promise<ApiResult<StaffInviteResponse>> {
       return result(await signedIn("POST", "/v1/me/staff-invites", body), StaffInviteResponse);
+    },
+
+    /** `POST /v1/me/shop-join`: the invited person's own account joins the shop with the Owner's code (S21). */
+    async joinShop(body: JoinShopBody): Promise<ApiResult<JoinShopResponse>> {
+      return result(await signedIn("POST", "/v1/me/shop-join", body), JoinShopResponse);
     },
 
     /** `POST /v1/me/shop-staff/:id/deactivate`: removes the person's access at once (ACC-11). */

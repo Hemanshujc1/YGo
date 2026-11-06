@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
-import { ErrorEnvelope, InviteStaffBody, JoinShopBody, JoinShopResponse, OrderParams, StaffInviteResponse, StaffInvitesResponse } from "@ygo/contracts";
+import { ErrorEnvelope, InviteStaffBody, JOIN_CODE_ALPHABET, JOIN_CODE_LENGTH, JoinShopBody, JoinShopResponse, OrderParams, StaffInviteResponse, StaffInvitesResponse } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { deriveKeys, digest, mobileSignedIn, sameDigest } from "../tokens";
@@ -10,9 +10,7 @@ import { ownerShop } from "./shop-agreement";
 /** A join code is valid for 24 hours (owner's answer 4 on #58); 5 wrong tries lock the invited number's open codes. */
 const CODE_HOURS = 24;
 const MAX_FAILED_TRIES = 5;
-/** 32 characters with no I, O, 0 or 1, so a code read aloud or off a screen is not mistyped. */
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const newCode = () => Array.from({ length: 8 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
+const newCode = () => Array.from({ length: JOIN_CODE_LENGTH }, () => JOIN_CODE_ALPHABET[randomInt(JOIN_CODE_ALPHABET.length)]).join("");
 
 /**
  * Staff are brought in, joined and removed here (#58). A phone number alone grants nothing (ACC-6): the invited person's

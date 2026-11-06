@@ -485,6 +485,13 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-staff/a%2Fb/deactivate" });
   });
 
+  it("joins a shop with the Owner's code (#536)", async () => {
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shopName: "Sai General Stores" }));
+    await client.verifyCode(signIn);
+    expect(await client.joinShop({ code: "ABCD2345" })).toEqual({ ok: true, data: { shopName: "Sai General Stores" } });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-join", body: { code: "ABCD2345" } });
+  });
+
   it("reads and sets the Owner's open/closed switch (#380)", async () => {
     const status = { open: false, until: "2030-01-02T03:30:00.000Z", setByOwner: true, scheduledOpen: true, nextOpening: "2030-01-02T03:30:00.000Z" };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, status));
