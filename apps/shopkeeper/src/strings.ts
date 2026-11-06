@@ -76,6 +76,8 @@ export const strings = {
   application: {
     loadFailed: "Could not load your shop application. Check your connection, then try again.",
     retry: "Try again",
+    // Staff open their shop in place of Start (#58).
+    staff: { title: (shop: string | null) => (shop ? `You work at ${shop}` : "You work at this shop"), notOpen: "The shop is not taking orders yet." },
     start: {
       title: "Bring your shop to YGo",
       body: "Tell us about your shop. You can save it and finish later.",
@@ -709,5 +711,8 @@ export const strings = {
     COUNTER_BILL_VOIDED: "This bill is already voided.",
     COUNTER_BILL_NOT_VOIDABLE: "This bill can't be voided now.",
     SHOP_NOT_BILLING: "Your shop can't bill right now.",
+    STAFF_AT_ANOTHER_SHOP: "That number is linked to another shop.",
+    STAFF_ALREADY_MEMBER: "That person already works in your shop.",
+    ALREADY_LINKED: "This account is already linked to a shop.",
   } satisfies Record<ErrorCode, string>,
 };

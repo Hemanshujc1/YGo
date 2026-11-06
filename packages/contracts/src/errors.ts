@@ -86,6 +86,9 @@ import { LiveCheck } from "./shops";
  *   the stock it would give back is more than Stock can show.
  * - SHOP_NOT_BILLING (409): the shop is not Live or Suspended.
  * - FORBIDDEN (403): the account is Staff; only the Owner voids (BIL-6).
+ * - STAFF_AT_ANOTHER_SHOP (409): the invited number belongs to an account linked to another shop (ACC-4).
+ * - STAFF_ALREADY_MEMBER (409): the invited number is already the Owner or active Staff of this shop.
+ * - ALREADY_LINKED (409): the account joining already holds a shop link (ACC-4).
  */
 export const ErrorCode = z.enum([
   "VALIDATION_FAILED",
@@ -145,6 +148,9 @@ export const ErrorCode = z.enum([
   "COUNTER_BILL_VOIDED",
   "COUNTER_BILL_NOT_VOIDABLE",
   "SHOP_NOT_BILLING",
+  "STAFF_AT_ANOTHER_SHOP",
+  "STAFF_ALREADY_MEMBER",
+  "ALREADY_LINKED",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

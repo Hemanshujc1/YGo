@@ -1,4 +1,4 @@
-import type { LiveCheck, ShopApplication } from "@ygo/contracts";
+import type { LiveCheck, ShopApplication, StaffShop } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
 import { NotificationsBell } from "@ygo/mobile/notification-parts";
 import { type ReactNode, useCallback, useRef, useState } from "react";
@@ -19,7 +19,7 @@ import { SyncStatus } from "../components/sync-status";
 
 const words = strings.application;
 
-type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; application: ShopApplication | null; liveCheck: LiveCheck | null };
+type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; application: ShopApplication | null; liveCheck: LiveCheck | null; staffShop: StaffShop | null };
 
 /**
  * The signed-in home until a Live shop gets its own home and staff join shops (#58):
@@ -69,7 +69,7 @@ export default function Home() {
     const answer = await api.startShopApplication().catch(() => null);
     working.current = false;
     setStarting(false);
-    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data, liveCheck: null });
+    if (answer?.ok) return setLoad({ kind: "loaded", application: answer.data, liveCheck: null, staffShop: null });
     // Started on another phone: open that one.
     if (answer?.code === "SHOP_APPLICATION_EXISTS") return void fetchApplication();
     setStartFailed(answer ? strings.errors[answer.code] : words.start.offline);
@@ -94,10 +94,22 @@ export default function Home() {
     );
   }
 
-  const { application, liveCheck } = load;
+  const { application, liveCheck, staffShop } = load;
+  // Staff work in a shop that is not theirs to apply for: show it, never Start (#58).
+  if (staffShop) {
+    const answersOrders = staffShop.state === "live" || staffShop.state === "suspended";
+    return (
+      <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+        {answersOrders && <AlertPanel />}
+        {answersOrders && <SyncStatus />}
+        <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.staff.title(staffShop.shopName)}</Text>
+        {!answersOrders && <Text className="text-body text-text">{words.staff.notOpen}</Text>}
+      </Plain>
+    );
+  }
   if (application?.state === "draft") {
     return (
-      <ApplicationForm application={application} onSent={(sent) => (sent ? setLoad({ kind: "loaded", application: sent, liveCheck: null }) : void fetchApplication())} />
+      <ApplicationForm application={application} onSent={(sent) => (sent ? setLoad({ kind: "loaded", application: sent, liveCheck: null, staffShop: null }) : void fetchApplication())} />
     );
   }
 

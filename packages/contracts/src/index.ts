@@ -155,7 +155,7 @@ export {
   CorrectShopApplicationBody,
   LiveBlocker,
   LiveCheck,
-  MyShopApplicationResponse,
+  MyShopApplicationResponse, StaffShop,
   SaveShopApplicationBody,
   SendShopApplicationBody,
   ShopApplication,
@@ -241,6 +241,8 @@ export {
   AssignDelivererBody, CompleteDeliveryBody, DeliveryFailureReason, DeliveryPhotoUpload, DeliveryPhotoUploadBody, FailDeliveryBody, OrderLine, OrderParams, OrderResponse, OrderStatus, OrderSummary, OrdersResponse, PlaceOrderBody, ProofExceptionBody, RejectOrderBody, RejectReason, SetStaffCanDeliverBody, SetStaffCanDeliverResponse, ShopDeliverer, ShopDeliverersResponse, ShopOrderResponse,
   ShopOrderSummary, ShopOrdersResponse, ShopStaff, ShopStaffResponse, ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES, DELIVERY_PHOTO_MAX_BYTES, ORDER_ANSWER_SECONDS,
 } from "./orders";
+
+export { InviteStaffBody, JoinShopBody, JoinShopResponse, StaffInvite, StaffInviteResponse, StaffInvitesResponse } from "./staff";
 
 export {
   AdminCounterBill, AdminCounterBillParams, AdminCounterBillVoid, AdminCounterBillsResponse, CounterBillOriginal, CounterBillResolution, CounterBillResolutionAction, ResolveCounterBillBody,

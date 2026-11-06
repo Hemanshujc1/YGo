@@ -149,7 +149,12 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
     if (!who) return reply;
     const found = await application(pool, "m.account_id", who.accountId);
     // S14 names what still keeps an Approved shop from Live (#363).
-    return { application: found, liveCheck: found?.state === "approved" ? await liveCheck(pool, found.id, clock.now()) : null };
+    const liveNote = found?.state === "approved" ? await liveCheck(pool, found.id, clock.now()) : null;
+    // Staff have no application of their own: they get the shop's name and state, so the app opens it instead of Start (#58).
+    const { rows: [staffShop] } = found ? { rows: [] } : await pool.query(
+      `SELECT s.id AS "shopId", s.shop_name AS "shopName", s.state FROM shops s JOIN shop_members m ON m.shop_id = s.id
+       WHERE m.account_id = $1 AND m.role = 'staff'`, [who.accountId]);
+    return { application: found, liveCheck: liveNote, staffShop: staffShop ?? null };
   });
 
   // Start creates the Draft and makes the account its Owner, in one go (ACC-5).

@@ -438,5 +438,8 @@ export const strings = {
     COUNTER_BILL_VOIDED: "Something changed. Try again.",
     COUNTER_BILL_NOT_VOIDABLE: "Something changed. Try again.",
     SHOP_NOT_BILLING: "Something changed. Try again.",
+    STAFF_AT_ANOTHER_SHOP: "Something changed. Try again.",
+    STAFF_ALREADY_MEMBER: "Something changed. Try again.",
+    ALREADY_LINKED: "This account is already linked to a shop.",
   } satisfies Record<ErrorCode, string>,
 };
