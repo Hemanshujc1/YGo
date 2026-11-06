@@ -84,7 +84,11 @@ export function registerShopStaffRoutes(app: FastifyInstance, { pool, clock, sec
         `DELETE FROM shop_members WHERE account_id = $1 AND shop_id = $2 AND role = 'staff' RETURNING can_deliver AS "canDeliver"`, [id, shop.id]);
       if (!member) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       // Orders already assigned to this person stay assigned; the Owner reassigns them from the order (owner's answer on #58).
-      await client.query(
+      // The person's own row first, found by account, so a number changed since joining leaves no stale active row.
+      const marked = await client.query(
+        `UPDATE staff_invites SET status = 'deactivated', can_deliver = $3, code_digest = NULL, code_expires_at = NULL, failed_attempts = 0
+         WHERE shop_id = $1 AND account_id = $2`, [shop.id, id, member.canDeliver]);
+      if (!marked.rowCount) await client.query(
         `INSERT INTO staff_invites (shop_id, phone, account_id, can_deliver, status, created_at)
          SELECT $1, phone, id, $3, 'deactivated', $4 FROM accounts WHERE id = $2 AND phone IS NOT NULL
          ON CONFLICT (shop_id, phone) DO UPDATE SET status = 'deactivated', account_id = EXCLUDED.account_id,

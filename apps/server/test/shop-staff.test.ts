@@ -179,6 +179,16 @@ describe("Staff invite and join (#58)", () => {
     expect(await accessOf(staff)).toMatchObject({ shopId: null });
   });
 
+  it("deactivates the right row after the member's number changed", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(owner, "+919800000001")).json() as { code: string }).code);
+    await database.pool.query("UPDATE accounts SET phone = '+919800000009' WHERE id = $1", [staff.id]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: owner.headers });
+    const { rows } = await database.pool.query("SELECT phone, status FROM staff_invites WHERE shop_id = $1", [owner.shopId]);
+    expect(rows).toEqual([{ phone: "+919800000001", status: "deactivated" }]);
+  });
+
   it("holds one shop link per account (ACC-4)", async () => {
     const owner = await shop();
     const other = await shop("owner2@example.com");
