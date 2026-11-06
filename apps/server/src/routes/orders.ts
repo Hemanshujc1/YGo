@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody,
+  CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody, ReceiptResponse,
   TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -176,6 +176,25 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     if (!who) return reply;
     const order = await orderView(pool, (request.params as OrderParams).id, who.accountId, clock.now(), secret);
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
+  });
+
+  // #61: the receipt of a finished sale. Every figure is the frozen one; the shop's name and address are read now.
+  app.get("/v1/orders/:id/receipt", { schema: { params: OrderParams, response: { 200: ReceiptResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt"> & { placedAt: Date; status: OrderStatus }>(
+      `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', s.shop_name, 'address', s.address, 'pincode', s.pincode) AS shop,
+          (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
+              'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
+            FROM order_lines l WHERE l.order_id = o.id) AS lines,
+          o.product_value::text AS "productValue", o.delivery_fee::text AS "deliveryFee", o.small_cart_fee::text AS "smallCartFee", o.total::text AS total,
+          o.delivery_payment AS payment
+        FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
+    if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (row.status !== "delivered" && row.status !== "picked_up") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
+    const { status, ...receipt } = row;
+    void status;
+    return { ...receipt, placedAt: row.placedAt.toISOString() };
   });
 
   app.post("/v1/orders/:id/items-ok", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {

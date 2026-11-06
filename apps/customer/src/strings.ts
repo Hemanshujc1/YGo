@@ -308,6 +308,17 @@ export const strings = {
       closing_soon: "Closing soon",
       cannot_deliver: "Can't deliver to this address",
     } satisfies Record<RejectReason, string>,
+    // #61: the shop's receipt for a finished order, made as a PDF on the phone.
+    receipt: {
+      button: "Receipt", making: "Making receipt…", share: "Share receipt",
+      failed: "Couldn't make the receipt. Check your connection and try again.",
+      pdf: {
+        number: (number: number) => `Order #${number}`, item: "Item", count: "Count", price: "Price", amount: "Amount",
+        items: "Items", deliveryFee: "Delivery fee", smallCartFee: "Small order fee", total: "Total",
+        paidBy: (payment: string) => `Paid by ${payment}`, payments: { cash: "cash", upi: "UPI" },
+        pincode: (pincode: string) => `Pin ${pincode}`, file: (number: number) => `YGo receipt #${number}`,
+      },
+    },
     rejectedBecause: (reason: string) => `The shop said: ${reason}`,
     statuses: {
       placed: "Waiting for shop",

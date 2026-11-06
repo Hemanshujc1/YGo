@@ -22,6 +22,7 @@ import {
   CartResponse,
   OrderResponse,
   OrdersResponse,
+  ReceiptResponse,
   NotificationsResponse,
   type PushTokenBody,
   type PlaceOrderBody,
@@ -411,6 +412,11 @@ export function createApiClient({
     /** `GET /v1/orders/:id`: C09 and C19, one of the Customer's orders. */
     async order(id: string): Promise<ApiResult<OrderResponse>> {
       return result(await signedIn("GET", `/v1/orders/${encodeURIComponent(id)}`), OrderResponse);
+    },
+
+    /** `GET /v1/orders/:id/receipt`: the shop's receipt for a delivered or picked-up order (#61); ORDER_STATUS_CHANGED for any other. */
+    async receipt(id: string): Promise<ApiResult<ReceiptResponse>> {
+      return result(await signedIn("GET", `/v1/orders/${encodeURIComponent(id)}/receipt`), ReceiptResponse);
     },
 
     async confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>> {
