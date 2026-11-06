@@ -770,6 +770,24 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
   });
 
+  it("keeps an order assigned to Staff after they are deactivated, and refuses them the order (ACC-11)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner })).statusCode).toBe(204);
+    // The order stays assigned for the Owner to reassign; the removed person can no longer open it as shop staff.
+    expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: staff })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: owner })).statusCode).toBe(200);
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

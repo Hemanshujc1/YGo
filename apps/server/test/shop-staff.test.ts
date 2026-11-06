@@ -212,4 +212,159 @@ describe("Staff invite and join (#58)", () => {
     expect((await app.inject({ method: "GET", url: "/v1/me/shop-hours", headers: staff.headers })).statusCode).toBe(404);
     expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${owner.id}/deactivate`, headers: staff.headers })).statusCode).toBe(404);
   });
+  it("refuses everyone but the signed-in Owner of that shop, on every staff route (API authorization)", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(owner, "+919800000001", true)).json() as { code: string }).code);
+    const customer = await signIn("customer@example.com");
+    const calls = [
+      { method: "GET", url: "/v1/me/staff-invites" },
+      { method: "POST", url: "/v1/me/staff-invites", payload: { phone: "+919800000009", canDeliver: false } },
+      { method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate` },
+      { method: "PUT", url: `/v1/me/shop-staff/${staff.id}/can-deliver`, payload: { canDeliver: false } },
+    ] as const;
+    for (const call of calls) {
+      expect((await app.inject(call)).statusCode, `${call.url} signed out`).toBe(401);
+      expect((await app.inject({ ...call, headers: customer.headers })).statusCode, `${call.url} customer`).toBe(404);
+      expect((await app.inject({ ...call, headers: staff.headers })).statusCode, `${call.url} staff`).toBe(404);
+    }
+    // Nothing changed.
+    expect(await accessOf(staff)).toMatchObject({ shopId: owner.shopId, role: "staff" });
+    expect((await database.pool.query("SELECT can_deliver FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ can_deliver: true }]);
+  });
+
+  it("keeps one shop's staff, invitations and codes away from another Owner (shop isolation)", async () => {
+    const a = await shop("a@example.com");
+    const b = await shop("b@example.com");
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(a, "+919800000001", true)).json() as { code: string }).code);
+    await invite(a, "+919800000002");
+    // B sees none of A's people and cannot change them.
+    expect((await app.inject({ method: "GET", url: "/v1/me/staff-invites", headers: b.headers })).json()).toEqual({ invites: [] });
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-staff", headers: b.headers })).json()).toEqual({ staff: [] });
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: b.headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-staff/${staff.id}/can-deliver`, headers: b.headers, payload: { canDeliver: false } })).statusCode).toBe(404);
+    expect(await accessOf(staff)).toMatchObject({ shopId: a.shopId });
+    expect((await database.pool.query("SELECT can_deliver FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ can_deliver: true }]);
+    // The same number invited by two shops: each code opens only its own shop.
+    const second = await person("second@example.com", "+919800000002");
+    const forA = ((await invite(a, "+919800000002")).json() as { code: string }).code;
+    const forB = ((await invite(b, "+919800000002")).json() as { code: string }).code;
+    expect((await join(second, forB)).statusCode).toBe(200);
+    expect(await accessOf(second)).toMatchObject({ shopId: b.shopId });
+    expect((await database.pool.query("SELECT status FROM staff_invites WHERE shop_id = $1 AND phone = '+919800000002'", [a.shopId])).rows).toEqual([{ status: "invited" }]);
+    expect((await join(second, forA)).json().error.code).toBe("ALREADY_LINKED");
+  });
+
+  it("makes a code single use: once joined, deactivated or expired it opens nothing again", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    const { code } = (await invite(owner, "+919800000001")).json() as { code: string };
+    expect((await join(staff, code)).statusCode).toBe(200);
+    expect((await database.pool.query("SELECT code_digest, code_expires_at FROM staff_invites WHERE shop_id = $1", [owner.shopId])).rows).toEqual([{ code_digest: null, code_expires_at: null }]);
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: owner.headers });
+    // The spent code does not bring the person back; only a new invitation does.
+    expect((await join(staff, code)).json().error.code).toBe("CODE_WRONG");
+    expect(await accessOf(staff)).toMatchObject({ shopId: null });
+    // Valid to the last second, refused after it.
+    const fresh = ((await invite(owner, "+919800000001")).json() as { code: string }).code;
+    clock.set(new Date("2030-01-02T00:00:00.000Z"));
+    // Access tokens are short-lived, so both sign in again after the clock moves.
+    const later = await signIn("staff@example.com");
+    const ownerLater = { ...owner, ...(await signIn("owner@example.com")) };
+    expect((await join(later, fresh)).json().error.code).toBe("CODE_EXPIRED");
+    expect(await accessOf(later)).toMatchObject({ shopId: null });
+    const again = (await invite(ownerLater, "+919800000001")).json() as { code: string; expiresAt: string };
+    expect(again.expiresAt).toBe("2030-01-03T00:00:00.000Z");
+    expect((await join(later, again.code)).statusCode).toBe(200);
+  });
+
+  it("replaces the old code when the Owner invites again, and clears the lock", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    const first = ((await invite(owner, "+919800000001", false)).json() as { code: string }).code;
+    clock.set(new Date("2030-01-01T10:00:00.000Z"));
+    const ownerLater = { ...owner, ...(await signIn("owner@example.com")) };
+    const second = (await invite(ownerLater, "+919800000001", true)).json() as { code: string; expiresAt: string };
+    expect(second.code).not.toBe(first);
+    // The new 24 hours count from the resend.
+    expect(second.expiresAt).toBe("2030-01-02T10:00:00.000Z");
+    const staffLater = await signIn("staff@example.com");
+    expect((await join(staffLater, first)).json().error.code).toBe("CODE_WRONG");
+    const listed = (await app.inject({ method: "GET", url: "/v1/me/staff-invites", headers: ownerLater.headers })).json();
+    expect(listed.invites).toHaveLength(1);
+    expect(listed.invites[0]).toMatchObject({ canDeliver: true, status: "invited", expiresAt: "2030-01-02T10:00:00.000Z" });
+    expect((await join(staffLater, second.code)).statusCode).toBe(200);
+    expect((await database.pool.query("SELECT can_deliver FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ can_deliver: true }]);
+  });
+
+  it("reads the same number however it is typed (phone normalization)", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    const typed = ["9800000001", "09800000001", "+91 98000 00001", "91-9800000001", "0091 9800000001"];
+    for (const phone of typed) expect((await invite(owner, phone)).statusCode, phone).toBe(200);
+    // One row, stored in one form.
+    expect((await database.pool.query("SELECT phone FROM staff_invites WHERE shop_id = $1", [owner.shopId])).rows).toEqual([{ phone: "+919800000001" }]);
+    const { code } = (await invite(owner, " 98000 00001 ")).json() as { code: string };
+    expect((await join(staff, code)).statusCode).toBe(200);
+    // Joined, any spelling of the number is "already a member"; a bad number is refused.
+    expect((await invite(owner, "9800000001")).json().error.code).toBe("STAFF_ALREADY_MEMBER");
+    for (const phone of ["12345", "+1 202 555 0100", "abcdefghij"]) expect((await invite(owner, phone)).statusCode, phone).toBe(400);
+  });
+
+  it("keeps one invitation per number when invited twice, even at the same moment", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    const results = await Promise.all([1, 2, 3, 4, 5].map((i) => invite(owner, "+919800000001", i % 2 === 0)));
+    expect(results.map((r) => r.statusCode)).toEqual([200, 200, 200, 200, 200]);
+    const codes = results.map((r) => (r.json() as { code: string }).code);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM staff_invites WHERE shop_id = $1", [owner.shopId])).rows).toEqual([{ n: 1 }]);
+    // Exactly one of the codes is the live one.
+    let joined = 0;
+    for (const code of codes) if ((await join(staff, code)).statusCode === 200) joined += 1;
+    expect(joined).toBe(1);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ n: 1 }]);
+  });
+
+  it("links an account once when the same code is sent twice at once, and two shops cannot claim one account", async () => {
+    const a = await shop("a@example.com");
+    const b = await shop("b@example.com");
+    const staff = await person("staff@example.com", "+919800000001");
+    const forA = ((await invite(a, "+919800000001")).json() as { code: string }).code;
+    const forB = ((await invite(b, "+919800000001")).json() as { code: string }).code;
+    const results = await Promise.all([join(staff, forA), join(staff, forA), join(staff, forB)]);
+    expect(results.filter((r) => r.statusCode === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.statusCode !== 200).every((r) => r.json().error.code === "ALREADY_LINKED")).toBe(true);
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ n: 1 }]);
+    // The shop that lost keeps its invitation open, so nothing is half done.
+    const { rows } = await database.pool.query("SELECT status FROM staff_invites WHERE phone = '+919800000001' ORDER BY status");
+    expect(rows).toEqual([{ status: "active" }, { status: "invited" }]);
+  });
+
+  it("leaves everything as it was when a Can deliver change or a deactivation fails", async () => {
+    const owner = await shop();
+    const other = await shop("other@example.com");
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(owner, "+919800000001", true)).json() as { code: string }).code);
+    const flag = () => database.pool.query("SELECT can_deliver FROM shop_members WHERE account_id = $1", [staff.id]);
+    const put = (headers: { authorization: string }, id: string, payload: unknown) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-staff/${id}/can-deliver`, headers, payload: payload as object });
+    // A malformed body, an unknown person, the Owner themself and another shop's Owner all change nothing.
+    expect((await put(owner.headers, staff.id, { canDeliver: "no" })).statusCode).toBe(400);
+    expect((await put(owner.headers, staff.id, {})).statusCode).toBe(400);
+    expect((await put(owner.headers, randomUUID(), { canDeliver: false })).statusCode).toBe(404);
+    expect((await put(owner.headers, owner.id, { canDeliver: true })).statusCode).toBe(404);
+    expect((await put(other.headers, staff.id, { canDeliver: false })).statusCode).toBe(404);
+    expect((await flag()).rows).toEqual([{ can_deliver: true }]);
+    // Deactivating the Owner or a stranger is refused and removes no link or invitation.
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${owner.id}/deactivate`, headers: owner.headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${randomUUID()}/deactivate`, headers: owner.headers })).statusCode).toBe(404);
+    expect(await accessOf(owner)).toMatchObject({ shopId: owner.shopId, role: "owner" });
+    expect((await database.pool.query("SELECT status FROM staff_invites WHERE shop_id = $1", [owner.shopId])).rows).toEqual([{ status: "active" }]);
+    // A deactivated person's flag cannot be changed through the Owner's toggle.
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: owner.headers });
+    expect((await put(owner.headers, staff.id, { canDeliver: false })).statusCode).toBe(404);
+    expect((await flag()).rows).toEqual([]);
+    expect((await database.pool.query("SELECT can_deliver FROM staff_invites WHERE shop_id = $1", [owner.shopId])).rows).toEqual([{ can_deliver: true }]);
+  });
 });
