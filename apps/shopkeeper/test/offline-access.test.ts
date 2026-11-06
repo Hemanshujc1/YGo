@@ -166,6 +166,13 @@ describe("verified offline shop access", () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", shopGstin: "29AAACG1234H1ZP", role: "owner" } });
     await restarted.verify(account);
     expect(restarted.shopGstin()).toBe("29AAACG1234H1ZP");
+    // A shop moved back to Approved keeps its lease, and an Admin edit still reaches the saved record.
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved", shopName: "Sai", shopGstin: "07AAACG1234H1ZP", role: "owner" } });
+    await restarted.verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const again = offlineAccess(storage, fetch, () => time);
+    await again.restore();
+    expect(again.shopGstin()).toBe("07AAACG1234H1ZP");
   });
   it("keeps the account's role from the last check, reads an older record as Owner, and follows a change at the next check (#494)", async () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff" } });

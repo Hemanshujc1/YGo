@@ -10,7 +10,7 @@ import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "
  * `role` is the account's role in that shop, so the phone can hide what only the Owner does (#494); the server still enforces it.
  */
 export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable(), shopGstin: z.string().nullable().default(null), role: z.enum(["owner", "staff"]).nullable() })
-  .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId === null) === (value.role === null) && (value.shopId !== null || value.shopName === null));
+  .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId === null) === (value.role === null) && (value.shopId !== null || (value.shopName === null && value.shopGstin === null)));
 export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
 
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });
