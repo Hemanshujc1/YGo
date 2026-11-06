@@ -68,8 +68,11 @@ export async function moveOrder(
     if (rows.length > 0) return false;
   }
   await client.query("UPDATE orders SET status = $2, status_changed_at = $3 WHERE id = $1", [order.id, to, at]);
-  // An ask to cancel nobody answered ends when the order moves on (ORD-5, #59). The agree route settles its own first.
-  await client.query("UPDATE order_cancel_requests SET status = 'closed_unanswered', settled_at = $2 WHERE order_id = $1 AND status = 'asked'", [order.id, at]);
+  // An ask to cancel nobody answered ends when the order leaves accepted and preparing (ORD-5, #59); accepted to preparing keeps it.
+  // The agree route settles its own first.
+  if (to !== "accepted" && to !== "preparing") {
+    await client.query("UPDATE order_cancel_requests SET status = 'closed_unanswered', settled_at = $2 WHERE order_id = $1 AND status = 'asked'", [order.id, at]);
+  }
   await recordStatus(client, order.id, order.status, to, actor, at, reasonCode);
   return true;
 }

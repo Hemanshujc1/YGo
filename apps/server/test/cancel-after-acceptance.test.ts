@@ -280,6 +280,15 @@ describe("Cancelling after acceptance: the shop's answer (ORD-5, #59)", () => {
 });
 
 describe("Cancelling after acceptance: an ask the order outruns (ORD-5, #59)", () => {
+  it("keeps an ask waiting when the order goes from accepted to preparing, and the shop can still answer it", async () => {
+    const { orderId } = await accepted();
+    await askToCancel(orderId);
+    expect((await shopAction(orderId, "preparing")).statusCode).toBe(200);
+    expect(await requestOf(orderId)).toBe("asked");
+    const agreed = await shopAction(orderId, "cancel-request/agree");
+    expect(agreed.json()).toMatchObject({ status: "cancelled_by_customer", cancelRequest: { status: "agreed" } });
+  });
+
   it("closes an unanswered ask when the order is ready, and the shop can no longer agree", async () => {
     const { orderId } = await accepted();
     await askToCancel(orderId);
@@ -312,6 +321,32 @@ describe("Cancelling after acceptance: an ask the order outruns (ORD-5, #59)", (
     expect(["cancelled_by_customer/agreed", "ready/closed_unanswered"]).toContain(outcome);
     expect([agree.statusCode, ready.statusCode].sort()).toEqual([200, 409]);
     expect(await heard(orderId, "order_cancel_agreed")).toHaveLength(outcome === "cancelled_by_customer/agreed" ? 1 : 0);
+  });
+});
+
+describe("Cancelling after acceptance: simultaneous requests (ORD-5, #59)", () => {
+  it("makes one ask and one notification when the Customer asks twice at once", async () => {
+    const { orderId } = await accepted();
+    const both = await Promise.all([askToCancel(orderId), askToCancel(orderId)]);
+    expect(both.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect((await database.pool.query("SELECT 1 FROM order_cancel_requests WHERE order_id = $1", [orderId])).rowCount).toBe(1);
+    expect(await heard(orderId, "order_cancel_requested")).toHaveLength(1);
+  });
+
+  it("leaves one winner when Agree and the shop's own cancel race, with the Customer told once", async () => {
+    const { orderId } = await accepted();
+    await askToCancel(orderId);
+    const [agree, cancel] = await Promise.all([
+      shopAction(orderId, "cancel-request/agree"),
+      shopAction(orderId, "cancel", { reason: "too_busy" }),
+    ]);
+    expect([agree.statusCode, cancel.statusCode].sort()).toEqual([200, 409]);
+    const outcome = `${await statusOf(orderId)}/${await requestOf(orderId)}`;
+    expect(["cancelled_by_customer/agreed", "cancelled_by_shop/closed_unanswered"]).toContain(outcome);
+    const agreed = outcome === "cancelled_by_customer/agreed";
+    expect(await heard(orderId, "order_cancel_agreed")).toHaveLength(agreed ? 1 : 0);
+    expect(await heard(orderId, "order_cancelled_by_shop")).toHaveLength(agreed ? 0 : 1);
+    expect(await history(orderId)).toHaveLength(2);
   });
 });
 
