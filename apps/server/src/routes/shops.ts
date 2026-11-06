@@ -29,7 +29,7 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
  * on #280). A pincode later dropped from every Area reads as no Area.
  */
 const applicationColumns = `s.id, s.state, s.shop_name AS "shopName", s.address, s.pincode,
-  ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.fssai_number AS "fssaiNumber",
+  ${pointJson("s.location")} AS location, s.owner_name AS "ownerName", s.entity_type AS "entityType", s.pan, s.gstin, s.fssai_number AS "fssaiNumber",
   to_char(s.fssai_expiry, 'YYYY-MM-DD') AS "fssaiExpiry", s.service_radius_metres AS "serviceRadiusMetres",
   s.upi_id AS "upiId", ar.name AS "areaName", a.phone AS "ownerPhone", a.email AS "ownerEmail",
   s.submitted_at AS "submittedAt"`;
@@ -98,6 +98,7 @@ const columns: Record<Exclude<ShopApplicationField, "location">, string> = {
   ownerName: "owner_name",
   entityType: "entity_type",
   pan: "pan",
+  gstin: "gstin",
   fssaiNumber: "fssai_number",
   fssaiExpiry: "fssai_expiry",
   serviceRadiusMetres: "service_radius_metres",

@@ -6,7 +6,7 @@ import { escapeHtml, receiptHtml } from "../src/lib/receipt-pdf";
 const fonts = { regular: "UkVH", medium: "TUVE", semibold: "U0VN" };
 const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
   number: 1042, status: "delivered", placedAt: "2030-01-01T04:30:00.000Z",
-  shop: { name: "Sai General Stores", address: "Shop 3, Paud Road", pincode: "411038" },
+  shop: { name: "Sai General Stores", address: "Shop 3, Paud Road", pincode: "411038", gstin: "27ABCDE1234F1Z5" },
   address: { label: "home", areaLine: "Kothrud" },
   lines: [
     { name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1.000", count: 2, part: null, unitPrice: "150.00", lineTotal: "300.00" },
@@ -29,6 +29,7 @@ describe("receipt PDF (#61)", () => {
   it("is in the shop's name and address and shows the frozen lines and amounts with no trailing zeros", () => {
     expect(html).toContain("<h1>Sai General Stores</h1>");
     expect(html).toContain("Shop 3, Paud Road");
+    expect(html).toContain("GSTIN: 27ABCDE1234F1Z5");
     expect(html).toContain("Order #1042");
     expect(html).toContain("Delivered to: Home · Kothrud");
     expect(html).not.toMatch(/\+91|phone/i);
@@ -52,7 +53,12 @@ describe("receipt PDF (#61)", () => {
 
   it("says nothing of a profit, a platform, a tax or a discount (MNY-11)", () => {
     const text = html.replace(/<style>[\s\S]*<\/style>/, "").replace(/<[^>]+>/g, " ");
-    expect(text).not.toMatch(/profit|margin|commission|platform|ygo|gst|tax|discount|saving|saved|mrp|contribution/i);
+    expect(text).not.toMatch(/profit|margin|commission|platform|ygo|gst(?!in)|tax|discount|saving|saved|mrp|contribution/i);
+  });
+
+  it("leaves the GSTIN line out when the shop has none, never printing a placeholder (#537)", () => {
+    const none = receiptHtml({ receipt: receipt({ shop: { name: "Sai", address: "Paud Road", pincode: "411038", gstin: null } }), fonts });
+    expect(none).not.toMatch(/GSTIN|null|undefined/);
   });
 
   it("leaves out a fee that wasn't charged and a payment that wasn't recorded", () => {
@@ -66,7 +72,7 @@ describe("receipt PDF (#61)", () => {
   it("escapes every value the shop or the catalogue wrote", () => {
     const evil = `<img src=x onerror="alert('1')"> & Co`;
     const out = receiptHtml({
-      receipt: receipt({ shop: { name: evil, address: evil, pincode: "<b>" }, address: { label: "home", areaLine: evil }, lines: [{ name: evil, brand: evil, baseUnit: "each", quantity: "1", count: 1, part: null, unitPrice: "5", lineTotal: "5" }] }),
+      receipt: receipt({ shop: { name: evil, address: evil, pincode: "<b>", gstin: evil }, address: { label: "home", areaLine: evil }, lines: [{ name: evil, brand: evil, baseUnit: "each", quantity: "1", count: 1, part: null, unitPrice: "5", lineTotal: "5" }] }),
       fonts,
     });
     expect(out).not.toContain("<img");

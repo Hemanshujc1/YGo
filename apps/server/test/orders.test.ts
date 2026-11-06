@@ -691,14 +691,32 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
 
     it("returns the frozen lines and amounts, the shop as it is, and how it was paid", async () => {
       const { orderId } = await delivered("upi");
-      await database.pool.query("UPDATE shops SET address = 'Shop 3, Paud Road', pincode = '411038'");
       const answer = await receipt(orderId);
       expect(answer.statusCode).toBe(200);
       const frozen = (await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json();
       expect(answer.json()).toEqual({
-        number: frozen.number, status: "delivered", placedAt: frozen.placedAt, address: { label: frozen.address.label, areaLine: frozen.address.areaLine }, shop: { name: frozen.shop.name, address: "Shop 3, Paud Road", pincode: "411038" },
+        number: frozen.number, status: "delivered", placedAt: frozen.placedAt, address: { label: frozen.address.label, areaLine: frozen.address.areaLine }, shop: { name: frozen.shop.name, address: "Paud Road", pincode: "411045", gstin: null },
         lines: frozen.lines, productValue: frozen.productValue, deliveryFee: frozen.deliveryFee, smallCartFee: frozen.smallCartFee, total: frozen.total, payment: "upi",
       });
+    });
+
+    it("keeps the shop as it was at placement: a rename, a new address or a new GSTIN later changes nothing (#537)", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      await database.pool.query("UPDATE shops SET shop_name = 'Sai General Stores', address = 'Shop 3, Paud Road', pincode = '411038', gstin = '27ABCDE1234F1Z5' WHERE id = $1", [shopId]);
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner, payload: { handoverCode: code, payment: "cash", photoUploadId: upload.id } });
+      await database.pool.query("UPDATE shops SET shop_name = 'Renamed', address = 'Elsewhere', pincode = '411045', gstin = NULL WHERE id = $1", [shopId]);
+      expect((await receipt(orderId)).json().shop).toEqual({ name: "Sai General Stores", address: "Shop 3, Paud Road", pincode: "411038", gstin: "27ABCDE1234F1Z5" });
+    });
+
+    it("shows a null GSTIN for a shop that had none, and the database refuses to change the frozen shop columns", async () => {
+      const { orderId } = await delivered();
+      expect((await receipt(orderId)).json().shop.gstin).toBeNull();
+      for (const column of ["shop_name", "shop_address", "shop_pincode", "shop_gstin"]) {
+        await expect(database.pool.query(`UPDATE orders SET ${column} = 'x' WHERE id = $1`, [orderId])).rejects.toThrow(/frozen at placement/);
+      }
     });
 
     it("also serves a picked-up order, and shows no payment method when none was recorded", async () => {
@@ -1233,9 +1251,9 @@ describe("Customer's order list (#426, ORD-1)", () => {
     const oldest = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
     await cancel(oldest.id);
     await database.pool.query(
-      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_area_line,
+      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin, address_label, address_flat, address_area_line,
          address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote)
-       SELECT account_id, shop_id, 'cancelled_by_customer', placed_at + g * interval '1 second', status_changed_at, address_label, address_flat,
+       SELECT account_id, shop_id, 'cancelled_by_customer', placed_at + g * interval '1 second', status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin, address_label, address_flat,
          address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote
        FROM orders, generate_series(1, 50) AS g WHERE id = $1`, [oldest.id]);
     at("2030-01-01T00:02:00.000Z");

@@ -316,7 +316,7 @@ export const strings = {
         number: (number: number) => `Order #${number}`, item: "Item", count: "Count", price: "Price", amount: "Amount",
         items: "Items", deliveryFee: "Delivery fee", smallCartFee: "Small order fee", total: "Total",
         paidBy: (payment: string) => `Paid by ${payment}`, payments: { cash: "cash", upi: "UPI" },
-        pincode: (pincode: string) => `Pin ${pincode}`, address: { delivered: "Delivered to", picked_up: "Order address" }, file: (number: number) => `YGo receipt #${number}`,
+        pincode: (pincode: string) => `Pin ${pincode}`, gstin: (gstin: string) => `GSTIN: ${gstin}`, address: { delivered: "Delivered to", picked_up: "Order address" }, file: (number: number) => `YGo receipt #${number}`,
       },
     },
     rejectedBecause: (reason: string) => `The shop said: ${reason}`,

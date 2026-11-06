@@ -6,6 +6,7 @@ import {
   CounterBillName,
   Email,
   FssaiNumber,
+  Gstin,
   HandoverOtp,
   invalidFields,
   LoginOtp,
@@ -156,6 +157,11 @@ describe("Pincode", () => {
 
 describe("Pan", () => {
   rule(Pan, { "abcpe1234f": "ABCPE1234F", "ABCPE 1234 F": "ABCPE1234F" }, ["", "ABCPE1234", "ABCP11234F", "1BCPE1234F"]);
+});
+
+describe("Gstin", () => {
+  rule(Gstin, { "27abcpe1234f1z5": "27ABCPE1234F1Z5", "27 ABCPE 1234 F1Z5": "27ABCPE1234F1Z5", "29AAACG1234H1ZP": "29AAACG1234H1ZP" },
+    ["", "27ABCPE1234F1Z", "27ABCPE1234F1Z55", "ABABCPE1234F1Z5", "27ABCPE1234F0Z5", "27ABCPE1234F1X5", "27ABCPE12345F1Z5"]);
 });
 
 describe("FssaiNumber", () => {

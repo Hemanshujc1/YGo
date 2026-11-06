@@ -13,6 +13,7 @@ const draft: ShopApplication = {
   ownerName: "Asha Kulkarni",
   entityType: null,
   pan: null,
+  gstin: null,
   fssaiNumber: null,
   fssaiExpiry: null,
   serviceRadiusMetres: 2000,
@@ -65,6 +66,7 @@ describe("draftBody", () => {
         pincode: null,
         ownerName: "Asha Kulkarni",
         pan: "ABCDE1234F",
+        gstin: null,
         fssaiNumber: null,
         fssaiExpiry: "2027-03-31",
         upiId: "asha@okhdfcbank",
@@ -116,12 +118,21 @@ describe("sendBody", () => {
         ownerName: "Asha Kulkarni",
         entityType: "proprietorship",
         pan: "ABCDE1234F",
+        gstin: null,
         fssaiNumber: "12345678901234",
         fssaiExpiry: "2099-12-31",
         serviceRadiusMetres: 2000,
         upiId: "asha@okhdfcbank",
       },
     });
+  });
+
+  it("treats the GSTIN as optional: empty is sent as null, a typed one in capitals, a malformed one is named (#537)", () => {
+    expect(sendBody({ ...filled, gstin: "  " })).toMatchObject({ ok: true, body: { gstin: null } });
+    expect(sendBody({ ...filled, gstin: " 27abcde1234f1z5 " })).toMatchObject({ ok: true, body: { gstin: "27ABCDE1234F1Z5" } });
+    expect(sendBody({ ...filled, gstin: "27ABCDE1234F" })).toEqual({ ok: false, wrong: ["gstin"] });
+    expect(typedFrom({ ...draft, gstin: "27ABCDE1234F1Z5" }).gstin).toBe("27ABCDE1234F1Z5");
+    expect(typedFrom(draft).gstin).toBe("");
   });
 
   it("names every empty field, the missing location among them", () => {

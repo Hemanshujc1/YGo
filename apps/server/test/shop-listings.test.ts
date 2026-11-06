@@ -690,9 +690,9 @@ describe("opening-stock correction (#452)", () => {
     const version = (await database.pool.query<{ version: string }>(
       "INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) VALUES ($1, 'global', 'test', now()) RETURNING version", [customer.id])).rows[0]?.version;
     await database.pool.query(
-      `WITH placed AS (INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_pincode,
+      `WITH placed AS (INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat, address_pincode,
           address_point, product_value, delivery_fee, total, rate_card_version, quote)
-        SELECT $1, $2, 'accepted', now(), now(), 'home', '1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 60, 0, 60,
+        SELECT $1, $2, 'accepted', now(), now(), 'Test shop', 'Shop 1', '411038', 'home', '1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 60, 0, 60,
           $3, '{}'::jsonb RETURNING id)
        INSERT INTO order_lines (order_id, position, listing_id, name, baseUnit_placeholder, pack_quantity, count, unit_price, line_total, stock_quantity)
        SELECT id, 0, (SELECT id FROM shop_listings WHERE shop_id = $2), 'Rice', 'kg', 1, 4, 15, 60, 4 FROM placed`.replace("baseUnit_placeholder", "base_unit"),
