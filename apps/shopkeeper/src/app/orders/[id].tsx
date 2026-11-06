@@ -8,10 +8,9 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
 import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, session } from "../../api";
+import { access, api, session } from "../../api";
 import { Countdown, useSecondsLeft } from "../../components/countdown";
 import { ReasonPicker } from "../../components/reason-picker";
-import { useAccountRole } from "../../lib/account-role";
 import { money } from "../../lib/money";
 import { createShopOrder, lineLabel, shortLabel, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
@@ -86,7 +85,8 @@ export default function OrderScreen() {
   const view = useSyncExternalStore(order.subscribe, order.get);
   useInFront(order);
   const [rejecting, setRejecting] = useState<{ chosen: RejectReason | null } | null>(null);
-  const owner = useAccountRole() === "owner";
+  // Known by now: the orders list that led here is the Owner's or Staff's own shop. Only decides what shows; the server refuses Staff.
+  const owner = access.role() === "owner";
   const [deliverers, setDeliverers] = useState<Awaited<ReturnType<typeof api.shopDeliverers>> | null>(null);
   const [delivererId, setDelivererId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
