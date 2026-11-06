@@ -24,7 +24,7 @@ vi.mock("expo-camera", () => ({ CameraView: "CameraView", useCameraPermissions: 
 vi.mock("expo-image-manipulator", () => ({ SaveFormat: { JPEG: "jpeg" }, manipulateAsync: () => Promise.resolve({ uri: "" }) }));
 vi.mock("react-native-qrcode-svg", () => ({ default: "QRCode" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-vi.mock("../src/api", () => ({ api: {}, session: { get: () => ({ account: { id: "owner-1" } }) } }));
+vi.mock("../src/api", () => ({ api: {}, access: { role: () => "owner" }, session: { get: () => ({ account: { id: "owner-1" } }) } }));
 vi.mock("../src/components/countdown", () => ({
   Countdown: "Countdown",
   useSecondsLeft: (expiresAt: string | null, offset: number) => { mock.seconds.push([expiresAt, offset]); return null; },

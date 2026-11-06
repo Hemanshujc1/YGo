@@ -8,7 +8,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
 import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, session } from "../../api";
+import { access, api, session } from "../../api";
 import { Countdown, useSecondsLeft } from "../../components/countdown";
 import { ReasonPicker } from "../../components/reason-picker";
 import { money } from "../../lib/money";
@@ -85,6 +85,8 @@ export default function OrderScreen() {
   const view = useSyncExternalStore(order.subscribe, order.get);
   useInFront(order);
   const [rejecting, setRejecting] = useState<{ chosen: RejectReason | null } | null>(null);
+  // Known by now: the orders list that led here is the Owner's or Staff's own shop. Only decides what shows; the server refuses Staff.
+  const owner = access.role() === "owner";
   const [deliverers, setDeliverers] = useState<Awaited<ReturnType<typeof api.shopDeliverers>> | null>(null);
   const [delivererId, setDelivererId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -149,11 +151,11 @@ export default function OrderScreen() {
           </View>
         )}
         {shown && <Detail order={shown} />}
-        {shown && ["accepted", "preparing"].includes(shown.status) && <View className="gap-2">
+        {shown && (["accepted", "preparing"].includes(shown.status) || (shown.status === "ready" && owner)) && <View className="gap-2">
           {shown.status === "accepted" && <Button label={words.preparing} busy={working} onPress={() => {
             setWorking(true); void api.advanceShopOrder(shown.id, "preparing").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
           }} />}
-          {shown.status === "preparing" && <View className="gap-2 rounded-card border border-border bg-surface p-4">
+          {(shown.status === "preparing" || shown.status === "ready") && <View className="gap-2 rounded-card border border-border bg-surface p-4">
             <Text className="text-body font-semibold text-text">{words.assign}</Text>
             {deliverers?.ok && deliverers.data.deliverers.map((person) => <Pressable key={person.accountId} accessibilityRole="radio" accessibilityState={{ checked: delivererId === person.accountId }} onPress={() => setDelivererId(person.accountId)} className={`rounded-button border px-3 py-3 ${delivererId === person.accountId ? "border-primary" : "border-border"}`}>
               <Text className="text-body text-text">{person.name ?? words.assignOwner}{person.role === "owner" ? ` · ${words.assignOwner}` : ""}</Text>

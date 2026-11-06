@@ -471,6 +471,20 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-hours", body: { ranges } });
   });
 
+  it("lists, invites and deactivates Staff (#535)", async () => {
+    const invites = { invites: [{ phone: "+919800000001", name: null, canDeliver: true, status: "invited", expiresAt: "2030-01-02T00:00:00.000Z" }] };
+    const sent = { code: "ABCD2345", expiresAt: "2030-01-02T00:00:00.000Z" };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1))
+      : call.path === "/v1/me/staff-invites" ? answer(200, call.method === "GET" ? invites : sent) : answer(204, undefined));
+    await client.verifyCode(signIn);
+    expect(await client.staffInvites()).toEqual({ ok: true, data: invites });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/staff-invites" });
+    expect(await client.inviteStaff({ phone: "+919800000001", canDeliver: true })).toEqual({ ok: true, data: sent });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/staff-invites", body: { phone: "+919800000001", canDeliver: true } });
+    expect(await client.deactivateStaff("a/b")).toEqual({ ok: true, data: undefined });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-staff/a%2Fb/deactivate" });
+  });
+
   it("reads and sets the Owner's open/closed switch (#380)", async () => {
     const status = { open: false, until: "2030-01-02T03:30:00.000Z", setByOwner: true, scheduledOpen: true, nextOpening: "2030-01-02T03:30:00.000Z" };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, status));

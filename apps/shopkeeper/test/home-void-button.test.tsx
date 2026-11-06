@@ -88,3 +88,25 @@ describe("Home's bell and S03 (#507)", () => {
     expect(shown("submitted")).toEqual([]);
   });
 });
+
+describe("Home's Staff button (#535)", () => {
+  it("sits in the Owner's setup list of an Approved or Live shop, once", () => {
+    for (const state of ["approved", "live"]) {
+      expect(links(state).filter((href) => href === "/staff")).toHaveLength(1);
+      expect(links(state).indexOf("/staff")).toBe(links(state).indexOf("/hours") + 1);
+    }
+  });
+
+  it("is hidden while Suspended or before approval", () => {
+    for (const state of ["suspended", "submitted"]) expect(links(state)).not.toContain("/staff");
+  });
+
+  it("is hidden from Staff of a shop", () => {
+    mock.cursor = 0; mock.hooks = [];
+    Home();
+    mock.hooks[0] = { kind: "loaded", application: null, liveCheck: null, staffShop: { shopName: "S", state: "live" } };
+    mock.cursor = 0;
+    const hrefs = elements(Home()).filter((node) => node.type === "Link").map((node) => node.props.href);
+    expect(hrefs).not.toContain("/staff");
+  });
+});

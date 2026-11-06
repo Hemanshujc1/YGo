@@ -806,6 +806,181 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
   });
 
+  it("keeps an order assigned to Staff after they are deactivated, and refuses them the order (ACC-11)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner })).statusCode).toBe(204);
+    // The order stays assigned for the Owner to reassign; the removed person can no longer open it as shop staff.
+    expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: staff })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: owner })).statusCode).toBe(200);
+  });
+
+  it("lets the Owner hand a Ready order to someone else after its deliverer is deactivated, and no one else (#535)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const ownerId = (await database.pool.query<{ id: string }>("SELECT account_id AS id FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId])).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    const assign = (headers: typeof owner, accountId: string) => app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers, payload: { accountId } });
+    expect((await assign(owner, staffId)).statusCode).toBe(200);
+    const readyAt = (await database.pool.query("SELECT status_changed_at FROM orders WHERE id = $1", [placed.id])).rows[0];
+    const history = async () => (await database.pool.query("SELECT count(*)::int AS n FROM order_status_history WHERE order_id = $1", [placed.id])).rows[0]?.n as number;
+    const rows = await history();
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner });
+    // The removed person is not eligible any more; the Owner can take it over.
+    expect((await assign(owner, staffId)).json()).toMatchObject({ error: { code: "DELIVERER_NOT_ELIGIBLE" } });
+    const taken = await assign(owner, ownerId);
+    expect(taken.statusCode).toBe(200);
+    expect(taken.json()).toMatchObject({ status: "ready", delivererId: ownerId });
+    // Same status and time, no extra history row: the lifecycle is untouched.
+    expect((await database.pool.query("SELECT status_changed_at FROM orders WHERE id = $1", [placed.id])).rows[0]).toEqual(readyAt);
+    expect(await history()).toBe(rows);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: owner })).statusCode).toBe(200);
+    // Once out for delivery it can no longer be reassigned.
+    expect((await assign(owner, ownerId)).json()).toMatchObject({ error: { code: "ORDER_STATUS_CHANGED" } });
+  });
+
+  it.each(["out_for_delivery", "arrived"] as const)("refuses to deactivate Staff who are %s with an order, and allows it once it is closed (#535)", async (status) => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } });
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: staff });
+    if (status === "arrived") await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/arrived`, headers: staff });
+    expect((await database.pool.query("SELECT status FROM orders WHERE id = $1", [placed.id])).rows[0]?.status).toBe(status);
+    const deactivate = (headers: typeof owner) => app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers });
+    // Staff cannot deactivate anyone, and the Owner is refused with a clear reason; nothing changes.
+    expect((await deactivate(staff)).statusCode).toBe(404);
+    const refused = await deactivate(owner);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
+    expect((await database.pool.query("SELECT 1 FROM shop_members WHERE account_id = $1", [staffId])).rowCount).toBe(1);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: staff })).statusCode).toBe(200);
+    // Once the order is no longer active, the Owner can deactivate.
+    await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [placed.id]);
+    expect((await deactivate(owner)).statusCode).toBe(204);
+  });
+
+  describe("Deactivate and starting a delivery take turns (#535)", () => {
+    const readyForStaff = async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const staff = await signIn("/v1/auth", "staff@example.com");
+      await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+      const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+      const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+      await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+      const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+      await accept(placed.id, owner);
+      await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+      await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } });
+      const start = () => app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: staff });
+      const deactivate = () => app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner });
+      const status = async () => (await database.pool.query("SELECT status FROM orders WHERE id = $1", [placed.id])).rows[0]?.status as string;
+      const linked = async () => (await database.pool.query("SELECT 1 FROM shop_members WHERE account_id = $1", [staffId])).rowCount;
+      return { staffId, start, deactivate, status, linked };
+    };
+    /** Resolves once a backend is waiting on a lock held by `holder`'s connection (pg_blocking_pids), so it is the competing request that is blocked. */
+    const lockWaiter = async (holder: { query: (sql: string) => Promise<{ rows: { pid: number }[] }> }) => {
+      const pid = (await holder.query("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      for (let tries = 0; tries < 200; tries += 1) {
+        const { rowCount } = await database.pool.query(
+          "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND $1 = ANY(pg_blocking_pids(pid))", [pid]);
+        if (rowCount) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error("no query is waiting on a lock held by the test's connection");
+    };
+    const track = <T,>(pending: Promise<T>) => {
+      const state = { done: false };
+      void pending.then(() => { state.done = true; }, () => { state.done = true; });
+      return state;
+    };
+
+    it("refuses a delivery start that waited behind a Deactivate, and leaves the order Ready", async () => {
+      const { staffId, start, status, linked } = await readyForStaff();
+      const holder = await database.pool.connect();
+      try {
+        // A Deactivate in flight: it holds the person's shop link.
+        await holder.query("BEGIN");
+        await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR UPDATE", [staffId]);
+        const starting = start();
+        const state = track(starting);
+        await lockWaiter(holder);
+        expect(state.done).toBe(false);
+        await holder.query("DELETE FROM shop_members WHERE account_id = $1", [staffId]);
+        await holder.query("COMMIT");
+        expect((await starting).statusCode).toBe(404);
+        expect(await status()).toBe("ready");
+        expect(await linked()).toBe(0);
+      } finally {
+        await holder.query("ROLLBACK").catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it("refuses a Deactivate that waited behind a delivery start, and keeps the person linked", async () => {
+      const { staffId, deactivate, status, linked } = await readyForStaff();
+      const holder = await database.pool.connect();
+      try {
+        // A delivery start in flight: it holds the order and a share lock on the person's link.
+        await holder.query("BEGIN");
+        await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR SHARE", [staffId]);
+        await holder.query("UPDATE orders SET status = 'out_for_delivery' WHERE deliverer_id = $1", [staffId]);
+        const removing = deactivate();
+        const state = track(removing);
+        await lockWaiter(holder);
+        expect(state.done).toBe(false);
+        await holder.query("COMMIT");
+        const answer = await removing;
+        expect(answer.statusCode).toBe(409);
+        expect(answer.json()).toMatchObject({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
+        expect(await status()).toBe("out_for_delivery");
+        expect(await linked()).toBe(1);
+      } finally {
+        await holder.query("ROLLBACK").catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it("never leaves a removed person holding an active delivery when both run at once", async () => {
+      const { start, deactivate, status, linked } = await readyForStaff();
+      const [started, removed] = await Promise.all([start(), deactivate()]);
+      expect([200, 404]).toContain(started.statusCode);
+      expect([204, 409]).toContain(removed.statusCode);
+      // Exactly one of the two won, whichever order the database took them in.
+      expect(started.statusCode === 200).toBe(removed.statusCode === 409);
+      expect(started.statusCode === 200).toBe(await status() === "out_for_delivery");
+      expect(removed.statusCode === 204).toBe(await linked() === 0);
+    });
+
+    it("stops a delivery start when Can deliver was switched off meanwhile", async () => {
+      const { staffId, start, status } = await readyForStaff();
+      await database.pool.query("UPDATE shop_members SET can_deliver = false WHERE account_id = $1", [staffId]);
+      expect((await start()).statusCode).toBe(403);
+      expect(await status()).toBe("ready");
+    });
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

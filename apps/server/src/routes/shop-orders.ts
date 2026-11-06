@@ -534,10 +534,14 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     if (!who) return reply;
     const { id } = request.params as OrderParams;
     const now = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff" }>(
-        `SELECT o.id, o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
-         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      // The order, then the caller's shop link are locked, so Deactivate (which takes the link first) and a delivery
+      // start take turns: a link deleted while this waits makes the row vanish and the caller gets NOT_FOUND (#535).
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; canDeliver: boolean }>(
+        `SELECT o.id, o.status, m.role, (m.role = 'owner' OR m.can_deliver) AS "canDeliver" FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o FOR SHARE OF m`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
+      // Re-checked here, inside the transaction, so a Can deliver switched off meanwhile stops the delivery too.
+      if (to !== "preparing" && !order.canDeliver) return "NOT_ASSIGNED" as const;
       const at = clock.now();
       if (to !== "preparing" && (await client.query("SELECT 1 FROM orders WHERE id = $1 AND deliverer_id = $2", [id, who.accountId])).rowCount === 0) return "NOT_ASSIGNED" as const;
       if (!await moveOrder(client, order, to, { id: who.accountId, role: order.role }, at)) return "ORDER_STATUS_CHANGED" as const;
@@ -567,7 +571,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         `SELECT role, can_deliver AS "canDeliver" FROM shop_members WHERE shop_id = $1 AND account_id = $2 FOR SHARE`, [order.shopId, accountId]);
       if (!deliverer || (deliverer.role !== "owner" && !deliverer.canDeliver)) return "DELIVERER_NOT_ELIGIBLE" as const;
       const now = clock.now();
-      if (!await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      // A Ready order not yet out for delivery can be handed to someone else by the Owner, e.g. after its
+      // deliverer was deactivated (#535). Only the person changes: no status move, no new Ready time.
+      const reassign = order.status === "ready" && order.role === "owner";
+      if (!reassign && !await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
       await client.query("UPDATE orders SET deliverer_id = $2 WHERE id = $1", [id, accountId]);
       await client.query("COMMIT");
       return now;
@@ -599,8 +606,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       "SELECT shop_id AS \"shopId\" FROM shop_members WHERE account_id = $1 AND role = 'owner'", [who.accountId]);
     if (!owner) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
     const { rows } = await pool.query<ShopStaffResponse["staff"][number]>(
-      `SELECT m.account_id AS "accountId", a.name, m.can_deliver AS "canDeliver" FROM shop_members m
-       JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = $1 AND m.role = 'staff' ORDER BY lower(a.name)`, [owner.shopId]);
+      `SELECT m.account_id AS "accountId", a.name, a.phone, m.can_deliver AS "canDeliver" FROM shop_members m
+       JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = $1 AND m.role = 'staff' ORDER BY lower(a.name), m.account_id`, [owner.shopId]);
     return { staff: rows };
   });
 

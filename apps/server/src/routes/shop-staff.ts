@@ -80,10 +80,20 @@ export function registerShopStaffRoutes(app: FastifyInstance, { pool, clock, sec
     return withTransaction(pool, async (client) => {
       const shop = await owner(who.accountId, reply, client, true);
       if (!shop) return reply;
+      // An order out for delivery or arrived needs its deliverer's own taps to finish, so they cannot be removed until it
+      // is delivered or closed. Ready orders are different: the Owner can hand those to someone else (#535).
+      // The person's shop link is locked first; a delivery start holds a share lock on it, so it either commits before
+      // this reads the orders (and blocks the deactivation) or waits and finds the link gone.
+      const { rows: [linked] } = await client.query(
+        "SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2 AND role = 'staff' FOR UPDATE", [id, shop.id]);
+      if (!linked) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      const { rows: [busy] } = await client.query(
+        "SELECT 1 FROM orders WHERE shop_id = $1 AND deliverer_id = $2 AND status IN ('out_for_delivery', 'arrived') LIMIT 1", [shop.id, id]);
+      if (busy) return reply.code(409).send({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
       const { rows: [member] } = await client.query<{ canDeliver: boolean }>(
         `DELETE FROM shop_members WHERE account_id = $1 AND shop_id = $2 AND role = 'staff' RETURNING can_deliver AS "canDeliver"`, [id, shop.id]);
       if (!member) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-      // Orders already assigned to this person stay assigned; the Owner reassigns them from the order (owner's answer on #58).
+      // A Ready order assigned to this person stays assigned; the Owner reassigns it from the order (owner's answer on #58).
       // The person's own row first, found by account, so a number changed since joining leaves no stale active row.
       const marked = await client.query(
         `UPDATE staff_invites SET status = 'deactivated', can_deliver = $3, code_digest = NULL, code_expires_at = NULL, failed_attempts = 0

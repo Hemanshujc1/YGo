@@ -37,6 +37,9 @@ import {
   SetStaffCanDeliverResponse,
   ShopDeliverersResponse,
   ShopStaffResponse,
+  StaffInviteResponse,
+  StaffInvitesResponse,
+  type InviteStaffBody,
   ShopOrderResponse,
   ShopOrdersResponse,
   ShopCounterBill,
@@ -571,6 +574,21 @@ export function createApiClient({
 
     async shopStaff(): Promise<ApiResult<ShopStaffResponse>> {
       return result(await signedIn("GET", "/v1/me/shop-staff"), ShopStaffResponse);
+    },
+
+    /** `GET /v1/me/staff-invites`: open invitations and deactivated people, for S16 (#58). */
+    async staffInvites(): Promise<ApiResult<StaffInvitesResponse>> {
+      return result(await signedIn("GET", "/v1/me/staff-invites"), StaffInvitesResponse);
+    },
+
+    /** `POST /v1/me/staff-invites`: invites or re-invites a number; the one-time code is in the answer and never read again (S20). */
+    async inviteStaff(body: InviteStaffBody): Promise<ApiResult<StaffInviteResponse>> {
+      return result(await signedIn("POST", "/v1/me/staff-invites", body), StaffInviteResponse);
+    },
+
+    /** `POST /v1/me/shop-staff/:id/deactivate`: removes the person's access at once (ACC-11). */
+    async deactivateStaff(accountId: string): Promise<ApiResult<undefined>> {
+      return empty(await signedIn("POST", `/v1/me/shop-staff/${encodeURIComponent(accountId)}/deactivate`));
     },
 
     async deliveryPhotoUpload(id: string, body: DeliveryPhotoUploadBody): Promise<ApiResult<DeliveryPhotoUpload>> {

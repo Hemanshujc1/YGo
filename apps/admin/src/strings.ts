@@ -623,6 +623,7 @@ export const strings = {
     HANDOVER_CODE_WRONG: "That handover code does not match.",
     HANDOVER_CODE_LOCKED: "The handover code is locked for two minutes.",
     DELIVERER_NOT_ELIGIBLE: "The assigned delivery person is not eligible.",
+    STAFF_HAS_ACTIVE_DELIVERY: "This person is delivering an order now.",
     DELIVERY_PHOTO_INVALID: "The delivery proof photo is invalid.",
     ITEM_CHECK_WAIT: "The customer needs time to check the items.",
     DELIVERY_FAILURE_CALL_REQUIRED: "A call attempt is required before marking delivery failed.",
