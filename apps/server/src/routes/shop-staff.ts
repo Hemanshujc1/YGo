@@ -82,8 +82,13 @@ export function registerShopStaffRoutes(app: FastifyInstance, { pool, clock, sec
       if (!shop) return reply;
       // An order out for delivery or arrived needs its deliverer's own taps to finish, so they cannot be removed until it
       // is delivered or closed. Ready orders are different: the Owner can hand those to someone else (#535).
+      // The person's shop link is locked first; a delivery start holds a share lock on it, so it either commits before
+      // this reads the orders (and blocks the deactivation) or waits and finds the link gone.
+      const { rows: [linked] } = await client.query(
+        "SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2 AND role = 'staff' FOR UPDATE", [id, shop.id]);
+      if (!linked) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       const { rows: [busy] } = await client.query(
-        `SELECT 1 FROM orders WHERE shop_id = $1 AND deliverer_id = $2 AND status IN ('out_for_delivery', 'arrived') LIMIT 1 FOR UPDATE`, [shop.id, id]);
+        "SELECT 1 FROM orders WHERE shop_id = $1 AND deliverer_id = $2 AND status IN ('out_for_delivery', 'arrived') LIMIT 1", [shop.id, id]);
       if (busy) return reply.code(409).send({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
       const { rows: [member] } = await client.query<{ canDeliver: boolean }>(
         `DELETE FROM shop_members WHERE account_id = $1 AND shop_id = $2 AND role = 'staff' RETURNING can_deliver AS "canDeliver"`, [id, shop.id]);

@@ -845,6 +845,92 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await deactivate(owner)).statusCode).toBe(204);
   });
 
+  describe("Deactivate and starting a delivery take turns (#535)", () => {
+    const readyForStaff = async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const staff = await signIn("/v1/auth", "staff@example.com");
+      await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+      const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+      const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+      await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+      const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+      await accept(placed.id, owner);
+      await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+      await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers: owner, payload: { accountId: staffId } });
+      const start = () => app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: staff });
+      const deactivate = () => app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner });
+      const status = async () => (await database.pool.query("SELECT status FROM orders WHERE id = $1", [placed.id])).rows[0]?.status as string;
+      const linked = async () => (await database.pool.query("SELECT 1 FROM shop_members WHERE account_id = $1", [staffId])).rowCount;
+      return { staffId, start, deactivate, status, linked };
+    };
+    const settledAfter = async <T,>(pending: Promise<T>, ms: number) => {
+      let done = false;
+      void pending.then(() => { done = true; }, () => { done = true; });
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return done;
+    };
+
+    it("refuses a delivery start that waited behind a Deactivate, and leaves the order Ready", async () => {
+      const { staffId, start, status, linked } = await readyForStaff();
+      const holder = await database.pool.connect();
+      try {
+        // A Deactivate in flight: it holds the person's shop link.
+        await holder.query("BEGIN");
+        await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR UPDATE", [staffId]);
+        const starting = start();
+        expect(await settledAfter(starting, 400)).toBe(false);
+        await holder.query("DELETE FROM shop_members WHERE account_id = $1", [staffId]);
+        await holder.query("COMMIT");
+        expect((await starting).statusCode).toBe(404);
+        expect(await status()).toBe("ready");
+        expect(await linked()).toBe(0);
+      } finally {
+        await holder.query("ROLLBACK").catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it("refuses a Deactivate that waited behind a delivery start, and keeps the person linked", async () => {
+      const { staffId, deactivate, status, linked } = await readyForStaff();
+      const holder = await database.pool.connect();
+      try {
+        // A delivery start in flight: it holds the order and a share lock on the person's link.
+        await holder.query("BEGIN");
+        await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR SHARE", [staffId]);
+        await holder.query("UPDATE orders SET status = 'out_for_delivery' WHERE deliverer_id = $1", [staffId]);
+        const removing = deactivate();
+        expect(await settledAfter(removing, 400)).toBe(false);
+        await holder.query("COMMIT");
+        const answer = await removing;
+        expect(answer.statusCode).toBe(409);
+        expect(answer.json()).toMatchObject({ error: { code: "STAFF_HAS_ACTIVE_DELIVERY" } });
+        expect(await status()).toBe("out_for_delivery");
+        expect(await linked()).toBe(1);
+      } finally {
+        await holder.query("ROLLBACK").catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it("never leaves a removed person holding an active delivery when both run at once", async () => {
+      const { start, deactivate, status, linked } = await readyForStaff();
+      const [started, removed] = await Promise.all([start(), deactivate()]);
+      expect([200, 404]).toContain(started.statusCode);
+      expect([204, 409]).toContain(removed.statusCode);
+      // Exactly one of the two won, whichever order the database took them in.
+      expect(started.statusCode === 200).toBe(removed.statusCode === 409);
+      expect(started.statusCode === 200).toBe(await status() === "out_for_delivery");
+      expect(removed.statusCode === 204).toBe(await linked() === 0);
+    });
+
+    it("stops a delivery start when Can deliver was switched off meanwhile", async () => {
+      const { staffId, start, status } = await readyForStaff();
+      await database.pool.query("UPDATE shop_members SET can_deliver = false WHERE account_id = $1", [staffId]);
+      expect((await start()).statusCode).toBe(403);
+      expect(await status()).toBe("ready");
+    });
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

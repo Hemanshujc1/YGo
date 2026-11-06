@@ -155,10 +155,14 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     if (!who) return reply;
     const { id } = request.params as OrderParams;
     const now = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff" }>(
-        `SELECT o.id, o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
-         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      // The order, then the caller's shop link are locked, so Deactivate (which takes the link first) and a delivery
+      // start take turns: a link deleted while this waits makes the row vanish and the caller gets NOT_FOUND (#535).
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; canDeliver: boolean }>(
+        `SELECT o.id, o.status, m.role, (m.role = 'owner' OR m.can_deliver) AS "canDeliver" FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o FOR SHARE OF m`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
+      // Re-checked here, inside the transaction, so a Can deliver switched off meanwhile stops the delivery too.
+      if (to !== "preparing" && !order.canDeliver) return "NOT_ASSIGNED" as const;
       const at = clock.now();
       if (to !== "preparing" && (await client.query("SELECT 1 FROM orders WHERE id = $1 AND deliverer_id = $2", [id, who.accountId])).rowCount === 0) return "NOT_ASSIGNED" as const;
       if (!await moveOrder(client, order, to, { id: who.accountId, role: order.role }, at)) return "ORDER_STATUS_CHANGED" as const;
