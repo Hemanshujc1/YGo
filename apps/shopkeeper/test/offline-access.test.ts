@@ -155,6 +155,18 @@ describe("verified offline shop access", () => {
     const older = readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }));
     expect(older?.shopName).toBeNull();
   });
+  it("keeps the shop's GSTIN from the last check for a bill made offline, reads a record saved before it as none, and follows an Admin edit at the next check (#543)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", shopGstin: "27ABCDE1234F1Z5", role: "owner" } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.shopGstin()).toBe("27ABCDE1234F1Z5");
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, shopName: "Sai" }))?.shopGstin).toBeNull();
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", shopGstin: "29AAACG1234H1ZP", role: "owner" } });
+    await restarted.verify(account);
+    expect(restarted.shopGstin()).toBe("29AAACG1234H1ZP");
+  });
   it("keeps the account's role from the last check, reads an older record as Owner, and follows a change at the next check (#494)", async () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff" } });
     const first = offlineAccess(storage, fetch, () => time);

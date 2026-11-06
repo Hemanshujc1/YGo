@@ -67,7 +67,7 @@ export default function SyncScreen() {
   function card(row: QueueRow, section: keyof Data["overview"], queue: OpeningStockQueue) {
     const bill = row.bill;
     if (bill) return <BillCard key={row.id} bill={bill} syncedAt={section === "synced" ? row.at : null}
-      onShare={() => shareBill({ bill, shopName: access.shopName(), label: (packId) => queue.label(row.shopId, packId) })} />;
+      onShare={() => shareBill({ bill, shopName: access.shopName(), shopGstin: access.shopGstin(), label: (packId) => queue.label(row.shopId, packId) })} />;
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
     const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");

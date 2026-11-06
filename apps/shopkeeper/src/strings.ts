@@ -245,7 +245,7 @@ export const strings = {
     // #53: each bill, before and after sync, shared as a PDF for the customer.
     share: "Share bill", shareFailed: "Couldn't make the bill PDF. Try again.",
     pdf: {
-      number: (number: number) => `Bill ${number}`, numberPending: "Number pending", reference: (reference: string) => `Reference ${reference}`,
+      number: (number: number) => `Bill ${number}`, numberPending: "Number pending", gstin: (gstin: string) => `GSTIN: ${gstin}`, reference: (reference: string) => `Reference ${reference}`,
       item: "Item", count: "Count", price: "Price", amount: "Amount", items: "Items", discount: "Discount", total: "Total",
       paidBy: (payment: string) => `Paid by ${payment}`, customer: (name: string) => `Customer: ${name}`, unknownItem: "Item",
       file: (reference: string) => `YGo bill ${reference}`, voided: (reason: string) => `Voided · ${reason}`,

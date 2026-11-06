@@ -8,7 +8,7 @@ import type { BillRow, PackName } from "./opening-stock-queue";
 
 /** Inter's three weights as base64 TTF, read from the app's own files when a bill is shared. */
 export type BillFonts = { regular: string; medium: string; semibold: string };
-export type BillPdf = { bill: BillRow; shopName: string | null; label: (packId: string) => PackName | null; fonts: BillFonts };
+export type BillPdf = { bill: BillRow; shopName: string | null; shopGstin?: string | null; label: (packId: string) => PackName | null; fonts: BillFonts };
 
 const words = strings.bill.pdf;
 const light = (role: keyof typeof colors) => colors[role].light;
@@ -20,7 +20,7 @@ const face = (weight: number, data: string) => `@font-face{font-family:Inter;fon
  * @ygo/format. It shows the shop, the bill number (or "Number pending"), the reference, the date, each line, any discount,
  * the total, the payment and the customer's name; never their phone or the offers tick.
  */
-export function billHtml({ bill, shopName, label, fonts }: BillPdf): string {
+export function billHtml({ bill, shopName, shopGstin, label, fonts }: BillPdf): string {
   const lines = [
     ...bill.lines.map((line) => {
       const pack = label(line.packId);
@@ -51,6 +51,7 @@ th.n,td.n{text-align:right;padding-left:16px;white-space:nowrap}
 .void{color:${light("danger")};font-weight:600}
 </style></head><body>
 ${shopName ? `<h1>${escape(shopName)}</h1>` : ""}
+${shopGstin ? `<p class="muted">${escape(words.gstin(shopGstin))}</p>` : ""}
 <p class="head">${bill.number !== null ? words.number(bill.number) : words.numberPending}</p>
 ${bill.voided ? `<p class="void">${words.voided(strings.voids.reasons[bill.voided.reason])}</p>` : ""}
 <p class="muted">${words.reference(bill.reference)} · ${formatDateTime(bill.createdAt)}</p>

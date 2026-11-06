@@ -38,6 +38,9 @@ it("requires paired shop identity/state for the explicit access check, and a nam
   for (const state of ["live", "suspended", "approved", "closed"]) expect(SyncAccessResponse.safeParse({ shopId: id, state, shopName: "Sai", role: "owner" }).success).toBe(true);
   expect(SyncAccessResponse.safeParse({ shopId: id, state: "approved", shopName: null, role: "staff" }).success).toBe(true);
   expect(SyncAccessResponse.safeParse({ shopId: null, state: null, shopName: null, role: null }).success).toBe(true);
+  // #543: the shop's GSTIN rides along; a reply without it reads as null.
+  expect(SyncAccessResponse.parse({ shopId: id, state: "live", shopName: "Sai", role: "owner" }).shopGstin).toBeNull();
+  expect(SyncAccessResponse.parse({ shopId: id, state: "live", shopName: "Sai", shopGstin: "27ABCDE1234F1Z5", role: "owner" }).shopGstin).toBe("27ABCDE1234F1Z5");
   expect(SyncAccessResponse.safeParse({ shopId: null, state: null, shopName: "Sai", role: null }).success).toBe(false);
   expect(SyncAccessResponse.safeParse({ shopId: null, state: "closed", shopName: null, role: null }).success).toBe(false);
   expect(SyncAccessResponse.safeParse({ shopId: id, state: "live", shopName: null, role: null }).success).toBe(false);
