@@ -108,17 +108,17 @@ describe("S16 Staff (#535)", () => {
 
   it("keeps the list and says why when a later read fails, and lets only the newest read draw", async () => {
     await open();
-    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 0, code: "NETWORK" });
+    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 500, code: "INTERNAL" });
     const nodes = draw(StaffScreen);
     ((nodes.find((n) => n.type === "ScrollView")?.props.refreshControl as El).props.onRefresh as () => void)();
     await settle();
     const after = draw(StaffScreen);
     expect(texts(after)).toContain("Ravi");
-    expect(texts(after).length).toBeGreaterThan(texts(nodes).length);
+    expect(texts(after)).toContain("Something went wrong on the server.");
   });
 
   it("offers a retry when the list cannot load", async () => {
-    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 0, code: "NETWORK" });
+    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 500, code: "INTERNAL" });
     draw(StaffScreen); await settle();
     expect(button(draw(StaffScreen), "Try again")).toBeDefined();
   });
