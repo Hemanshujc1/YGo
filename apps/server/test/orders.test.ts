@@ -863,11 +863,20 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       const linked = async () => (await database.pool.query("SELECT 1 FROM shop_members WHERE account_id = $1", [staffId])).rowCount;
       return { staffId, start, deactivate, status, linked };
     };
-    const settledAfter = async <T,>(pending: Promise<T>, ms: number) => {
-      let done = false;
-      void pending.then(() => { done = true; }, () => { done = true; });
-      await new Promise((resolve) => setTimeout(resolve, ms));
-      return done;
+    /** Resolves once a backend in this test database is waiting on a row lock, so the competing query is known to be blocked. */
+    const lockWaiter = async () => {
+      for (let tries = 0; tries < 200; tries += 1) {
+        const { rowCount } = await database.pool.query(
+          "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'");
+        if (rowCount) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error("no query is waiting on a lock");
+    };
+    const track = <T,>(pending: Promise<T>) => {
+      const state = { done: false };
+      void pending.then(() => { state.done = true; }, () => { state.done = true; });
+      return state;
     };
 
     it("refuses a delivery start that waited behind a Deactivate, and leaves the order Ready", async () => {
@@ -878,7 +887,9 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
         await holder.query("BEGIN");
         await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR UPDATE", [staffId]);
         const starting = start();
-        expect(await settledAfter(starting, 400)).toBe(false);
+        const state = track(starting);
+        await lockWaiter();
+        expect(state.done).toBe(false);
         await holder.query("DELETE FROM shop_members WHERE account_id = $1", [staffId]);
         await holder.query("COMMIT");
         expect((await starting).statusCode).toBe(404);
@@ -899,7 +910,9 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
         await holder.query("SELECT 1 FROM shop_members WHERE account_id = $1 FOR SHARE", [staffId]);
         await holder.query("UPDATE orders SET status = 'out_for_delivery' WHERE deliverer_id = $1", [staffId]);
         const removing = deactivate();
-        expect(await settledAfter(removing, 400)).toBe(false);
+        const state = track(removing);
+        await lockWaiter();
+        expect(state.done).toBe(false);
         await holder.query("COMMIT");
         const answer = await removing;
         expect(answer.statusCode).toBe(409);
