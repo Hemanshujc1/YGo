@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mock = vi.hoisted(() => ({ syncAccess: vi.fn(), push: vi.fn() }));
+const mock = vi.hoisted(() => ({ syncAccess: vi.fn(), push: vi.fn(), focus: null as null | (() => (() => void) | undefined) }));
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
   return {
@@ -15,7 +15,14 @@ vi.mock("@ygo/mobile", async () => {
   const { createElement } = await import("react");
   return { Text: ({ children }: { children?: ReactNode }) => createElement("span", null, children) };
 });
-vi.mock("expo-router", () => ({ router: { push: mock.push } }));
+vi.mock("expo-router", async () => {
+  const { useEffect } = await import("react");
+  return {
+    router: { push: mock.push },
+    // Runs the effect on mount like a first focus; the test calls mock.focus() to focus the screen again.
+    useFocusEffect: (effect: () => (() => void) | undefined) => { mock.focus = effect; useEffect(effect, [effect]); },
+  };
+});
 vi.mock("../src/api", () => ({ api: { syncAccess: mock.syncAccess } }));
 import { ShopLink } from "../src/components/shop-link";
 
@@ -41,5 +48,15 @@ describe("C23 shop link (ACC-4, #536)", () => {
     const { container } = render(<ShopLink />);
     await waitFor(() => expect(mock.syncAccess).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");
+  });
+
+  it("shows the shop on coming back from S21 after joining, not the stale Join button", async () => {
+    mock.syncAccess.mockResolvedValueOnce({ ok: true, data: { shopId: null, state: null, shopName: null, shopGstin: null, role: null } });
+    const { findByLabelText, findByText, queryByLabelText } = render(<ShopLink />);
+    await findByLabelText("Join a shop");
+    mock.syncAccess.mockResolvedValueOnce({ ok: true, data: { shopId: "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e", state: "live", shopName: "Sai General Stores", shopGstin: null, role: "staff" } });
+    act(() => { mock.focus?.(); });
+    await findByText(/You work at Sai General Stores/);
+    expect(queryByLabelText("Join a shop")).toBeNull();
   });
 });

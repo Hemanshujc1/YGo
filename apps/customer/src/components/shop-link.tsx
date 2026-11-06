@@ -1,6 +1,6 @@
 import { Text } from "@ygo/mobile";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { Pressable, View } from "react-native";
 import { api } from "../api";
 import { strings } from "../strings";
@@ -14,11 +14,12 @@ const words = strings.account.shop;
  */
 export function ShopLink() {
   const [link, setLink] = useState<{ shopName: string | null } | null | undefined>(undefined);
-  useEffect(() => {
+  // On every focus, so coming back from S21 after joining shows the shop at once.
+  useFocusEffect(useCallback(() => {
     let live = true;
     void api.syncAccess().then((answer) => { if (live && answer.ok) setLink(answer.data.shopId ? { shopName: answer.data.shopName } : null); }).catch(() => undefined);
     return () => { live = false; };
-  }, []);
+  }, []));
   if (link === undefined) return null;
   if (link) return <Text className="text-body text-muted">{words.linked(link.shopName)}</Text>;
   return (
