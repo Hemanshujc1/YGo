@@ -12,6 +12,8 @@ import { Amount } from "./pricing";
  */
 export const ReceiptResponse = z.strictObject({
   number: z.number().int().positive(),
+  /** Only these two have a receipt; the PDF words the address "Delivered to" or "Order address" by it. */
+  status: z.enum(["delivered", "picked_up"]),
   placedAt: z.iso.datetime(),
   shop: z.strictObject({ name: z.string(), address: z.string(), pincode: z.string() }),
   /** Where it was delivered, as frozen: the label and area line only, never the Customer's phone. */

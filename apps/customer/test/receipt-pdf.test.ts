@@ -5,7 +5,7 @@ import { escapeHtml, receiptHtml } from "../src/lib/receipt-pdf";
 
 const fonts = { regular: "UkVH", medium: "TUVE", semibold: "U0VN" };
 const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
-  number: 1042, placedAt: "2030-01-01T04:30:00.000Z",
+  number: 1042, status: "delivered", placedAt: "2030-01-01T04:30:00.000Z",
   shop: { name: "Sai General Stores", address: "Shop 3, Paud Road", pincode: "411038" },
   address: { label: "home", areaLine: "Kothrud" },
   lines: [
@@ -36,6 +36,13 @@ describe("receipt PDF (#61)", () => {
     expect(html).toContain("500 g of a 5 kg pack");
     for (const text of ["₹150", "₹300", "₹330", "₹20", "₹10.50", "₹360.50", "Paid by UPI"]) expect(html).toContain(text);
     expect(html).not.toMatch(/\.00|1\.000|5\.000/);
+  });
+
+  it("words the address by status: Delivered to, or Order address for a pickup", () => {
+    const picked = receiptHtml({ receipt: receipt({ status: "picked_up" }), fonts });
+    expect(picked).toContain("Order address: Home · Kothrud");
+    expect(picked).not.toContain("Delivered to");
+    expect(html).not.toContain("Order address");
   });
 
   it("keeps money and quantity formats apart: a count and a pack size never get a rupee sign", () => {

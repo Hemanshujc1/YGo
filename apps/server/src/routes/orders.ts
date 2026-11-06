@@ -182,7 +182,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
   app.get("/v1/orders/:id/receipt", { schema: { params: OrderParams, response: { 200: ReceiptResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
-    const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt"> & { placedAt: Date; status: OrderStatus }>(
+    const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt" | "status"> & { placedAt: Date; status: OrderStatus }>(
       `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', s.shop_name, 'address', s.address, 'pincode', s.pincode) AS shop,
           json_build_object('label', o.address_label, 'areaLine', o.address_area_line) AS address,
           (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
@@ -193,9 +193,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
         FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
     if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     if (row.status !== "delivered" && row.status !== "picked_up") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
-    const { status, ...receipt } = row;
-    void status;
-    return { ...receipt, placedAt: row.placedAt.toISOString() };
+    return { ...row, status: row.status, placedAt: row.placedAt.toISOString() };
   });
 
   app.post("/v1/orders/:id/items-ok", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
