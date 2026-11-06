@@ -27,12 +27,19 @@ export default function StaffScreen() {
   const [message, setMessage] = useState<string | null>(null);
   // Set before React re-renders, so a second tap never starts a second change.
   const working = useRef(false);
+  // Only the newest read may draw, so an older answer arriving late never brings back a removed person.
+  const newest = useRef(0);
 
   const read = useCallback(async () => {
+    const mine = ++newest.current;
     const [staff, invites] = await Promise.all([api.shopStaff().catch(() => null), api.staffInvites().catch(() => null)]);
+    if (mine !== newest.current) return;
     if (!staff?.ok || !invites?.ok) {
       const refused = staff && !staff.ok ? staff : invites && !invites.ok ? invites : null;
-      return setLoad((now) => now.kind === "loaded" ? now : { kind: "failed", message: refused ? strings.errors[refused.code] : words.loadFailed });
+      const text = refused ? strings.errors[refused.code] : words.loadFailed;
+      // A list already on screen stays, with the reason above it, so the Owner knows it may be old.
+      setMessage(text);
+      return setLoad((now) => now.kind === "loaded" ? now : { kind: "failed", message: text });
     }
     setLoad({ kind: "loaded", staff: staff.data.staff, invites: invites.data.invites });
   }, []);
@@ -96,7 +103,7 @@ export default function StaffScreen() {
           </Section>}
           {invited.length > 0 && <Section title={words.invited}>
             {invited.map((invite) => <PersonRow key={invite.phone} invite={invite}
-              note={codeRanOut(invite.expiresAt, Date.now()) ? words.codeExpired : words.invitedUntil(formatDateTime(invite.expiresAt ?? ""))} action={words.sendAgain} />)}
+              note={!invite.expiresAt || codeRanOut(invite.expiresAt, Date.now()) ? words.codeExpired : words.invitedUntil(formatDateTime(invite.expiresAt))} action={words.sendAgain} />)}
           </Section>}
           {removed.length > 0 && <Section title={words.deactivated}>
             {removed.map((invite) => <PersonRow key={invite.phone} invite={invite} note={null} action={words.reinvite} />)}

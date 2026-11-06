@@ -54,7 +54,7 @@ export default function InviteStaffScreen() {
       contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Link href="/staff" asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+      <Link href="/staff" replace asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.inviteTitle}</Text>
       {sent ? <>
         <Text accessibilityRole="header" className="text-headline font-semibold text-text">{words.codeTitle(personLabel({ name: null, phone: sent.phone }))}</Text>

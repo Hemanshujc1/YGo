@@ -106,6 +106,17 @@ describe("S16 Staff (#535)", () => {
     expect(mock.push).toHaveBeenLastCalledWith({ pathname: "/invite-staff", params: { phone: "+919800000004", canDeliver: "0" } });
   });
 
+  it("keeps the list and says why when a later read fails, and lets only the newest read draw", async () => {
+    await open();
+    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 0, code: "NETWORK" });
+    const nodes = draw(StaffScreen);
+    ((nodes.find((n) => n.type === "ScrollView")?.props.refreshControl as El).props.onRefresh as () => void)();
+    await settle();
+    const after = draw(StaffScreen);
+    expect(texts(after)).toContain("Ravi");
+    expect(texts(after).length).toBeGreaterThan(texts(nodes).length);
+  });
+
   it("offers a retry when the list cannot load", async () => {
     mock.api.shopStaff.mockResolvedValue({ ok: false, status: 0, code: "NETWORK" });
     draw(StaffScreen); await settle();
