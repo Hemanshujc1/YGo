@@ -151,6 +151,20 @@ async function setupShopWithOrder() {
   return { shopId, dal, atta, orderId, home };
 }
 
+/** Another order of `count` dal at the same shop, placed and accepted, so it holds that stock. */
+async function acceptedOrder(shopId: string, home: string, dal: string, count: number) {
+  const { revision } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+  const cart = (await app.inject({
+    method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer, payload: { revision, lines: [{ listingId: dal, count }] },
+  })).json() as { revision: number; quote: { total: string } };
+  const placed = await app.inject({
+    method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer, payload: { revision: cart.revision, total: cart.quote.total, addressId: home },
+  });
+  expect(placed.statusCode).toBe(201);
+  const accepted = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${(placed.json() as { id: string }).id}/accept`, headers: owner });
+  expect(accepted.statusCode).toBe(200);
+}
+
 describe("S05 Accept in part: partial acceptance (#64)", () => {
   it("proposes partial acceptance from placed, reductions only with reason, transitions to awaiting_customer_confirm", async () => {
     const { orderId, dal } = await setupShopWithOrder();
@@ -253,6 +267,50 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     });
     expect(second.statusCode).toBe(409);
     expect(second.json()).toMatchObject({ error: { code: "PROPOSAL_OPEN" } });
+  });
+
+  it("refuses a proposal from placed that would hold stock another order took since placement, and allows one that fits", async () => {
+    const { shopId, dal, atta, orderId, home } = await setupShopWithOrder();
+    // The placed order holds nothing; another order takes 9 of the 10 kg of dal, leaving 1.
+    await acceptedOrder(shopId, home, dal, 9);
+    expect(await left(dal)).toBe(1);
+
+    // Removing atta but keeping 2 kg of dal would hold 2 kg where 1 is left.
+    const short = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: atta, count: 0, reason: "out_of_stock" }] },
+    });
+    expect(short.statusCode).toBe(409);
+    expect(short.json()).toEqual({ error: { code: "NOT_ENOUGH_STOCK", shortLines: [
+      { name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, available: "1" },
+    ] } });
+    const status = await database.pool.query<{ status: string }>("SELECT status FROM orders WHERE id = $1", [orderId]);
+    expect(status.rows[0]?.status).toBe("placed");
+    expect(await left(dal)).toBe(1);
+
+    // Cutting dal to the 1 kg left fits.
+    const fits = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }, { listingId: atta, count: 0, reason: "out_of_stock" }] },
+    });
+    expect(fits.statusCode).toBe(200);
+    expect(fits.json()).toMatchObject({ status: "awaiting_customer_confirm" });
+    expect(await left(dal)).toBe(0);
+  });
+
+  it("lets an accepted order cut its own hold even when other orders took all the stock left", async () => {
+    const { shopId, dal, orderId, home } = await setupShopWithOrder();
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/accept`, headers: owner })).statusCode).toBe(200);
+    // This order holds 2 kg of dal; another takes the other 8.
+    await acceptedOrder(shopId, home, dal, 8);
+    expect(await left(dal)).toBe(0);
+
+    const res = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "damaged" }] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(await left(dal)).toBe(1);
   });
 
   it("cancels immediately as cancelled_by_shop (actor system, reason negative_contribution) when platform contribution is negative", async () => {

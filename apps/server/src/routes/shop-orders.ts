@@ -179,7 +179,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const { id } = request.params as OrderParams;
     const { lines: proposedLines } = request.body as PartialAcceptOrderBody;
 
-    type Outcome = { code: string; status?: number } | { now: Date };
+    type Outcome = { code: string; status?: number; shortLines?: ShortLine[] } | { now: Date };
     const outcome = await withTransaction(pool, async (client): Promise<Outcome> => {
       const { rows: [order] } = await client.query<{
         id: string;
@@ -413,6 +413,26 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         });
       }
 
+      // The proposal holds its lines (awaiting_customer_confirm is a holding status). A placed order holds
+      // nothing yet, so stock other orders took since placement may be gone: each line may hold no more than
+      // stock left plus what this order already holds. A cut to an existing hold never needs new stock.
+      const holdsNow = STOCK_HOLDING_ORDER_STATUSES.includes(order.status);
+      const { rows: shortLines } = await client.query<ShortLine>(
+        `SELECT p.name, p.brand, p.base_unit AS "baseUnit", trim_scale(p.pack_quantity)::text AS quantity, p.count,
+            trim_scale(p.part)::text AS part, trim_scale(GREATEST(stock.left + p.own, 0))::text AS available
+          FROM jsonb_to_recordset($1::jsonb) AS p(position int, listing_id uuid, name text, brand text, base_unit text,
+            pack_quantity numeric, count int, part numeric, wanted numeric, own numeric)
+          JOIN shop_listings listing ON listing.id = p.listing_id
+          CROSS JOIN LATERAL (SELECT ${stockOf("listing")} AS left) stock
+          WHERE p.wanted > p.own AND p.wanted - p.own > stock.left
+          ORDER BY p.position`,
+        [JSON.stringify(preparedLines.map((pl, index) => ({
+          position: pl.position, listing_id: pl.listingId, name: pl.name, brand: pl.brand, base_unit: pl.baseUnit,
+          pack_quantity: pl.packQuantity, count: pl.count, part: pl.partQuantity, wanted: pl.stockQuantity,
+          own: holdsNow ? activeLines[index]?.stockQuantity : "0",
+        })))]);
+      if (shortLines.length > 0) return { code: "NOT_ENOUGH_STOCK", status: 409, shortLines };
+
       const subtotalStr = fromPaise(subtotalPaise);
       const totalCommissionStr = fromPaise(totalCommissionPaise);
 
@@ -503,7 +523,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     });
 
     if (!("now" in outcome)) {
-      return reply.code(outcome.status ?? 409).send({ error: { code: outcome.code } });
+      const { status, ...error } = outcome;
+      return reply.code(status ?? 409).send({ error });
     }
     return shopOrderView(pool, id, who.accountId, outcome.now, failureWaitSeconds);
   });
