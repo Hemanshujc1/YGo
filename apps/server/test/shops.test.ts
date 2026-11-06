@@ -109,6 +109,7 @@ const draft = {
   ownerName: "Asha Kulkarni",
   entityType: null,
   pan: null,
+  gstin: null,
   fssaiNumber: null,
   fssaiExpiry: null,
   serviceRadiusMetres: 2000,
@@ -168,6 +169,19 @@ describe("shop application", () => {
     expect(second.json()).toEqual({ ...first.json(), pan: "ABCDE1234F", location: null, serviceRadiusMetres: 3500 });
     expect((await save(headers, {})).json()).toEqual(second.json());
     expect(await read(headers)).toEqual({ application: second.json(), liveCheck: null, staffShop: null });
+  });
+
+  it("takes an optional GSTIN: saved in capitals, emptied with null, sent or left out, and refused when malformed (#537)", async () => {
+    await area("411038", true);
+    const { headers } = await owner("asha@example.com");
+    await start(headers);
+    expect((await save(headers, { gstin: "27abcde1234f1z5" })).json().gstin).toBe("27ABCDE1234F1Z5");
+    expect((await save(headers, { gstin: "27ABCDE1234F" })).json().error.fields).toEqual(["gstin"]);
+    expect((await save(headers, { gstin: null })).json().gstin).toBeNull();
+    await save(headers, { gstin: "27ABCDE1234F1Z5" });
+    const sent = await send(headers, complete);
+    expect(sent.statusCode).toBe(200);
+    expect(sent.json().gstin).toBe("27ABCDE1234F1Z5");
   });
 
   it("refuses a Draft value that breaks its rule, and an empty radius", async () => {
@@ -397,6 +411,21 @@ describe("shop application, Admin", () => {
     expect(same.json()).toEqual(corrected.json());
     expect((await actions(id)).slice(2)).toEqual(logged);
     expect((await correct(headers, id, { reason: "Nothing" })).json().error.fields).toEqual(["fields"]);
+  });
+
+  it("lets Admin set and clear a shop's GSTIN, logged by field name only (#537)", async () => {
+    await area("411038");
+    const { id } = await application("asha@example.com");
+    const headers = await adminHeaders();
+    await move(headers, id, "start-review");
+    await move(headers, id, "approve");
+    const set = await correct(headers, id, { gstin: "27abcde1234f1z5", reason: "Owner sent the certificate" });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().gstin).toBe("27ABCDE1234F1Z5");
+    expect((await correct(headers, id, { gstin: "27ABCDE1234F1Z5", reason: "Again" })).statusCode).toBe(200);
+    const cleared = await correct(headers, id, { gstin: null, reason: "Registration cancelled" });
+    expect(cleared.json().gstin).toBeNull();
+    expect((await actions(id)).slice(2)).toEqual([{ action: "shop.correct.gstin", reason: "Owner sent the certificate" }, { action: "shop.correct.gstin", reason: "Registration cancelled" }]);
   });
 
   it("moves the shop to a corrected pincode's Area, and refuses one in no Area", async () => {

@@ -299,6 +299,7 @@ export const strings = {
   applicationAddress: "Shop address",
   entityType: "Entity type",
   pan: "PAN",
+  gstin: "GSTIN",
   fssaiNumber: "FSSAI number",
   fssaiExpiry: "FSSAI expiry date",
   serviceRadius: "Service radius (km)",
@@ -465,7 +466,7 @@ export const strings = {
   applicationInvalidFields: {
     shopName: "Enter a shop name.", address: "Enter a shop address.", pincode: "Enter a valid pincode.",
     location: "Enter a valid latitude and longitude.", ownerName: "Enter the Owner's name.",
-    entityType: "Choose an entity type.", pan: "Enter a valid PAN.", fssaiNumber: "Enter a valid FSSAI number.",
+    entityType: "Choose an entity type.", pan: "Enter a valid PAN.", gstin: "Enter a valid 15-character GSTIN, or leave it empty to remove it.", fssaiNumber: "Enter a valid FSSAI number.",
     fssaiExpiry: "Enter a valid expiry date.", serviceRadiusMetres: "Enter a service radius from 0.5 to 5 km.",
     upiId: "Enter a valid UPI ID.", reason: invalidReason,
   },

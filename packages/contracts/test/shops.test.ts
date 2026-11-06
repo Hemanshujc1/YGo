@@ -108,6 +108,13 @@ describe("SendShopApplicationBody", () => {
     expect(SendShopApplicationBody.parse({ ...complete, pan: "abcde 1234 f" }).pan).toBe("ABCDE1234F");
   });
 
+  it("takes a GSTIN, or none, since it is optional (#537)", () => {
+    expect(SendShopApplicationBody.parse({ ...complete, gstin: "27abcde1234f1z5" }).gstin).toBe("27ABCDE1234F1Z5");
+    expect(SendShopApplicationBody.parse({ ...complete, gstin: null }).gstin).toBeNull();
+    expect(SendShopApplicationBody.parse(complete).gstin).toBeUndefined();
+    expect(fieldsRefused(SendShopApplicationBody, { ...complete, gstin: "27ABCDE1234F" })).toEqual(["gstin"]);
+  });
+
   it("names each missing field", () => {
     const missing = { ...complete, pan: undefined, location: undefined };
     expect(fieldsRefused(SendShopApplicationBody, missing)).toEqual(["location", "pan"]);
@@ -164,6 +171,7 @@ describe("ShopApplication", () => {
       state: "draft",
       ...Object.fromEntries(Object.keys(complete).map((key) => [key, null])),
       ownerName: "Asha Kulkarni",
+      gstin: null,
       serviceRadiusMetres: 2000,
       areaName: null,
       ownerPhone: "+919876543210",
@@ -182,6 +190,7 @@ describe("ShopApplication", () => {
       id: "00000000-0000-4000-8000-000000000401",
       state: "submitted",
       ...complete,
+      gstin: null,
       areaName: "Kothrud",
       ownerPhone: "+919876543210",
       ownerEmail: "asha@example.com",

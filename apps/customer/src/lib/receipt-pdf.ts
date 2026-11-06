@@ -50,6 +50,7 @@ th.n,td.n{text-align:right;padding-left:16px;white-space:nowrap}
 </style></head><body>
 <h1>${escapeHtml(receipt.shop.name)}</h1>
 <p>${escapeHtml(receipt.shop.address)} · ${escapeHtml(words.pincode(receipt.shop.pincode))}</p>
+${receipt.shop.gstin ? `<p>${escapeHtml(words.gstin(receipt.shop.gstin))}</p>` : ""}
 <p class="head">${words.number(receipt.number)}</p>
 <p class="muted">${formatDateTime(receipt.placedAt)}</p>
 <p>${words.address[receipt.status]}: ${escapeHtml(strings.confirm[receipt.address.label])}${receipt.address.areaLine ? ` · ${escapeHtml(receipt.address.areaLine)}` : ""}</p>

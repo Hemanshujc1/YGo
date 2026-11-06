@@ -30,6 +30,7 @@ export {
   CalendarDate,
   Email,
   FssaiNumber,
+  Gstin,
   HandoverOtp,
   indiaToday,
   LoginOtp,

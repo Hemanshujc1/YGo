@@ -393,6 +393,13 @@
       "when": 1793964101011,
       "tag": "0055_staff_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793969241549,
+      "tag": "0056_order_shop_snapshot",
+      "breakpoints": true
     }
   ]
 }

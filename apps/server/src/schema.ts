@@ -195,6 +195,7 @@ export const shops = pgTable("shops", {
   ownerName: text("owner_name"),
   entityType: text("entity_type"),
   pan: text("pan"),
+  gstin: text("gstin"),
   fssaiNumber: text("fssai_number"),
   fssaiExpiry: date("fssai_expiry"),
   serviceRadiusMetres: integer("service_radius_metres").notNull().default(2000),
@@ -689,6 +690,11 @@ export const orders = pgTable("orders", {
   shopId: uuid("shop_id").notNull().references(() => shops.id),
   status: text("status").notNull(),
   placedAt: timestamp("placed_at", { withTimezone: true }).notNull(),
+  // The shop as it was at placement, for the receipt (#537); the freeze trigger lets none of these change.
+  shopName: text("shop_name").notNull(),
+  shopAddress: text("shop_address").notNull(),
+  shopPincode: text("shop_pincode").notNull(),
+  shopGstin: text("shop_gstin"),
   statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull(),
   // The saved address as it was at placement, so a later edit doesn't move the delivery.
   addressLabel: text("address_label").notNull(),

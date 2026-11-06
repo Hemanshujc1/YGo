@@ -50,6 +50,7 @@ const inputs: Record<TextField, TextInputProps> = {
   pincode: { keyboardType: "number-pad", autoComplete: "postal-code", textContentType: "postalCode" },
   ownerName: { autoCapitalize: "words", autoComplete: "name", textContentType: "name" },
   pan: { autoCapitalize: "characters", autoCorrect: false },
+  gstin: { autoCapitalize: "characters", autoCorrect: false },
   fssaiNumber: { keyboardType: "number-pad" },
   fssaiExpiry: { keyboardType: "numbers-and-punctuation", placeholder: words.datePlaceholder },
   upiId: { keyboardType: "email-address", autoCapitalize: "none", autoCorrect: false },
@@ -382,6 +383,7 @@ export function ApplicationForm({ application, onSent }: { application: ShopAppl
 
         <Group title={words.groups.licences}>
           {input("pan")}
+          {input("gstin")}
           {input("fssaiNumber")}
           {input("fssaiExpiry")}
         </Group>

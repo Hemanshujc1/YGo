@@ -127,10 +127,11 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       const now = clock.now();
 
       const { rows: [order] } = await client.query<{ id: string }>(
-        `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_area_line,
-           address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote)
-         SELECT $1, $2, 'placed', $3, $3, label, flat, area_line, pincode, point, $5, $6, $7, $8, $9, $10
-         FROM saved_addresses WHERE id = $4 RETURNING id`,
+        `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
+           address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote)
+         SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin,
+           a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10
+         FROM saved_addresses a, shops shop WHERE a.id = $4 AND shop.id = $2 RETURNING id`,
         [who.accountId, shopId, now, addressId, priced.productValue, priced.deliveryFee.amount, priced.smallCartFee?.amount ?? null,
           priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced)]);
       if (!order) throw new Error("A locked address disappeared");
@@ -178,19 +179,19 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
   });
 
-  // #61: the receipt of a finished sale. Every figure is the frozen one; the shop's name and address are read now.
+  // #61: the receipt of a finished sale. Every figure and the shop's identity are the ones frozen at placement (#537).
   app.get("/v1/orders/:id/receipt", { schema: { params: OrderParams, response: { 200: ReceiptResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt" | "status"> & { placedAt: Date; status: OrderStatus }>(
-      `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', s.shop_name, 'address', s.address, 'pincode', s.pincode) AS shop,
+      `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', o.shop_name, 'address', o.shop_address, 'pincode', o.shop_pincode, 'gstin', o.shop_gstin) AS shop,
           json_build_object('label', o.address_label, 'areaLine', o.address_area_line) AS address,
           (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
               'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
             FROM order_lines l WHERE l.order_id = o.id) AS lines,
           o.product_value::text AS "productValue", o.delivery_fee::text AS "deliveryFee", o.small_cart_fee::text AS "smallCartFee", o.total::text AS total,
           o.delivery_payment AS payment
-        FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
+        FROM orders o WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
     if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     if (row.status !== "delivered" && row.status !== "picked_up") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
     return { ...row, status: row.status, placedAt: row.placedAt.toISOString() };

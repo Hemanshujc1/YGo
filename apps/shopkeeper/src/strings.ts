@@ -127,6 +127,7 @@ export const strings = {
       ownerName: { label: "Owner's legal name", invalid: "Enter your name in letters, such as Asha Kulkarni." },
       entityType: { label: "Business type", invalid: "Choose your business type." },
       pan: { label: "PAN", invalid: "Enter a PAN such as ABCDE1234F: 5 letters, 4 digits, 1 letter." },
+      gstin: { label: "GSTIN (optional)", invalid: "Enter the 15-character GSTIN on your registration, such as 27ABCDE1234F1Z5, or leave it empty." },
       fssaiNumber: { label: "FSSAI licence number", invalid: "Enter the 14-digit number on your FSSAI licence." },
       fssaiExpiry: {
         label: "FSSAI licence valid until",

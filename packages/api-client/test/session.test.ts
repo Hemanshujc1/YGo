@@ -229,6 +229,7 @@ describe("each call", () => {
   ownerName: "Asha Kulkarni",
   entityType: null,
   pan: null,
+  gstin: null,
   fssaiNumber: null,
   fssaiExpiry: null,
   serviceRadiusMetres: 2000,
