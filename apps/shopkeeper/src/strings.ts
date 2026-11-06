@@ -745,5 +745,6 @@ export const strings = {
     NEGATIVE_CONTRIBUTION_CANCELLED: "Order cancelled: items left could not cover delivery.",
     EMPTY_ORDER: "You cannot accept an order with no items. Reject it instead.",
     INVALID_PARTIAL_ACCEPT: "You can only reduce quantities or remove items.",
+    CANCEL_REQUEST_CLOSED: "The customer's ask to cancel has already been answered.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -26,6 +26,7 @@ import {
   NotificationsResponse,
   type PushTokenBody,
   type PlaceOrderBody,
+  type CancelOrderBody,
   type RejectOrderBody,
   type AssignDelivererBody,
   type CompleteDeliveryBody,
@@ -426,6 +427,11 @@ export function createApiClient({
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/items-ok`), OrderResponse);
     },
 
+    /** `POST /v1/orders/:id/cancel-request`: asks the shop to cancel an accepted or preparing order, once (ORD-5). */
+    async askToCancelOrder(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel-request`), OrderResponse);
+    },
+
     /** `POST /v1/orders/:id/cancel`: free while the shop hasn't answered (ORD-5); ORDER_STATUS_CHANGED once it has. */
     async cancelOrder(id: string): Promise<ApiResult<OrderResponse>> {
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel`), OrderResponse);
@@ -553,6 +559,16 @@ export function createApiClient({
     /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
     async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/cancel-request/agree` or `/keep`: the shop's answer to the Customer's ask to cancel (ORD-5). */
+    async answerCancelRequest(id: string, answer: "agree" | "keep"): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/cancel-request/${answer}`), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/cancel`: the shop cancels an accepted, preparing or ready order, with a reason (ORD-5). */
+    async cancelShopOrder(id: string, body: CancelOrderBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/cancel`, body), ShopOrderResponse);
     },
 
     /** Advances a shop order through its delivery lifecycle (#56). */

@@ -7,6 +7,7 @@ import {
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { createHandoverCode, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, revealHandoverCode } from "../delivery";
+import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder, recordStatus } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -94,7 +95,9 @@ export const frozenOrder = (o: string) => `json_build_object('label', ${o}.addre
             )
           )
           FROM order_revisions p WHERE p.order_id = ${o}.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
-        ) END AS proposal`;
+        ) END AS proposal,
+        (SELECT json_build_object('status', c.status, 'askedAt', to_char(c.asked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+          FROM order_cancel_requests c WHERE c.order_id = ${o}.id) AS "cancelRequest"`;
 
 /** The shop as C18 and C19 show it, with the Owner's phone read now (ORD-8). */
 const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.shop_name, 'phone', (SELECT a.phone FROM shop_members m
@@ -343,6 +346,28 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       return "MOVED";
     });
     if (moved !== "MOVED") return reply.code(moved === "NOT_FOUND" ? 404 : 409).send({ error: { code: moved } });
+    return orderView(pool, id, who.accountId, clock.now(), secret);
+  });
+
+  // C19 Ask to cancel: once the shop has accepted, the Customer asks and the shop answers (ORD-5, #59). One ask per order.
+  app.post("/v1/orders/:id/cancel-request", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ status: OrderStatus }>("SELECT status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
+      if (!order) return "NOT_FOUND";
+      const { rows: [asked] } = await client.query<{ status: string }>("SELECT status FROM order_cancel_requests WHERE order_id = $1", [id]);
+      // A retry of the ask that is still waiting answers the same, with no second row and no second notification.
+      if (asked) return asked.status === "asked" ? "OK" : "CANCEL_REQUEST_CLOSED";
+      if (order.status !== "accepted" && order.status !== "preparing") return "ORDER_STATUS_CHANGED";
+      const now = clock.now();
+      await client.query("INSERT INTO order_cancel_requests (order_id, status, asked_at) VALUES ($1, 'asked', $2)", [id, now]);
+      await queueNotification(client, id, cancelRules.asked, now);
+      await client.query("COMMIT");
+      return "OK";
+    });
+    if (result !== "OK") return reply.code(result === "NOT_FOUND" ? 404 : 409).send({ error: { code: result } });
     return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 

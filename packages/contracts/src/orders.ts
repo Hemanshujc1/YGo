@@ -29,6 +29,16 @@ export type OrderParams = z.infer<typeof OrderParams>;
 export const RejectReason = z.enum(["out_of_stock", "too_busy", "closing_soon", "cannot_deliver"]);
 export type RejectReason = z.infer<typeof RejectReason>;
 
+/**
+ * The Customer's one ask to cancel an accepted order (ORD-5, #59). `asked` waits for the shop; the shop's answer makes it
+ * `agreed` (the order is cancelled) or `kept`; it becomes `closed_unanswered` when the order moves on first (ready,
+ * a partial acceptance or a shop cancel).
+ */
+export const CancelRequestStatus = z.enum(["asked", "agreed", "kept", "closed_unanswered"]);
+export type CancelRequestStatus = z.infer<typeof CancelRequestStatus>;
+export const CancelRequest = z.strictObject({ status: CancelRequestStatus, askedAt: z.iso.datetime() });
+export type CancelRequest = z.infer<typeof CancelRequest>;
+
 /** Reasons for line reduction or removal in a partial acceptance proposal (ORD-3). */
 export const OrderLineChangeReason = z.enum(["out_of_stock", "damaged", "near_expiry", "quality_issue"]);
 export type OrderLineChangeReason = z.infer<typeof OrderLineChangeReason>;
@@ -109,6 +119,8 @@ export const OrderResponse = z.strictObject({
   itemsCheckedAt: z.iso.datetime().nullable(),
   confirmByAt: z.iso.datetime().nullable(),
   proposal: OrderProposal.nullable(),
+  /** The Customer's ask to cancel, once made; null before. The app offers Ask to cancel only while the order is accepted or preparing and this is null. */
+  cancelRequest: CancelRequest.nullable(),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;
 
@@ -140,6 +152,10 @@ export const STOCK_HOLDING_ORDER_STATUSES: readonly OrderStatus[] = ["accepted",
 export const RejectOrderBody = z.strictObject({ reason: RejectReason });
 export type RejectOrderBody = z.infer<typeof RejectOrderBody>;
 
+/** `POST /v1/me/shop-orders/:id/cancel`: the shop cancels an accepted, preparing or ready order, with a reason (ORD-5). Reject stays for orders still placed. */
+export const CancelOrderBody = z.strictObject({ reason: RejectReason });
+export type CancelOrderBody = z.infer<typeof CancelOrderBody>;
+
 /** A line reduction or removal in a partial acceptance proposal (ORD-3). */
 export const PartialAcceptLine = z.strictObject({
   listingId: z.uuid(),
@@ -162,6 +178,8 @@ export const ShopOrderSummary = z.strictObject({
   placedAt: z.iso.datetime(),
   expiresAt: z.iso.datetime().nullable(),
   confirmByAt: z.iso.datetime().nullable(),
+  /** The Customer has asked to cancel and the shop has not answered. */
+  cancelAsked: z.boolean(),
   itemCount: z.number().int().positive(),
   total: Amount,
   address: z.strictObject({ flat: z.string(), areaLine: z.string().nullable() }),
@@ -209,6 +227,7 @@ export const ShopOrderResponse = z.strictObject({
   deliveryFailureReadyAt: z.iso.datetime().nullable(),
   confirmByAt: z.iso.datetime().nullable(),
   proposal: OrderProposal.nullable(),
+  cancelRequest: CancelRequest.nullable(),
 });
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
 
