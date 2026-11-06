@@ -16,6 +16,7 @@ export interface AuthKeys {
   loginCode: Buffer;
   refreshHash: Buffer;
   successor: Buffer;
+  staffCode: Buffer;
 }
 
 export function deriveKeys(secret: string): AuthKeys {
@@ -25,6 +26,7 @@ export function deriveKeys(secret: string): AuthKeys {
     loginCode: derive("ygo login-code v1"),
     refreshHash: derive("ygo refresh-hash v1"),
     successor: derive("ygo refresh-successor v1"),
+    staffCode: derive("ygo staff-join-code v1"),
   };
 }
 

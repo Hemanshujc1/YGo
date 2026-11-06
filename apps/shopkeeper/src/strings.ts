@@ -709,5 +709,8 @@ export const strings = {
     COUNTER_BILL_VOIDED: "This bill is already voided.",
     COUNTER_BILL_NOT_VOIDABLE: "This bill can't be voided now.",
     SHOP_NOT_BILLING: "Your shop can't bill right now.",
+    STAFF_AT_ANOTHER_SHOP: "That number is linked to another shop.",
+    STAFF_ALREADY_MEMBER: "That person already works in your shop.",
+    ALREADY_LINKED: "This account is already linked to a shop.",
   } satisfies Record<ErrorCode, string>,
 };

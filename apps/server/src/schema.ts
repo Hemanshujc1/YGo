@@ -233,6 +233,27 @@ export const shopMembers = pgTable("shop_members", {
   index("shop_members_shop_id_idx").on(table.shopId),
 ]);
 
+// A Staff invitation and the link's memory (#58). A join code is shown once, stored as a keyed digest, and valid for
+// 24 hours. Deactivating removes the shop_members row, so every shop route stops at once (ACC-11); this row keeps the
+// account, so a re-invite restores the same link and its history (ACC-7). The phone is the invited number, normalised.
+export const staffInvites = pgTable("staff_invites", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  phone: text("phone").notNull(),
+  accountId: uuid("account_id").references(() => accounts.id),
+  canDeliver: boolean("can_deliver").notNull().default(false),
+  status: text("status").notNull(),
+  codeDigest: text("code_digest"),
+  codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  check("staff_invites_status_valid", sql`${table.status} IN ('invited', 'active', 'deactivated')`),
+  check("staff_invites_code_valid", sql`(${table.status} = 'invited') = (${table.codeDigest} IS NOT NULL AND ${table.codeExpiresAt} IS NOT NULL)`),
+  uniqueIndex("staff_invites_shop_phone_idx").on(table.shopId, table.phone),
+  index("staff_invites_phone_idx").on(table.phone),
+]);
+
 // One immutable publication number covers every scope, so an order or agreement can name
 // exactly which configuration it used. A publication stores the complete snapshot for one
 // scope; an omitted key clears that override and inherits from the broader scope (#44).
