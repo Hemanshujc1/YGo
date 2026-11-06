@@ -89,9 +89,10 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
         // Live/Suspended lease until its original deadline.
         if (!stockAllowed && state === "approved" && record?.stockAllowed && usable(record)) {
           storage.select(account.id);
-          // The lease keeps its deadline, but a changed role or GSTIN is kept so it survives a restart.
+          // The lease keeps its deadline, but a changed role, name or GSTIN is kept so it survives a restart.
           const gstin = shopGstin ?? null;
-          const kept = (role && role !== record.role) || gstin !== (record.shopGstin ?? null) ? { ...record, role: role ?? record.role, shopGstin: gstin } : record;
+          const name = shopName ?? null;
+          const kept = (role && role !== record.role) || gstin !== (record.shopGstin ?? null) || name !== (record.shopName ?? null) ? { ...record, role: role ?? record.role, shopName: name, shopGstin: gstin } : record;
           if (kept !== record) { await storage.save(kept); if (mine !== turn) return null; }
           saved = kept;
           show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
