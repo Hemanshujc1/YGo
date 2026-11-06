@@ -175,7 +175,7 @@ export const Pan = z
 export const Gstin = z
   .string()
   .overwrite((value) => withoutSpaces(value).toUpperCase())
-  .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z][Z1-9A-J][0-9A-Z]$/);
+  .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/);
 
 /** An FSSAI licence or registration number: 14 digits (ONB-3). */
 export const FssaiNumber = z.string().overwrite(withoutSpaces).regex(/^\d{14}$/);
