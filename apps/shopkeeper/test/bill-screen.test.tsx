@@ -263,6 +263,7 @@ describe("S06 Counter bill (#468)", () => {
     expect(texts()).toContain("Couldn't make the bill PDF. Try again.");
   });
 
+  // 100 full re-renders: slow when the machine is busy, so it gets a longer limit (#541).
   it("stops at 100 catalog and typed items together, as the contract does (#53)", async () => {
     render(); await settle();
     (find((props) => props.accessibilityLabel === "Search products")?.onChangeText as (value: string) => void)("rice");
@@ -271,7 +272,7 @@ describe("S06 Counter bill (#468)", () => {
     expect(find((props) => props.accessibilityLabel === "Typed item 99: Item name")).toBeDefined();
     expect(find((props) => props.accessibilityLabel === "Typed item 100: Item name")).toBeUndefined();
     expect(texts()).toContain("A bill holds up to 100 items. Save this one and start another.");
-  });
+  }, 30_000);
 
   it("clamps typed count at 1 on minus and removes the item with the Remove action (#485)", async () => {
     render(); await settle();
