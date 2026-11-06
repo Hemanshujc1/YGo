@@ -138,6 +138,47 @@ describe("Staff invite and join (#58)", () => {
     expect((await database.pool.query("SELECT can_deliver FROM shop_members WHERE account_id = $1", [staff.id])).rows).toEqual([{ can_deliver: false }]);
   });
 
+  it("opens Staff's shop instead of the Start screen (GET /v1/me/shop-application)", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    const read = async () => (await app.inject({ method: "GET", url: "/v1/me/shop-application", headers: staff.headers })).json();
+    expect(await read()).toEqual({ application: null, liveCheck: null, staffShop: null });
+    await join(staff, ((await invite(owner, "+919800000001")).json() as { code: string }).code);
+    // The shop's name and state only: none of the Owner's application (PAN, FSSAI, UPI).
+    expect(await read()).toEqual({ application: null, liveCheck: null, staffShop: { shopId: owner.shopId, shopName: "Sai General Stores", state: "approved" } });
+    // Start refuses a Staff account, so the app must not offer it.
+    expect((await app.inject({ method: "POST", url: "/v1/me/shop-application", headers: staff.headers })).json().error.code).toBe("SHOP_APPLICATION_EXISTS");
+    // The Owner still sees their own application and no staffShop.
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-application", headers: owner.headers })).json()).toMatchObject({ application: { state: "approved" }, staffShop: null });
+  });
+
+  it("stops a deactivated Staff member's existing token at every shop resource, but not as a Customer (ACC-11)", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(owner, "+919800000001", true)).json() as { code: string }).code);
+    const shopRoutes = ["/v1/me/shop-orders", "/v1/me/shop-deliverers", "/v1/me/stock", "/v1/me/counter-bills"];
+    for (const url of shopRoutes) expect((await app.inject({ method: "GET", url, headers: staff.headers })).statusCode, url).not.toBe(404);
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: owner.headers });
+    // The same access token, with no refresh and no new sign-in.
+    for (const url of shopRoutes) expect((await app.inject({ method: "GET", url, headers: staff.headers })).statusCode, url).toBe(404);
+    expect(await accessOf(staff)).toMatchObject({ shopId: null, role: null });
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-application", headers: staff.headers })).json().staffShop).toBeNull();
+    expect((await app.inject({ method: "POST", url: "/v1/sync/actions", headers: staff.headers, payload: { actions: [] } })).statusCode).not.toBe(200);
+    // The Customer side of the same account keeps working.
+    expect((await app.inject({ method: "GET", url: "/v1/orders", headers: staff.headers })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/me/addresses", headers: staff.headers })).statusCode).toBe(200);
+  });
+
+  it("lets the Owner of a Suspended shop still remove Staff, but not invite", async () => {
+    const owner = await shop();
+    const staff = await person("staff@example.com", "+919800000001");
+    await join(staff, ((await invite(owner, "+919800000001")).json() as { code: string }).code);
+    await database.pool.query("UPDATE shops SET state = 'suspended' WHERE id = $1", [owner.shopId]);
+    expect((await invite(owner, "+919800000002")).statusCode).toBe(409);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staff.id}/deactivate`, headers: owner.headers })).statusCode).toBe(204);
+    expect(await accessOf(staff)).toMatchObject({ shopId: null });
+  });
+
   it("holds one shop link per account (ACC-4)", async () => {
     const owner = await shop();
     const other = await shop("owner2@example.com");

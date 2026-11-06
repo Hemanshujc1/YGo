@@ -76,6 +76,8 @@ export const strings = {
   application: {
     loadFailed: "Could not load your shop application. Check your connection, then try again.",
     retry: "Try again",
+    // Staff open their shop in place of Start (#58).
+    staff: { title: (shop: string | null) => (shop ? `You work at ${shop}` : "You work at this shop"), notOpen: "The shop is not taking orders yet." },
     start: {
       title: "Bring your shop to YGo",
       body: "Tell us about your shop. You can save it and finish later.",

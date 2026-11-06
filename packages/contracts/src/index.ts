@@ -155,7 +155,7 @@ export {
   CorrectShopApplicationBody,
   LiveBlocker,
   LiveCheck,
-  MyShopApplicationResponse,
+  MyShopApplicationResponse, StaffShop,
   SaveShopApplicationBody,
   SendShopApplicationBody,
   ShopApplication,

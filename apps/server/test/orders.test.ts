@@ -690,6 +690,41 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect(await read()).toEqual({ name: "Meera", phone: "+919876500002" });
   });
 
+  it("assigns an order only to Staff who can deliver, and again after a re-invite (DLV-1, ACC-7)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const { rows: [{ id: staffId }] } = await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'");
+    const invite = async (canDeliver: boolean) => {
+      const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver } });
+      return app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    };
+    expect((await invite(false)).statusCode).toBe(200);
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    const assign = (headers: Record<string, string>) => app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers, payload: { accountId: staffId } });
+    const flag = (headers: Record<string, string>, canDeliver: boolean) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-staff/${staffId}/can-deliver`, headers, payload: { canDeliver } });
+    const deliverers = async () => ((await app.inject({ method: "GET", url: "/v1/me/shop-deliverers", headers: owner })).json().deliverers as Array<{ accountId: string }>).map((row) => row.accountId);
+
+    // Without the flag Staff can't be assigned and aren't offered; Staff can't flag themselves.
+    expect((await assign(owner)).json().error.code).toBe("DELIVERER_NOT_ELIGIBLE");
+    expect(await deliverers()).not.toContain(staffId);
+    expect((await flag(staff, true)).statusCode).toBe(404);
+    // The Owner flags them; a deactivated person is refused again even though the flag is still set.
+    expect((await flag(owner, true)).statusCode).toBe(200);
+    expect(await deliverers()).toContain(staffId);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner })).statusCode).toBe(204);
+    expect(await deliverers()).not.toContain(staffId);
+    expect((await assign(owner)).json().error.code).toBe("DELIVERER_NOT_ELIGIBLE");
+    // Re-inviting with the flag restores the same account, who can then be assigned and sees the order.
+    expect((await invite(true)).statusCode).toBe(200);
+    expect((await assign(owner)).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: staff })).statusCode).toBe(200);
+    expect((await database.pool.query("SELECT deliverer_id FROM orders WHERE id = $1", [placed.id])).rows).toEqual([{ deliverer_id: staffId }]);
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

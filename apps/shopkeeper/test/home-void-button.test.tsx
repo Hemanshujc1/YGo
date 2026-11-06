@@ -37,7 +37,7 @@ function elements(node: unknown): Array<{ type: unknown; props: Record<string, u
 const rendered = (state: string) => {
   mock.cursor = 0; mock.hooks = [];
   Home(); // the first render registers the load state
-  mock.hooks[0] = { kind: "loaded", application: { state }, liveCheck: null };
+  mock.hooks[0] = { kind: "loaded", application: { state }, liveCheck: null, staffShop: null };
   mock.cursor = 0;
   return elements(Home());
 };

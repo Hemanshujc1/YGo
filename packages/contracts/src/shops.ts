@@ -144,11 +144,16 @@ export type LiveBlocker = z.infer<typeof LiveBlocker>;
 export const LiveCheck = z.strictObject({ blockers: z.array(LiveBlocker), rateCardMissing: z.array(RateCardKey) });
 export type LiveCheck = z.infer<typeof LiveCheck>;
 
+/** The shop a Staff member works in: its name and state only, none of the Owner's application (#58). */
+export const StaffShop = z.strictObject({ shopId: z.uuid(), shopName: z.string().nullable(), state: ShopState });
+export type StaffShop = z.infer<typeof StaffShop>;
+
 /**
  * `GET /v1/me/shop-application`: null until the Owner taps Start.
  * `liveCheck` is set only while the shop is Approved (S14).
+ * A Staff member gets `application: null` and `staffShop`, so the app opens their shop instead of Start.
  */
-export const MyShopApplicationResponse = z.strictObject({ application: ShopApplication.nullable(), liveCheck: LiveCheck.nullable() });
+export const MyShopApplicationResponse = z.strictObject({ application: ShopApplication.nullable(), liveCheck: LiveCheck.nullable(), staffShop: StaffShop.nullable() });
 export type MyShopApplicationResponse = z.infer<typeof MyShopApplicationResponse>;
 
 /**

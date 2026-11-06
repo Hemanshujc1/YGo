@@ -24,11 +24,14 @@ export function registerShopStaffRoutes(app: FastifyInstance, { pool, clock, sec
   const auth = { pool, clock, keys };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope, 429: ErrorEnvelope };
 
-  /** The signed-in Owner's shop, or null once refused: no Owner link 404, shop not yet Approved 409. */
-  const owner = async (accountId: string, reply: FastifyReply, client: Pick<Pool, "query">, lock = false) => {
+  /**
+   * The signed-in Owner's shop, or null once refused: no Owner link 404, and for an invitation a shop not yet Approved 409.
+   * Listing and deactivating work in every state, so an Owner can always remove someone's access.
+   */
+  const owner = async (accountId: string, reply: FastifyReply, client: Pick<Pool, "query">, lock = false, inviting = false) => {
     const shop = await ownerShop(client as Pool, accountId, lock);
     if (!shop) void reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    else if (shop.state !== "approved" && shop.state !== "live") void reply.code(409).send({ error: { code: "SHOP_NOT_APPROVED" } });
+    else if (inviting && shop.state !== "approved" && shop.state !== "live") void reply.code(409).send({ error: { code: "SHOP_NOT_APPROVED" } });
     else return shop;
     return null;
   };
@@ -51,7 +54,7 @@ export function registerShopStaffRoutes(app: FastifyInstance, { pool, clock, sec
     if (!who) return reply;
     const { phone, canDeliver } = request.body as InviteStaffBody;
     return withTransaction(pool, async (client) => {
-      const shop = await owner(who.accountId, reply, client, true);
+      const shop = await owner(who.accountId, reply, client, true, true);
       if (!shop) return reply;
       const { rows: [linked] } = await client.query<{ shopId: string }>(
         `SELECT m.shop_id AS "shopId" FROM accounts a JOIN shop_members m ON m.account_id = a.id WHERE a.phone = $1`, [phone]);
