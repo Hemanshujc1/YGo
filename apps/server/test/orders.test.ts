@@ -186,7 +186,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
       productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null, answerExpired: false,
-      handoverCode: null, itemsCheckedAt: null,
+      handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: other })).statusCode).toBe(404);
@@ -233,6 +233,17 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect((await place(shopId, { revision: 2, total: "300.00", addressId: home })).json()).toMatchObject({ error: { code: "CART_CHANGED", cart: { quote: { total: "310.00" } } } });
     expect(await orderCount()).toBe(0);
     expect((await place(shopId, { revision: 2, total: "310.00", addressId: home })).statusCode).toBe(201);
+  });
+
+  it("refuses placement with CART_CHANGED when the submitted total does not match the quoted total (#64)", async () => {
+    const { shopId, dal, home } = await stocked();
+    const cart = (await save(shopId, 0, [{ listingId: dal, count: 1 }])).json() as { revision: number; quote: { total: string } };
+    const mismatch = await place(shopId, { revision: cart.revision, total: "999.00", addressId: home });
+    expect(mismatch.statusCode).toBe(409);
+    expect(mismatch.json()).toMatchObject({
+      error: { code: "CART_CHANGED", cart: { quote: { total: cart.quote.total } } },
+    });
+    expect(await orderCount()).toBe(0);
   });
 
   it("checks the cart again under its locks, so a price edit landing while the order is placed refuses it", async () => {
@@ -405,7 +416,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, order_lines, order_status_history, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, order_lines, order_status_history, order_revision_lines, order_revisions, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });
@@ -416,11 +427,18 @@ describe("Order transitions (#9)", () => {
     const allowed = OrderStatus.options.flatMap((from) => OrderStatus.options.flatMap((to) =>
       roles.filter((role) => canMove(from, to, role)).map((role) => `${from} → ${to} by ${role}`)));
     expect(allowed).toEqual([
+      "placed → awaiting_customer_confirm by owner", "placed → awaiting_customer_confirm by staff",
       "placed → accepted by owner", "placed → accepted by staff", "placed → rejected_by_shop by owner", "placed → rejected_by_shop by staff",
-      "placed → expired by system", "placed → cancelled_by_customer by customer",
+      "placed → expired by system", "placed → cancelled_by_customer by customer", "placed → cancelled_by_shop by system",
+      "awaiting_customer_confirm → placed by customer", "awaiting_customer_confirm → accepted by customer",
+      "awaiting_customer_confirm → preparing by customer", "awaiting_customer_confirm → cancelled_by_customer by customer",
+      "awaiting_customer_confirm → cancelled_by_customer by system",
+      "accepted → awaiting_customer_confirm by owner", "accepted → awaiting_customer_confirm by staff",
       "accepted → preparing by owner", "accepted → preparing by staff", "accepted → ready by owner", "accepted → ready by staff",
-      "accepted → cancelled_by_shop by owner", "accepted → cancelled_by_shop by staff",
+      "accepted → cancelled_by_shop by owner", "accepted → cancelled_by_shop by staff", "accepted → cancelled_by_shop by system",
+      "preparing → awaiting_customer_confirm by owner", "preparing → awaiting_customer_confirm by staff",
       "preparing → ready by owner", "preparing → ready by staff", "preparing → cancelled_by_shop by owner", "preparing → cancelled_by_shop by staff",
+      "preparing → cancelled_by_shop by system",
       "ready → out_for_delivery by owner", "ready → out_for_delivery by staff", "ready → picked_up by owner", "ready → picked_up by staff",
       "ready → cancelled_by_shop by owner", "ready → cancelled_by_shop by staff",
       "out_for_delivery → arrived by owner", "out_for_delivery → arrived by staff",
@@ -595,7 +613,7 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
       if (await left(dal) === "6") held.push(status);
       else expect(await left(dal)).toBe("10");
     }
-    expect(held).toEqual(["accepted", "preparing", "ready", "out_for_delivery", "arrived"]);
+    expect(held).toEqual(["awaiting_customer_confirm", "accepted", "preparing", "ready", "out_for_delivery", "arrived"]);
   });
 
   it("lists S04's New, Accepted and Done today, by the last status change in India time", async () => {
@@ -622,7 +640,7 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
     expect(listed.new).toEqual([{
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:11:00.000Z", expiresAt: "2030-01-01T00:21:00.000Z",
       itemCount: 1, total: "435.00", address: { flat: "Flat 4B", areaLine: "Kothrud" },
-      delivererId: null,
+      delivererId: null, confirmByAt: null,
     }]);
     expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
     expect(listed.doneToday?.map((row) => row.id)).toEqual([rejected.id, cancelled.id]);
@@ -1192,7 +1210,7 @@ describe("Customer's order list (#426, ORD-1)", () => {
     expect(ids(past)).toEqual([rejected.id, cancelled.id]);
     expect(active[2]).toEqual({
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:01:00.000Z",
-      shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" }, total: "180.00", answerExpired: false,
+      shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" }, total: "180.00", answerExpired: false, confirmByAt: null,
     });
     expect(ids((await list(other)).json().active)).toEqual([theirs.id]);
   });

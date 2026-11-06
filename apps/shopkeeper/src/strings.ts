@@ -715,5 +715,10 @@ export const strings = {
     STAFF_AT_ANOTHER_SHOP: "That number is linked to another shop.",
     STAFF_ALREADY_MEMBER: "That person already works in your shop.",
     ALREADY_LINKED: "This account is already linked to a shop.",
+    PROPOSAL_OPEN: "A proposed total is already waiting for the customer.",
+    CONFIRMATION_EXPIRED: "The time for the customer to confirm has expired.",
+    NEGATIVE_CONTRIBUTION_CANCELLED: "Order cancelled: items left could not cover delivery.",
+    EMPTY_ORDER: "You cannot accept an order with no items. Reject it instead.",
+    INVALID_PARTIAL_ACCEPT: "You can only reduce quantities or remove items.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -8,12 +8,34 @@ export type OrderActor = { id: string; role: "customer" | "owner" | "staff" } | 
 const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArray<OrderActor["role"]>>>>> = {
   // Free while the shop hasn't answered (ORD-5); the shop's Owner or Staff answers it (#425).
   // Only the timed job (#57, ORD-2) expires an order: `system` is never the role of a signed-in request.
-  placed: { cancelled_by_customer: ["customer"], accepted: ["owner", "staff"], rejected_by_shop: ["owner", "staff"], expired: ["system"] },
-  accepted: { preparing: ["owner", "staff"], ready: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
-  preparing: { ready: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
+  placed: {
+    cancelled_by_customer: ["customer"],
+    accepted: ["owner", "staff"],
+    rejected_by_shop: ["owner", "staff"],
+    expired: ["system"],
+    awaiting_customer_confirm: ["owner", "staff"],
+    cancelled_by_shop: ["system"],
+  },
+  accepted: {
+    preparing: ["owner", "staff"],
+    ready: ["owner", "staff"],
+    cancelled_by_shop: ["owner", "staff", "system"],
+    awaiting_customer_confirm: ["owner", "staff"],
+  },
+  preparing: {
+    ready: ["owner", "staff"],
+    cancelled_by_shop: ["owner", "staff", "system"],
+    awaiting_customer_confirm: ["owner", "staff"],
+  },
   ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
   out_for_delivery: { arrived: ["owner", "staff"] },
   arrived: { delivered: ["owner", "staff"], delivery_failed: ["owner", "staff"] },
+  awaiting_customer_confirm: {
+    placed: ["customer"],
+    accepted: ["customer"],
+    preparing: ["customer"],
+    cancelled_by_customer: ["customer", "system"],
+  },
 };
 
 export const canMove = (from: OrderStatus, to: OrderStatus, role: OrderActor["role"]) => MOVES[from]?.[to]?.includes(role) ?? false;
@@ -26,7 +48,7 @@ export async function recordStatus(
     "INSERT INTO order_status_history (order_id, from_status, to_status, actor_id, actor_role, at, reason_code) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [orderId, from, to, actor.id, actor.role, at, reasonCode]);
   // Every status change passes here, so whoever should hear of it is told in the same transaction (#505).
-  await notifyOrderStatus(client, orderId, to, at, reasonCode);
+  await notifyOrderStatus(client, orderId, to, at, reasonCode, from);
 }
 
 /**
@@ -37,6 +59,10 @@ export async function moveOrder(
   client: PoolClient, order: { id: string; status: OrderStatus }, to: OrderStatus, actor: OrderActor, at: Date, reasonCode: string | null = null,
 ): Promise<boolean> {
   if (!canMove(order.status, to, actor.role)) return false;
+  if (order.status === "awaiting_customer_confirm" && to !== "awaiting_customer_confirm") {
+    const { rows } = await client.query("SELECT 1 FROM order_revisions WHERE order_id = $1 AND status = 'proposed'", [order.id]);
+    if (rows.length > 0) return false;
+  }
   await client.query("UPDATE orders SET status = $2, status_changed_at = $3 WHERE id = $1", [order.id, to, at]);
   await recordStatus(client, order.id, order.status, to, actor, at, reasonCode);
   return true;

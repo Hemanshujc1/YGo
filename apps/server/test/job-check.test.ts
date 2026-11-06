@@ -26,6 +26,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
@@ -36,6 +37,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
     { jobName: "backup-nightly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "cleanup-sessions", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
     { jobName: "snapshot-weekly", startedAt: yesterday, finishedAt: yesterday, status: "ok" },
+    { jobName: "expire-confirmations", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
     // expire-orders runs every minute, so it counts as stale after 15 minutes.
     { jobName: "expire-orders", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
   ]);
@@ -56,6 +58,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: true },
   ]);
@@ -72,6 +75,7 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
   expect(reports).toEqual([
     { name: "backup-nightly", healthy: false },
     { name: "cleanup-sessions", healthy: false },
+    { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
@@ -140,4 +144,32 @@ it("checks only the named job, and expire-orders goes stale after 15 minutes", a
   reports.length = 0;
   expect(await checkJobs(database, clock, publish, ["expire-orders"])).toBe(false);
   expect(reports).toEqual([{ name: "expire-orders", healthy: false }]);
+});
+
+it("checks only expire-confirmations, detecting both failed and overdue jobs", async () => {
+  const now = new Date("2042-01-02T01:30:00.000Z");
+  const clock = createLocalClock(now);
+  const reports: { name: JobName; healthy: boolean }[] = [];
+  const publish = async (name: JobName, healthy: boolean) => { reports.push({ name, healthy }); };
+  const ago = (minutes: number) => new Date(now.getTime() - minutes * 60 * 1000);
+
+  // Fresh success: healthy
+  await database.db.insert(jobRuns).values({ jobName: "expire-confirmations", startedAt: ago(10), finishedAt: ago(10), status: "ok" });
+  expect(await checkJobs(database, clock, publish, ["expire-confirmations"])).toBe(true);
+  expect(reports).toEqual([{ name: "expire-confirmations", healthy: true }]);
+
+  // Overdue (> 15 minutes, 0.25h): unhealthy
+  clock.advance(6 * 60 * 1000); // 16 minutes after success
+  reports.length = 0;
+  expect(await checkJobs(database, clock, publish, ["expire-confirmations"])).toBe(false);
+  expect(reports).toEqual([{ name: "expire-confirmations", healthy: false }]);
+
+  // Latest run failed: unhealthy even if recent
+  const failed = clock.now();
+  await database.db.insert(jobRuns).values({
+    jobName: "expire-confirmations", startedAt: failed, finishedAt: failed, status: "failed", errorText: "confirmation expiry failed",
+  });
+  reports.length = 0;
+  expect(await checkJobs(database, clock, publish, ["expire-confirmations"])).toBe(false);
+  expect(reports).toEqual([{ name: "expire-confirmations", healthy: false }]);
 });

@@ -7,7 +7,7 @@ import { strings } from "../src/strings";
 
 const row = (number: number, status: OrderStatus): OrderSummary => ({
   id: `7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c${String(number).padStart(4, "0")}`, number, status, placedAt: "2030-01-01T00:00:00.000Z",
-  shop: { id: "5b0c7f1e-2a4d-4e8f-9b6a-1c3d5e7f9a0b", name: "Sai General Stores", phone: "+919876500001" }, total: "300.00", answerExpired: false,
+  shop: { id: "5b0c7f1e-2a4d-4e8f-9b6a-1c3d5e7f9a0b", name: "Sai General Stores", phone: "+919876500001" }, total: "300.00", answerExpired: false, confirmByAt: null,
 });
 const withActive: OrdersResponse = { active: [row(1002, "accepted")], past: [row(1001, "delivered")] };
 const allPast: OrdersResponse = { active: [], past: [row(1002, "delivered"), row(1001, "cancelled_by_customer")] };

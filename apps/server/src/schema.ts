@@ -775,6 +775,69 @@ export const orderStatusHistory = pgTable("order_status_history", {
   check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
 ]);
 
+// Append-only order revisions for partial acceptances (ORD-3, ORD-4, #526).
+export const orderRevisions = pgTable("order_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  revision: integer("revision").notNull(),
+  status: text("status").notNull(),
+  sourceStatus: text("source_status").notNull(),
+  actorId: uuid("actor_id").references(() => accounts.id),
+  actorRole: text("actor_role").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  confirmByAt: timestamp("confirm_by_at", { withTimezone: true }).notNull(),
+  productValue: numeric("product_value", { precision: 12, scale: 2 }).notNull(),
+  deliveryFee: numeric("delivery_fee", { precision: 12, scale: 2 }).notNull(),
+  smallCartFee: numeric("small_cart_fee", { precision: 12, scale: 2 }),
+  total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+  commission: numeric("commission", { precision: 12, scale: 2 }).notNull(),
+  platformContribution: numeric("platform_contribution", { precision: 12, scale: 2 }).notNull(),
+  quote: jsonb("quote").notNull(),
+  belowFloorException: boolean("below_floor_exception").notNull().default(false),
+  belowFloorShortfall: numeric("below_floor_shortfall", { precision: 12, scale: 2 }),
+  belowFloorReason: text("below_floor_reason"),
+}, (table) => [
+  uniqueIndex("order_revisions_order_id_revision_idx").on(table.orderId, table.revision),
+  uniqueIndex("order_revisions_one_open_proposal_idx").on(table.orderId).where(sql`${table.status} = 'proposed'`),
+  index("order_revisions_order_id_status_idx").on(table.orderId, table.status),
+  index("order_revisions_confirm_by_at_idx").on(table.confirmByAt),
+  check("order_revisions_status_valid", sql`${table.status} IN ('proposed', 'confirmed', 'declined', 'expired', 'cancelled_negative_contribution')`),
+  check("order_revisions_source_status_valid", sql`${table.sourceStatus} IN ('placed', 'accepted', 'preparing')`),
+  check("order_revisions_actor_role_valid", sql`${table.actorRole} IN ('owner', 'staff', 'system')`),
+  check("order_revisions_revision_positive", sql`${table.revision} >= 1`),
+  check("order_revisions_confirmed_at_valid", sql`(${table.status} = 'confirmed' AND ${table.confirmedAt} IS NOT NULL AND ${table.confirmedAt} >= ${table.createdAt}) OR (${table.status} <> 'confirmed' AND ${table.confirmedAt} IS NULL)`),
+  check("order_revisions_confirm_by_at_valid", sql`${table.confirmByAt} >= ${table.createdAt}`),
+  check("order_revisions_below_floor_valid", sql`(${table.belowFloorException} = true AND ${table.belowFloorShortfall} IS NOT NULL AND ${table.belowFloorShortfall} > 0) OR (${table.belowFloorException} = false AND ${table.belowFloorShortfall} IS NULL)`),
+]);
+
+// Each line in an order revision, recording original and changed quantities (ORD-3, #526).
+export const orderRevisionLines = pgTable("order_revision_lines", {
+  revisionId: uuid("revision_id").notNull().references(() => orderRevisions.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  name: text("name").notNull(),
+  brand: text("brand"),
+  baseUnit: text("base_unit").notNull(),
+  packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).notNull(),
+  originalCount: integer("original_count").notNull(),
+  count: integer("count").notNull(),
+  originalPartQuantity: numeric("original_part_quantity", { precision: 12, scale: 3 }),
+  partQuantity: numeric("part_quantity", { precision: 12, scale: 3 }),
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
+  lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+  commission: numeric("commission", { precision: 12, scale: 2 }).notNull(),
+  stockQuantity: numeric("stock_quantity", { precision: 12, scale: 3 }).notNull(),
+  changeReason: text("change_reason"),
+}, (table) => [
+  primaryKey({ columns: [table.revisionId, table.position] }),
+  index("order_revision_lines_listing_id_idx").on(table.listingId),
+  check("order_revision_lines_count_valid", sql`${table.count} BETWEEN 0 AND ${table.originalCount}`),
+  check("order_revision_lines_stock_valid", sql`${table.stockQuantity} = CASE WHEN ${table.count} = 0 THEN 0 ELSE COALESCE(${table.partQuantity}, ${table.count} * ${table.packQuantity}) END`),
+  check("order_revision_lines_reason_valid", sql`${table.changeReason} IS NULL OR ${table.changeReason} IN ('out_of_stock', 'damaged', 'near_expiry', 'other')`),
+  check("order_revision_lines_reduction_reason", sql`(${table.count} = ${table.originalCount} AND (${table.partQuantity} IS NULL OR ${table.partQuantity} = ${table.originalPartQuantity})) OR ${table.changeReason} IS NOT NULL`),
+]);
+
 export const deliveryPhotoUploads = pgTable("delivery_photo_uploads", {
   id: uuid("id").primaryKey(),
   orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
@@ -836,7 +899,7 @@ export const notifications = pgTable("notifications", {
 }, (table) => [
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session

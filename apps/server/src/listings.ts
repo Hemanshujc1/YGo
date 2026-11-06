@@ -23,12 +23,29 @@ const onHandOf = (listing: string) =>
 /**
  * What accepted orders hold of a listing, in base units (#425, #436): its lines on the shop's orders in the
  * STOCK_HOLDING_ORDER_STATUSES. Nothing writes a movement for a hold, so an order leaving those statuses
- * (rejected, cancelled, expired) gives its stock back by itself. It starts from the shop's orders in those
- * statuses (`orders_shop_id_status_idx`), a handful, so it doesn't grow with order history.
+ * (rejected, cancelled, expired) gives its stock back by itself. An order in awaiting_customer_confirm holds
+ * the proposed revision's reduced quantities (#64); confirmed revisions hold their confirmed lines.
  */
 export const heldOf = (listing: string) =>
-  `COALESCE((SELECT sum(held.stock_quantity) FROM orders holder JOIN order_lines held ON held.order_id = holder.id
-      WHERE holder.shop_id = ${listing}.shop_id AND holder.status IN (${holding}) AND held.listing_id = ${listing}.id), 0)`;
+  `COALESCE((SELECT sum(held.stock_quantity) FROM orders holder
+      CROSS JOIN LATERAL (
+        SELECT (
+          SELECT r.id FROM order_revisions r
+          WHERE r.order_id = holder.id
+            AND ((holder.status = 'awaiting_customer_confirm' AND r.status = 'proposed')
+              OR (holder.status != 'awaiting_customer_confirm' AND r.status = 'confirmed'))
+          ORDER BY r.revision DESC LIMIT 1
+        ) AS active_revision_id,
+        EXISTS (SELECT 1 FROM order_revisions r WHERE r.order_id = holder.id) AS has_revisions
+      ) rev
+      JOIN LATERAL (
+        SELECT orl.stock_quantity FROM order_revision_lines orl
+        WHERE rev.active_revision_id IS NOT NULL AND orl.revision_id = rev.active_revision_id AND orl.listing_id = ${listing}.id
+        UNION ALL
+        SELECT ol.stock_quantity FROM order_lines ol
+        WHERE NOT rev.has_revisions AND ol.order_id = holder.id AND ol.listing_id = ${listing}.id
+      ) held ON true
+      WHERE holder.shop_id = ${listing}.shop_id AND holder.status IN (${holding})), 0)`;
 
 /**
  * A listing's stock left to sell in base units (CAT-4): on hand less what accepted orders hold. The one rule

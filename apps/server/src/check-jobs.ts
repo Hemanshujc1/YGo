@@ -5,14 +5,15 @@ import { checkJobs } from "./job-check";
 import { isJobName, jobMaxAgeHours, type JobName } from "./jobs";
 
 // `check-jobs.js <job>` checks that one job (the every-5-minute expire-orders
-// timer). With no argument it checks the daily jobs; expire-orders is left to its own timer.
+// and expire-confirmations timers). With no argument it checks the daily jobs;
+// minutely jobs are left to their own timers.
 const only = process.argv[2];
 if (only !== undefined && !isJobName(only)) {
   console.error("Unknown job name");
   process.exit(2);
 }
 const names = only !== undefined ? [only as JobName]
-  : (Object.keys(jobMaxAgeHours) as JobName[]).filter((name) => name !== "expire-orders");
+  : (Object.keys(jobMaxAgeHours) as JobName[]).filter((name) => name !== "expire-orders" && name !== "expire-confirmations");
 
 let database: Database | undefined;
 try {

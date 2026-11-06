@@ -29,6 +29,45 @@ export type OrderParams = z.infer<typeof OrderParams>;
 export const RejectReason = z.enum(["out_of_stock", "too_busy", "closing_soon", "cannot_deliver"]);
 export type RejectReason = z.infer<typeof RejectReason>;
 
+/** Reasons for line reduction or removal in a partial acceptance proposal (ORD-3). */
+export const OrderLineChangeReason = z.enum(["out_of_stock", "damaged", "near_expiry", "other"]);
+export type OrderLineChangeReason = z.infer<typeof OrderLineChangeReason>;
+
+/** A line in a partial acceptance proposal, showing original and changed figures (C10). */
+export const OrderRevisionLine = z.strictObject({
+  listingId: z.uuid(),
+  name: z.string(),
+  brand: z.string().nullable(),
+  baseUnit: ProductBaseUnit,
+  quantity: z.string(),
+  originalCount: LineCount,
+  count: z.number().int().min(0).max(999),
+  originalPart: z.string().nullable(),
+  part: z.string().nullable(),
+  unitPrice: Amount,
+  originalLineTotal: Amount,
+  lineTotal: Amount,
+  changeReason: OrderLineChangeReason.nullable(),
+});
+export type OrderRevisionLine = z.infer<typeof OrderRevisionLine>;
+
+/** An open partial acceptance proposal awaiting Customer confirmation (C10, S05). */
+export const OrderProposal = z.strictObject({
+  id: z.uuid(),
+  revision: z.number().int().positive(),
+  sourceStatus: OrderStatus,
+  createdAt: z.iso.datetime(),
+  confirmByAt: z.iso.datetime(),
+  lines: z.array(OrderRevisionLine),
+  productValue: Amount,
+  deliveryFee: Amount,
+  smallCartFee: Amount.nullable(),
+  total: Amount,
+  originalProductValue: Amount,
+  originalTotal: Amount,
+});
+export type OrderProposal = z.infer<typeof OrderProposal>;
+
 /** A line as it was frozen at placement (MNY-7). */
 export const OrderLine = z.strictObject({
   name: z.string(),
@@ -68,11 +107,13 @@ export const OrderResponse = z.strictObject({
   answerExpired: z.boolean(),
   handoverCode: z.string().regex(/^\d{4}$/).nullable(),
   itemsCheckedAt: z.iso.datetime().nullable(),
+  confirmByAt: z.iso.datetime().nullable(),
+  proposal: OrderProposal.nullable(),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;
 
 /** A row on C18 (#426). */
-export const OrderSummary = OrderResponse.pick({ id: true, number: true, status: true, placedAt: true, shop: true, total: true, answerExpired: true });
+export const OrderSummary = OrderResponse.pick({ id: true, number: true, status: true, placedAt: true, shop: true, total: true, answerExpired: true, confirmByAt: true });
 export type OrderSummary = z.infer<typeof OrderSummary>;
 
 /**
@@ -93,11 +134,25 @@ export type OrdersResponse = z.infer<typeof OrdersResponse>;
 export const ORDER_ANSWER_SECONDS = 600;
 
 /** The statuses whose lines hold stock (#425): from Accept until the order leaves the shop's hands. */
-export const STOCK_HOLDING_ORDER_STATUSES: readonly OrderStatus[] = ["accepted", "preparing", "ready", "out_for_delivery", "arrived"];
+export const STOCK_HOLDING_ORDER_STATUSES: readonly OrderStatus[] = ["accepted", "preparing", "ready", "out_for_delivery", "arrived", "awaiting_customer_confirm"];
 
 /** `POST /v1/me/shop-orders/:id/reject`. */
 export const RejectOrderBody = z.strictObject({ reason: RejectReason });
 export type RejectOrderBody = z.infer<typeof RejectOrderBody>;
+
+/** A line reduction or removal in a partial acceptance proposal (ORD-3). */
+export const PartialAcceptLine = z.strictObject({
+  listingId: z.uuid(),
+  count: z.number().int().min(0).max(999),
+  reason: OrderLineChangeReason.optional(),
+});
+export type PartialAcceptLine = z.infer<typeof PartialAcceptLine>;
+
+/** `POST /v1/me/shop-orders/:id/partial-accept` (ORD-3, #526). */
+export const PartialAcceptOrderBody = z.strictObject({
+  lines: z.array(PartialAcceptLine).min(1),
+});
+export type PartialAcceptOrderBody = z.infer<typeof PartialAcceptOrderBody>;
 
 /** A row on S04 (#425). `itemCount` is the number of distinct lines; `expiresAt` is set only while the order is placed. */
 export const ShopOrderSummary = z.strictObject({
@@ -106,6 +161,7 @@ export const ShopOrderSummary = z.strictObject({
   status: OrderStatus,
   placedAt: z.iso.datetime(),
   expiresAt: z.iso.datetime().nullable(),
+  confirmByAt: z.iso.datetime().nullable(),
   itemCount: z.number().int().positive(),
   total: Amount,
   address: z.strictObject({ flat: z.string(), areaLine: z.string().nullable() }),
@@ -151,6 +207,8 @@ export const ShopOrderResponse = z.strictObject({
   shopUpiId: z.string().nullable(),
   deliveryPhotoAvailable: z.boolean(),
   deliveryFailureReadyAt: z.iso.datetime().nullable(),
+  confirmByAt: z.iso.datetime().nullable(),
+  proposal: OrderProposal.nullable(),
 });
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
 
@@ -190,3 +248,24 @@ export type FailDeliveryBody = z.infer<typeof FailDeliveryBody>;
 export const ShortLine = OrderLine.pick({ name: true, brand: true, baseUnit: true, quantity: true, count: true, part: true })
   .extend({ available: z.string() });
 export type ShortLine = z.infer<typeof ShortLine>;
+
+/** An order that went ahead below the contribution floor as a recorded exception (D-5, #526). */
+export const BelowFloorException = z.strictObject({
+  orderId: z.uuid(),
+  orderNumber: z.number().int().positive(),
+  shopId: z.uuid(),
+  shopName: z.string(),
+  placedAt: z.iso.datetime(),
+  status: OrderStatus,
+  originalTotal: Amount,
+  revisedTotal: Amount,
+  shortfall: Amount,
+  platformContribution: Amount,
+  reason: z.string(),
+});
+export type BelowFloorException = z.infer<typeof BelowFloorException>;
+
+export const BelowFloorExceptionsResponse = z.strictObject({
+  exceptions: z.array(BelowFloorException),
+});
+export type BelowFloorExceptionsResponse = z.infer<typeof BelowFloorExceptionsResponse>;

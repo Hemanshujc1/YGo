@@ -13,7 +13,11 @@ import { setOrderTiming } from "./order-timing";
 import { checkPushReceipts, sendDuePushes } from "./notifications";
 
 const config = loadConfig();
-setOrderTiming({ reRingSeconds: config.ORDER_REALERT_SECONDS, expireSeconds: config.ORDER_EXPIRE_SECONDS });
+setOrderTiming({
+  reRingSeconds: config.ORDER_REALERT_SECONDS,
+  expireSeconds: config.ORDER_EXPIRE_SECONDS,
+  confirmSeconds: config.ORDER_CONFIRM_SECONDS,
+});
 const mailer = config.MAILER === "ses"
   ? createSesMailer(config.MAIL_FROM, config.AWS_REGION)
   : createMailpitMailer(config.MAIL_FROM, config.MAILPIT_URL);

@@ -15,6 +15,7 @@ const order = (status: ShopOrderResponse["status"] = "placed"): ShopOrderRespons
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
   productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null,
   delivererId: null, customer: null, shopUpiId: null, deliveryPhotoAvailable: false, deliveryFailureReadyAt: null,
+  confirmByAt: null, proposal: null,
 });
 const expires = "2030-01-01T00:10:00.000Z";
 const line = order().lines[0] ?? never();
@@ -316,7 +317,7 @@ describe("S05 New order (#431)", () => {
 describe("S03's pinned order (#507)", () => {
   const summary = (number: number, expiresAt: string): ShopOrdersResponse["new"][number] => ({
     id: `${id.slice(0, -4)}${String(number).padStart(4, "0")}`, number, status: "placed", placedAt: "2030-01-01T00:00:00.000Z", expiresAt,
-    itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null }, delivererId: null,
+    itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null,
   });
 
   it("pins the oldest New order with time left, and none when there is none", () => {
