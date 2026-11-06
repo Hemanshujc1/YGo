@@ -117,13 +117,13 @@ describe("order timers (#57, ORD-2)", () => {
   const mail = { ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
 
   it("rings again at 120 s and expires at 600 s unless set otherwise", () => {
-    expect(loadConfig(mail)).toMatchObject({ ORDER_REALERT_SECONDS: 120, ORDER_EXPIRE_SECONDS: 600 });
-    expect(loadOrderTiming({})).toEqual({ reRingSeconds: 120, expireSeconds: 600 });
-    expect(loadOrderTiming({ ORDER_REALERT_SECONDS: "30", ORDER_EXPIRE_SECONDS: "900" })).toEqual({ reRingSeconds: 30, expireSeconds: 900 });
+    expect(loadConfig(mail)).toMatchObject({ ORDER_REALERT_SECONDS: 120, ORDER_EXPIRE_SECONDS: 600, ORDER_CONFIRM_SECONDS: 300 });
+    expect(loadOrderTiming({})).toEqual({ reRingSeconds: 120, expireSeconds: 600, confirmSeconds: 300 });
+    expect(loadOrderTiming({ ORDER_REALERT_SECONDS: "30", ORDER_EXPIRE_SECONDS: "900", ORDER_CONFIRM_SECONDS: "400" })).toEqual({ reRingSeconds: 30, expireSeconds: 900, confirmSeconds: 400 });
   });
 
   it("refuses a re-alert that is not before the expiry, and numbers that are not positive whole seconds", () => {
-    for (const bad of [{ ORDER_REALERT_SECONDS: "600" }, { ORDER_REALERT_SECONDS: "700" }, { ORDER_EXPIRE_SECONDS: "0" }, { ORDER_EXPIRE_SECONDS: "1.5" }, { ORDER_REALERT_SECONDS: "-1" }]) {
+    for (const bad of [{ ORDER_REALERT_SECONDS: "600" }, { ORDER_REALERT_SECONDS: "700" }, { ORDER_EXPIRE_SECONDS: "0" }, { ORDER_EXPIRE_SECONDS: "1.5" }, { ORDER_REALERT_SECONDS: "-1" }, { ORDER_CONFIRM_SECONDS: "0" }, { ORDER_CONFIRM_SECONDS: "-5" }]) {
       expect(() => loadConfig({ ...mail, ...bad })).toThrow();
       expect(() => loadOrderTiming(bad)).toThrow();
     }

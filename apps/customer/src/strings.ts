@@ -441,5 +441,10 @@ export const strings = {
     STAFF_AT_ANOTHER_SHOP: "Something changed. Try again.",
     STAFF_ALREADY_MEMBER: "Something changed. Try again.",
     ALREADY_LINKED: "This account is already linked to a shop.",
+    PROPOSAL_OPEN: "A proposed total is already waiting for your confirmation.",
+    CONFIRMATION_EXPIRED: "The time to confirm this total has expired.",
+    NEGATIVE_CONTRIBUTION_CANCELLED: "This order was cancelled because it could not be fulfilled.",
+    EMPTY_ORDER: "An order must have at least one item.",
+    INVALID_PARTIAL_ACCEPT: "Invalid item update.",
   } satisfies Record<ErrorCode, string>,
 };

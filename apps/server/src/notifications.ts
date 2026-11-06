@@ -14,7 +14,7 @@ export function spokenDuration(totalSeconds: number): string {
   return seconds === 0 ? part(minutes, "minute") : `${part(minutes, "minute")} ${part(seconds, "second")}`;
 }
 
-type Order = { number: number; shopName: string; reason: RejectReason | null };
+type Order = { number: number; shopName: string; reason: string | null };
 
 /** The customer reads the same reason C19 shows (owner's answer 3 on #425). */
 const rejectReasons: Record<RejectReason, string> = {
@@ -36,7 +36,19 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   },
   cancelled_by_customer: {
     kind: "order_cancelled_by_customer", to: "shop", staff: true,
-    words: ({ number }) => ({ title: `Order #${number} cancelled`, body: "The customer cancelled this order." }),
+    words: ({ number, reason }) => ({
+      title: reason === "declined_total" ? `Order #${number} declined` : reason === "no_confirmation" ? `Order #${number} expired` : `Order #${number} cancelled`,
+      body: reason === "declined_total" ? "The customer declined the updated order."
+        : reason === "no_confirmation" ? "The customer did not confirm the changes in time."
+        : "The customer cancelled this order.",
+    }),
+  },
+  awaiting_customer_confirm: {
+    kind: "order_partially_accepted", to: "customer", loud: true,
+    words: ({ number, shopName }) => ({
+      title: `Order #${number} partially accepted`,
+      body: `${shopName} accepted part of your order. Please confirm the new total within ${spokenDuration(orderTiming.confirmSeconds)}.`,
+    }),
   },
   accepted: {
     kind: "order_accepted", to: "customer",
@@ -51,7 +63,7 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
     kind: "order_rejected", to: "customer",
     words: ({ number, shopName, reason }) => ({
       title: `Order #${number} rejected`,
-      body: `${shopName} could not take your order${reason ? `: ${rejectReasons[reason]}` : ""}.`,
+      body: `${shopName} could not take your order${reason && reason in rejectReasons ? `: ${rejectReasons[reason as RejectReason]}` : ""}.`,
     }),
   },
 };
@@ -63,14 +75,36 @@ export const FLOOR_SECONDS = 15;
  * Records the notification for an order's move to `to`, with its pushes queued, in the caller's transaction:
  * it lands only with the move it reports (NOT-2).
  */
-export async function notifyOrderStatus(client: PoolClient, orderId: string, to: OrderStatus, at: Date, reason: string | null): Promise<void> {
+export async function notifyOrderStatus(
+  client: PoolClient, orderId: string, to: OrderStatus, at: Date, reason: string | null, from: OrderStatus | null = null,
+): Promise<void> {
+  // If moving from awaiting_customer_confirm back to accepted/preparing/placed, the customer confirmed the changes.
+  // The shop gets an ordinary notification (#64).
+  if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) {
+    const { rows: [order] } = await client.query<Order & { accountId: string; shopId: string }>(
+      `SELECT o.number, o.account_id AS "accountId", o.shop_id AS "shopId", s.shop_name AS "shopName"
+       FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1`, [orderId]);
+    if (!order) throw new Error("A notified order is missing");
+    const title = `Order #${order.number} confirmed`;
+    const body = "The customer confirmed the updated order total.";
+    await client.query(
+      `WITH added AS (
+         INSERT INTO notifications (account_id, app, kind, title, body, order_id, loud, created_at)
+         SELECT account_id, 'shopkeeper', 'order_accepted', $2::text, $3::text, $4::uuid, false, $5::timestamptz
+         FROM shop_members WHERE shop_id = $1::uuid AND (role = 'owner' OR true)
+         RETURNING id)
+       INSERT INTO push_queue (notification_id, send_after)
+       SELECT id, $5::timestamptz FROM added`,
+      [order.shopId, title, body, orderId, at]);
+    return;
+  }
   const rule = rules[to];
   if (!rule) return;
   const { rows: [order] } = await client.query<Order & { accountId: string; shopId: string }>(
     `SELECT o.number, o.account_id AS "accountId", o.shop_id AS "shopId", s.shop_name AS "shopName"
      FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1`, [orderId]);
   if (!order) throw new Error("A notified order is missing");
-  const { title, body } = rule.words({ ...order, reason: reason as RejectReason | null });
+  const { title, body } = rule.words({ ...order, reason });
   await client.query(
     `WITH added AS (
        INSERT INTO notifications (account_id, app, kind, title, body, order_id, loud, created_at)

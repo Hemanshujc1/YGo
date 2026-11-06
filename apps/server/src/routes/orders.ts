@@ -20,12 +20,81 @@ import { latestRateCardVersion } from "./price-simulator";
  */
 export const frozenOrder = (o: string) => `json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
           'areaLine', ${o}.address_area_line, 'pincode', ${o}.address_pincode) AS address,
-        (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
-            'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
-          FROM order_lines l WHERE l.order_id = ${o}.id) AS lines,
-        ${o}.product_value::text AS "productValue", ${o}.delivery_fee::text AS "deliveryFee", ${o}.small_cart_fee::text AS "smallCartFee", ${o}.total::text AS total,
+        COALESCE(
+          (SELECT json_agg(json_build_object('name', rl.name, 'brand', rl.brand, 'baseUnit', rl.base_unit,
+              'quantity', trim_scale(rl.pack_quantity)::text, 'count', rl.count, 'part', trim_scale(rl.part_quantity)::text,
+              'unitPrice', rl.unit_price::text, 'lineTotal', rl.line_total::text) ORDER BY rl.position)
+            FROM order_revision_lines rl
+            WHERE rl.revision_id = (SELECT r.id FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1)
+              AND rl.count > 0),
+          (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit,
+              'quantity', trim_scale(l.pack_quantity)::text, 'count', l.count, 'part', trim_scale(l.part_quantity)::text,
+              'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
+            FROM order_lines l WHERE l.order_id = ${o}.id)
+        ) AS lines,
+        COALESCE(
+          (SELECT r.product_value::text FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
+          ${o}.product_value::text
+        ) AS "productValue",
+        ${o}.delivery_fee::text AS "deliveryFee",
+        ${o}.small_cart_fee::text AS "smallCartFee",
+        COALESCE(
+          (SELECT r.total::text FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
+          ${o}.total::text
+        ) AS total,
         CASE WHEN ${o}.status = 'rejected_by_shop' THEN (SELECT h.reason_code FROM order_status_history h
-          WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' ORDER BY h.at DESC LIMIT 1) END AS "rejectReason"`;
+          WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' ORDER BY h.at DESC LIMIT 1) END AS "rejectReason",
+        CASE WHEN ${o}.status = 'awaiting_customer_confirm' THEN (
+          SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+          FROM order_revisions p WHERE p.order_id = ${o}.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
+        ) END AS "confirmByAt",
+        CASE WHEN ${o}.status = 'awaiting_customer_confirm' THEN (
+          SELECT json_build_object(
+            'id', p.id,
+            'revision', p.revision,
+            'sourceStatus', p.source_status,
+            'createdAt', to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+            'confirmByAt', to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+            'lines', (
+              SELECT json_agg(json_build_object(
+                'listingId', pl.listing_id,
+                'name', pl.name,
+                'brand', pl.brand,
+                'baseUnit', pl.base_unit,
+                'quantity', trim_scale(pl.pack_quantity)::text,
+                'originalCount', pl.original_count,
+                'count', pl.count,
+                'originalPart', trim_scale(pl.original_part_quantity)::text,
+                'part', trim_scale(pl.part_quantity)::text,
+                'unitPrice', pl.unit_price::text,
+                'originalLineTotal', (
+                  CASE WHEN pl.original_part_quantity IS NOT NULL THEN pl.unit_price
+                  ELSE round(pl.unit_price * pl.original_count, 2) END
+                )::text,
+                'lineTotal', pl.line_total::text,
+                'changeReason', pl.change_reason
+              ) ORDER BY pl.position)
+              FROM order_revision_lines pl WHERE pl.revision_id = p.id
+            ),
+            'productValue', p.product_value::text,
+            'deliveryFee', ${o}.delivery_fee::text,
+            'smallCartFee', ${o}.small_cart_fee::text,
+            'total', p.total::text,
+            'originalProductValue', COALESCE(
+              (SELECT prev.product_value::text FROM order_revisions prev
+               WHERE prev.order_id = ${o}.id AND prev.status = 'confirmed' AND prev.revision < p.revision
+               ORDER BY prev.revision DESC LIMIT 1),
+              ${o}.product_value::text
+            ),
+            'originalTotal', COALESCE(
+              (SELECT prev.total::text FROM order_revisions prev
+               WHERE prev.order_id = ${o}.id AND prev.status = 'confirmed' AND prev.revision < p.revision
+               ORDER BY prev.revision DESC LIMIT 1),
+              ${o}.total::text
+            )
+          )
+          FROM order_revisions p WHERE p.order_id = ${o}.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
+        ) END AS proposal`;
 
 /** The shop as C18 and C19 show it, with the Owner's phone read now (ORD-8). */
 const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.shop_name, 'phone', (SELECT a.phone FROM shop_members m
@@ -161,14 +230,22 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     const { rows } = await pool.query<Row>(
       `SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY ended ORDER BY "placedAt" DESC, number DESC) AS rank FROM (
-            SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop, o.total::text AS total,
-              ${answerExpired("o", "$3")} AS "answerExpired", (o.status = ANY($2::text[]) OR ${answerExpired("o", "$3")}) AS ended
+            SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${shopOf("s")} AS shop,
+              COALESCE(
+                (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
+                o.total::text
+              ) AS total,
+              ${answerExpired("o", "$3")} AS "answerExpired", (o.status = ANY($2::text[]) OR ${answerExpired("o", "$3")}) AS ended,
+              CASE WHEN o.status = 'awaiting_customer_confirm' THEN (
+                SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
+              ) END AS "confirmByAt"
             FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.account_id = $1) AS mine) AS ranked
         WHERE NOT ended OR rank <= ${PAST_SHOWN}
         ORDER BY ended, status IN ('awaiting_customer_confirm', 'arrived') DESC, "placedAt" DESC, number DESC`,
       [who.accountId, TERMINAL_ORDER_STATUSES, clock.now()]);
-    const summary = ({ id, number, status, placedAt, shop, total, answerExpired: late }: Row): OrderSummary =>
-      ({ id, number, status, placedAt: placedAt.toISOString(), shop, total, answerExpired: late });
+    const summary = ({ id, number, status, placedAt, shop, total, answerExpired: late, confirmByAt }: Row): OrderSummary =>
+      ({ id, number, status, placedAt: placedAt.toISOString(), shop, total, answerExpired: late, confirmByAt: confirmByAt ?? null });
     return { active: rows.filter((row) => !row.ended).map(summary), past: rows.filter((row) => row.ended).map(summary) };
   });
 
@@ -236,7 +313,8 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 
-  // Cancel on C09/C19: free and with no reason while the shop hasn't answered (ORD-5).
+  // Cancel on C09/C19: free and with no reason while the shop hasn't answered (ORD-5),
+  // or decline the proposal during awaiting_customer_confirm (#64).
   app.post("/v1/orders/:id/cancel", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
@@ -245,16 +323,80 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       const { rows: [order] } = await client.query<{ id: string; status: OrderStatus }>(
         "SELECT id, status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
       if (!order) return "NOT_FOUND";
-      // Read after the lock, as Accept does, so a wait on it can't stamp an earlier time.
       const now = clock.now();
       const { rows: [late] } = await client.query<{ late: boolean }>(`SELECT ${answerExpired("orders", "$2")} AS late FROM orders WHERE id = $1`, [id, now]);
-      // Past its answer time the order has ended as the shop not answering, so there is nothing to cancel (owner's answer 4 on #426).
       if (late?.late) return "ORDER_EXPIRED";
-      if (!await moveOrder(client, order, "cancelled_by_customer", { id: who.accountId, role: "customer" }, now)) return "ORDER_STATUS_CHANGED";
+
+      let reasonCode: string | null = null;
+      if (order.status === "awaiting_customer_confirm") {
+        const { rows: [proposal] } = await client.query<{ id: string; confirmByAt: Date }>(
+          `SELECT id, confirm_by_at AS "confirmByAt"
+           FROM order_revisions WHERE order_id = $1 AND status = 'proposed' FOR UPDATE`, [id]);
+        if (!proposal) return "ORDER_STATUS_CHANGED";
+        if (now.getTime() >= proposal.confirmByAt.getTime()) return "CONFIRMATION_EXPIRED";
+        await client.query("UPDATE order_revisions SET status = 'declined' WHERE id = $1", [proposal.id]);
+        reasonCode = "declined_total";
+      }
+
+      if (!await moveOrder(client, order, "cancelled_by_customer", { id: who.accountId, role: "customer" }, now, reasonCode)) return "ORDER_STATUS_CHANGED";
       await client.query("COMMIT");
       return "MOVED";
     });
     if (moved !== "MOVED") return reply.code(moved === "NOT_FOUND" ? 404 : 409).send({ error: { code: moved } });
+    return orderView(pool, id, who.accountId, clock.now(), secret);
+  });
+
+  // C10 Customer confirms partial acceptance proposal (#64).
+  app.post("/v1/orders/:id/confirm-total", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus }>(
+        "SELECT id, status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
+      if (!order) return "NOT_FOUND";
+      if (order.status !== "awaiting_customer_confirm") return "ORDER_STATUS_CHANGED";
+      const { rows: [proposal] } = await client.query<{ id: string; sourceStatus: OrderStatus; confirmByAt: Date }>(
+        `SELECT id, source_status AS "sourceStatus", confirm_by_at AS "confirmByAt"
+         FROM order_revisions WHERE order_id = $1 AND status = 'proposed' FOR UPDATE`, [id]);
+      if (!proposal) return "ORDER_STATUS_CHANGED";
+      const now = clock.now();
+      if (now.getTime() >= proposal.confirmByAt.getTime()) return "CONFIRMATION_EXPIRED";
+      await client.query("UPDATE order_revisions SET status = 'confirmed', confirmed_at = $2 WHERE id = $1", [proposal.id, now]);
+      if (!await moveOrder(client, order, proposal.sourceStatus, { id: who.accountId, role: "customer" }, now)) {
+        return "ORDER_STATUS_CHANGED";
+      }
+      await client.query("COMMIT");
+      return "OK";
+    });
+    if (result !== "OK") return reply.code(result === "NOT_FOUND" ? 404 : 409).send({ error: { code: result } });
+    return orderView(pool, id, who.accountId, clock.now(), secret);
+  });
+
+  // C10 Customer declines partial acceptance proposal (#64).
+  app.post("/v1/orders/:id/decline-total", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus }>(
+        "SELECT id, status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE", [id, who.accountId]);
+      if (!order) return "NOT_FOUND";
+      if (order.status !== "awaiting_customer_confirm") return "ORDER_STATUS_CHANGED";
+      const { rows: [proposal] } = await client.query<{ id: string; confirmByAt: Date }>(
+        `SELECT id, confirm_by_at AS "confirmByAt"
+         FROM order_revisions WHERE order_id = $1 AND status = 'proposed' FOR UPDATE`, [id]);
+      if (!proposal) return "ORDER_STATUS_CHANGED";
+      const now = clock.now();
+      if (now.getTime() >= proposal.confirmByAt.getTime()) return "CONFIRMATION_EXPIRED";
+      await client.query("UPDATE order_revisions SET status = 'declined' WHERE id = $1", [proposal.id]);
+      if (!await moveOrder(client, order, "cancelled_by_customer", { id: who.accountId, role: "customer" }, now, "declined_total")) {
+        return "ORDER_STATUS_CHANGED";
+      }
+      await client.query("COMMIT");
+      return "OK";
+    });
+    if (result !== "OK") return reply.code(result === "NOT_FOUND" ? 404 : 409).send({ error: { code: result } });
     return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 }
