@@ -15,6 +15,7 @@ export { SignIn, type SignInProps } from "./sign-in";
 export { PHONE_PREFIX, PhoneField } from "./phone-field";
 export { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 export type { SignInWords } from "./sign-in-words";
+export { TabBar, type TabItem } from "./tab-bar";
 export { Text } from "./text";
 export { showUpdateRequired } from "./update-signal";
 export { applySavedTheme, phoneTheme } from "./theme";

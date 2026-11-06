@@ -39,6 +39,7 @@ vi.mock("../src/lib/opening-stock-database", () => ({
   openOpeningStock: mock.open, legacyOpeningStock: {},
 }));
 
+vi.mock("../src/lib/back-path", () => ({ backPath: () => "/" }));
 import OpeningStockScreen from "../src/app/opening-stock";
 import { stockSync } from "../src/lib/stock-sync";
 import { strings } from "../src/strings";

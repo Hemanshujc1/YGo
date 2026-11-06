@@ -37,6 +37,7 @@ vi.mock("../src/api", () => ({
 }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: () => Promise.resolve({ billCount: () => mock.waiting }) }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }) } }));
+vi.mock("../src/lib/back-path", () => ({ backPath: () => "/" }));
 import VoidBillScreen from "../src/app/void-bill";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";

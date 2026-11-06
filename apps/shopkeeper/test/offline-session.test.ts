@@ -25,7 +25,7 @@ describe("Shopkeeper launch and session lifecycle", () => {
     vi.resetModules(); vi.clearAllMocks();
     vi.stubEnv("EXPO_PUBLIC_API_BASE_URL", "http://localhost:3000"); vi.stubEnv("EXPO_PUBLIC_SUPPORT_EMAIL", "help@example.com");
     mock.token = "saved-token"; mock.active = account.id;
-    mock.record = { account, shopId, verifiedAt: Date.now(), stockAllowed: true, shopName: null, shopGstin: null, role: "owner" as const };
+    mock.record = { account, shopId, verifiedAt: Date.now(), stockAllowed: true, shopName: null, shopGstin: null, role: "owner" as const, canDeliver: true };
     mock.me.mockRejectedValue(new Error("offline")); mock.lookup.mockRejectedValue(new Error("offline"));
     mock.signOut.mockResolvedValue(undefined); mock.close.mockResolvedValue(undefined);
     await import("../src/api");

@@ -15,6 +15,7 @@ import { shareBill } from "../lib/share-bill";
 import type { OpeningStockQueue, QueueRow } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 const words = strings.sync;
 type Label = NonNullable<QueueRow["label"]>;
@@ -90,7 +91,7 @@ export default function SyncScreen() {
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}>
       {/* Offline, only Stock and this screen open (#394). */}
-      <Link href={view.mode === "offline" ? "/stock" : "/"} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
+      <Link href={view.mode === "offline" ? "/stock" : backPath()} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {data === null && <ActivityIndicator className="text-primary" />}
       {data === "failed" && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{words.loadFailed}</Text>}

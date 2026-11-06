@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
 import { stockLine } from "../lib/stock-line";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 const words = strings.shopSetup;
 type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; items: ShopListingCatalogItem[] };
@@ -98,7 +99,7 @@ export default function ListingsScreen() {
   const visible = load.kind === "loaded" ? load.items.filter((item) => `${item.name} ${item.brand ?? ""} ${item.barcode ?? ""}`.toLowerCase().includes(search.trim().toLowerCase())) : [];
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
-      <Link href="/" asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+      <Link href={backPath()} asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.listings}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
       {load.kind === "failed" && <><Text className="text-body text-danger">{load.message}</Text><Button label={words.retry} onPress={() => void refresh()} variant="secondary" /></>}

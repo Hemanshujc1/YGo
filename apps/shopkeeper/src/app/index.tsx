@@ -1,19 +1,14 @@
 import type { LiveCheck, ShopApplication, StaffShop } from "@ygo/contracts";
 import { Button, Text, ThemePicker } from "@ygo/mobile";
-import { NotificationsBell } from "@ygo/mobile/notification-parts";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { Link, useFocusEffect } from "expo-router";
+import { Link, Redirect, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session } from "../api";
-import { AlertPanel } from "../components/alert-panel";
 import { ApplicationForm } from "../components/application-form";
 import { ApplicationStatus } from "../components/application-status";
-import { OpenSwitch } from "../components/open-switch";
 import { SignOut } from "../components/sign-out";
-import { useAccountRole } from "../lib/account-role";
 import { waiting } from "../lib/application-status";
-import { inbox } from "../lib/inbox";
 import { strings } from "../strings";
 import { SyncStatus } from "../components/sync-status";
 
@@ -22,7 +17,7 @@ const words = strings.application;
 type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; application: ShopApplication | null; liveCheck: LiveCheck | null; staffShop: StaffShop | null };
 
 /**
- * The signed-in home until a Live shop gets its own home and staff join shops (#58):
+ * The signed-in home before the shop answers orders (#58): a Live or Suspended shop opens on the Orders tab (#550).
  * Start with no application, S17 for a Draft, and S18 once sent, refreshed by
  * pulling down. From Approved on, S14 lists what still keeps the shop from
  * Live and keeps the setup buttons (#363). Owner's answers on #40 (Q12, Q13),
@@ -97,13 +92,12 @@ export default function Home() {
   const { application, liveCheck, staffShop } = load;
   // Staff work in a shop that is not theirs to apply for: show it, never Start (#58).
   if (staffShop) {
-    const answersOrders = staffShop.state === "live" || staffShop.state === "suspended";
+    // A shop that answers orders opens on the Orders tab, not here (#550).
+    if (staffShop.state === "live" || staffShop.state === "suspended") return <Redirect href="/orders" />;
     return (
-      <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
-        {answersOrders && <AlertPanel />}
-        {answersOrders && <SyncStatus />}
+      <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
         <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.staff.title(staffShop.shopName)}</Text>
-        {!answersOrders && <Text className="text-body text-text">{words.staff.notOpen}</Text>}
+        <Text className="text-body text-text">{words.staff.notOpen}</Text>
       </Plain>
     );
   }
@@ -114,17 +108,14 @@ export default function Home() {
   }
 
   if (application) {
-    const answersOrders = application.state === "live" || application.state === "suspended";
+    // Live and Suspended shops open on the Orders tab, with the tab bar (#550).
+    if (application.state === "live" || application.state === "suspended") return <Redirect href="/orders" />;
     return (
-      <Plain stock={answersOrders} orders={answersOrders} refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
-        {/* S03 (#507): where orders can arrive, so the alarm must ring. */}
-        {answersOrders && <AlertPanel />}
-        {application.state === "live" && <OpenSwitch />}
-        {application.state === "suspended" && <Text className="text-body text-danger">{strings.stock.suspended}</Text>}
-        {(answersOrders || application.state === "approved") && <SyncStatus />}
+      <Plain refreshing={refreshing} onRefresh={() => void fetchApplication(true)}>
+        {application.state === "approved" && <SyncStatus />}
         <ApplicationStatus application={application} refreshFailed={refreshFailed} />
         {liveCheck && <Waiting check={liveCheck} />}
-        {(application.state === "approved" || application.state === "live") && (
+        {application.state === "approved" && (
           <View className="gap-3">
             <Text accessibilityRole="header" className="text-title font-semibold text-text">{strings.shopSetup.title}</Text>
             <Link href="/agreement" asChild>
@@ -142,7 +133,7 @@ export default function Home() {
                 <Text className="text-body font-semibold text-on-primary">{strings.hours.open}</Text>
               </Pressable>
             </Link>
-            {/* Only the Owner's setup list has it (Staff never reach this branch), and only Approved or Live (#535). */}
+            {/* Only the Owner's setup list has it (Staff never reach this branch), and only Approved (#535). A Live shop has it under More (#550). */}
             <Link href="/staff" asChild>
               <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
                 <Text className="text-body font-semibold text-primary">{strings.staff.open}</Text>
@@ -203,9 +194,8 @@ function Waiting({ check }: { check: LiveCheck }) {
 }
 
 /** A short screen with the theme picker and Sign out under it; scrolls so Sign out stays reachable at the largest font sizes. */
-function Plain({ children, refreshing = false, onRefresh, stock = false, orders = false }: { stock?: boolean; orders?: boolean; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+function Plain({ children, refreshing = false, onRefresh, stock = false }: { stock?: boolean; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
   const insets = useSafeAreaInsets();
-  const owner = useAccountRole(orders) === "owner";
   return (
     <ScrollView
       // The offset keeps Android's spinner below the status bar, as the app draws edge to edge.
@@ -214,27 +204,7 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
       contentContainerClassName="grow justify-center gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}
     >
-      {/* S41's bell, only where orders and their notifications arrive (owner's answer 6 on #507). */}
-      {orders && <View className="flex-row justify-end"><NotificationsBell inbox={inbox} words={strings.notifications} /></View>}
-      {/* At the top, with no count (#431); a Suspended shop still answers its orders (owner's answer 13 on #425). */}
-      {orders && <Link href="/orders" asChild>
-        <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
-          <Text className="text-body font-semibold text-on-primary">{strings.orders.open}</Text>
-        </Pressable>
-      </Link>}
       {children}
-      {/* A Live or Suspended shop bills at the counter (#468, BIL-1). */}
-      {orders && <Link href="/bill" asChild>
-        <Pressable accessibilityRole="button" className="rounded-button bg-primary px-4 py-3">
-          <Text className="text-body font-semibold text-on-primary">{strings.bill.open}</Text>
-        </Pressable>
-      </Link>}
-      {/* Beside New bill (owner's answer 9 on #54); hidden from Staff and with no shop (#494). */}
-      {orders && owner && <Link href="/void-bill" asChild>
-        <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
-          <Text className="text-body font-semibold text-primary">{strings.voids.open}</Text>
-        </Pressable>
-      </Link>}
       {stock && <Link href="/stock" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
           <Text className="text-body font-semibold text-primary">{strings.stock.title}</Text>

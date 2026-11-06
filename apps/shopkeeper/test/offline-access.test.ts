@@ -174,6 +174,26 @@ describe("verified offline shop access", () => {
     await again.restore();
     expect(again.shopGstin()).toBe("07AAACG1234H1ZP");
   });
+  it("keeps whether the account can deliver and whether the shop answers orders from the last check, reads an older record by its role, and follows a change at the next check (#550)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", role: "staff", canDeliver: true } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.canDeliver()).toBe(true);
+    expect(restarted.answersOrders()).toBe(true);
+    // A record saved before the flag reads true for an Owner and false for Staff, until the next check says otherwise.
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, role: "owner" }))?.canDeliver).toBe(true);
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, role: "staff" }))?.canDeliver).toBe(false);
+    // Taken off deliveries while the shop is moved back to Approved: the lease keeps its deadline and the flag still follows.
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved", shopName: "Sai", role: "staff", canDeliver: false } });
+    await restarted.verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const again = offlineAccess(storage, fetch, () => time);
+    await again.restore();
+    expect(again.canDeliver()).toBe(false);
+    expect(again.answersOrders()).toBe(true);
+  });
   it("keeps the account's role from the last check, reads an older record as Owner, and follows a change at the next check (#494)", async () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff" } });
     const first = offlineAccess(storage, fetch, () => time);

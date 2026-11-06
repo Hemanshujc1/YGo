@@ -10,6 +10,7 @@ import { Holidays } from "../components/holidays";
 import { TimeSheet } from "../components/time-sheet";
 import { canAdd, copyToAll, nextOpening, TIMES, toRanges, toWeek, type Opening, type Week } from "../lib/hours";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 const words = strings.hours;
 
@@ -80,7 +81,7 @@ export default function HoursScreen() {
         contentContainerClassName="gap-4 px-4"
         contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }}
       >
-        <Link href="/" asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+        <Link href={backPath()} asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
         {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
         {load.kind === "failed" && <>

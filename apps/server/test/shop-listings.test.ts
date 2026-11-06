@@ -421,8 +421,8 @@ describe("verified offline shop access", () => {
     await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
     for (const state of ["live", "suspended", "approved", "closed"]) {
       await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [actor.shopId, state]);
-      expect((await read()).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "owner" });
-      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "staff" });
+      expect((await read()).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "owner", canDeliver: true });
+      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "staff", canDeliver: false });
     }
     // The name a bill PDF prints offline follows a rename at the next check (#53).
     await database.pool.query("UPDATE shops SET shop_name = 'Sai Stores' WHERE id = $1", [actor.shopId]);
@@ -431,9 +431,12 @@ describe("verified offline shop access", () => {
     await database.pool.query("UPDATE shops SET gstin = '27ABCDE1234F1Z5' WHERE id = $1", [actor.shopId]);
     expect((await read()).json().shopGstin).toBe("27ABCDE1234F1Z5");
     expect((await read(staff.headers)).json().shopGstin).toBe("27ABCDE1234F1Z5");
+    // Staff can deliver only when the Owner flags them; the tab bar reads it, the server still decides (#550, DLV-1).
+    await database.pool.query("UPDATE shop_members SET can_deliver = true WHERE account_id = $1", [staff.id]);
+    expect((await read(staff.headers)).json().canDeliver).toBe(true);
     await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [staff.id]);
-    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
-    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
+    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null, canDeliver: false });
+    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null, canDeliver: false });
     expect((await app.inject({ method: "GET", url: "/v1/sync/access" })).statusCode).toBe(401);
     clock.set(new Date("2030-01-02T00:00:00Z"));
     expect((await read()).statusCode).toBe(401);
@@ -450,7 +453,7 @@ describe("verified offline shop access", () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(finished).toBe(false);
       await removal.query("COMMIT");
-      expect((await checking).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
+      expect((await checking).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null, canDeliver: false });
     } finally {
       await removal.query("ROLLBACK");
       removal.release();

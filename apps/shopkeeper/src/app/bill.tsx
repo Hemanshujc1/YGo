@@ -1,6 +1,6 @@
 import { formatNumber, trimDecimal } from "@ygo/format";
 import { Button, FieldMessage, PhoneField, SupportEmail, Text } from "@ygo/mobile";
-import { Link, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -170,8 +170,6 @@ export default function BillScreen() {
 
   return (
     <ScrollView className="flex-1 bg-bg" keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}>
-      {/* Offline, only Stock, this screen and S08 open (#394). */}
-      <Link href={view.mode === "offline" ? "/stock" : "/"} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator className="text-primary" />}
       {(load.kind === "failed" || (load.kind === "loaded" && !read)) && <>

@@ -15,6 +15,7 @@ import { openOpeningStock } from "../lib/opening-stock-database";
 import type { OpeningStockQueue } from "../lib/opening-stock-queue";
 import { stockSync } from "../lib/stock-sync";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 // S37 Void a bill (#492): the shop's bills of the last 2 days from the server; the Owner voids one while the
 // server says it may. Owner's answers on #54 (2–5, 9–12) and on #492 (1–10).
@@ -153,7 +154,7 @@ export default function VoidBillScreen() {
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
         refreshControl={<RefreshControl refreshing={view.refreshing} onRefresh={() => void voids.refresh()} progressViewOffset={insets.top} />}
       >
-        <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
+        <Link href={backPath()} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
         {role === "staff" && <Text className="text-body text-muted">{words.staffView}</Text>}
         {waiting > 0 && <Text className="text-body text-muted">{words.waiting(waiting)}</Text>}
