@@ -13,6 +13,7 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
 
 - Write the minimum the ticket asks for. One caller gets inline code; handle only the errors that can actually occur.
 - Keep each diff surgical: every changed line traces to the ticket and matches the surrounding style. Report unrelated problems in the PR description, and remove only what your own change made unused.
+- Research before you ask: on every ticket, before the grilling round, search the references in "Where to look first" below for the ticket's terms, and read `docs/research/reference-projects.md`. Put what you found, or "nothing found in References", in the questions and in the PR's Assumptions. A reference shows how others solved it, not what YGo does: `CONTEXT.md`, the ADRs and `docs/product/` win where they disagree.
 - Settle every assumption with the owner before writing code. After claiming the ticket, list each choice the ticket and the docs leave open, in plain words, in the rounds of the `grilling` skill (the owner can also start it with `/grill-me`): numbered questions, each with your recommended answer and its one-line reason, worded so "yes" accepts it. Put a deep technical choice as your decision, what it costs and why, so a "yes" is an informed one. Look facts up yourself and ask only for decisions; a choice the docs or the standing answers already settle needs no question. When no open choice is left, say "No open questions; building with the standing answers" and start. Otherwise wait for the answers and build what was agreed. Record the answers and the standing answers used in the PR's Assumptions section. An open question found mid-work stops the work until it is answered.
 - Standing answers hold for every ticket without being asked; a ticket that needs a different one raises it as a question:
   - Done check: a test for each new behaviour, `pnpm check` before pushing, and a green gate in CI. Name it before writing code and finish when it passes. The owner checks a screen in a browser or on a phone after it merges, in a batch (`docs/agents/workflow.md`, section 7).
@@ -20,6 +21,20 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
   - Follow the pattern of the nearest existing screen, route or test.
   - A small fix in code the ticket already edits goes in the same PR and is named in it. A bigger or unrelated problem becomes a follow-up issue named in the PR.
   - A flaky test gets one rerun, and an issue only when it fails again.
+
+## Where to look first
+
+`References/` is read-only. Each part has a job; search the matching one for every ticket (a ticket often needs two), and say what you took or why nothing applied.
+
+| For | Look in |
+| --- | --- |
+| Order flow and status guards, delivery OTP and failed attempts, the per-order revenue snapshot, commission, delivery and small-order fee rules, discounts, weekly settlement | `References/VaayuGO/server/` (`services/OrderService.js`, `services/RuleEngineService.js`, `cron/settlementCron.js`, `models/`) and `References/VaayuGO/Docs/` (`SettlementPage.md`, `VaayuGo_Metrics - Sheet1.csv`, `Database.json`) |
+| Money, fees, commission, GST, TCS and TDS, invoices, the ledger, payout formulas | `References/yugo_financial_architecture.pdf`, read with `docs/research/financial-architecture-review.md`, which says what YGo does not take from it |
+| GST rules and formats, bills and invoices, e-invoice, GST reports, offline billing, POS, inventory | `References/Usthaan/usthaan-lekha/` |
+| Shared types and schemas, versioned contracts, validation, GST schema patterns | `References/Usthaan/usthaan-ts-types/` |
+| Customer storefront, cart, checkout, tenant themes | `References/Usthaan/usthaan-sthaan/` |
+| Image upload and storage | `References/Usthaan/usthaan-media-ingestion-service/` |
+| What each reference contains, reusable patterns, pitfalls, vocabulary | `docs/research/reference-projects.md` |
 
 ## Where code lives
 
