@@ -1,6 +1,12 @@
 // global.css is compiled by NativeWind's Metro step, not imported as a module.
 declare module "*.css";
 
+// Metro bundles a font file as an asset and gives its module id; expo-asset finds the file from it.
+declare module "*.ttf" {
+  const asset: number;
+  export default asset;
+}
+
 declare namespace NodeJS {
   interface ProcessEnv {
     readonly EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?: string;

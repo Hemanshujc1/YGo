@@ -10,8 +10,10 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
+import { api } from "../../api";
 import { money } from "../../lib/money";
 import { shownStatus, treatments } from "../../lib/order";
+import { hasReceipt, makeReceipt } from "../../lib/receipt";
 import { addressLine } from "../../lib/saved-addresses";
 import { packLabel } from "../../lib/shop-page";
 import { useOrder } from "../../lib/use-order";
@@ -103,6 +105,7 @@ export default function OrderScreen() {
   const { id, placed, phone: carried } = useLocalSearchParams<{ id: string; placed?: string; phone?: string }>();
   const { order, view } = useOrder(id ?? "");
   const [asking, setAsking] = useState(false);
+  const [receipt, setReceipt] = useState<"idle" | "making" | "failed">("idle");
   const shown = view.order;
   // Unknown until the order is read, when no phone came with the link.
   const phone = shown ? shown.shop.phone : carried || undefined;
@@ -157,6 +160,16 @@ export default function OrderScreen() {
                 <Text className="text-secondary text-muted">{words.codeSoon}</Text>
               </>
             )}
+          </View>
+        )}
+
+        {shown && hasReceipt(shown.status) && (
+          <View className="gap-2">
+            <Button label={receipt === "making" ? words.receipt.making : words.receipt.button} busy={receipt === "making"} variant="secondary" onPress={() => {
+              setReceipt("making");
+              void makeReceipt(api, shown.id).then((done) => setReceipt(done === "shared" ? "idle" : "failed"));
+            }} />
+            {receipt === "failed" && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{words.receipt.failed}</Text>}
           </View>
         )}
 

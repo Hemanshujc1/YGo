@@ -677,6 +677,51 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect(await left(dal)).toBe("9");
   });
 
+  describe("receipt (#61)", () => {
+    async function delivered(payment: "cash" | "upi" = "cash") {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      const done = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner, payload: { handoverCode: code, payment, photoUploadId: upload.id } });
+      expect(done.statusCode).toBe(200);
+      return { shopId, orderId };
+    }
+    const receipt = (orderId: string, headers = customer) => app.inject({ method: "GET", url: `/v1/orders/${orderId}/receipt`, headers });
+
+    it("returns the frozen lines and amounts, the shop as it is, and how it was paid", async () => {
+      const { orderId } = await delivered("upi");
+      await database.pool.query("UPDATE shops SET address = 'Shop 3, Paud Road', pincode = '411038'");
+      const answer = await receipt(orderId);
+      expect(answer.statusCode).toBe(200);
+      const frozen = (await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json();
+      expect(answer.json()).toEqual({
+        number: frozen.number, status: "delivered", placedAt: frozen.placedAt, address: { label: frozen.address.label, areaLine: frozen.address.areaLine }, shop: { name: frozen.shop.name, address: "Shop 3, Paud Road", pincode: "411038" },
+        lines: frozen.lines, productValue: frozen.productValue, deliveryFee: frozen.deliveryFee, smallCartFee: frozen.smallCartFee, total: frozen.total, payment: "upi",
+      });
+    });
+
+    it("also serves a picked-up order, and shows no payment method when none was recorded", async () => {
+      const { orderId } = await delivered();
+      await database.pool.query("UPDATE orders SET status = 'picked_up', delivery_payment = NULL WHERE id = $1", [orderId]);
+      const answer = await receipt(orderId);
+      expect(answer.statusCode).toBe(200);
+      expect(answer.json()).toMatchObject({ payment: null, status: "picked_up" });
+    });
+
+    it("refuses an order that isn't finished, another Customer's order, a missing order and no sign-in", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+      expect((await receipt(placed.id)).json()).toEqual({ error: { code: "ORDER_STATUS_CHANGED" } });
+      await accept(placed.id, owner);
+      expect((await receipt(placed.id)).statusCode).toBe(409);
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [placed.id]);
+      expect((await receipt(placed.id, other)).statusCode).toBe(404);
+      expect((await receipt(randomUUID())).statusCode).toBe(404);
+      expect((await app.inject({ method: "GET", url: `/v1/orders/${placed.id}/receipt` })).statusCode).toBe(401);
+    });
+  });
+
   it("shows the shop the Customer's name from the start, and the phone only to the assigned deliverer (DLV-7)", async () => {
     const { shopId, dal, owner, home } = await stocked();
     await database.pool.query("UPDATE accounts SET name = 'Meera', phone = '+919876500002' WHERE email = 'customer@example.com'");
