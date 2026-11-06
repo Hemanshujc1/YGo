@@ -694,7 +694,7 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     const { shopId, dal, owner, home } = await stocked();
     const staff = await signIn("/v1/auth", "staff@example.com");
     await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
-    const { rows: [{ id: staffId }] } = await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
     const invite = async (canDeliver: boolean) => {
       const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver } });
       return app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
