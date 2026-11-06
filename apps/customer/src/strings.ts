@@ -76,6 +76,12 @@ export const strings = {
     changeContact: "To change your email or phone number, write to",
     changeContactEnd: ".",
     help: "Help",
+    // The shop link on C23 (#536). "Switch to shop" waits for app switching (#551), so a linked account is told where to go.
+    shop: {
+      join: "Join a shop",
+      joinBody: "Working at a shop? Enter the code its Owner gave you.",
+      linked: (shop: string | null) => (shop ? `You work at ${shop}. Open the YGo Shop app to switch.` : "You work at a shop. Open the YGo Shop app to switch."),
+    },
     sheet: {
       title: "Change name",
       label: "Your name",
@@ -84,6 +90,28 @@ export const strings = {
       saving: "Saving…",
       cancel: "Cancel",
     },
+  },
+  // S21 Join a shop (#536).
+  joinShop: {
+    title: "Join a shop",
+    body: "Enter the code the shop's Owner gave you. It works once, for the number they invited.",
+    label: "Join code",
+    hint: "8 letters and numbers.",
+    button: "Join shop",
+    checking: "Checking…",
+    problems: {
+      short: "Enter all 8 characters of the code.",
+      wrong: "That code is not right. Check it with the Owner.",
+      expired: "This code has expired. Ask the Owner for a new one.",
+      locked: "Too many wrong tries. Ask the Owner to invite you again.",
+      linked: "This account already works at a shop. An account can have one shop link.",
+      offline: "Could not reach YGo. Check your connection and try again.",
+      other: "Something went wrong. Try again.",
+    },
+    joinedTitle: (shop: string | null) => (shop ? `You joined ${shop}` : "You joined the shop"),
+    joinedBody: "Open the YGo Shop app and sign in with this account to start working.",
+    done: "Done",
+    refreshButton: "Try again",
   },
   // C15 Set location (#216). Area and street search come with #217, so only a pincode is typed.
   location: {

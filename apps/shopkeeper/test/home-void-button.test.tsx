@@ -109,4 +109,22 @@ describe("Home's Staff button (#535)", () => {
     const hrefs = elements(Home()).filter((node) => node.type === "Link").map((node) => node.props.href);
     expect(hrefs).not.toContain("/staff");
   });
+
+  it("offers Start a way to join a shop with a code (S21, #536)", () => {
+    mock.cursor = 0; mock.hooks = [];
+    Home();
+    mock.hooks[0] = { kind: "loaded", application: null, liveCheck: null, staffShop: null };
+    mock.cursor = 0;
+    expect(elements(Home()).filter((node) => node.type === "Link").map((node) => node.props.href)).toContain("/join-shop");
+  });
+
+  it("shows Staff of a Live shop only Orders, Bill and Stock, and no join link (#536)", () => {
+    mock.role = "staff";
+    mock.cursor = 0; mock.hooks = [];
+    Home();
+    mock.hooks[0] = { kind: "loaded", application: null, liveCheck: null, staffShop: { shopName: "S", state: "live" } };
+    mock.cursor = 0;
+    const hrefs = elements(Home()).filter((node) => node.type === "Link").map((node) => node.props.href);
+    expect(hrefs).toEqual(["/orders", "/bill", "/stock"]);
+  });
 });

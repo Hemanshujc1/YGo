@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, session, supportEmail } from "../api";
 import { LogOut, Mail, Phone, User } from "../components/icons";
+import { ShopLink } from "../components/shop-link";
 import { TopBar } from "../components/top-bar";
 import { strings } from "../strings";
 
@@ -81,6 +82,8 @@ export default function AccountScreen() {
           <SupportEmail address={supportEmail} className="text-caption" />
           {words.changeContactEnd}
         </Text>
+
+        <ShopLink />
 
         <ThemePicker session={session} words={strings.theme} />
 

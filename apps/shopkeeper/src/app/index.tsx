@@ -172,6 +172,11 @@ export default function Home() {
         </Text>
       )}
       <Text className="text-secondary text-muted">{words.start.staff}</Text>
+      <Link href="/join-shop" asChild>
+        <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+          <Text className="text-body font-semibold text-primary">{words.start.join}</Text>
+        </Pressable>
+      </Link>
     </Plain>
   );
 }
