@@ -6,7 +6,7 @@ import { OFFLINE_WINDOW_MS } from "./offline-limits";
  * `shopName` is what a bill PDF prints offline (#53); a record saved before it, or a Draft without a name, has null.
  * `role` only decides what the phone shows (#494); a record saved before it reads as Owner until the next check says otherwise.
  */
-export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null; role: "owner" | "staff" };
+export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null; shopGstin: string | null; role: "owner" | "staff" };
 export type AccessView = { mode: "online" | "offline" | "expired" | "erasing" | "ended" | "signing-out"; accountId?: string; shopId?: string; expiresAt?: number };
 export interface AccessStorage {
   active(): string | undefined;
@@ -45,6 +45,8 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
     get: () => view,
     /** The shop's name from the last check this phone saved, for a bill PDF made offline (#53). */
     shopName: () => saved?.shopName ?? null,
+    /** The shop's GSTIN from the last check this phone saved, for the same bill PDF (#543). An Admin edit shows after the next online check. */
+    shopGstin: () => saved?.shopGstin ?? null,
     /** The role from the last check, null with no shop. Only hides screens; the server decides what a role may do (#494). */
     role: () => saved?.role ?? null,
     /** The last answer the server gave this account, so a sync pass need not ask again. */
@@ -76,7 +78,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       }
       if (mine !== turn) return null;
       if (!answer.ok) { if (record) cached(record); return null; }
-      const { shopId, state, shopName, role } = answer.data;
+      const { shopId, state, shopName, shopGstin, role } = answer.data;
       if (state === "closed" || (record && shopId !== record.shopId) || (!record && storage.hasData(account.id) && !shopId)) {
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
         return null;
@@ -87,14 +89,15 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
         // Live/Suspended lease until its original deadline.
         if (!stockAllowed && state === "approved" && record?.stockAllowed && usable(record)) {
           storage.select(account.id);
-          // The lease keeps its deadline, but a changed role is kept so it survives a restart.
-          const kept = role && role !== record.role ? { ...record, role } : record;
+          // The lease keeps its deadline, but a changed role or GSTIN is kept so it survives a restart.
+          const gstin = shopGstin ?? null;
+          const kept = (role && role !== record.role) || gstin !== (record.shopGstin ?? null) ? { ...record, role: role ?? record.role, shopGstin: gstin } : record;
           if (kept !== record) { await storage.save(kept); if (mine !== turn) return null; }
           saved = kept;
           show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
           return answered(account.id, answer.data);
         }
-        const next = { account, shopId, verifiedAt: now(), stockAllowed, shopName, role: role ?? "owner" };
+        const next = { account, shopId, verifiedAt: now(), stockAllowed, shopName, shopGstin, role: role ?? "owner" };
         await storage.save(next);
         if (mine !== turn) return null;
         storage.select(account.id);
@@ -124,6 +127,6 @@ export function readSavedAccess(raw: string | null): SavedAccess | null {
     const value = JSON.parse(raw) as SavedAccess;
     const account = Account.safeParse(value.account);
     return account.success && ShopStockResponse.shape.shopId.safeParse(value.shopId).success && typeof value.stockAllowed === "boolean" && Number.isFinite(value.verifiedAt)
-      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, role: value.role === "staff" ? "staff" : "owner" } : null;
+      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, shopGstin: typeof value.shopGstin === "string" ? value.shopGstin : null, role: value.role === "staff" ? "staff" : "owner" } : null;
   } catch { return null; }
 }

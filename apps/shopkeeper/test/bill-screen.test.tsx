@@ -43,7 +43,7 @@ vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, supportEmail: "help@example.com", session: { get: mock.get }, api: { shopCounterBills: mock.bills },
-  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) } }));
+  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", shopGstin: () => null, get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }), run: mock.run } }));
 import BillScreen from "../src/app/bill";
