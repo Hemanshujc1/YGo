@@ -188,7 +188,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         `SELECT role, can_deliver AS "canDeliver" FROM shop_members WHERE shop_id = $1 AND account_id = $2 FOR SHARE`, [order.shopId, accountId]);
       if (!deliverer || (deliverer.role !== "owner" && !deliverer.canDeliver)) return "DELIVERER_NOT_ELIGIBLE" as const;
       const now = clock.now();
-      if (!await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      // A Ready order not yet out for delivery can be handed to someone else by the Owner, e.g. after its
+      // deliverer was deactivated (#535). Only the person changes: no status move, no new Ready time.
+      const reassign = order.status === "ready" && order.role === "owner";
+      if (!reassign && !await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
       await client.query("UPDATE orders SET deliverer_id = $2 WHERE id = $1", [id, accountId]);
       await client.query("COMMIT");
       return now;

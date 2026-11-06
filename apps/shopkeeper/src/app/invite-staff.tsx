@@ -59,7 +59,7 @@ export default function InviteStaffScreen() {
       {sent ? <>
         <Text accessibilityRole="header" className="text-headline font-semibold text-text">{words.codeTitle(personLabel({ name: null, phone: sent.phone }))}</Text>
         <View className="items-center rounded-card border border-border bg-surface px-4 py-6">
-          <Text accessibilityLabel={sent.code.split("").join(" ")} selectable className="text-display font-semibold tabular-nums text-text">{sent.code}</Text>
+          <Text accessibilityLabel={sent.code.split("").join(" ")} className="text-display font-semibold tabular-nums text-text">{sent.code}</Text>
         </View>
         <Text className="text-body text-text">{words.codeRule(formatDateTime(sent.expiresAt))}</Text>
         <Text className="text-secondary text-muted">{words.codeLost}</Text>

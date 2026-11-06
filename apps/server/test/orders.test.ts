@@ -788,6 +788,36 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${placed.id}`, headers: owner })).statusCode).toBe(200);
   });
 
+  it("lets the Owner hand a Ready order to someone else after its deliverer is deactivated, and no one else (#535)", async () => {
+    const { shopId, dal, owner, home } = await stocked();
+    const staff = await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query("UPDATE accounts SET name = 'Ravi', phone = '+919800000001' WHERE email = 'staff@example.com'");
+    const staffId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'staff@example.com'")).rows[0]?.id ?? "";
+    const ownerId = (await database.pool.query<{ id: string }>("SELECT account_id AS id FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId])).rows[0]?.id ?? "";
+    const made = await app.inject({ method: "POST", url: "/v1/me/staff-invites", headers: owner, payload: { phone: "+919800000001", canDeliver: true } });
+    await app.inject({ method: "POST", url: "/v1/me/shop-join", headers: staff, payload: { code: made.json().code } });
+    const placed = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
+    await accept(placed.id, owner);
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/preparing`, headers: owner });
+    const assign = (headers: typeof owner, accountId: string) => app.inject({ method: "PUT", url: `/v1/me/shop-orders/${placed.id}/ready`, headers, payload: { accountId } });
+    expect((await assign(owner, staffId)).statusCode).toBe(200);
+    const readyAt = (await database.pool.query("SELECT status_changed_at FROM orders WHERE id = $1", [placed.id])).rows[0];
+    const history = async () => (await database.pool.query("SELECT count(*)::int AS n FROM order_status_history WHERE order_id = $1", [placed.id])).rows[0]?.n as number;
+    const rows = await history();
+    await app.inject({ method: "POST", url: `/v1/me/shop-staff/${staffId}/deactivate`, headers: owner });
+    // The removed person is not eligible any more; the Owner can take it over.
+    expect((await assign(owner, staffId)).json()).toMatchObject({ error: { code: "DELIVERER_NOT_ELIGIBLE" } });
+    const taken = await assign(owner, ownerId);
+    expect(taken.statusCode).toBe(200);
+    expect(taken.json()).toMatchObject({ status: "ready", delivererId: ownerId });
+    // Same status and time, no extra history row: the lifecycle is untouched.
+    expect((await database.pool.query("SELECT status_changed_at FROM orders WHERE id = $1", [placed.id])).rows[0]).toEqual(readyAt);
+    expect(await history()).toBe(rows);
+    expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${placed.id}/out-for-delivery`, headers: owner })).statusCode).toBe(200);
+    // Once out for delivery it can no longer be reassigned.
+    expect((await assign(owner, ownerId)).json()).toMatchObject({ error: { code: "ORDER_STATUS_CHANGED" } });
+  });
+
   it("waits after a call, then closes a failed delivery without recording a sale", async () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);

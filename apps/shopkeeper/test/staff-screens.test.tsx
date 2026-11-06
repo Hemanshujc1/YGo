@@ -117,6 +117,16 @@ describe("S16 Staff (#535)", () => {
     expect(texts(after)).toContain("Something went wrong on the server.");
   });
 
+  it("shows the pull-to-refresh spinner while it reads, then stops", async () => {
+    await open();
+    const spinner = () => (draw(StaffScreen).find((n) => n.type === "ScrollView")?.props.refreshControl as El).props;
+    expect(spinner().refreshing).toBe(false);
+    (spinner().onRefresh as () => void)();
+    expect(spinner().refreshing).toBe(true);
+    await settle();
+    expect(spinner().refreshing).toBe(false);
+  });
+
   it("offers a retry when the list cannot load", async () => {
     mock.api.shopStaff.mockResolvedValue({ ok: false, status: 500, code: "INTERNAL" });
     draw(StaffScreen); await settle();
@@ -144,6 +154,10 @@ describe("S20 Invite staff (#535)", () => {
     expect(mock.api.inviteStaff).toHaveBeenCalledWith({ phone: "+919800000001", canDeliver: false });
     const shown = texts(draw(InviteStaffScreen));
     expect(shown).toContain("ABCD2345");
+    // Not selectable (no copy handle on the screen), but read out letter by letter; Share is the way out.
+    const codeText = draw(InviteStaffScreen).find((n) => n.props.children === "ABCD2345");
+    expect(codeText?.props.selectable).toBeUndefined();
+    expect(codeText?.props.accessibilityLabel).toBe("A B C D 2 3 4 5");
     expect(shown.some((line) => line.startsWith("Works once, only on this number's own phone"))).toBe(true);
     (button(draw(InviteStaffScreen), "Share code")?.props.onPress as () => void)();
     expect(mock.share).toHaveBeenCalledWith({ message: expect.stringContaining("ABCD2345") });

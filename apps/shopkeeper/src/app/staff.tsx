@@ -25,6 +25,7 @@ export default function StaffScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [asking, setAsking] = useState<ShopStaff | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   // Set before React re-renders, so a second tap never starts a second change.
   const working = useRef(false);
   // Only the newest read may draw, so an older answer arriving late never brings back a removed person.
@@ -44,6 +45,7 @@ export default function StaffScreen() {
     setLoad({ kind: "loaded", staff: staff.data.staff, invites: invites.data.invites });
   }, []);
   const start = useCallback(() => { setMessage(null); void read(); }, [read]);
+  const pull = useCallback(async () => { setRefreshing(true); await read(); setRefreshing(false); }, [read]);
   const stop = useCallback(() => undefined, []);
   useInFront({ start, stop });
 
@@ -76,7 +78,7 @@ export default function StaffScreen() {
         className="flex-1"
         contentContainerClassName="gap-4 px-4"
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={() => void read()} progressViewOffset={insets.top} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void pull()} progressViewOffset={insets.top} />}
       >
         <Link href="/" asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
