@@ -834,7 +834,7 @@ export const orderRevisionLines = pgTable("order_revision_lines", {
   index("order_revision_lines_listing_id_idx").on(table.listingId),
   check("order_revision_lines_count_valid", sql`${table.count} BETWEEN 0 AND ${table.originalCount}`),
   check("order_revision_lines_stock_valid", sql`${table.stockQuantity} = CASE WHEN ${table.count} = 0 THEN 0 ELSE COALESCE(${table.partQuantity}, ${table.count} * ${table.packQuantity}) END`),
-  check("order_revision_lines_reason_valid", sql`${table.changeReason} IS NULL OR ${table.changeReason} IN ('out_of_stock', 'damaged', 'near_expiry', 'other')`),
+  check("order_revision_lines_reason_valid", sql`${table.changeReason} IS NULL OR ${table.changeReason} IN ('out_of_stock', 'damaged', 'near_expiry', 'quality_issue')`),
   check("order_revision_lines_reduction_reason", sql`(${table.count} = ${table.originalCount} AND (${table.partQuantity} IS NULL OR ${table.partQuantity} = ${table.originalPartQuantity})) OR ${table.changeReason} IS NOT NULL`),
 ]);
 

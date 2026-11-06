@@ -30,7 +30,7 @@ export const RejectReason = z.enum(["out_of_stock", "too_busy", "closing_soon", 
 export type RejectReason = z.infer<typeof RejectReason>;
 
 /** Reasons for line reduction or removal in a partial acceptance proposal (ORD-3). */
-export const OrderLineChangeReason = z.enum(["out_of_stock", "damaged", "near_expiry", "other"]);
+export const OrderLineChangeReason = z.enum(["out_of_stock", "damaged", "near_expiry", "quality_issue"]);
 export type OrderLineChangeReason = z.infer<typeof OrderLineChangeReason>;
 
 /** A line in a partial acceptance proposal, showing original and changed figures (C10). */

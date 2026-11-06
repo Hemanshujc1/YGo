@@ -211,7 +211,7 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     // Increase dal from 2 to 3 -> INVALID_PARTIAL_ACCEPT
     const inc = await app.inject({
       method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
-      payload: { lines: [{ listingId: dal, count: 3, reason: "other" }] },
+      payload: { lines: [{ listingId: dal, count: 3, reason: "quality_issue" }] },
     });
     expect(inc.statusCode).toBe(400);
     expect(inc.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
@@ -300,6 +300,11 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     const hist = await database.pool.query<{ actor_role: string; reason_code: string }>(
       "SELECT actor_role, reason_code FROM order_status_history WHERE order_id = $1 ORDER BY at DESC, id DESC LIMIT 1", [orderId]);
     expect(hist.rows[0]).toMatchObject({ actor_role: "system", reason_code: "negative_contribution" });
+
+    // A negative-contribution cancellation is not a below-floor exception
+    const adminRes = await app.inject({ method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin });
+    expect(adminRes.statusCode).toBe(200);
+    expect((adminRes.json().exceptions as Array<{ orderId: string }>).some((e) => e.orderId === orderId)).toBe(false);
   });
 
   it("records below floor exception (D-5) when contribution is below floor but non-negative, and lists on admin endpoint", async () => {
@@ -368,6 +373,135 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     expect(adminRes.statusCode).toBe(200);
     const exceptions = adminRes.json().exceptions as Array<{ orderId: string; shortfall: string }>;
     expect(exceptions.some((e) => e.orderId === orderId && e.shortfall === "9.00")).toBe(true);
+  });
+
+  it("below-floor proposal that is declined is not shown in admin exceptions queue", async () => {
+    const shopId = await shop("BF Declined Shop");
+    await publish({ type: "global" }, { ...card, deliveredContributionFloor: "25" });
+    const groceries = await category("GroceriesBFD");
+    const item = (await product(shopId, groceries, "Rice BFD", "kg", [{ quantity: "1", price: "50", stock: "10" }])).listings[0] as string;
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'owner' FROM accounts WHERE email = 'owner@example.com'", [shopId]);
+    const home = await address("customer@example.com");
+    const { revision } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+    const cart = (await app.inject({
+      method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer,
+      payload: { revision, lines: [{ listingId: item, count: 4 }] },
+    })).json() as { revision: number; quote: { total: string } };
+    const placed = await app.inject({
+      method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer,
+      payload: { revision: cart.revision, total: cart.quote.total, addressId: home },
+    });
+    const orderId = (placed.json() as { id: string }).id;
+
+    // Create a below-floor proposal
+    const propRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 2, reason: "out_of_stock" }] },
+    });
+    expect(propRes.statusCode).toBe(200);
+
+    // Customer declines the proposal
+    const declineRes = await app.inject({
+      method: "POST", url: `/v1/orders/${orderId}/decline-total`, headers: customer,
+    });
+    expect(declineRes.statusCode).toBe(200);
+    expect(declineRes.json()).toMatchObject({ status: "cancelled_by_customer" });
+
+    // Declined revision must NOT appear in admin exceptions queue
+    const adminRes = await app.inject({
+      method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin,
+    });
+    expect(adminRes.statusCode).toBe(200);
+    const exceptions = adminRes.json().exceptions as Array<{ orderId: string }>;
+    expect(exceptions.some((e) => e.orderId === orderId)).toBe(false);
+  });
+
+  it("below-floor proposal that expires is not shown in admin exceptions queue", async () => {
+    const shopId = await shop("BF Expired Shop");
+    await publish({ type: "global" }, { ...card, deliveredContributionFloor: "25" });
+    const groceries = await category("GroceriesBFE");
+    const item = (await product(shopId, groceries, "Lentils BFE", "kg", [{ quantity: "1", price: "50", stock: "10" }])).listings[0] as string;
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'owner' FROM accounts WHERE email = 'owner@example.com'", [shopId]);
+    const home = await address("customer@example.com");
+    const { revision } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+    const cart = (await app.inject({
+      method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer,
+      payload: { revision, lines: [{ listingId: item, count: 4 }] },
+    })).json() as { revision: number; quote: { total: string } };
+    const placed = await app.inject({
+      method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer,
+      payload: { revision: cart.revision, total: cart.quote.total, addressId: home },
+    });
+    const orderId = (placed.json() as { id: string }).id;
+
+    // Create a below-floor proposal, then backdate confirm_by_at to simulate expiry
+    const propRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 2, reason: "out_of_stock" }] },
+    });
+    expect(propRes.statusCode).toBe(200);
+
+    // Expire the proposal via the expire-confirmations job logic (mark directly as expired + cancel order)
+    await database.pool.query(
+      `UPDATE order_revisions SET status = 'expired'
+       WHERE order_id = $1 AND status = 'proposed'`,
+      [orderId],
+    );
+    await database.pool.query(
+      `UPDATE orders SET status = 'cancelled_by_customer' WHERE id = $1`,
+      [orderId],
+    );
+
+    // Expired revision must NOT appear in admin exceptions queue
+    const adminRes = await app.inject({
+      method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin,
+    });
+    expect(adminRes.statusCode).toBe(200);
+    const exceptions = adminRes.json().exceptions as Array<{ orderId: string }>;
+    expect(exceptions.some((e) => e.orderId === orderId)).toBe(false);
+  });
+
+  it("valid pending (proposed) below-floor exception appears in admin queue; confirmed exception also appears", async () => {
+    const shopId = await shop("BF Active Shop");
+    await publish({ type: "global" }, { ...card, deliveredContributionFloor: "25" });
+    const groceries = await category("GroceriesBFA");
+    const item = (await product(shopId, groceries, "Oil BFA", "kg", [{ quantity: "1", price: "50", stock: "10" }])).listings[0] as string;
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'owner' FROM accounts WHERE email = 'owner@example.com'", [shopId]);
+    const home = await address("customer@example.com");
+    const { revision } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+    const cart = (await app.inject({
+      method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer,
+      payload: { revision, lines: [{ listingId: item, count: 4 }] },
+    })).json() as { revision: number; quote: { total: string } };
+    const placed = await app.inject({
+      method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer,
+      payload: { revision: cart.revision, total: cart.quote.total, addressId: home },
+    });
+    const orderId = (placed.json() as { id: string }).id;
+
+    // Proposal → below-floor (shortfall 9.00), still pending (proposed)
+    const propRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 2, reason: "out_of_stock" }] },
+    });
+    expect(propRes.statusCode).toBe(200);
+
+    // Pending proposal must appear
+    const adminRes1 = await app.inject({ method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin });
+    expect(adminRes1.statusCode).toBe(200);
+    const ex1 = adminRes1.json().exceptions as Array<{ orderId: string; shortfall: string }>;
+    expect(ex1.some((e) => e.orderId === orderId && e.shortfall === "9.00")).toBe(true);
+
+    // Customer confirms → revision becomes confirmed; must still appear
+    const confirmRes = await app.inject({
+      method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer,
+    });
+    expect(confirmRes.statusCode).toBe(200);
+
+    const adminRes2 = await app.inject({ method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin });
+    expect(adminRes2.statusCode).toBe(200);
+    const ex2 = adminRes2.json().exceptions as Array<{ orderId: string; shortfall: string }>;
+    expect(ex2.some((e) => e.orderId === orderId && e.shortfall === "9.00")).toBe(true);
   });
 });
 

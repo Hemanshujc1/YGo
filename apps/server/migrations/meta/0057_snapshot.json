@@ -2520,7 +2520,7 @@
         },
         "order_revision_lines_reason_valid": {
           "name": "order_revision_lines_reason_valid",
-          "value": "\"order_revision_lines\".\"change_reason\" IS NULL OR \"order_revision_lines\".\"change_reason\" IN ('out_of_stock', 'damaged', 'near_expiry', 'other')"
+          "value": "\"order_revision_lines\".\"change_reason\" IS NULL OR \"order_revision_lines\".\"change_reason\" IN ('out_of_stock', 'damaged', 'near_expiry', 'quality_issue')"
         },
         "order_revision_lines_reduction_reason": {
           "name": "order_revision_lines_reduction_reason",

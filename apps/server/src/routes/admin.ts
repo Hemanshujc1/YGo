@@ -141,6 +141,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
          JOIN orders o ON o.id = r.order_id
          JOIN shops s ON s.id = o.shop_id
          WHERE r.below_floor_exception = true
+           AND r.status IN ('proposed', 'confirmed')
          ORDER BY r.created_at DESC`,
       );
       return reply.code(200).send({

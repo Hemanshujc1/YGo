@@ -18,7 +18,7 @@ CREATE TABLE "order_revision_lines" (
 	CONSTRAINT "order_revision_lines_revision_id_position_pk" PRIMARY KEY("revision_id","position"),
 	CONSTRAINT "order_revision_lines_count_valid" CHECK ("order_revision_lines"."count" BETWEEN 0 AND "order_revision_lines"."original_count"),
 	CONSTRAINT "order_revision_lines_stock_valid" CHECK ("order_revision_lines"."stock_quantity" = CASE WHEN "order_revision_lines"."count" = 0 THEN 0 ELSE COALESCE("order_revision_lines"."part_quantity", "order_revision_lines"."count" * "order_revision_lines"."pack_quantity") END),
-	CONSTRAINT "order_revision_lines_reason_valid" CHECK ("order_revision_lines"."change_reason" IS NULL OR "order_revision_lines"."change_reason" IN ('out_of_stock', 'damaged', 'near_expiry', 'other')),
+	CONSTRAINT "order_revision_lines_reason_valid" CHECK ("order_revision_lines"."change_reason" IS NULL OR "order_revision_lines"."change_reason" IN ('out_of_stock', 'damaged', 'near_expiry', 'quality_issue')),
 	CONSTRAINT "order_revision_lines_reduction_reason" CHECK (("order_revision_lines"."count" = "order_revision_lines"."original_count" AND ("order_revision_lines"."part_quantity" IS NULL OR "order_revision_lines"."part_quantity" = "order_revision_lines"."original_part_quantity")) OR "order_revision_lines"."change_reason" IS NOT NULL)
 );
 --> statement-breakpoint
