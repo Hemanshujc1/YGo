@@ -9,9 +9,10 @@ import { ORDER_ANSWER_SECONDS } from "@ygo/contracts";
  * `ORDER_EXPIRE_SECONDS` therefore needs an app update that changes that constant, until the order
  * responses carry the server's deadline.
  */
-export const orderTiming = { reRingSeconds: 120, expireSeconds: ORDER_ANSWER_SECONDS };
+export const orderTiming = { reRingSeconds: 120, expireSeconds: ORDER_ANSWER_SECONDS, confirmSeconds: 300 };
 
-export function setOrderTiming(timing: { reRingSeconds: number; expireSeconds: number }): void {
-  orderTiming.reRingSeconds = timing.reRingSeconds;
-  orderTiming.expireSeconds = timing.expireSeconds;
+export function setOrderTiming(timing: { reRingSeconds?: number; expireSeconds?: number; confirmSeconds?: number }): void {
+  if (timing.reRingSeconds !== undefined) orderTiming.reRingSeconds = timing.reRingSeconds;
+  if (timing.expireSeconds !== undefined) orderTiming.expireSeconds = timing.expireSeconds;
+  if (timing.confirmSeconds !== undefined) orderTiming.confirmSeconds = timing.confirmSeconds;
 }

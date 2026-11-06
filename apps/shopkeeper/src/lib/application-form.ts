@@ -13,7 +13,7 @@ import type { Found } from "@ygo/mobile";
 import type { AddressAt } from "@ygo/mobile/address-at";
 
 /** The S17 fields typed as text. Business type and service radius are picked, and the location comes from the phone or the map. */
-export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
+export const textFields = ["shopName", "address", "pincode", "ownerName", "pan", "gstin", "fssaiNumber", "fssaiExpiry", "upiId"] as const;
 export type TextField = (typeof textFields)[number];
 
 /** A field that can show a message under it. */

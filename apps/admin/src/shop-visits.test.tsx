@@ -15,7 +15,7 @@ const actorId = "00000000-0000-4000-8000-000000000099";
 const application: ShopApplication = {
   id, state: "under_review", shopName: "Fresh Mart", address: "Main Road", pincode: "411038",
   location: { latitude: 18.5, longitude: 73.8 }, ownerName: "Owner Name", entityType: "proprietorship",
-  pan: "ABCDE1234F", fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000,
+  pan: "ABCDE1234F", gstin: null, fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000,
   upiId: "owner@upi", areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com",
   submittedAt: "2026-10-24T10:00:00.000Z",
 };

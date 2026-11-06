@@ -421,15 +421,19 @@ describe("verified offline shop access", () => {
     await database.pool.query("INSERT INTO shop_members VALUES ($1, $2, 'staff')", [staff.id, actor.shopId]);
     for (const state of ["live", "suspended", "approved", "closed"]) {
       await database.pool.query("UPDATE shops SET state = $2 WHERE id = $1", [actor.shopId, state]);
-      expect((await read()).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", role: "owner" });
-      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", role: "staff" });
+      expect((await read()).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "owner" });
+      expect((await read(staff.headers)).json()).toEqual({ shopId: actor.shopId, state, shopName: "Sai General Stores", shopGstin: null, role: "staff" });
     }
     // The name a bill PDF prints offline follows a rename at the next check (#53).
     await database.pool.query("UPDATE shops SET shop_name = 'Sai Stores' WHERE id = $1", [actor.shopId]);
     expect((await read()).json().shopName).toBe("Sai Stores");
+    // The GSTIN for the counter bill follows an Admin edit at the next check (#543).
+    await database.pool.query("UPDATE shops SET gstin = '27ABCDE1234F1Z5' WHERE id = $1", [actor.shopId]);
+    expect((await read()).json().shopGstin).toBe("27ABCDE1234F1Z5");
+    expect((await read(staff.headers)).json().shopGstin).toBe("27ABCDE1234F1Z5");
     await database.pool.query("DELETE FROM shop_members WHERE account_id = $1", [staff.id]);
-    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null, shopName: null, role: null });
-    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null, shopName: null, role: null });
+    expect((await read(staff.headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
+    expect((await read((await owner("new@example.com")).headers)).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
     expect((await app.inject({ method: "GET", url: "/v1/sync/access" })).statusCode).toBe(401);
     clock.set(new Date("2030-01-02T00:00:00Z"));
     expect((await read()).statusCode).toBe(401);
@@ -446,7 +450,7 @@ describe("verified offline shop access", () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(finished).toBe(false);
       await removal.query("COMMIT");
-      expect((await checking).json()).toEqual({ shopId: null, state: null, shopName: null, role: null });
+      expect((await checking).json()).toEqual({ shopId: null, state: null, shopName: null, shopGstin: null, role: null });
     } finally {
       await removal.query("ROLLBACK");
       removal.release();
@@ -690,9 +694,9 @@ describe("opening-stock correction (#452)", () => {
     const version = (await database.pool.query<{ version: string }>(
       "INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) VALUES ($1, 'global', 'test', now()) RETURNING version", [customer.id])).rows[0]?.version;
     await database.pool.query(
-      `WITH placed AS (INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat, address_pincode,
+      `WITH placed AS (INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat, address_pincode,
           address_point, product_value, delivery_fee, total, rate_card_version, quote)
-        SELECT $1, $2, 'accepted', now(), now(), 'home', '1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 60, 0, 60,
+        SELECT $1, $2, 'accepted', now(), now(), 'Test shop', 'Shop 1', '411038', 'home', '1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 60, 0, 60,
           $3, '{}'::jsonb RETURNING id)
        INSERT INTO order_lines (order_id, position, listing_id, name, baseUnit_placeholder, pack_quantity, count, unit_price, line_total, stock_quantity)
        SELECT id, 0, (SELECT id FROM shop_listings WHERE shop_id = $2), 'Rice', 'kg', 1, 4, 15, 60, 4 FROM placed`.replace("baseUnit_placeholder", "base_unit"),

@@ -27,7 +27,7 @@ vi.mock("../src/components/icons", () => ({ Share2: "Share2" }));
 vi.mock("../src/lib/share-bill", () => ({ shareBill: mock.share }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, session: { get: () => ({ account: { id: "account-1" } }) }, supportEmail: "help@example.com",
-  access: { subscribe: vi.fn(), get: () => mock.view, shopName: () => "Sai General Stores" }, api: { shopListings: mock.listings, shopCounterBills: mock.bills } }));
+  access: { subscribe: vi.fn(), get: () => mock.view, shopName: () => "Sai General Stores", shopGstin: () => "27ABCDE1234F1Z5" }, api: { shopListings: mock.listings, shopCounterBills: mock.bills } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: vi.fn(), get: () => mock.status, retryNow: mock.retry } }));
 import SyncScreen from "../src/app/sync";
@@ -91,8 +91,9 @@ describe("S08 Waiting to sync (#395)", () => {
     render(); await settle();
     const card = elements(render()).find((node) => (node.props.bill as { id?: string } | undefined)?.id === (typeof saved === "string" ? "" : saved.id));
     await (card?.props.onShare as () => Promise<void>)();
-    const [{ shopName, label }] = mock.share.mock.calls[0] as [{ shopName: string; label: (id: string) => { name: string } | null }];
+    const [{ shopName, shopGstin, label }] = mock.share.mock.calls[0] as [{ shopName: string; shopGstin: string; label: (id: string) => { name: string } | null }];
     expect(shopName).toBe("Sai General Stores");
+    expect(shopGstin).toBe("27ABCDE1234F1Z5");
     expect(label(packId)?.name).toBe("Rice");
   });
 

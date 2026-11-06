@@ -229,6 +229,7 @@ describe("each call", () => {
   ownerName: "Asha Kulkarni",
   entityType: null,
   pan: null,
+  gstin: null,
   fssaiNumber: null,
   fssaiExpiry: null,
   serviceRadiusMetres: 2000,
@@ -1267,7 +1268,7 @@ it("pulls authenticated Stock deltas with an encoded cursor and validates the re
 });
 
 it("checks authenticated shop access independently of catalog readiness", async () => {
-  const data = { shopId: "00000000-0000-4000-8000-000000000394", state: "closed", shopName: "Sai General Stores", role: "owner" };
+  const data = { shopId: "00000000-0000-4000-8000-000000000394", state: "closed", shopName: "Sai General Stores", shopGstin: null, role: "owner" };
   const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, data));
   await client.verifyCode(signIn);
   expect(await client.syncAccess()).toEqual({ ok: true, data });

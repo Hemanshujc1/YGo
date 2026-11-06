@@ -31,7 +31,7 @@ const aundh = { id: "00000000-0000-4000-8000-000000000202", name: "Aundh", pinco
 const application = {
   id: "00000000-0000-4000-8000-000000000501", state: "submitted" as const, shopName: "Fresh Mart", address: "Main Road",
   pincode: "411038", location: { latitude: 18.5, longitude: 73.8 }, ownerName: "Owner Name", entityType: "proprietorship" as const,
-  pan: "ABCDE1234F", fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000, upiId: "owner@upi",
+  pan: "ABCDE1234F", gstin: null as string | null, fssaiNumber: "12345678901234", fssaiExpiry: "2030-01-01", serviceRadiusMetres: 2000, upiId: "owner@upi",
   areaName: "Kothrud", ownerPhone: "+919876543210", ownerEmail: "owner@example.com", submittedAt: "2026-10-24T10:00:00.000Z",
   areaManager: null as { id: string; name: string | null; email: string } | null,
 };
@@ -781,6 +781,31 @@ describe("Admin web", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
     expect(await screen.findByRole("status")).toHaveProperty("textContent", strings.correctionSaved);
     expect(api.correctShopApplication).toHaveBeenCalledWith(application.id, { shopName: "Fresh Foods", reason: "Owner updated the name" });
+  });
+
+  it("sets a GSTIN in capitals and clears it with an empty box, and refuses a malformed one (#537)", async () => {
+    const withGstin = { ...application, gstin: "27ABCDE1234F1Z5" };
+    const correctShopApplication = vi.fn().mockResolvedValueOnce({ ok: true, data: withGstin }).mockResolvedValueOnce({ ok: true, data: application });
+    setup(`/applications/${application.id}`, { getShopApplication: vi.fn().mockResolvedValue({ ok: true, data: application }), correctShopApplication });
+    await screen.findByRole("heading", { name: application.shopName });
+    const save = async (reason: string) => {
+      fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+      fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: reason } });
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.saveCorrection }));
+      await screen.findByRole("status");
+    };
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.gstin) }));
+    fireEvent.change(screen.getByLabelText(strings.gstin), { target: { value: "27ABCDE1234F" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveCorrection }));
+    expect(await screen.findByText(strings.applicationInvalidFields.gstin)).toBeTruthy();
+    expect(correctShopApplication).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(strings.gstin), { target: { value: "27abcde1234f1z5" } });
+    await save("Owner sent the certificate");
+    expect(correctShopApplication).toHaveBeenLastCalledWith(application.id, { gstin: "27ABCDE1234F1Z5", reason: "Owner sent the certificate" });
+    fireEvent.click(screen.getByRole("button", { name: strings.editField(strings.gstin) }));
+    fireEvent.change(screen.getByLabelText(strings.gstin), { target: { value: "" } });
+    await save("Registration cancelled");
+    expect(correctShopApplication).toHaveBeenLastCalledWith(application.id, { gstin: null, reason: "Registration cancelled" });
   });
 
   it("opens corrections in a focused dialog and keeps the value when cancelling the reason", async () => {

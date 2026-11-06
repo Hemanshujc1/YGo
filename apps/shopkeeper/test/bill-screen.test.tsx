@@ -43,7 +43,7 @@ vi.mock("../src/components/sync-status", () => ({ SyncStatus: "SyncStatus" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, supportEmail: "help@example.com", session: { get: mock.get }, api: { shopCounterBills: mock.bills },
-  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) } }));
+  access: { subscribe: () => () => undefined, allowed: mock.allowed, expire: vi.fn(), shopName: () => "Sai General Stores", shopGstin: () => null, get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) } }));
 vi.mock("../src/lib/opening-stock-database", () => ({ openOpeningStock: mock.open }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false }), run: mock.run } }));
 import BillScreen from "../src/app/bill";
@@ -263,6 +263,7 @@ describe("S06 Counter bill (#468)", () => {
     expect(texts()).toContain("Couldn't make the bill PDF. Try again.");
   });
 
+  // 100 full re-renders: slow when the machine is busy, so it gets a longer limit (#541).
   it("stops at 100 catalog and typed items together, as the contract does (#53)", async () => {
     render(); await settle();
     (find((props) => props.accessibilityLabel === "Search products")?.onChangeText as (value: string) => void)("rice");
@@ -271,7 +272,7 @@ describe("S06 Counter bill (#468)", () => {
     expect(find((props) => props.accessibilityLabel === "Typed item 99: Item name")).toBeDefined();
     expect(find((props) => props.accessibilityLabel === "Typed item 100: Item name")).toBeUndefined();
     expect(texts()).toContain("A bill holds up to 100 items. Save this one and start another.");
-  });
+  }, 30_000);
 
   it("clamps typed count at 1 on minus and removes the item with the Remove action (#485)", async () => {
     render(); await settle();

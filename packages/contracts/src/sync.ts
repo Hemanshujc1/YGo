@@ -6,10 +6,11 @@ import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "
 /**
  * Explicit access result: only an authenticated absence/closure ends cached access.
  * `shopName` is kept with the phone's access record so a bill PDF can name the shop offline (#53); a Draft may have none yet.
+ * `shopGstin` is the shop's GSTIN for the counter bill, kept the same way (#543); null when the shop has none, and when a reply or saved record predates it.
  * `role` is the account's role in that shop, so the phone can hide what only the Owner does (#494); the server still enforces it.
  */
-export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable(), role: z.enum(["owner", "staff"]).nullable() })
-  .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId === null) === (value.role === null) && (value.shopId !== null || value.shopName === null));
+export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable(), shopGstin: z.string().nullable().default(null), role: z.enum(["owner", "staff"]).nullable() })
+  .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId === null) === (value.role === null) && (value.shopId !== null || (value.shopName === null && value.shopGstin === null)));
 export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
 
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });

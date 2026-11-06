@@ -4,11 +4,12 @@ import { z } from "zod";
 // Configuration is environment variables only (ADR-0008).
 const DatabaseUrl = z.url({ protocol: /^postgres(ql)?$/ });
 
-// The two order timers of ORD-2 (#57): the shop's alarm rings again, then an unanswered order expires. The apps count
-// down from ORDER_ANSWER_SECONDS (600) in @ygo/contracts, so changing the expiry needs a matching app update.
+// The order timers of ORD-2 (#57) and ORD-4 (#64): the shop's alarm rings again, an unanswered order expires,
+// and customer has ORDER_CONFIRM_SECONDS to confirm a partial-acceptance proposal.
 const OrderTimingShape = {
   ORDER_REALERT_SECONDS: z.coerce.number().int().positive().default(120),
   ORDER_EXPIRE_SECONDS: z.coerce.number().int().positive().default(ORDER_ANSWER_SECONDS),
+  ORDER_CONFIRM_SECONDS: z.coerce.number().int().positive().default(300),
 };
 const realertBeforeExpiry = (env: { ORDER_REALERT_SECONDS: number; ORDER_EXPIRE_SECONDS: number }) =>
   env.ORDER_REALERT_SECONDS < env.ORDER_EXPIRE_SECONDS;
@@ -90,9 +91,17 @@ export function loadDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** The order timers alone, for the timed-job command, which reads no other setting. */
-export function loadOrderTiming(env: NodeJS.ProcessEnv = process.env): { reRingSeconds: number; expireSeconds: number } {
+export function loadOrderTiming(env: NodeJS.ProcessEnv = process.env): {
+  reRingSeconds: number;
+  expireSeconds: number;
+  confirmSeconds: number;
+} {
   const timing = OrderTimingEnv.parse(env);
-  return { reRingSeconds: timing.ORDER_REALERT_SECONDS, expireSeconds: timing.ORDER_EXPIRE_SECONDS };
+  return {
+    reRingSeconds: timing.ORDER_REALERT_SECONDS,
+    expireSeconds: timing.ORDER_EXPIRE_SECONDS,
+    confirmSeconds: timing.ORDER_CONFIRM_SECONDS,
+  };
 }
 
 const DeliveryPhotoEnv = z.object({

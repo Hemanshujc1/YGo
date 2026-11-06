@@ -339,6 +339,7 @@ describe("Admin browser API client", () => {
       ownerName: "Asha Kulkarni",
       entityType: null,
       pan: null,
+      gstin: null,
       fssaiNumber: null,
       fssaiExpiry: null,
       serviceRadiusMetres: 2000,

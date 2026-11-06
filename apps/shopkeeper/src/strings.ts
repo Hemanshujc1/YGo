@@ -127,6 +127,7 @@ export const strings = {
       ownerName: { label: "Owner's legal name", invalid: "Enter your name in letters, such as Asha Kulkarni." },
       entityType: { label: "Business type", invalid: "Choose your business type." },
       pan: { label: "PAN", invalid: "Enter a PAN such as ABCDE1234F: 5 letters, 4 digits, 1 letter." },
+      gstin: { label: "GSTIN (optional)", invalid: "Enter the 15-character GSTIN on your registration, such as 27ABCDE1234F1Z5, or leave it empty." },
       fssaiNumber: { label: "FSSAI licence number", invalid: "Enter the 14-digit number on your FSSAI licence." },
       fssaiExpiry: {
         label: "FSSAI licence valid until",
@@ -244,7 +245,7 @@ export const strings = {
     // #53: each bill, before and after sync, shared as a PDF for the customer.
     share: "Share bill", shareFailed: "Couldn't make the bill PDF. Try again.",
     pdf: {
-      number: (number: number) => `Bill ${number}`, numberPending: "Number pending", reference: (reference: string) => `Reference ${reference}`,
+      number: (number: number) => `Bill ${number}`, numberPending: "Number pending", gstin: (gstin: string) => `GSTIN: ${gstin}`, reference: (reference: string) => `Reference ${reference}`,
       item: "Item", count: "Count", price: "Price", amount: "Amount", items: "Items", discount: "Discount", total: "Total",
       paidBy: (payment: string) => `Paid by ${payment}`, customer: (name: string) => `Customer: ${name}`, unknownItem: "Item",
       file: (reference: string) => `YGo bill ${reference}`, voided: (reason: string) => `Voided · ${reason}`,
@@ -739,5 +740,10 @@ export const strings = {
     STAFF_AT_ANOTHER_SHOP: "That number is linked to another shop.",
     STAFF_ALREADY_MEMBER: "That person already works in your shop.",
     ALREADY_LINKED: "This account is already linked to a shop.",
+    PROPOSAL_OPEN: "A proposed total is already waiting for the customer.",
+    CONFIRMATION_EXPIRED: "The time for the customer to confirm has expired.",
+    NEGATIVE_CONTRIBUTION_CANCELLED: "Order cancelled: items left could not cover delivery.",
+    EMPTY_ORDER: "You cannot accept an order with no items. Reject it instead.",
+    INVALID_PARTIAL_ACCEPT: "You can only reduce quantities or remove items.",
   } satisfies Record<ErrorCode, string>,
 };

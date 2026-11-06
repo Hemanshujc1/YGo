@@ -11,10 +11,10 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type EditableField = Exclude<keyof CorrectShopApplicationBody, "reason">;
 type FieldErrors = Partial<Record<EditableField | "reason", string>>;
-const editableFields: EditableField[] = ["shopName", "address", "pincode", "location", "ownerName", "entityType", "pan", "fssaiNumber", "fssaiExpiry", "serviceRadiusMetres", "upiId"];
+const editableFields: EditableField[] = ["shopName", "address", "pincode", "location", "ownerName", "entityType", "pan", "gstin", "fssaiNumber", "fssaiExpiry", "serviceRadiusMetres", "upiId"];
 const fieldLabels: Record<EditableField, string> = {
   shopName: strings.shopName, address: strings.applicationAddress, pincode: strings.pincode, location: strings.location,
-  ownerName: strings.owner, entityType: strings.entityType, pan: strings.pan, fssaiNumber: strings.fssaiNumber,
+  ownerName: strings.owner, entityType: strings.entityType, pan: strings.pan, gstin: strings.gstin, fssaiNumber: strings.fssaiNumber,
   fssaiExpiry: strings.fssaiExpiry, serviceRadiusMetres: strings.serviceRadius, upiId: strings.upiId,
 };
 
@@ -82,6 +82,8 @@ export function ShopApplicationReview({ api }: { api: AdminApi }) {
   function correction(field: EditableField, raw: string, reason: string) {
     let parsedValue: unknown = raw;
     if (field === "serviceRadiusMetres") parsedValue = Number(raw);
+    // The GSTIN is optional, so an empty box clears it (#537).
+    if (field === "gstin" && raw.trim() === "") parsedValue = null;
     if (field === "location") {
       const parts = raw.split(",").map((part) => part.trim() ? Number(part.trim()) : NaN);
       parsedValue = { latitude: parts[0], longitude: parts[1] };

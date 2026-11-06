@@ -3,10 +3,17 @@ import type { Clock } from "./adapters/clock";
 import type { DeliveryPhotoStorage } from "./adapters/delivery-photos";
 import { withTransaction, type Database } from "./db";
 import { expireUnansweredOrders } from "./order-expiry";
+import { expireUnconfirmedOrders } from "./order-confirm-expiry";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
-export const jobMaxAgeHours = { "backup-nightly": 26, "cleanup-sessions": 26, "expire-orders": 0.25, "snapshot-weekly": 8 * 24 } as const;
+export const jobMaxAgeHours = {
+  "backup-nightly": 26,
+  "cleanup-sessions": 26,
+  "expire-confirmations": 0.25,
+  "expire-orders": 0.25,
+  "snapshot-weekly": 8 * 24,
+} as const;
 // Run history kept by cleanup-sessions (#520): the every-minute expire-orders job writes ~1,440 rows a day.
 export const JOB_RUN_OK_KEEP_DAYS = 30;
 export const JOB_RUN_FAILED_KEEP_DAYS = 180;
@@ -107,6 +114,8 @@ export async function runJob(
       await snapshotWeekly();
     } else if (name === "expire-orders") {
       await expireUnansweredOrders(database.pool, clock);
+    } else if (name === "expire-confirmations") {
+      await expireUnconfirmedOrders(database.pool, clock);
     } else {
       await database.db.transaction(async (tx) => {
         // ON DELETE CASCADE removes every refresh token of an expired session.
@@ -130,7 +139,7 @@ export async function runJob(
       status: "failed",
       finishedAt: clock.now(),
       errorText: name === "backup-nightly" ? "backup failed" : name === "snapshot-weekly" ? "snapshot failed" :
-        name === "expire-orders" ? "expiry failed" : "cleanup failed",
+        name === "expire-orders" ? "expiry failed" : name === "expire-confirmations" ? "confirmation expiry failed" : "cleanup failed",
     }).where(eq(jobRuns.id, run.id));
     throw error;
   }

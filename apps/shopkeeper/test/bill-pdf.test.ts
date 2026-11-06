@@ -23,6 +23,13 @@ describe("the bill PDF (#53)", () => {
     expect(page).not.toMatch(/\.00\b/);
   });
 
+  it("prints the shop's GSTIN under its name, escaped, and nothing when the shop has none (#543)", () => {
+    const html = billHtml({ bill, shopName: "Sai", shopGstin: "27ABCDE1234F1Z5", label, fonts });
+    expect(text(html)).toContain("Sai GSTIN: 27ABCDE1234F1Z5 Bill 42");
+    expect(billHtml({ bill, shopName: "Sai", shopGstin: "<b>", label, fonts })).toContain("GSTIN: &lt;b&gt;");
+    for (const shopGstin of [null, undefined, ""]) expect(text(billHtml({ bill, shopName: "Sai", shopGstin, label, fonts }))).not.toMatch(/GSTIN/);
+  });
+
   it("never shows the customer's phone or the offers tick", () => {
     const html = billHtml({ bill, shopName: "Sai", label, fonts });
     expect(html).not.toMatch(/98765|9876543210|offers/i);

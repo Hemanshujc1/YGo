@@ -8,7 +8,9 @@ export const PushTokenBody = z.strictObject({
 export type PushTokenBody = z.infer<typeof PushTokenBody>;
 
 /** What a notification reports (CONTEXT.md, Notifications). Later tickets add theirs. */
-export const NotificationKind = z.enum(["order_placed", "order_cancelled_by_customer", "order_accepted", "order_rejected", "order_expired"]);
+export const NotificationKind = z.enum([
+  "order_placed", "order_cancelled_by_customer", "order_accepted", "order_rejected", "order_expired", "order_partially_accepted",
+]);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 
 /** One row of C22 or S41, in the words its push carried (NOT-1). A tap opens `orderId` when there is one. */

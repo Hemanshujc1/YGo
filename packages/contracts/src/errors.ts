@@ -152,6 +152,11 @@ export const ErrorCode = z.enum([
   "STAFF_AT_ANOTHER_SHOP",
   "STAFF_ALREADY_MEMBER",
   "ALREADY_LINKED",
+  "PROPOSAL_OPEN",
+  "CONFIRMATION_EXPIRED",
+  "NEGATIVE_CONTRIBUTION_CANCELLED",
+  "EMPTY_ORDER",
+  "INVALID_PARTIAL_ACCEPT",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

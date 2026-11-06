@@ -167,6 +167,16 @@ export const Pan = z
   .overwrite((value) => withoutSpaces(value).toUpperCase())
   .regex(/^[A-Z]{5}\d{4}[A-Z]$/);
 
+/**
+ * A GSTIN: 15 characters in the pattern of the GSTN schema (two digits for the state, the PAN, an entity number,
+ * "Z" and a check character), stored in capitals. The shape only: no checksum and no match against the shop's PAN.
+ * Optional on a shop; a receipt carries it only when there is one (CONTEXT.md, #537).
+ */
+export const Gstin = z
+  .string()
+  .overwrite((value) => withoutSpaces(value).toUpperCase())
+  .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/);
+
 /** An FSSAI licence or registration number: 14 digits (ONB-3). */
 export const FssaiNumber = z.string().overwrite(withoutSpaces).regex(/^\d{14}$/);
 

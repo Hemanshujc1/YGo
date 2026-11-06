@@ -108,7 +108,7 @@ export default function BillScreen() {
   const matches = search.trim() ? read?.items.filter((item) => item.name.toLowerCase().includes(search.trim().toLowerCase()) && !lines.some((line) => line.item.packId === item.packId)) ?? [] : [];
 
   // The bill cards only show while the Stock on the phone is open.
-  const share = (bill: BillRow) => loaded ? shareBill({ bill, shopName: access.shopName(), label: (packId) => loaded.queue.label(loaded.shopId, packId) }) : Promise.resolve();
+  const share = (bill: BillRow) => loaded ? shareBill({ bill, shopName: access.shopName(), shopGstin: access.shopGstin(), label: (packId) => loaded.queue.label(loaded.shopId, packId) }) : Promise.resolve();
 
   function add(item: Item) {
     if (!item.counterPrice) return;
