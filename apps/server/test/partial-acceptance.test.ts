@@ -330,9 +330,9 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
 
     const now = clock.now();
     const inserted = await database.pool.query<{ id: string }>(
-      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, address_label, address_flat,
+      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat,
          address_pincode, address_point, product_value, delivery_fee, total, rate_card_version, quote)
-       VALUES ($1, $2, 'placed', $5, $5, 'home', '101', '411038',
+       VALUES ($1, $2, 'placed', $5, $5, 'Sai General Stores', 'Paud Road', '411045', 'home', '101', '411038',
          ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 200, 30, 230, $3, $4) RETURNING id`,
       [customerId, shopId, version, JSON.stringify(fakeQuote), now]);
     const orderId = inserted.rows[0]?.id as string;
