@@ -142,6 +142,12 @@ export default function Home() {
                 <Text className="text-body font-semibold text-on-primary">{strings.hours.open}</Text>
               </Pressable>
             </Link>
+            {/* A Live or Suspended shop has Staff on the button below; an Approved one can already invite (#535). */}
+            {application.state === "approved" && <Link href="/staff" asChild>
+              <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
+                <Text className="text-body font-semibold text-primary">{strings.staff.open}</Text>
+              </Pressable>
+            </Link>}
             <Link href="/opening-stock" asChild>
               <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
                 <Text className="text-body font-semibold text-primary">{strings.shopSetup.stock}</Text>
@@ -224,9 +230,9 @@ function Plain({ children, refreshing = false, onRefresh, stock = false, orders 
           <Text className="text-body font-semibold text-primary">{strings.voids.open}</Text>
         </Pressable>
       </Link>}
-      {orders && owner && <Link href="/delivery-access" asChild>
+      {orders && owner && <Link href="/staff" asChild>
         <Pressable accessibilityRole="button" className="rounded-button border border-primary px-4 py-3">
-          <Text className="text-body font-semibold text-primary">{strings.orders.staffDeliveryOpen}</Text>
+          <Text className="text-body font-semibold text-primary">{strings.staff.open}</Text>
         </Pressable>
       </Link>}
       {stock && <Link href="/stock" asChild>

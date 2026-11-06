@@ -239,6 +239,8 @@ describe("Staff invite and join (#58)", () => {
     const staff = await person("staff@example.com", "+919800000001");
     await join(staff, ((await invite(a, "+919800000001", true)).json() as { code: string }).code);
     await invite(a, "+919800000002");
+    // The Owner's list names each person by phone as well (S16).
+    expect((await app.inject({ method: "GET", url: "/v1/me/shop-staff", headers: a.headers })).json()).toEqual({ staff: [{ accountId: staff.id, name: "Ravi", phone: "+919800000001", canDeliver: true }] });
     // B sees none of A's people and cannot change them.
     expect((await app.inject({ method: "GET", url: "/v1/me/staff-invites", headers: b.headers })).json()).toEqual({ invites: [] });
     expect((await app.inject({ method: "GET", url: "/v1/me/shop-staff", headers: b.headers })).json()).toEqual({ staff: [] });

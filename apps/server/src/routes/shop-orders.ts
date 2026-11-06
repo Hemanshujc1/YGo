@@ -220,8 +220,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       "SELECT shop_id AS \"shopId\" FROM shop_members WHERE account_id = $1 AND role = 'owner'", [who.accountId]);
     if (!owner) return reply.code(403).send({ error: { code: "FORBIDDEN" } });
     const { rows } = await pool.query<ShopStaffResponse["staff"][number]>(
-      `SELECT m.account_id AS "accountId", a.name, m.can_deliver AS "canDeliver" FROM shop_members m
-       JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = $1 AND m.role = 'staff' ORDER BY lower(a.name)`, [owner.shopId]);
+      `SELECT m.account_id AS "accountId", a.name, a.phone, m.can_deliver AS "canDeliver" FROM shop_members m
+       JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = $1 AND m.role = 'staff' ORDER BY lower(a.name), m.account_id`, [owner.shopId]);
     return { staff: rows };
   });
 
