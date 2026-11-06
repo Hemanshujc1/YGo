@@ -21,8 +21,12 @@ export type StaffInvite = z.infer<typeof StaffInvite>;
 export const StaffInvitesResponse = z.strictObject({ invites: z.array(StaffInvite) });
 export type StaffInvitesResponse = z.infer<typeof StaffInvitesResponse>;
 
+/** 32 characters with no I, O, 0 or 1, so a code read aloud or off a screen is not mistyped. The server draws codes from it and S21 accepts only it. */
+export const JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const JOIN_CODE_LENGTH = 8;
+
 /** The invited person types the code the Owner shows (S21). */
-export const JoinShopBody = z.strictObject({ code: z.string().trim().toUpperCase().regex(/^[A-Z2-9]{8}$/) });
+export const JoinShopBody = z.strictObject({ code: z.string().trim().toUpperCase().regex(new RegExp(`^[${JOIN_CODE_ALPHABET}]{${JOIN_CODE_LENGTH}}$`)) });
 export type JoinShopBody = z.infer<typeof JoinShopBody>;
 export const JoinShopResponse = z.strictObject({ shopName: z.string().nullable() });
 export type JoinShopResponse = z.infer<typeof JoinShopResponse>;

@@ -188,7 +188,7 @@ All delivery screens work offline. The server rechecks them when the phone recon
 |---|---|---|---|---|
 | **S16 Staff** | The staff list with the "can deliver" flag. A phone number alone never lets anyone in. Re-inviting someone keeps their history | code shown, staff list | ACC-6, ACC-7, ACC-11, DLV-1 | [#58](https://github.com/Hemanshujc1/YGo/issues/58) |
 | **S20 Invite staff** | The Owner enters a phone number and sets "can deliver". The app shows a one-time join code. A number already linked to another shop is refused, because a person is linked to one shop at a time | enter number, sending, already at another shop, re-invite, code shown | ACC-4, ACC-6, ACC-7 | [#58](https://github.com/Hemanshujc1/YGo/issues/58) |
-| **S21 Join a shop** | The invited person opens this on their own phone, from C23 "Join a shop", and types the code | empty, checking, wrong code, expired code, joined | ACC-4, ACC-6 | [#58](https://github.com/Hemanshujc1/YGo/issues/58) |
+| **S21 Join a shop** | The invited person opens this on their own phone, from C23 "Join a shop" or from the Shopkeeper app's Start screen, and types the code | empty, checking, wrong code, expired code, joined | ACC-4, ACC-6 | [#58](https://github.com/Hemanshujc1/YGo/issues/58) |
 
 ### Account and settings
 
@@ -319,6 +319,7 @@ These are decisions that differ from, or extend, the PRD or the brief. The PRD h
 | Decision | Reason | Impact on dev |
 |---|---|---|
 | **The customer gives a name** at first sign-in, with the phone number (D-16, `ACC-2`, `DLV-7`) | The owner wants the shop and the deliverer to know whom they serve | C02 has a name field, C23 has "change name", and S27 and A15 show the name. GitHub issues #34 and #56 carry the name in their acceptance criteria |
+| **Switching between the Customer and Shopkeeper apps is informational for now** (`ACC-4`), 6 Nov 2026. C23 shows "Join a shop" when the account has no shop link and a line naming the shop when it has; the Shopkeeper side's "Switch to Customer" waits with it. The two apps have no way to open each other yet | The apps are separate and no switch flow exists or is tested; store builds do not exist either | #536 builds C23 and S21 with the plain line. #551 builds the real switch ("Switch to shop" on C23, "Switch to Customer" on S36). ACC-4 stays open on #58 until then |
 | **The Owner enters a renewed FSSAI expiry** in the app, and the auto-pause lifts on save. Admin can correct it (D-17, `ONB-6`) | No one owned this update before | S35 has the date field and A09 has the correction |
 | **Area Manager payouts are weekly**, on the statement week (D-18, `ADM-9`) | Matches the statement cycle | A24 groups payouts by statement week |
 | **Admin settles a disputed repayment as paid or still owed**, with a reason both sides see. Suspension stays a separate step (D-19, `TRU-4`) | Admin needs a way to close a dispute without the app holding money | A27 has the outcome radio and a pre-filled link to suspension. C21 shows Admin's reason |

@@ -82,7 +82,8 @@ export const strings = {
       title: "Bring your shop to YGo",
       body: "Tell us about your shop. You can save it and finish later.",
       button: "Start my shop application",
-      staff: "Joining a shop as staff? That's coming soon.",
+      staff: "Joining a shop as staff?",
+      join: "Join a shop with a code",
       offline: "Could not start. Check your connection, then try again.",
     },
     form: {
@@ -308,6 +309,30 @@ export const strings = {
       ACTION_CONFLICT: "This change clashes with one the server already has.",
       SHOP_NOT_BILLING: "Counter billing is open only while your shop is Live or Suspended.",
     } satisfies Record<SyncActionCode, string>,
+  },
+  // S21 Join a shop (#536), opened from Start for a person the Owner invited.
+  joinShop: {
+    title: "Join a shop",
+    body: "Enter the code the shop's Owner gave you. It works once, for the number they invited.",
+    label: "Join code",
+    hint: "8 letters and numbers.",
+    button: "Join shop",
+    checking: "Checking…",
+    problems: {
+      short: "Enter all 8 characters of the code.",
+      wrong: "That code is not right. Check it with the Owner.",
+      expired: "This code has expired. Ask the Owner for a new one.",
+      locked: "Too many wrong tries. Ask the Owner to invite you again.",
+      linked: "This account already works at a shop. An account can have one shop link.",
+      offline: "Could not reach YGo. Check your connection and try again.",
+      other: "Something went wrong. Try again.",
+    },
+    joinedTitle: (shop: string | null) => (shop ? `You joined ${shop}` : "You joined the shop"),
+    joinedBody: "You can now work at the shop.",
+    done: "Open the shop",
+    refreshButton: "Try again",
+    refreshFailed: "You joined, but this phone could not open the shop yet. Check your connection and try again.",
+    back: "Back",
   },
   // S16 Staff and S20 Invite staff (#535): the Owner's people, their `can deliver` flag, and the one-time join code.
   staff: {
