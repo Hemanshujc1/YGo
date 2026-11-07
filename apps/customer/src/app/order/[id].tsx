@@ -105,6 +105,7 @@ export default function OrderScreen() {
   const { id, placed, phone: carried } = useLocalSearchParams<{ id: string; placed?: string; phone?: string }>();
   const { order, view } = useOrder(id ?? "");
   const [asking, setAsking] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [receipt, setReceipt] = useState<"idle" | "making" | "failed">("idle");
   const shown = view.order;
   // Unknown until the order is read, when no phone came with the link.
@@ -180,6 +181,12 @@ export default function OrderScreen() {
             {shown && shownStatus(shown) === "placed" && (
               <Button label={view.cancelling ? words.cancelling : words.cancel} busy={view.cancelling} onPress={() => setAsking(true)} variant="text" />
             )}
+            {/* After acceptance only the shop can agree (ORD-5, #59); nothing from ready on, or once it kept the order. */}
+            {shown && ["accepted", "preparing"].includes(shown.status) && !shown.cancelRequest && (
+              <Button label={view.asking ? words.asking : words.ask} busy={view.asking} onPress={() => setAskOpen(true)} variant="text" />
+            )}
+            {shown?.cancelRequest?.status === "asked" && <Text className="text-secondary text-muted">{words.askWaiting}</Text>}
+            {shown?.cancelRequest?.status === "kept" && <Text className="text-secondary text-muted">{words.askKept}</Text>}
             {view.notice && <Text accessibilityLiveRegion="polite" className="text-secondary text-text">{view.notice}</Text>}
           </View>
         )}
@@ -195,6 +202,18 @@ export default function OrderScreen() {
           void order.cancel();
         }}
         onCancel={() => setAsking(false)}
+      />
+      <Confirm
+        visible={askOpen}
+        title={words.askTitle}
+        body={words.askBody}
+        confirm={words.ask}
+        cancel={words.keep}
+        onConfirm={() => {
+          setAskOpen(false);
+          void order.ask();
+        }}
+        onCancel={() => setAskOpen(false)}
       />
     </View>
   );

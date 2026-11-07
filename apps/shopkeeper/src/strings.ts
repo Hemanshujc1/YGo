@@ -431,6 +431,16 @@ export const strings = {
     short: (item: string, left: string, needs: string) => `${item}: ${left} left, order needs ${needs}`,
     rejectedBecause: (reason: string) => `Rejected: ${reason}`,
     sheet: { title: "Reject this order?", confirm: "Reject order", cancel: "Keep order" },
+    // Cancelling after acceptance (ORD-5, #59).
+    cancelSheet: { title: "Cancel this order?", confirm: "Cancel order", cancel: "Keep order" },
+    cancelOrder: "Cancel order",
+    cancelling: "Cancelling",
+    cancelAsked: "Asked to cancel",
+    askedTitle: "Customer asked to cancel",
+    askedBody: "Agree to cancel it, or keep the order and the customer can call you.",
+    agree: "Agree", agreeing: "Agreeing", keepOrder: "Keep order", keeping: "Keeping",
+    agreeTitle: "Cancel this order?",
+    agreeBody: "The customer asked to cancel. Agreeing cancels it and cannot be undone.",
     reasons: {
       out_of_stock: "Items out of stock",
       too_busy: "Too busy right now",

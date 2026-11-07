@@ -1,6 +1,6 @@
 import { RejectReason, type ShopOrderResponse } from "@ygo/contracts";
 import { formatTime } from "@ygo/format";
-import { Button, StatusChip, Text, useInFront } from "@ygo/mobile";
+import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
 import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
@@ -56,8 +56,9 @@ function Detail({ order }: { order: ShopOrderResponse }) {
   );
 }
 
-/** "Reject this order?": a fixed list of reasons; Reject stays off until one is chosen (design system, Reason picker). */
-function RejectSheet({ chosen, onChoose, onConfirm, onCancel }: {
+/** "Reject this order?" or "Cancel this order?" (#59): a fixed list of reasons; the button stays off until one is chosen (design system, Reason picker). */
+function RejectSheet({ sheet, chosen, onChoose, onConfirm, onCancel }: {
+  sheet: { title: string; confirm: string; cancel: string };
   chosen: RejectReason | null;
   onChoose: (reason: RejectReason) => void;
   onConfirm: () => void;
@@ -68,10 +69,10 @@ function RejectSheet({ chosen, onChoose, onConfirm, onCancel }: {
     <Modal transparent visible animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onCancel}>
       <View className="flex-1 justify-end bg-scrim">
         <View accessibilityViewIsModal className="gap-2 rounded-t-sheet bg-raised px-4 pt-4" style={{ paddingBottom: insets.bottom + 12 }}>
-          <Text accessibilityRole="header" className="text-headline font-semibold text-text">{words.sheet.title}</Text>
+          <Text accessibilityRole="header" className="text-headline font-semibold text-text">{sheet.title}</Text>
           <ReasonPicker reasons={RejectReason.options} chosen={chosen} words={words.reasons} onChoose={onChoose} />
-          <Button label={words.sheet.confirm} disabled={!chosen} onPress={onConfirm} />
-          <Button label={words.sheet.cancel} variant="text" onPress={onCancel} />
+          <Button label={sheet.confirm} disabled={!chosen} onPress={onConfirm} />
+          <Button label={sheet.cancel} variant="text" onPress={onCancel} />
         </View>
       </View>
     </Modal>
@@ -85,6 +86,8 @@ export default function OrderScreen() {
   const view = useSyncExternalStore(order.subscribe, order.get);
   useInFront(order);
   const [rejecting, setRejecting] = useState<{ chosen: RejectReason | null } | null>(null);
+  const [cancelling, setCancelling] = useState<{ chosen: RejectReason | null } | null>(null);
+  const [agreeing, setAgreeing] = useState(false);
   // Known by now: the orders list that led here is the Owner's or Staff's own shop. Only decides what shows; the server refuses Staff.
   const owner = access.role() === "owner";
   const [deliverers, setDeliverers] = useState<Awaited<ReturnType<typeof api.shopDeliverers>> | null>(null);
@@ -150,7 +153,18 @@ export default function OrderScreen() {
             {view.shortLines.map((line, index) => <Text key={index} className="text-secondary tabular-nums text-text">{`• ${shortLabel(line)}`}</Text>)}
           </View>
         )}
+        {shown && ["accepted", "preparing"].includes(shown.status) && shown.cancelRequest?.status === "asked" && (
+          <View className="gap-2 rounded-card border border-border bg-surface p-4">
+            <Text className="text-body font-semibold text-text">{words.askedTitle}</Text>
+            <Text className="text-secondary text-muted">{words.askedBody}</Text>
+            <Button label={view.answering === "agree" ? words.agreeing : words.agree} variant="secondary" busy={view.answering === "agree"} disabled={view.answering !== null} onPress={() => setAgreeing(true)} />
+            <Button label={view.answering === "keep" ? words.keeping : words.keepOrder} busy={view.answering === "keep"} disabled={view.answering !== null} onPress={() => void order.keep()} />
+          </View>
+        )}
         {shown && <Detail order={shown} />}
+        {shown && ["accepted", "preparing", "ready"].includes(shown.status) && access.role() !== null && (
+          <Button label={view.answering === "cancel" ? words.cancelling : words.cancelOrder} variant="secondary" busy={view.answering === "cancel"} disabled={view.answering !== null} onPress={() => setCancelling({ chosen: null })} />
+        )}
         {shown && (["accepted", "preparing"].includes(shown.status) || (shown.status === "ready" && owner)) && <View className="gap-2">
           {shown.status === "accepted" && <Button label={words.preparing} busy={working} onPress={() => {
             setWorking(true); void api.advanceShopOrder(shown.id, "preparing").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
@@ -249,8 +263,35 @@ export default function OrderScreen() {
           />
         </View>
       )}
+      {cancelling && (
+        <RejectSheet
+          sheet={words.cancelSheet}
+          chosen={cancelling.chosen}
+          onChoose={(chosen) => setCancelling({ chosen })}
+          onCancel={() => setCancelling(null)}
+          onConfirm={() => {
+            if (!cancelling.chosen) return;
+            const reason = cancelling.chosen;
+            setCancelling(null);
+            void order.cancel(reason);
+          }}
+        />
+      )}
+      <Confirm
+        visible={agreeing}
+        title={words.agreeTitle}
+        body={words.agreeBody}
+        confirm={words.agree}
+        cancel={words.keepOrder}
+        onConfirm={() => {
+          setAgreeing(false);
+          void order.agree();
+        }}
+        onCancel={() => setAgreeing(false)}
+      />
       {rejecting && (
         <RejectSheet
+          sheet={words.sheet}
           chosen={rejecting.chosen}
           onChoose={(chosen) => setRejecting({ chosen })}
           onCancel={() => setRejecting(null)}

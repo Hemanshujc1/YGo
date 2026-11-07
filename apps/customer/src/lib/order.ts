@@ -74,6 +74,8 @@ export type OrderView = {
   /** A pull to refresh is on its way. */
   refreshing: boolean;
   cancelling: boolean;
+  /** The ask to cancel is on its way (ORD-5, #59). */
+  asking: boolean;
   confirmingItems: boolean;
   /** Why Cancel didn't go through. */
   notice: string | null;
@@ -82,6 +84,7 @@ export type OrderView = {
 type Client = {
   order(id: string): Promise<ApiResult<OrderResponse>>;
   cancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
+  askToCancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
   confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>>;
 };
 
@@ -90,7 +93,7 @@ type Client = {
  * once the status is final (owner's improvement on #52); `seed` is the order placement answered with.
  */
 export function createOrder(client: Client, id: string, seed?: OrderResponse, timers: Timers = phoneTimers, every = pollEvery) {
-  let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, confirmingItems: false, notice: null };
+  let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, asking: false, confirmingItems: false, notice: null };
   // Each read and Cancel takes a ticket, so an older answer never replaces a newer one.
   const poller = createPoller(() => void read(), every, timers);
   const listeners = new Set<() => void>();
@@ -104,7 +107,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
 
   async function read(pull = false) {
     // Cancel's answer is the newest word on the order; a read waits until it lands.
-    if (view.cancelling || view.confirmingItems) return;
+    if (view.cancelling || view.asking || view.confirmingItems) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
@@ -163,6 +166,24 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         // A read dropped while Cancel was on its way didn't set the next one.
         schedule();
       }
+    },
+
+    /** After acceptance the shop must agree (ORD-5, #59). Never sent twice: a stale or offline answer is shown, the order read again, and the Customer asks again by hand. */
+    async ask() {
+      if (view.asking) return;
+      poller.ticket();
+      poller.unschedule();
+      set({ asking: true, notice: null });
+      const answer = await client.askToCancelOrder(id).catch(() => "offline" as const);
+      set({ asking: false, refreshing: false });
+      if (answer !== "offline" && answer.ok) {
+        set({ status: "ready", order: answer.data });
+        schedule();
+        return;
+      }
+      // The notice stays whatever the read says; a failed read only sets `message`.
+      set({ notice: answer === "offline" ? strings.order.askOffline : strings.errors[answer.code] });
+      await read();
     },
 
     async confirmItems() {
