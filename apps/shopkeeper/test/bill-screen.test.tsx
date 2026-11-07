@@ -387,4 +387,17 @@ describe("S06 Counter bill (#468)", () => {
     expect(texts()).toContain("Today's bills · 1");
     expect(texts()).not.toContain("Bills found");
   });
+
+  it("offers a product request on every named typed line, carrying its name and price, and leaves the bill as it was (#565)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    const request = (props: Record<string, unknown>) => props.accessibilityLabel === "Typed item 1: Request this as a product";
+    expect(find(request)).toBeUndefined();
+    type("Typed item 1: Item name", "  Rope "); type("Typed item 1: Price each (₹)", "15");
+    expect(find(request)).toBeDefined();
+    expect(find((props) => typeof props.href === "object")?.href).toEqual({ pathname: "/product-requests", params: { name: "Rope", price: "15" } });
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Item name")?.value).toBe("  Rope ");
+    expect(find((props) => props.accessibilityLabel === "Typed item 1: Price each (₹)")?.value).toBe("15");
+    expect(queue.batch(shopId).actions).toHaveLength(0);
+  });
 });
