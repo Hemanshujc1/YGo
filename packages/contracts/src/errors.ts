@@ -27,6 +27,9 @@ import { LiveCheck } from "./shops";
  * - AREA_NAME_IN_USE (409): another Area has this name, ignoring case.
  * - PINCODE_IN_OTHER_AREA (409): another Area holds one or more of the
  *   pincodes; `conflicts` names each pincode and the Area holding it.
+ * Product requests (#62): PRODUCT_REQUEST_RESOLVED (409), the request was already approved, mapped or rejected; PRODUCT_IMAGE_REQUIRED (409),
+ * approval needs the product's three image sizes first; PACK_ALREADY_LISTED (409), the shop already lists the pack it would be mapped to.
+ * A new request with a name and brand or a barcode the catalog holds answers PRODUCT_NAME_IN_USE or BARCODE_IN_USE.
  * Master products (#203):
  * - PRODUCT_NAME_IN_USE (409): another global product has the same name and brand, ignoring case.
  * Catalog packs (#205):
@@ -132,6 +135,9 @@ export const ErrorCode = z.enum([
   "HOLIDAY_OVERLAP",
   "TOO_MANY_HOLIDAYS",
   "SEARCH_TERM_IN_USE",
+  "PRODUCT_REQUEST_RESOLVED",
+  "PRODUCT_IMAGE_REQUIRED",
+  "PACK_ALREADY_LISTED",
   "CART_CHANGED",
   "OWN_SHOP",
   "ORDER_STATUS_CHANGED",

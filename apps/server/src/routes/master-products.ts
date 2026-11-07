@@ -211,7 +211,7 @@ export function registerMasterProductRoutes(app: FastifyInstance, { pool, clock,
       await client.query(
         `UPDATE master_products SET name = $1, brand = $2, category_id = $3, base_unit = $4,
          classification = $5, active = $6, image_256_key = $7, image_512_key = $8,
-         image_1024_key = $9, published = true WHERE id = $10`,
+         image_1024_key = $9, published = published OR requested_by_shop_id IS NULL WHERE id = $10`,
         [nextName, nextBrand, nextCategory, nextBaseUnit, nextClassification, nextActive,
           stored?.keys[256] ?? oldKeys?.[256], stored?.keys[512] ?? oldKeys?.[512], stored?.keys[1024] ?? oldKeys?.[1024], id],
       );

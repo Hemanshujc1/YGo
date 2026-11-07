@@ -29,6 +29,10 @@ import {
   PacksResponse,
   AdminShopApplication,
   LiveCheck,
+  AdminProductRequest,
+  AdminProductRequestsResponse,
+  type MapProductRequestBody,
+  type RejectProductRequestBody,
   ProofException,
   ProofExceptionPhotoAccess,
   ProofExceptionsResponse,
@@ -121,7 +125,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -336,6 +340,26 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
       return result(await adminRequest("GET", `/v1/admin/proof-exceptions?${params}`), ProofExceptionsResponse);
+    },
+
+    /** `GET /v1/admin/product-requests`: A11, the requests waiting for Admin, or the answered ones (CAT-3). */
+    async listProductRequests(status: "pending" | "resolved" = "pending"): Promise<ApiResult<AdminProductRequestsResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/product-requests?status=${status}`), AdminProductRequestsResponse);
+    },
+
+    /** `POST /v1/admin/product-requests/:id/approve`: publishes the product. 409 `PRODUCT_IMAGE_REQUIRED` until its images are added on the product. */
+    async approveProductRequest(id: string): Promise<ApiResult<AdminProductRequest>> {
+      return result(await adminRequest("POST", `/v1/admin/product-requests/${encodeURIComponent(id)}/approve`), AdminProductRequest);
+    },
+
+    /** `POST /v1/admin/product-requests/:id/map`: points the shop at an existing catalog pack and moves its stock. 409 `PACK_ALREADY_LISTED` when the shop lists that pack. */
+    async mapProductRequest(id: string, packId: string): Promise<ApiResult<AdminProductRequest>> {
+      return result(await adminRequest("POST", `/v1/admin/product-requests/${encodeURIComponent(id)}/map`, { packId } satisfies MapProductRequestBody), AdminProductRequest);
+    },
+
+    /** `POST /v1/admin/product-requests/:id/reject`: with a reason; `excludedGood` also takes the product off the shop's counter list (D-9). */
+    async rejectProductRequest(id: string, body: RejectProductRequestBody): Promise<ApiResult<AdminProductRequest>> {
+      return result(await adminRequest("POST", `/v1/admin/product-requests/${encodeURIComponent(id)}/reject`, body), AdminProductRequest);
     },
 
     /** `POST /v1/admin/proof-exceptions/:orderId/review`: mark one reviewed; marking it again changes nothing. */

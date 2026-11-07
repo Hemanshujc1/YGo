@@ -10,7 +10,7 @@ export type PushTokenBody = z.infer<typeof PushTokenBody>;
 /** What a notification reports (CONTEXT.md, Notifications). Later tickets add theirs. */
 export const NotificationKind = z.enum([
   "order_placed", "order_cancelled_by_customer", "order_accepted", "order_rejected", "order_expired", "order_partially_accepted",
-  "order_cancel_requested", "order_cancel_agreed", "order_cancel_kept", "order_cancelled_by_shop",
+  "order_cancel_requested", "order_cancel_agreed", "order_cancel_kept", "order_cancelled_by_shop", "product_request_approved", "product_request_rejected",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 

@@ -19,6 +19,7 @@ import { CatalogImport } from "./catalog-import";
 import { CounterBills } from "./counter-bills";
 import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
+import { ProductRequests } from "./product-requests";
 import { ProofExceptions } from "./proof-exceptions";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
@@ -57,6 +58,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/rate-cards", label: strings.rateCards },
     { path: "/price-simulator", label: strings.priceSimulator },
     { path: "/products", label: strings.products },
+    { path: "/product-requests", label: strings.productRequests },
     { path: "/search-terms", label: strings.searchTerms },
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
@@ -347,6 +349,7 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   const guarded = ({ loader = () => null, areaManager, ...route }: GuardedRoute): RouteObject =>
     ({ ...route, loader: byRole(api, loader, areaManager) });
   const applicationsLoader = listLoader(() => api.listShopApplications(), (data) => data.applications);
+  const productRequestsLoader = listLoader(() => api.listProductRequests(), (data) => data);
   const proofExceptionsLoader = listLoader(() => api.listProofExceptions(), (data) => data);
   const applicationLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
@@ -466,6 +469,13 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: counterBillsLoader,
       element: <Page protectedArea api={api}><CounterBills api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.counterBillsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/product-requests",
+      loader: productRequestsLoader,
+      element: <Page protectedArea api={api}><ProductRequests api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.productRequestsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     // An Area Manager uses A28 too; the server shows them only the proof exceptions of their assigned shops (#60).

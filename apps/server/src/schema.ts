@@ -110,6 +110,8 @@ export const masterProducts = pgTable("master_products", {
   image1024Key: text("image_1024_key"),
   active: boolean("active").notNull().default(true),
   published: boolean("published").notNull().default(false),
+  // Set on the temporary product a shop's request made (CAT-3, #62): unpublished, so no customer sees it, and billable only by that shop.
+  requestedByShopId: uuid("requested_by_shop_id").references(() => shops.id),
 }, (table) => [
   check("master_products_name_valid", sql`btrim(${table.name}) <> '' AND char_length(${table.name}) <= 200`),
   check("master_products_brand_valid", sql`${table.brand} IS NULL OR (btrim(${table.brand}) <> '' AND char_length(${table.brand}) <= 100)`),
@@ -338,6 +340,8 @@ export const shopListings = pgTable("shop_listings", {
   lowStockLevel: numeric("low_stock_level", { precision: 12, scale: 3 }).notNull().default("0"),
   available: boolean("available").notNull().default(true),
   outOfStock: boolean("out_of_stock").notNull().default(false),
+  // A product request rejected as an excluded good, or mapped away, leaves the counter list (CAT-8, D-9, #62). History keeps naming it.
+  removedFromCounter: boolean("removed_from_counter").notNull().default(false),
   minimumOrderQuantity: numeric("minimum_order_quantity", { precision: 12, scale: 3 }),
   quantityStep: numeric("quantity_step", { precision: 12, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -373,8 +377,8 @@ export const stockMovements = pgTable("stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction') = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
-  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale', 'void')`),
-  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0)
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale', 'void', 'transfer_out', 'transfer_in')`),
+  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale', 'transfer_out', 'transfer_in')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0)
     AND (${table.kind} <> 'void' OR ${table.quantity} > 0) AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
   uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
@@ -924,13 +928,15 @@ export const notifications = pgTable("notifications", {
   title: text("title").notNull(),
   body: text("body").notNull(),
   orderId: uuid("order_id").references(() => orders.id),
+  // The shop a shop-level notice belongs to, when no order does (#62); a push is still sent only while the recipient is in it.
+  shopId: uuid("shop_id").references(() => shops.id),
   loud: boolean("loud").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
 }, (table) => [
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'product_request_approved', 'product_request_rejected')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session
@@ -998,4 +1004,36 @@ export const pushReceipts = pgTable("push_receipts", {
 }, (table) => [
   index("push_receipts_check_after_idx").on(table.checkAfter),
   check("push_receipts_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
+]);
+
+// Words that flag a product request for Admin and never block it (CAT-8, #62). Stored normalized: lowercase letters and digits, single spaces.
+export const denylistWords = pgTable("denylist_words", {
+  word: text("word").primaryKey(),
+}, (table) => [check("denylist_words_normalized", sql`${table.word} ~ '^[a-z0-9]+( [a-z0-9]+)*$'`)]);
+
+// A shop's request for a product the catalog lacks (CAT-3, #62). It owns a temporary unpublished product, pack and listing,
+// so the shop sells it at the counter at once. `clientId` makes a retried request one request.
+export const productRequests = pgTable("product_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  requestedBy: uuid("requested_by").notNull().references(() => accounts.id),
+  clientId: uuid("client_id").notNull(),
+  productId: uuid("product_id").notNull().references(() => masterProducts.id),
+  packId: uuid("pack_id").notNull().references(() => packs.id),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  status: text("status").notNull().default("pending"),
+  flagged: boolean("flagged").notNull().default(false),
+  reason: text("reason"),
+  excludedGood: boolean("excluded_good").notNull().default(false),
+  mappedPackId: uuid("mapped_pack_id").references(() => packs.id),
+  resolvedBy: uuid("resolved_by").references(() => accounts.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("product_requests_client_id_idx").on(table.shopId, table.clientId),
+  index("product_requests_status_created_at_idx").on(table.status, table.createdAt),
+  check("product_requests_status_valid", sql`${table.status} IN ('pending', 'approved', 'mapped', 'rejected')`),
+  check("product_requests_resolution_valid", sql`(${table.status} = 'pending') = (${table.resolvedAt} IS NULL)
+    AND (${table.status} = 'rejected') = (${table.reason} IS NOT NULL) AND (${table.status} = 'mapped') = (${table.mappedPackId} IS NOT NULL)
+    AND (${table.excludedGood} = false OR ${table.status} = 'rejected')`),
 ]);

@@ -150,6 +150,17 @@ export async function queueNotification(client: PoolClient, orderId: string, rul
       rule.loud ?? false, at, orderTiming.reRingSeconds]);
 }
 
+/** Tells every Owner and Staff member of a shop something that belongs to no order (NOT-6, #62), with its pushes queued, in the caller's transaction. */
+export async function notifyShop(client: PoolClient, shopId: string, kind: "product_request_approved" | "product_request_rejected", title: string, body: string, at: Date): Promise<void> {
+  await client.query(
+    `WITH added AS (
+       INSERT INTO notifications (account_id, app, kind, title, body, shop_id, loud, created_at)
+       SELECT account_id, 'shopkeeper', $2::text, $3::text, $4::text, $1::uuid, false, $5::timestamptz FROM shop_members WHERE shop_id = $1::uuid
+       RETURNING id)
+     INSERT INTO push_queue (notification_id, send_after) SELECT id, $5::timestamptz FROM added`,
+    [shopId, kind, title, body, at]);
+}
+
 /** A phone's push is tried this many times in all, then dropped (NOT-2). */
 const MAX_TRIES = 3;
 const RETRY_SECONDS = 30;
@@ -164,7 +175,7 @@ const RECEIPT_KEPT_SECONDS = 24 * 60 * 60;
 const CLAIM_SECONDS = 60;
 
 /** The kinds a shop's Staff hear of; the Owner hears every kind (S41). */
-const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind);
+const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind).concat(["product_request_approved", "product_request_rejected"]);
 
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of
@@ -173,7 +184,7 @@ const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filt
  */
 const stillDue = `EXISTS (SELECT 1 FROM push_tokens t JOIN sessions s ON s.id = t.session_id
     WHERE t.token = q.token AND t.app = n.app AND s.account_id = n.account_id AND s.expires_at > $1)
-  AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = o.shop_id
+  AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = COALESCE(o.shop_id, n.shop_id)
     AND (m.role = 'owner' OR n.kind = ANY($2::text[]))))
   AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))
   AND NOT (q.floor AND EXISTS (SELECT 1 FROM ring_attempts a WHERE a.id = q.ring_attempt_id AND a.acknowledged_at IS NOT NULL))`;

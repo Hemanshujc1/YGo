@@ -142,6 +142,7 @@ export default function ListingsScreen() {
         {wrong.map((field) => <Text key={field} className="text-secondary text-danger">{words.errors[field as keyof typeof words.errors] ?? words.invalid}</Text>)}
         <Button label={words.save} onPress={() => void save()} busy={saving} />
       </>}
+      <Link href="/product-requests" asChild><Pressable accessibilityRole="button" className="py-2"><Text className="text-body font-semibold text-primary">{strings.productRequests.open}</Text></Pressable></Link>
       <Link href="/opening-stock" asChild><Pressable accessibilityRole="button" className="py-2"><Text className="text-body font-semibold text-primary">{words.stock}</Text></Pressable></Link>
     </ScrollView>
   );
