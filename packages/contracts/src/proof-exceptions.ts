@@ -38,7 +38,7 @@ export type ProofException = z.infer<typeof ProofException>;
 const Count = { total: z.number().int().nonnegative(), open: z.number().int().nonnegative() };
 export const ProofExceptionCounts = z.strictObject({
   shops: z.array(z.strictObject({ shopId: z.uuid(), name: z.string(), ...Count })),
-  deliverers: z.array(z.strictObject({ accountId: z.uuid(), name: z.string().nullable(), shopId: z.uuid(), shopName: z.string(), ...Count })),
+  deliverers: z.array(z.strictObject({ accountId: z.uuid(), name: z.string().nullable(), ...Count })),
 });
 export type ProofExceptionCounts = z.infer<typeof ProofExceptionCounts>;
 

@@ -1,7 +1,7 @@
 import type { createAdminApiClient } from "@ygo/api-client";
 import type { ProofException, ProofExceptionsResponse } from "@ygo/contracts";
 import { formatDateTime } from "@ygo/format";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useLoaderData } from "react-router";
 import { strings } from "./strings";
 
@@ -23,13 +23,22 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
   const [counts, setCounts] = useState(first.counts);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  /** Each load from the top takes a number; an answer that is no longer the latest is dropped, so a slow one can't undo a newer tab or filter. */
+  const latest = useRef(0);
+  /** Set while a page is being fetched, synchronously, so two quick clicks send one request. */
+  const paging = useRef(false);
 
   const query = (state: { status: Status; shopId: string; delivererId: string }) => ({
     status: state.status, ...(state.shopId ? { shopId: state.shopId } : {}), ...(state.delivererId ? { delivererId: state.delivererId } : {}),
   });
   /** From the top: a new tab, a new filter, or after a mark, when the page and the counts both changed. */
   const reload = useCallback(async (state: { status: Status; shopId: string; delivererId: string }) => {
+    const mine = ++latest.current;
+    setLoading(true);
     const answer = await api.listProofExceptions(query(state));
+    if (mine !== latest.current) return;
+    setLoading(false);
     if (!answer.ok) { setProblem(strings.proofExceptionsLoadFailed); return; }
     setProblem(null);
     setRows(answer.data.exceptions); setNext(answer.data.nextCursor); setCounts(answer.data.counts);
@@ -40,11 +49,19 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
     void reload(state);
   };
   async function more() {
-    if (!next) return;
+    if (!next || paging.current || loading) return;
+    paging.current = true;
+    const mine = latest.current;
+    setLoading(true);
     const answer = await api.listProofExceptions({ ...query({ status, shopId, delivererId }), cursor: next });
+    paging.current = false;
+    // A new tab or filter started meanwhile: this page belongs to the old list.
+    if (mine !== latest.current) return;
+    setLoading(false);
     if (!answer.ok) { setProblem(strings.proofExceptionsLoadFailed); return; }
     setProblem(null);
-    setRows((current) => [...current, ...answer.data.exceptions]); setNext(answer.data.nextCursor);
+    setRows((current) => { const seen = new Set(current.map((row) => row.orderId)); return [...current, ...answer.data.exceptions.filter((row) => !seen.has(row.orderId))]; });
+    setNext(answer.data.nextCursor);
   }
   async function review(orderId: string) {
     setBusy(orderId);
@@ -67,8 +84,8 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
       </section>
       <section aria-labelledby="by-deliverer" className="rounded-xl border border-border bg-surface p-4">
         <h2 id="by-deliverer" className="mb-2 font-semibold">{strings.proofExceptionsPerDeliverer}</h2>
-        <ul className="space-y-1">{counts.deliverers.map((person) => <li key={`${person.accountId}:${person.shopId}`} className="flex justify-between gap-3">
-          <span>{person.name ?? "—"} · {person.shopName}</span><span className="tabular-nums text-muted">{strings.proofExceptionsCount(person.total, person.open)}</span>
+        <ul className="space-y-1">{counts.deliverers.map((person) => <li key={person.accountId} className="flex justify-between gap-3">
+          <span>{person.name ?? "—"}</span><span className="tabular-nums text-muted">{strings.proofExceptionsCount(person.total, person.open)}</span>
         </li>)}</ul>
       </section>
     </div>
@@ -115,6 +132,6 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
         </table>
       </div>}
     </section>
-    {next && <button onClick={() => void more()} className="mt-4 h-10 rounded-lg border border-border-strong px-4 font-medium">{strings.proofExceptionsMore}</button>}
+    {next && <button disabled={loading} onClick={() => void more()} className="mt-4 h-10 rounded-lg border border-border-strong px-4 font-medium disabled:opacity-60">{strings.proofExceptionsMore}</button>}
   </>;
 }

@@ -47,17 +47,16 @@ export async function listProofExceptions(db: Db, areaManagerId: string | null, 
   return { exceptions, nextCursor: rows.length > query.limit ? page[page.length - 1]?.cursor ?? null : null };
 }
 
-/** Per shop and per deliverer, over every proof exception the caller may see; `open` is those not yet reviewed. */
+/** Per shop and per deliverer (each deliverer once, across the shops the caller may see), over every proof exception the caller may see; `open` is those not yet reviewed. */
 export async function proofExceptionCounts(db: Db, areaManagerId: string | null): Promise<ProofExceptionCounts> {
   const shops = await db.query<ProofExceptionCounts["shops"][number]>(
     `SELECT o.shop_id AS "shopId", (array_agg(o.shop_name ORDER BY o.status_changed_at DESC))[1] AS name,
        count(*)::int AS total, (count(*) FILTER (WHERE r.order_id IS NULL))::int AS open
      ${fromSql} GROUP BY o.shop_id ORDER BY total DESC, name, o.shop_id`, [areaManagerId]);
   const deliverers = await db.query<ProofExceptionCounts["deliverers"][number]>(
-    `SELECT o.deliverer_id AS "accountId", max(d.name) AS name, o.shop_id AS "shopId",
-       (array_agg(o.shop_name ORDER BY o.status_changed_at DESC))[1] AS "shopName",
+    `SELECT o.deliverer_id AS "accountId", max(d.name) AS name,
        count(*)::int AS total, (count(*) FILTER (WHERE r.order_id IS NULL))::int AS open
-     ${fromSql} AND o.deliverer_id IS NOT NULL GROUP BY o.deliverer_id, o.shop_id ORDER BY total DESC, name, o.deliverer_id`, [areaManagerId]);
+     ${fromSql} AND o.deliverer_id IS NOT NULL GROUP BY o.deliverer_id ORDER BY total DESC, name, o.deliverer_id`, [areaManagerId]);
   return { shops: shops.rows, deliverers: deliverers.rows };
 }
 

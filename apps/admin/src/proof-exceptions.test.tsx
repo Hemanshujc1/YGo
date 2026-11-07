@@ -20,8 +20,8 @@ const row = (n: number, extra: Partial<ProofException> = {}): ProofException => 
 const counts: ProofExceptionsResponse["counts"] = {
   shops: [{ shopId: shopA, name: "Sai General Stores", total: 3, open: 2 }, { shopId: shopB, name: "Kothrud Mart", total: 1, open: 1 }],
   deliverers: [
-    { accountId: asha, name: "Asha", shopId: shopA, shopName: "Sai General Stores", total: 3, open: 2 },
-    { accountId: dev, name: "Dev", shopId: shopB, shopName: "Kothrud Mart", total: 1, open: 1 },
+    { accountId: asha, name: "Asha", total: 3, open: 2 },
+    { accountId: dev, name: "Dev", total: 1, open: 1 },
   ],
 };
 const page = (exceptions: ProofException[], nextCursor: string | null = null): ProofExceptionsResponse => ({ exceptions, nextCursor, counts });
@@ -51,7 +51,9 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     const byShop = screen.getByRole("heading", { name: strings.proofExceptionsPerShop }).closest("section") as HTMLElement;
     expect(byShop.textContent).toContain(`Sai General Stores${strings.proofExceptionsCount(3, 2)}`);
     const byDeliverer = screen.getByRole("heading", { name: strings.proofExceptionsPerDeliverer }).closest("section") as HTMLElement;
-    expect(byDeliverer.textContent).toContain(`Dev · Kothrud Mart${strings.proofExceptionsCount(1, 1)}`);
+    expect(byDeliverer.textContent).toContain(`Dev${strings.proofExceptionsCount(1, 1)}`);
+    // Each deliverer once, with their total across shops.
+    expect(byDeliverer.textContent).toContain(`Asha${strings.proofExceptionsCount(3, 2)}`);
     expect(screen.getAllByRole("button", { name: strings.proofExceptionsReview })).toHaveLength(2);
   });
 
@@ -127,6 +129,63 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     expect(calls.listProofExceptions).toHaveBeenCalledWith({ status: "open", cursor });
     expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1003", "#1002", "#1001"]);
     expect(screen.queryByRole("button", { name: strings.proofExceptionsMore })).toBeNull();
+  });
+
+  it("drops a slow answer that a newer tab or filter has overtaken", async () => {
+    const calls = setup(page([row(3)]));
+    let slow: (value: unknown) => void = () => undefined;
+    calls.listProofExceptions
+      .mockImplementationOnce(() => new Promise((resolve) => { slow = resolve; }))
+      .mockResolvedValueOnce(ok(page([row(1, { reviewed: { at: "2030-01-05T10:00:00.000Z", by: "Ravi Patil" } })])));
+    fireEvent.click(await screen.findByRole("tab", { name: strings.proofExceptionsReviewed }));
+    fireEvent.click(screen.getByRole("tab", { name: strings.proofExceptionsOpen }));
+    await waitFor(() => expect(calls.listProofExceptions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(bodyRows()[0]?.textContent).toContain("#1001"));
+    // The first (Reviewed) request answers last; it must not replace the newer list.
+    slow(ok(page([row(2)])));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(bodyRows()).toHaveLength(1);
+    expect(bodyRows()[0]?.textContent).toContain("#1001");
+    expect(screen.getByRole("tab", { name: strings.proofExceptionsOpen }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("drops a page that arrives after the filter changed", async () => {
+    const cursor = "2030-01-02T10:00:00.000000Z|00000000-0000-4000-8000-00000000c002";
+    const calls = setup(page([row(3), row(2)], cursor));
+    let late: (value: unknown) => void = () => undefined;
+    calls.listProofExceptions
+      .mockImplementationOnce(() => new Promise((resolve) => { late = resolve; }))
+      .mockResolvedValueOnce(ok(page([row(4, { shop: { id: shopB, name: "Kothrud Mart" } })])));
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsMore }));
+    fireEvent.change(screen.getByLabelText(strings.proofExceptionsFilterShop), { target: { value: shopB } });
+    await waitFor(() => expect(bodyRows()[0]?.textContent).toContain("#1004"));
+    late(ok(page([row(1)])));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1004"]);
+  });
+
+  it("sends one request and adds no duplicate rows when Show more is clicked repeatedly", async () => {
+    const cursor = "2030-01-02T10:00:00.000000Z|00000000-0000-4000-8000-00000000c002";
+    const calls = setup(page([row(3), row(2)], cursor));
+    let answer: (value: unknown) => void = () => undefined;
+    calls.listProofExceptions.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const button = await screen.findByRole("button", { name: strings.proofExceptionsMore });
+    fireEvent.click(button); fireEvent.click(button); fireEvent.click(button);
+    expect(calls.listProofExceptions).toHaveBeenCalledTimes(1);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    answer(ok(page([row(1)])));
+    await waitFor(() => expect(bodyRows()).toHaveLength(3));
+    expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1003", "#1002", "#1001"]);
+    expect(calls.listProofExceptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("never lists an order twice when a page repeats one already shown", async () => {
+    const cursor = "2030-01-02T10:00:00.000000Z|00000000-0000-4000-8000-00000000c002";
+    const calls = setup(page([row(3), row(2)], cursor));
+    calls.listProofExceptions.mockResolvedValue(ok(page([row(2), row(1)])));
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsMore }));
+    await waitFor(() => expect(bodyRows()).toHaveLength(3));
+    expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1003", "#1002", "#1001"]);
   });
 
   it("says so, and keeps what it has, when a page or a tab cannot load", async () => {

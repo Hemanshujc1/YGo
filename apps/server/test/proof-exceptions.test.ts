@@ -103,11 +103,11 @@ describe("A28 proof exceptions (DLV-4, #60)", () => {
       { shopId: kothrud, name: "Kothrud Mart", total: 1, open: 1 },
     ]);
     expect(body.counts.deliverers).toEqual(expect.arrayContaining([
-      { accountId: asha, name: "Asha", shopId: sai, shopName: "Sai General Stores", total: 1, open: 0 },
-      { accountId: asha, name: "Asha", shopId: kothrud, shopName: "Kothrud Mart", total: 1, open: 1 },
-      { accountId: dev, name: "Dev", shopId: sai, shopName: "Sai General Stores", total: 1, open: 1 },
+      { accountId: asha, name: "Asha", total: 2, open: 1 },
+      { accountId: dev, name: "Dev", total: 1, open: 1 },
     ]));
-    expect(body.counts.deliverers).toHaveLength(3);
+    // One row per deliverer, whatever number of shops they delivered for.
+    expect(body.counts.deliverers).toHaveLength(2);
   });
 
   it("shows the Reviewed tab with who reviewed and when", async () => {
@@ -144,10 +144,11 @@ describe("A28 proof exceptions (DLV-4, #60)", () => {
     const adminOwn = await order({ shopId: adminShop, customerId, delivererId, exception: "other" });
     const ravi = await signIn("ravi@example.com");
 
-    const seen = (await list(ravi)).json() as { exceptions: Row[]; counts: { shops: Array<{ shopId: string }>; deliverers: Array<{ shopId: string }> } };
+    const seen = (await list(ravi)).json() as { exceptions: Row[]; counts: { shops: Array<{ shopId: string }>; deliverers: Array<{ accountId: string; total: number }> } };
     expect(seen.exceptions.map((row) => row.orderId)).toEqual([own]);
     expect(seen.counts.shops.map((row) => row.shopId)).toEqual([ownShop]);
-    expect(seen.counts.deliverers.map((row) => row.shopId)).toEqual([ownShop]);
+    // Asha delivered for three shops, but an Area Manager is counted only her one exception in their own.
+    expect(seen.counts.deliverers).toEqual([expect.objectContaining({ accountId: delivererId, total: 1 })]);
     // Asking for another shop narrows nothing open: it finds nothing.
     expect((await list(ravi, `?shopId=${otherShop}`)).json().exceptions).toEqual([]);
 
