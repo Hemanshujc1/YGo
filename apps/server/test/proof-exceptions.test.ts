@@ -341,11 +341,42 @@ describe("A28 proof photo access (DLV-4, #560)", () => {
     expect(await views()).toHaveLength(2);
   });
 
-  it("asks storage for a link of five minutes that no cache keeps", async () => {
+  it("asks storage for a link of five minutes that no cache keeps, and refuses one that is not signed", async () => {
     const files = { downloadUrl: vi.fn(async () => "https://photos.example.test/x?X-Amz-Signature=s") };
     const { createDeliveryPhotoStorage } = await import("../src/adapters/delivery-photos");
     await createDeliveryPhotoStorage(files as never).downloadUrl("delivery-proofs/o/p.jpg");
     expect(files.downloadUrl).toHaveBeenCalledWith("delivery-proofs/o/p.jpg", { expiresIn: 300, cacheControl: "private, no-store" });
+    for (const unsigned of ["file:///srv/photos/delivery-proofs/o/p.jpg", "https://photos.example.test/x"]) {
+      files.downloadUrl.mockResolvedValueOnce(unsigned);
+      await expect(createDeliveryPhotoStorage(files as never).downloadUrl("k")).rejects.toThrow(/presigned/);
+    }
+  });
+
+  it("answers 503 and logs nothing when storage gives an unsigned link, as local file storage does", async () => {
+    const customerId = await account("c@example.com");
+    const id = await order({ shopId: await shop(null), customerId, delivererId: await account("asha@example.com"), exception: "other", photo: keep });
+    const { createDeliveryPhotoStorage } = await import("../src/adapters/delivery-photos");
+    const local = createDeliveryPhotoStorage({ downloadUrl: async () => "file:///srv/photos/p.jpg" } as never);
+    photos.downloadUrl.mockImplementationOnce(local.downloadUrl);
+    const answer = await photo(await signIn(admin.email), id);
+    expect(answer.statusCode).toBe(503);
+    expect(answer.json().error.code).toBe("UNAVAILABLE");
+    expect(await views()).toEqual([]);
+  });
+
+  it("keeps the access log append-only: a row can be neither changed nor removed", async () => {
+    const customerId = await account("c@example.com");
+    const id = await order({ shopId: await shop(null), customerId, delivererId: await account("asha@example.com"), exception: "other", photo: keep });
+    const headers = await signIn(admin.email);
+    expect((await photo(headers, id)).statusCode).toBe(200);
+    const refused = async (sql: string) => expect(database.pool.query(sql)).rejects.toThrow(/proof_photo_views is append-only/);
+    await refused("UPDATE proof_photo_views SET viewed_at = now()");
+    await refused("UPDATE proof_photo_views SET viewed_by = (SELECT id FROM accounts LIMIT 1)");
+    await refused("DELETE FROM proof_photo_views");
+    expect(await views()).toHaveLength(1);
+    // New rows still go in.
+    expect((await photo(headers, id)).statusCode).toBe(200);
+    expect(await views()).toHaveLength(2);
   });
 
   it("gives an Area Manager their own shop's photo, and NOT_FOUND for another shop's, logging nothing for it", async () => {
