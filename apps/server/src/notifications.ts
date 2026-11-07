@@ -116,7 +116,7 @@ export async function notifyOrderStatus(
     await client.query(
       `WITH added AS (
          INSERT INTO notifications (account_id, app, kind, title, body, order_id, loud, created_at)
-         SELECT account_id, 'shopkeeper', 'order_accepted', $2::text, $3::text, $4::uuid, false, $5::timestamptz
+         SELECT account_id, 'shopkeeper', 'order_total_confirmed', $2::text, $3::text, $4::uuid, false, $5::timestamptz
          FROM shop_members WHERE shop_id = $1::uuid AND (role = 'owner' OR true)
          RETURNING id)
        INSERT INTO push_queue (notification_id, send_after)

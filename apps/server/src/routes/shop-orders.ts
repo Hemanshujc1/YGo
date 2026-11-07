@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  AssignDelivererBody, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
+  AssignDelivererBody, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
   ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -25,7 +25,7 @@ const DELIVERY_PHOTO_OPEN_UPLOADS_MAX = 5;
 /** S05: one order of the shop the account is Owner or Staff of, whether or not the shop is Live now (owner's answer 13 on #425). */
 async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, failureWaitSeconds: number): Promise<ShopOrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; deliveryFailureReadyAt: Date | null }>(
-    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o")}, o.deliverer_id AS "delivererId",
+    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o", true)}, o.deliverer_id AS "delivererId",
         json_build_object('name', a.name, 'phone', CASE WHEN o.deliverer_id = $2 THEN a.phone END) AS customer,
         CASE WHEN o.deliverer_id = $2 THEN s.upi_id END AS "shopUpiId", (o.delivery_photo_key IS NOT NULL) AS "deliveryPhotoAvailable",
         CASE WHEN o.deliverer_id = $2 AND o.delivery_call_attempt_at IS NOT NULL THEN o.delivery_call_attempt_at + make_interval(secs => $3) END AS "deliveryFailureReadyAt"
@@ -210,6 +210,380 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
   app.post("/v1/me/shop-orders/:id/cancel-request/keep", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("keep"));
   app.post("/v1/me/shop-orders/:id/cancel", { schema: { params: OrderParams, body: CancelOrderBody, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("cancel"));
 
+  const toPaise = (str: string): bigint => {
+    const isNegative = str.startsWith("-");
+    const s = isNegative ? str.slice(1) : str;
+    const [whole = "0", frac = ""] = s.split(".");
+    const cents = (frac + "00").slice(0, 2);
+    const paise = BigInt(whole) * 100n + BigInt(cents);
+    return isNegative ? -paise : paise;
+  };
+
+  const fromPaise = (paise: bigint): string => {
+    const isNegative = paise < 0n;
+    const abs = isNegative ? -paise : paise;
+    const whole = abs / 100n;
+    const frac = abs % 100n;
+    return `${isNegative ? "-" : ""}${whole}.${frac.toString().padStart(2, "0")}`;
+  };
+
+  type PreparedRevisionLine = {
+    position: number;
+    listingId: string;
+    name: string;
+    brand: string | null;
+    baseUnit: string;
+    packQuantity: string;
+    originalCount: number;
+    count: number;
+    originalPartQuantity: string | null;
+    partQuantity: string | null;
+    unitPrice: string;
+    lineTotal: string;
+    commission: string;
+    stockQuantity: string;
+    changeReason: string | null;
+  };
+
+  type PartialAcceptEvaluation =
+    | { ok: false; code: string; status?: number; shortLines?: ShortLine[] }
+    | {
+        ok: true;
+        order: {
+          id: string;
+          shopId: string;
+          status: OrderStatus;
+          placedAt: Date;
+          role: "owner" | "staff";
+          rateCardVersion: string;
+          quote: {
+            deliveryFee: { amount: string; platformShare: string; shopShare: string };
+            smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+          };
+          originalTotal: string;
+        };
+        activeLines: Array<{
+          position: number;
+          listingId: string;
+          name: string;
+          brand: string | null;
+          baseUnit: string;
+          packQuantity: string;
+          count: number;
+          partQuantity: string | null;
+          unitPrice: string;
+          lineTotal: string;
+          stockQuantity: string;
+          categoryId: string;
+        }>;
+        preparedLines: PreparedRevisionLine[];
+        subtotalStr: string;
+        deliveryFee: { amount: string; platformShare: string; shopShare: string };
+        smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+        customerTotalStr: string;
+        totalCommissionStr: string;
+        platformContributionPaise: bigint;
+        platformContributionStr: string;
+        orderCard: Awaited<ReturnType<typeof resolveRateCard>>;
+        revisionQuote: Record<string, unknown>;
+        originalTotal: string;
+        confirmByAt: Date;
+        revision: number;
+      };
+
+  async function evaluatePartialAccept(
+    client: Pool | PoolClient,
+    orderId: string,
+    accountId: string,
+    proposedLines: Array<{ listingId: string; count: number; reason?: string }>,
+    now: Date,
+    orderTimingConfig: { expireSeconds: number; confirmSeconds: number },
+    forUpdate = false,
+  ): Promise<PartialAcceptEvaluation> {
+    const { rows: [order] } = await client.query<{
+      id: string;
+      shopId: string;
+      status: OrderStatus;
+      placedAt: Date;
+      role: "owner" | "staff";
+      rateCardVersion: string;
+      quote: {
+        deliveryFee: { amount: string; platformShare: string; shopShare: string };
+        smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+      };
+      originalTotal: string;
+    }>(
+      `SELECT o.id, o.shop_id AS "shopId", o.status, o.placed_at AS "placedAt", m.role,
+              o.rate_card_version AS "rateCardVersion", o.quote,
+              COALESCE(
+                (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
+                o.total::text
+              ) AS "originalTotal"
+       FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+       WHERE o.id = $1 AND m.account_id = $2 ${forUpdate ? "FOR UPDATE OF o" : ""}`, [orderId, accountId]);
+    if (!order) return { ok: false, code: "NOT_FOUND", status: 404 };
+
+    if (order.status === "placed" && now.getTime() >= order.placedAt.getTime() + orderTimingConfig.expireSeconds * 1000) {
+      return { ok: false, code: "ORDER_EXPIRED", status: 409 };
+    }
+
+    if (order.status === "awaiting_customer_confirm") {
+      return { ok: false, code: "PROPOSAL_OPEN", status: 409 };
+    }
+
+    if (order.status !== "placed" && order.status !== "accepted" && order.status !== "preparing") {
+      return { ok: false, code: "ORDER_STATUS_CHANGED", status: 409 };
+    }
+
+    const { rows: openProposals } = await client.query(
+      "SELECT 1 FROM order_revisions WHERE order_id = $1 AND status = 'proposed'", [orderId]);
+    if (openProposals.length > 0) return { ok: false, code: "PROPOSAL_OPEN", status: 409 };
+
+    const { rows: [confirmedRev] } = await client.query<{ id: string }>(
+      "SELECT id FROM order_revisions WHERE order_id = $1 AND status = 'confirmed' ORDER BY revision DESC LIMIT 1", [orderId]);
+
+    type ActiveLine = {
+      position: number;
+      listingId: string;
+      name: string;
+      brand: string | null;
+      baseUnit: string;
+      packQuantity: string;
+      count: number;
+      partQuantity: string | null;
+      unitPrice: string;
+      lineTotal: string;
+      stockQuantity: string;
+      categoryId: string;
+    };
+
+    const { rows: activeLines } = confirmedRev
+      ? await client.query<ActiveLine>(
+          `SELECT rl.position, rl.listing_id AS "listingId", rl.name, rl.brand, rl.base_unit AS "baseUnit",
+                  rl.pack_quantity::text AS "packQuantity", rl.count, rl.part_quantity::text AS "partQuantity",
+                  rl.unit_price::text AS "unitPrice", rl.line_total::text AS "lineTotal", rl.stock_quantity::text AS "stockQuantity",
+                  p.category_id AS "categoryId"
+           FROM order_revision_lines rl
+           JOIN shop_listings l ON l.id = rl.listing_id
+           JOIN packs pk ON pk.id = l.pack_id
+           JOIN master_products p ON p.id = pk.product_id
+           WHERE rl.revision_id = $1
+           ORDER BY rl.position`, [confirmedRev.id])
+      : await client.query<ActiveLine>(
+          `SELECT ol.position, ol.listing_id AS "listingId", ol.name, ol.brand, ol.base_unit AS "baseUnit",
+                  ol.pack_quantity::text AS "packQuantity", ol.count, ol.part_quantity::text AS "partQuantity",
+                  ol.unit_price::text AS "unitPrice", ol.line_total::text AS "lineTotal", ol.stock_quantity::text AS "stockQuantity",
+                  p.category_id AS "categoryId"
+           FROM order_lines ol
+           JOIN shop_listings l ON l.id = ol.listing_id
+           JOIN packs pk ON pk.id = l.pack_id
+           JOIN master_products p ON p.id = pk.product_id
+           WHERE ol.order_id = $1
+           ORDER BY ol.position`, [orderId]);
+
+    const proposedListingIds = proposedLines.map((l) => l.listingId);
+    if (new Set(proposedListingIds).size !== proposedListingIds.length) {
+      return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 409 };
+    }
+
+    const proposedMap = new Map(proposedLines.map((l) => [l.listingId, l]));
+
+    for (const p of proposedLines) {
+      if (!activeLines.some((l) => l.listingId === p.listingId)) {
+        return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
+      }
+    }
+
+    if (forUpdate) {
+      const allListingIds = [...new Set(activeLines.map((l) => l.listingId))].sort();
+      if (allListingIds.length > 0) {
+        await client.query("SELECT 1 FROM shop_listings WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE", [allListingIds]);
+      }
+    }
+
+    let changedCount = 0;
+    let remainingCount = 0;
+
+    for (const line of activeLines) {
+      const proposed = proposedMap.get(line.listingId);
+      const targetCount = proposed ? proposed.count : line.count;
+
+      if (targetCount > line.count) {
+        return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
+      }
+
+      if (line.partQuantity !== null && targetCount !== 0 && targetCount !== 1) {
+        return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
+      }
+
+      if (targetCount < line.count) {
+        changedCount += 1;
+        if (!proposed?.reason) {
+          return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
+        }
+      }
+
+      if (targetCount > 0) {
+        remainingCount += 1;
+      }
+    }
+
+    if (changedCount === 0) {
+      return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
+    }
+
+    if (remainingCount === 0) {
+      return { ok: false, code: "EMPTY_ORDER", status: 400 };
+    }
+
+    const orderCard = await resolveRateCard(client, order.shopId, undefined, order.rateCardVersion);
+
+    const categories = [...new Set(activeLines.map((l) => l.categoryId))];
+    const byCategory = new Map(await Promise.all(categories.map(async (catId) => [catId, await resolveRateCard(client, order.shopId, catId, order.rateCardVersion)] as const)));
+
+    let subtotalPaise = 0n;
+    let totalCommissionPaise = 0n;
+
+    const preparedLines: PreparedRevisionLine[] = [];
+
+    for (const line of activeLines) {
+      const proposed = proposedMap.get(line.listingId);
+      const count = proposed ? proposed.count : line.count;
+      const changeReason = count < line.count ? (proposed?.reason ?? null) : null;
+      const partQuantity = line.partQuantity !== null && count > 0 ? line.partQuantity : null;
+
+      let lineTotalStr = "0.00";
+      let lineCommissionStr = "0.00";
+      let stockQuantityStr = "0.000";
+
+      if (count > 0) {
+        const lineTotalPaise = partQuantity !== null
+          ? toPaise(line.unitPrice)
+          : toPaise(line.unitPrice) * BigInt(count);
+        lineTotalStr = fromPaise(lineTotalPaise);
+        subtotalPaise += lineTotalPaise;
+
+        const categoryCard = byCategory.get(line.categoryId);
+        const commissionRule = categoryCard?.values.commission?.value;
+        if (commissionRule) {
+          const { rows: [commRow] } = await client.query<{ comm: string }>(
+            "SELECT pricing_line_commission($1::numeric, $2::jsonb)::text AS comm",
+            [lineTotalStr, JSON.stringify(commissionRule)]);
+          lineCommissionStr = commRow?.comm ?? "0.00";
+          totalCommissionPaise += toPaise(lineCommissionStr);
+        }
+
+        stockQuantityStr = partQuantity ? partQuantity : (count * Number(line.packQuantity)).toFixed(3);
+      }
+
+      preparedLines.push({
+        position: line.position,
+        listingId: line.listingId,
+        name: line.name,
+        brand: line.brand,
+        baseUnit: line.baseUnit,
+        packQuantity: line.packQuantity,
+        originalCount: line.count,
+        count,
+        originalPartQuantity: line.partQuantity,
+        partQuantity,
+        unitPrice: line.unitPrice,
+        lineTotal: lineTotalStr,
+        commission: lineCommissionStr,
+        stockQuantity: stockQuantityStr,
+        changeReason,
+      });
+    }
+
+    const holdsNow = STOCK_HOLDING_ORDER_STATUSES.includes(order.status);
+    const { rows: shortLines } = await client.query<ShortLine>(
+      `SELECT p.name, p.brand, p.base_unit AS "baseUnit", trim_scale(p.pack_quantity)::text AS quantity, p.count,
+          trim_scale(p.part)::text AS part, trim_scale(GREATEST(stock.left + p.own, 0))::text AS available
+        FROM jsonb_to_recordset($1::jsonb) AS p(position int, listing_id uuid, name text, brand text, base_unit text,
+          pack_quantity numeric, count int, part numeric, wanted numeric, own numeric)
+        JOIN shop_listings listing ON listing.id = p.listing_id
+        CROSS JOIN LATERAL (SELECT ${stockOf("listing")} AS left) stock
+        WHERE p.wanted > p.own AND p.wanted - p.own > stock.left
+        ORDER BY p.position`,
+      [JSON.stringify(preparedLines.map((pl, index) => ({
+        position: pl.position, listing_id: pl.listingId, name: pl.name, brand: pl.brand, base_unit: pl.baseUnit,
+        pack_quantity: pl.packQuantity, count: pl.count, part: pl.partQuantity, wanted: pl.stockQuantity,
+        own: holdsNow ? activeLines[index]?.stockQuantity : "0",
+      })))]);
+    if (shortLines.length > 0) return { ok: false, code: "NOT_ENOUGH_STOCK", status: 409, shortLines };
+
+    const subtotalStr = fromPaise(subtotalPaise);
+    const totalCommissionStr = fromPaise(totalCommissionPaise);
+
+    const deliveryFee = order.quote.deliveryFee;
+    const smallCartFee = order.quote.smallCartFee;
+    const deliveryPlatformSharePaise = toPaise(deliveryFee.platformShare);
+    const smallCartPlatformSharePaise = smallCartFee ? toPaise(smallCartFee.platformShare) : 0n;
+    const deliveryFeeAmountPaise = toPaise(deliveryFee.amount);
+    const smallCartFeeAmountPaise = smallCartFee ? toPaise(smallCartFee.amount) : 0n;
+
+    const customerTotalPaise = subtotalPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise;
+    const platformContributionPaise = totalCommissionPaise + deliveryPlatformSharePaise + smallCartPlatformSharePaise;
+
+    const customerTotalStr = fromPaise(customerTotalPaise);
+    const platformContributionStr = fromPaise(platformContributionPaise);
+
+    const { rows: [revRow] } = await client.query<{ nextRev: number }>(
+      "SELECT COALESCE(max(revision), 0) + 1 AS \"nextRev\" FROM order_revisions WHERE order_id = $1", [orderId]);
+    const revision = revRow?.nextRev ?? 1;
+
+    const confirmByAt = new Date(now.getTime() + orderTimingConfig.confirmSeconds * 1000);
+    const revisionQuote = {
+      ...order.quote,
+      productValue: subtotalStr,
+      customerTotal: customerTotalStr,
+      commission: totalCommissionStr,
+      platformContribution: platformContributionStr,
+    };
+
+    return {
+      ok: true,
+      order,
+      activeLines,
+      preparedLines,
+      subtotalStr,
+      deliveryFee,
+      smallCartFee,
+      customerTotalStr,
+      totalCommissionStr,
+      platformContributionPaise,
+      platformContributionStr,
+      orderCard,
+      revisionQuote,
+      originalTotal: order.originalTotal,
+      confirmByAt,
+      revision,
+    };
+  }
+
+  // S05 Accept in part: quote preview dry-run (ORD-3).
+  app.post("/v1/me/shop-orders/:id/partial-accept/preview", {
+    schema: { params: OrderParams, body: PartialAcceptOrderBody, response: { 200: PartialAcceptPreviewResponse, ...errors } },
+  }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const { lines: proposedLines } = request.body as PartialAcceptOrderBody;
+    const now = clock.now();
+    const evalResult = await evaluatePartialAccept(pool, id, who.accountId, proposedLines, now, orderTiming, false);
+    if (!evalResult.ok) {
+      const { status, code, shortLines } = evalResult;
+      return reply.code(status ?? 400).send({ error: { code, ...(shortLines ? { shortLines } : {}) } });
+    }
+    return {
+      productValue: evalResult.subtotalStr,
+      deliveryFee: evalResult.deliveryFee.amount,
+      smallCartFee: evalResult.smallCartFee?.amount ?? null,
+      total: evalResult.customerTotalStr,
+      originalTotal: evalResult.originalTotal,
+    };
+  });
+
   // S05 Accept in part: shopkeeper proposes quantity reductions or removals (#64).
   app.post("/v1/me/shop-orders/:id/partial-accept", {
     schema: { params: OrderParams, body: PartialAcceptOrderBody, response: { 200: ShopOrderResponse, ...errors } },
@@ -221,299 +595,22 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
 
     type Outcome = { code: string; status?: number; shortLines?: ShortLine[] } | { now: Date };
     const outcome = await withTransaction(pool, async (client): Promise<Outcome> => {
-      const { rows: [order] } = await client.query<{
-        id: string;
-        shopId: string;
-        status: OrderStatus;
-        placedAt: Date;
-        role: "owner" | "staff";
-        rateCardVersion: string;
-        quote: {
-          deliveryFee: { amount: string; platformShare: string; shopShare: string };
-          smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
-        };
-      }>(
-        `SELECT o.id, o.shop_id AS "shopId", o.status, o.placed_at AS "placedAt", m.role,
-                o.rate_card_version AS "rateCardVersion", o.quote
-         FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
-         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
-      if (!order) return { code: "NOT_FOUND", status: 404 };
-
-      // Placed order past answer time cannot be answered.
       const now = clock.now();
-      if (order.status === "placed" && now.getTime() >= order.placedAt.getTime() + orderTiming.expireSeconds * 1000) {
-        return { code: "ORDER_EXPIRED", status: 409 };
-      }
-
-      if (order.status === "awaiting_customer_confirm") {
-        return { code: "PROPOSAL_OPEN", status: 409 };
-      }
-
-      if (order.status !== "placed" && order.status !== "accepted" && order.status !== "preparing") {
-        return { code: "ORDER_STATUS_CHANGED", status: 409 };
-      }
-
-      // Check if an open proposal already exists
-      const { rows: openProposals } = await client.query(
-        "SELECT 1 FROM order_revisions WHERE order_id = $1 AND status = 'proposed'", [id]);
-      if (openProposals.length > 0) return { code: "PROPOSAL_OPEN", status: 409 };
-
-      // Find current active lines: latest confirmed revision if one exists, else order_lines
-      const { rows: [confirmedRev] } = await client.query<{ id: string }>(
-        "SELECT id FROM order_revisions WHERE order_id = $1 AND status = 'confirmed' ORDER BY revision DESC LIMIT 1", [id]);
-
-      type ActiveLine = {
-        position: number;
-        listingId: string;
-        name: string;
-        brand: string | null;
-        baseUnit: string;
-        packQuantity: string;
-        count: number;
-        partQuantity: string | null;
-        unitPrice: string;
-        lineTotal: string;
-        stockQuantity: string;
-        categoryId: string;
-      };
-
-      const { rows: activeLines } = confirmedRev
-        ? await client.query<ActiveLine>(
-            `SELECT rl.position, rl.listing_id AS "listingId", rl.name, rl.brand, rl.base_unit AS "baseUnit",
-                    rl.pack_quantity::text AS "packQuantity", rl.count, rl.part_quantity::text AS "partQuantity",
-                    rl.unit_price::text AS "unitPrice", rl.line_total::text AS "lineTotal", rl.stock_quantity::text AS "stockQuantity",
-                    p.category_id AS "categoryId"
-             FROM order_revision_lines rl
-             JOIN shop_listings l ON l.id = rl.listing_id
-             JOIN packs pk ON pk.id = l.pack_id
-             JOIN master_products p ON p.id = pk.product_id
-             WHERE rl.revision_id = $1
-             ORDER BY rl.position`, [confirmedRev.id])
-        : await client.query<ActiveLine>(
-            `SELECT ol.position, ol.listing_id AS "listingId", ol.name, ol.brand, ol.base_unit AS "baseUnit",
-                    ol.pack_quantity::text AS "packQuantity", ol.count, ol.part_quantity::text AS "partQuantity",
-                    ol.unit_price::text AS "unitPrice", ol.line_total::text AS "lineTotal", ol.stock_quantity::text AS "stockQuantity",
-                    p.category_id AS "categoryId"
-             FROM order_lines ol
-             JOIN shop_listings l ON l.id = ol.listing_id
-             JOIN packs pk ON pk.id = l.pack_id
-             JOIN master_products p ON p.id = pk.product_id
-             WHERE ol.order_id = $1
-             ORDER BY ol.position`, [id]);
-
-      const proposedListingIds = proposedLines.map((l) => l.listingId);
-      if (new Set(proposedListingIds).size !== proposedListingIds.length) {
-        return { code: "INVALID_PARTIAL_ACCEPT", status: 409 };
-      }
-
-      const proposedMap = new Map(proposedLines.map((l) => [l.listingId, l]));
-
-      // Validate all proposed lines exist in active lines
-      for (const p of proposedLines) {
-        if (!activeLines.some((l) => l.listingId === p.listingId)) {
-          return { code: "INVALID_PARTIAL_ACCEPT", status: 400 };
-        }
-      }
-
-      // Lock affected shop listings in deterministic ID order, compatible with Accept flow
-      const allListingIds = [...new Set(activeLines.map((l) => l.listingId))].sort();
-      if (allListingIds.length > 0) {
-        await client.query("SELECT 1 FROM shop_listings WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE", [allListingIds]);
-      }
-
-      let changedCount = 0;
-      let remainingCount = 0;
-
-      for (const line of activeLines) {
-        const proposed = proposedMap.get(line.listingId);
-        const targetCount = proposed ? proposed.count : line.count;
-
-        // Cannot increase quantity
-        if (targetCount > line.count) {
-          return { code: "INVALID_PARTIAL_ACCEPT", status: 400 };
-        }
-
-        // If line has partQuantity, count must be 0 or 1
-        if (line.partQuantity !== null && targetCount !== 0 && targetCount !== 1) {
-          return { code: "INVALID_PARTIAL_ACCEPT", status: 400 };
-        }
-
-        if (targetCount < line.count) {
-          changedCount += 1;
-          if (!proposed?.reason) {
-            return { code: "INVALID_PARTIAL_ACCEPT", status: 400 };
-          }
-        }
-
-        if (targetCount > 0) {
-          remainingCount += 1;
-        }
-      }
-
-      if (changedCount === 0) {
-        return { code: "INVALID_PARTIAL_ACCEPT", status: 400 };
-      }
-
-      if (remainingCount === 0) {
-        return { code: "EMPTY_ORDER", status: 400 };
-      }
-
-      // Requote with order.rateCardVersion using exact integer paise arithmetic (ADR-0004)
-      const toPaise = (str: string): bigint => {
-        const isNegative = str.startsWith("-");
-        const s = isNegative ? str.slice(1) : str;
-        const [whole = "0", frac = ""] = s.split(".");
-        const cents = (frac + "00").slice(0, 2);
-        const paise = BigInt(whole) * 100n + BigInt(cents);
-        return isNegative ? -paise : paise;
-      };
-
-      const fromPaise = (paise: bigint): string => {
-        const isNegative = paise < 0n;
-        const abs = isNegative ? -paise : paise;
-        const whole = abs / 100n;
-        const frac = abs % 100n;
-        return `${isNegative ? "-" : ""}${whole}.${frac.toString().padStart(2, "0")}`;
-      };
-
-      const orderCard = await resolveRateCard(client, order.shopId, undefined, order.rateCardVersion);
-
-      const categories = [...new Set(activeLines.map((l) => l.categoryId))];
-      const byCategory = new Map(await Promise.all(categories.map(async (catId) => [catId, await resolveRateCard(client, order.shopId, catId, order.rateCardVersion)] as const)));
-
-      let subtotalPaise = 0n;
-      let totalCommissionPaise = 0n;
-
-      type PreparedRevisionLine = {
-        position: number;
-        listingId: string;
-        name: string;
-        brand: string | null;
-        baseUnit: string;
-        packQuantity: string;
-        originalCount: number;
-        count: number;
-        originalPartQuantity: string | null;
-        partQuantity: string | null;
-        unitPrice: string;
-        lineTotal: string;
-        commission: string;
-        stockQuantity: string;
-        changeReason: string | null;
-      };
-
-      const preparedLines: PreparedRevisionLine[] = [];
-
-      for (const line of activeLines) {
-        const proposed = proposedMap.get(line.listingId);
-        const count = proposed ? proposed.count : line.count;
-        const changeReason = count < line.count ? (proposed?.reason ?? null) : null;
-        const partQuantity = line.partQuantity !== null && count > 0 ? line.partQuantity : null;
-
-        let lineTotalStr = "0.00";
-        let lineCommissionStr = "0.00";
-        let stockQuantityStr = "0.000";
-
-        if (count > 0) {
-          const lineTotalPaise = partQuantity !== null
-            ? toPaise(line.unitPrice)
-            : toPaise(line.unitPrice) * BigInt(count);
-          lineTotalStr = fromPaise(lineTotalPaise);
-          subtotalPaise += lineTotalPaise;
-
-          const categoryCard = byCategory.get(line.categoryId);
-          const commissionRule = categoryCard?.values.commission?.value;
-          if (commissionRule) {
-            const { rows: [commRow] } = await client.query<{ comm: string }>(
-              "SELECT pricing_line_commission($1::numeric, $2::jsonb)::text AS comm",
-              [lineTotalStr, JSON.stringify(commissionRule)]);
-            lineCommissionStr = commRow?.comm ?? "0.00";
-            totalCommissionPaise += toPaise(lineCommissionStr);
-          }
-
-          stockQuantityStr = partQuantity ? partQuantity : (count * Number(line.packQuantity)).toFixed(3);
-        }
-
-        preparedLines.push({
-          position: line.position,
-          listingId: line.listingId,
-          name: line.name,
-          brand: line.brand,
-          baseUnit: line.baseUnit,
-          packQuantity: line.packQuantity,
-          originalCount: line.count,
-          count,
-          originalPartQuantity: line.partQuantity,
-          partQuantity,
-          unitPrice: line.unitPrice,
-          lineTotal: lineTotalStr,
-          commission: lineCommissionStr,
-          stockQuantity: stockQuantityStr,
-          changeReason,
-        });
-      }
-
-      // The proposal holds its lines (awaiting_customer_confirm is a holding status). A placed order holds
-      // nothing yet, so stock other orders took since placement may be gone: each line may hold no more than
-      // stock left plus what this order already holds. A cut to an existing hold never needs new stock.
-      const holdsNow = STOCK_HOLDING_ORDER_STATUSES.includes(order.status);
-      const { rows: shortLines } = await client.query<ShortLine>(
-        `SELECT p.name, p.brand, p.base_unit AS "baseUnit", trim_scale(p.pack_quantity)::text AS quantity, p.count,
-            trim_scale(p.part)::text AS part, trim_scale(GREATEST(stock.left + p.own, 0))::text AS available
-          FROM jsonb_to_recordset($1::jsonb) AS p(position int, listing_id uuid, name text, brand text, base_unit text,
-            pack_quantity numeric, count int, part numeric, wanted numeric, own numeric)
-          JOIN shop_listings listing ON listing.id = p.listing_id
-          CROSS JOIN LATERAL (SELECT ${stockOf("listing")} AS left) stock
-          WHERE p.wanted > p.own AND p.wanted - p.own > stock.left
-          ORDER BY p.position`,
-        [JSON.stringify(preparedLines.map((pl, index) => ({
-          position: pl.position, listing_id: pl.listingId, name: pl.name, brand: pl.brand, base_unit: pl.baseUnit,
-          pack_quantity: pl.packQuantity, count: pl.count, part: pl.partQuantity, wanted: pl.stockQuantity,
-          own: holdsNow ? activeLines[index]?.stockQuantity : "0",
-        })))]);
-      if (shortLines.length > 0) return { code: "NOT_ENOUGH_STOCK", status: 409, shortLines };
-
-      const subtotalStr = fromPaise(subtotalPaise);
-      const totalCommissionStr = fromPaise(totalCommissionPaise);
-
-      const deliveryFee = order.quote.deliveryFee;
-      const smallCartFee = order.quote.smallCartFee;
-      const deliveryPlatformSharePaise = toPaise(deliveryFee.platformShare);
-      const smallCartPlatformSharePaise = smallCartFee ? toPaise(smallCartFee.platformShare) : 0n;
-      const deliveryFeeAmountPaise = toPaise(deliveryFee.amount);
-      const smallCartFeeAmountPaise = smallCartFee ? toPaise(smallCartFee.amount) : 0n;
-
-      const customerTotalPaise = subtotalPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise;
-      const platformContributionPaise = totalCommissionPaise + deliveryPlatformSharePaise + smallCartPlatformSharePaise;
-
-      const customerTotalStr = fromPaise(customerTotalPaise);
-      const platformContributionStr = fromPaise(platformContributionPaise);
-
-      const { rows: [revRow] } = await client.query<{ nextRev: number }>(
-        "SELECT COALESCE(max(revision), 0) + 1 AS \"nextRev\" FROM order_revisions WHERE order_id = $1", [id]);
-      const revision = revRow?.nextRev ?? 1;
-
-      const confirmByAt = new Date(now.getTime() + orderTiming.confirmSeconds * 1000);
-      const revisionQuote = {
-        ...order.quote,
-        productValue: subtotalStr,
-        customerTotal: customerTotalStr,
-        commission: totalCommissionStr,
-        platformContribution: platformContributionStr,
-      };
+      const evalResult = await evaluatePartialAccept(client, id, who.accountId, proposedLines, now, orderTiming, true);
+      if (!evalResult.ok) return evalResult;
 
       // Negative contribution: cancel immediately as cancelled_by_shop, actor system, reason negative_contribution
-      if (platformContributionPaise < 0n) {
+      if (evalResult.platformContributionPaise < 0n) {
         const { rows: [insertedRev] } = await client.query<{ id: string }>(
           `INSERT INTO order_revisions (
              order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
              commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at
            ) VALUES ($1, $2, 'cancelled_negative_contribution', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
-          [id, revision, order.status, who.accountId, order.role, subtotalStr, deliveryFee.amount, smallCartFee?.amount ?? null, customerTotalStr,
-           totalCommissionStr, platformContributionStr, JSON.stringify(revisionQuote), true, fromPaise(-platformContributionPaise),
-           confirmByAt, now]);
+          [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
+           evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), true, fromPaise(-evalResult.platformContributionPaise),
+           evalResult.confirmByAt, now]);
         if (!insertedRev) throw new Error("Failed to insert order revision");
-        for (const pl of preparedLines) {
+        for (const pl of evalResult.preparedLines) {
           await client.query(
             `INSERT INTO order_revision_lines (
                revision_id, position, listing_id, name, brand, base_unit, pack_quantity, original_count, count,
@@ -522,29 +619,29 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
             [insertedRev.id, pl.position, pl.listingId, pl.name, pl.brand, pl.baseUnit, pl.packQuantity, pl.originalCount, pl.count,
              pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.stockQuantity, pl.changeReason]);
         }
-        await moveOrder(client, order, "cancelled_by_shop", { id: null, role: "system" }, now, "negative_contribution");
+        await moveOrder(client, evalResult.order, "cancelled_by_shop", { id: null, role: "system" }, now, "negative_contribution");
         await client.query("COMMIT");
         return { code: "NEGATIVE_CONTRIBUTION_CANCELLED", status: 409 };
       }
 
-      const floorValue = orderCard?.values.deliveredContributionFloor?.value;
+      const floorValue = evalResult.orderCard?.values.deliveredContributionFloor?.value;
       const floorPaise = typeof floorValue === "string" ? toPaise(floorValue) : 0n;
 
-      const belowFloorException = platformContributionPaise < floorPaise;
-      const belowFloorShortfall = belowFloorException ? fromPaise(floorPaise - platformContributionPaise) : null;
+      const belowFloorException = evalResult.platformContributionPaise < floorPaise;
+      const belowFloorShortfall = belowFloorException ? fromPaise(floorPaise - evalResult.platformContributionPaise) : null;
 
       const { rows: [insertedRev] } = await client.query<{ id: string }>(
         `INSERT INTO order_revisions (
            order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
            commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at
          ) VALUES ($1, $2, 'proposed', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
-        [id, revision, order.status, who.accountId, order.role, subtotalStr, deliveryFee.amount, smallCartFee?.amount ?? null, customerTotalStr,
-         totalCommissionStr, platformContributionStr, JSON.stringify(revisionQuote), belowFloorException, belowFloorShortfall,
-         confirmByAt, now]);
+        [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
+         evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), belowFloorException, belowFloorShortfall,
+         evalResult.confirmByAt, now]);
 
       if (!insertedRev) throw new Error("Failed to insert order revision");
 
-      for (const pl of preparedLines) {
+      for (const pl of evalResult.preparedLines) {
         await client.query(
           `INSERT INTO order_revision_lines (
              revision_id, position, listing_id, name, brand, base_unit, pack_quantity, original_count, count,
@@ -554,7 +651,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
            pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.stockQuantity, pl.changeReason]);
       }
 
-      if (!await moveOrder(client, order, "awaiting_customer_confirm", { id: who.accountId, role: order.role }, now)) {
+      if (!await moveOrder(client, evalResult.order, "awaiting_customer_confirm", { id: who.accountId, role: evalResult.order.role }, now)) {
         return { code: "ORDER_STATUS_CHANGED", status: 409 };
       }
 
@@ -564,7 +661,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
 
     if (!("now" in outcome)) {
       const { status, ...error } = outcome;
-      return reply.code(status ?? 409).send({ error });
+      return reply.code(status ?? (error.code === "NOT_FOUND" ? 404 : 409)).send({ error });
     }
     return shopOrderView(pool, id, who.accountId, outcome.now, failureWaitSeconds);
   });
