@@ -16,14 +16,18 @@ const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArr
     awaiting_customer_confirm: ["owner", "staff"],
     cancelled_by_shop: ["system"],
   },
+  // `cancelled_by_customer` here is only the shop agreeing to the Customer's ask (ORD-5, #59): that route checks an `asked`
+  // request first. The Customer never cancels an accepted order directly.
   accepted: {
     preparing: ["owner", "staff"],
     ready: ["owner", "staff"],
+    cancelled_by_customer: ["owner", "staff"],
     cancelled_by_shop: ["owner", "staff", "system"],
     awaiting_customer_confirm: ["owner", "staff"],
   },
   preparing: {
     ready: ["owner", "staff"],
+    cancelled_by_customer: ["owner", "staff"],
     cancelled_by_shop: ["owner", "staff", "system"],
     awaiting_customer_confirm: ["owner", "staff"],
   },
@@ -64,6 +68,11 @@ export async function moveOrder(
     if (rows.length > 0) return false;
   }
   await client.query("UPDATE orders SET status = $2, status_changed_at = $3 WHERE id = $1", [order.id, to, at]);
+  // An ask to cancel nobody answered ends when the order leaves accepted and preparing (ORD-5, #59); accepted to preparing keeps it.
+  // The agree route settles its own first.
+  if (to !== "accepted" && to !== "preparing") {
+    await client.query("UPDATE order_cancel_requests SET status = 'closed_unanswered', settled_at = $2 WHERE order_id = $1 AND status = 'asked'", [order.id, at]);
+  }
   await recordStatus(client, order.id, order.status, to, actor, at, reasonCode);
   return true;
 }

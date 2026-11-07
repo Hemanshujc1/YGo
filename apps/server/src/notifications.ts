@@ -28,8 +28,8 @@ const rejectReasons: Record<RejectReason, string> = {
  * Who hears of each order status, and in what words (CONTEXT.md, Notifications). The shop's Owner hears every
  * kind; `staff` adds its Staff, as order and product kinds do (S41). Only the new order is loud (NOT-3).
  */
-const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer" | "shop"; staff?: boolean; loud?: boolean;
-  words: (order: Order) => { title: string; body: string } }>> = {
+type Rule = { kind: NotificationKind; to: "customer" | "shop"; staff?: boolean; loud?: boolean; words: (order: Order) => { title: string; body: string } };
+const rules: Partial<Record<OrderStatus, Rule>> = {
   placed: {
     kind: "order_placed", to: "shop", staff: true, loud: true,
     words: ({ number }) => ({ title: `New order #${number}`, body: `Accept or reject it within ${spokenDuration(orderTiming.expireSeconds)}.` }),
@@ -68,6 +68,32 @@ const rules: Partial<Record<OrderStatus, { kind: NotificationKind; to: "customer
   },
 };
 
+/**
+ * Cancelling after acceptance (ORD-5, #59). None is loud (NOT-3). The shop hears of an ask, its Staff too; the customer
+ * hears of each answer. `agreed` and `byShop` ride the status change that cancels the order; the ask and the keep don't change the status.
+ */
+export const cancelRules = {
+  asked: { kind: "order_cancel_requested", to: "shop", staff: true,
+    words: ({ number }) => ({ title: `Order #${number}: cancel asked`, body: "The customer asks to cancel this order. Agree or keep it." }) },
+  kept: { kind: "order_cancel_kept", to: "customer",
+    words: ({ number, shopName }) => ({ title: `Order #${number} not cancelled`, body: `${shopName} is keeping your order. You can call the shop.` }) },
+  agreed: { kind: "order_cancel_agreed", to: "customer",
+    words: ({ number, shopName }) => ({ title: `Order #${number} cancelled`, body: `${shopName} agreed to cancel your order.` }) },
+  byShop: { kind: "order_cancelled_by_shop", to: "customer",
+    words: ({ number, shopName, reason }) => ({
+      title: `Order #${number} cancelled`,
+      body: `${shopName} cancelled your order: ${rejectReasons[reason as RejectReason]}.`,
+    }) },
+} satisfies Record<string, Rule>;
+
+/** The rule for a move: a cancel after acceptance has its own words; any other move uses its status's rule. */
+function ruleFor(to: OrderStatus, from: OrderStatus | null, reason: string | null): Rule | undefined {
+  if (to === "cancelled_by_customer" && reason === "agreed_cancel") return cancelRules.agreed;
+  // Only the shop's own cancel, which always has one of the four reasons; the system's negative-contribution cancel keeps sending nothing.
+  if (to === "cancelled_by_shop" && (from === "accepted" || from === "preparing" || from === "ready") && reason !== null && reason in rejectReasons) return cancelRules.byShop;
+  return rules[to];
+}
+
 /** The safety-net floor push goes this long after an unacknowledged ring push (#508). */
 export const FLOOR_SECONDS = 15;
 
@@ -98,8 +124,13 @@ export async function notifyOrderStatus(
       [order.shopId, title, body, orderId, at]);
     return;
   }
-  const rule = rules[to];
+  const rule = ruleFor(to, from, reason);
   if (!rule) return;
+  await queueNotification(client, orderId, rule, at, reason);
+}
+
+/** Records one notification of an order, with its pushes queued, in the caller's transaction. */
+export async function queueNotification(client: PoolClient, orderId: string, rule: Rule, at: Date, reason: string | null = null): Promise<void> {
   const { rows: [order] } = await client.query<Order & { accountId: string; shopId: string }>(
     `SELECT o.number, o.account_id AS "accountId", o.shop_id AS "shopId", s.shop_name AS "shopName"
      FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1`, [orderId]);
@@ -133,7 +164,7 @@ const RECEIPT_KEPT_SECONDS = 24 * 60 * 60;
 const CLAIM_SECONDS = 60;
 
 /** The kinds a shop's Staff hear of; the Owner hears every kind (S41). */
-const staffKinds = Object.values(rules).filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind);
+const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind);
 
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of

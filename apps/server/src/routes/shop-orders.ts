@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  AssignDelivererBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
+  AssignDelivererBody, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
   ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -9,6 +9,7 @@ import { InvalidDeliveryPhotoError, type DeliveryPhotoStorage } from "../adapter
 import { withTransaction } from "../db";
 import { createHandoverCode, HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN, HANDOVER_CODE_COOLDOWN_MS, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, matchesHandoverCode, recordDeliverySale } from "../delivery";
 import { stockOf } from "../listings";
+import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -77,7 +78,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
             CASE WHEN o.status = 'awaiting_customer_confirm' THEN (
               SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
               FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
-            ) END AS "confirmByAt"
+            ) END AS "confirmByAt",
+            EXISTS (SELECT 1 FROM order_cancel_requests c WHERE c.order_id = o.id AND c.status = 'asked') AS "cancelAsked"
           FROM orders o
           WHERE o.shop_id = $1 AND (
             (o.status = 'placed' AND NOT ${answerExpired("o", "$2")})
@@ -169,6 +171,44 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
   app.post("/v1/me/shop-orders/:id/accept", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, answer("accepted"));
   app.post("/v1/me/shop-orders/:id/reject", { schema: { params: OrderParams, body: RejectOrderBody, response: { 200: ShopOrderResponse, ...errors } } },
     answer("rejected_by_shop"));
+
+  /**
+   * Cancelling after acceptance (ORD-5, #59), each in one transaction on the locked order. Agree and Keep answer the Customer's
+   * ask; Cancel is the shop's own, with a reason, from accepted, preparing or ready. Reject stays for orders still placed.
+   */
+  const cancelling = (action: "agree" | "keep" | "cancel") => async (request: FastifyRequest, reply: FastifyReply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const outcome = await withTransaction(pool, async (client): Promise<{ code: string } | { now: Date }> => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff" }>(
+        `SELECT o.id, o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return { code: "NOT_FOUND" };
+      const now = clock.now();
+      const actor = { id: who.accountId, role: order.role };
+      if (action === "cancel") {
+        if (!await moveOrder(client, order, "cancelled_by_shop", actor, now, (request.body as CancelOrderBody).reason)) return { code: "ORDER_STATUS_CHANGED" };
+      } else {
+        const { rows: [asked] } = await client.query<{ status: string }>("SELECT status FROM order_cancel_requests WHERE order_id = $1", [id]);
+        if (!asked) return { code: "ORDER_STATUS_CHANGED" };
+        const settled = action === "agree" ? "agreed" : "kept";
+        // The same answer again is a retry: it answers as before and notifies no one twice.
+        if (asked.status === settled) return { now };
+        if (asked.status !== "asked") return { code: "CANCEL_REQUEST_CLOSED" };
+        await client.query("UPDATE order_cancel_requests SET status = $2, settled_at = $3, settled_by = $4 WHERE order_id = $1", [id, settled, now, who.accountId]);
+        if (action === "keep") await queueNotification(client, id, cancelRules.kept, now);
+        else if (!await moveOrder(client, order, "cancelled_by_customer", actor, now, "agreed_cancel")) return { code: "ORDER_STATUS_CHANGED" };
+      }
+      await client.query("COMMIT");
+      return { now };
+    });
+    if (!("now" in outcome)) return reply.code(outcome.code === "NOT_FOUND" ? 404 : 409).send({ error: outcome });
+    return shopOrderView(pool, id, who.accountId, outcome.now, failureWaitSeconds);
+  };
+  app.post("/v1/me/shop-orders/:id/cancel-request/agree", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("agree"));
+  app.post("/v1/me/shop-orders/:id/cancel-request/keep", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("keep"));
+  app.post("/v1/me/shop-orders/:id/cancel", { schema: { params: OrderParams, body: CancelOrderBody, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("cancel"));
 
   // S05 Accept in part: shopkeeper proposes quantity reductions or removals (#64).
   app.post("/v1/me/shop-orders/:id/partial-accept", {

@@ -644,5 +644,6 @@ export const strings = {
     NEGATIVE_CONTRIBUTION_CANCELLED: "The order was cancelled due to negative platform contribution.",
     EMPTY_ORDER: "An order must retain at least one item.",
     INVALID_PARTIAL_ACCEPT: "Quantities can only be reduced.",
+    CANCEL_REQUEST_CLOSED: "The ask to cancel is already closed.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -775,6 +775,21 @@ export const orderStatusHistory = pgTable("order_status_history", {
   check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
 ]);
 
+// The Customer's one ask to cancel an accepted order (ORD-5, #59): one row per order, so the ask is made once.
+// `asked` waits for the shop; the rest are final. The order's status does not change while it waits.
+export const orderCancelRequests = pgTable("order_cancel_requests", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id),
+  status: text("status").notNull(),
+  askedAt: timestamp("asked_at", { withTimezone: true }).notNull(),
+  settledAt: timestamp("settled_at", { withTimezone: true }),
+  // The Owner or Staff who agreed or kept; null while asked and when the order moved on first.
+  settledBy: uuid("settled_by").references(() => accounts.id),
+}, (table) => [
+  check("order_cancel_requests_status_valid", sql`${table.status} IN ('asked', 'agreed', 'kept', 'closed_unanswered')`),
+  check("order_cancel_requests_settled_valid", sql`(${table.status} = 'asked') = (${table.settledAt} IS NULL)`),
+  check("order_cancel_requests_settled_by_valid", sql`${table.settledBy} IS NULL OR ${table.status} IN ('agreed', 'kept')`),
+]);
+
 // Append-only order revisions for partial acceptances (ORD-3, ORD-4, #526).
 export const orderRevisions = pgTable("order_revisions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -899,7 +914,7 @@ export const notifications = pgTable("notifications", {
 }, (table) => [
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session
