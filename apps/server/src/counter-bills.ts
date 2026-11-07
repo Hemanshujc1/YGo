@@ -47,7 +47,7 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
   // On the shop's list means what the phone's Stock shows: listed, with pack, product and category active.
   const listed = data !== undefined && (await client.query(`SELECT 1 FROM shop_listings sl JOIN packs pk ON pk.id = sl.pack_id
       JOIN master_products p ON p.id = pk.product_id JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
-    WHERE sl.shop_id = $1 AND sl.pack_id = ANY($2::uuid[]) AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`,
+    WHERE sl.shop_id = $1 AND sl.pack_id = ANY($2::uuid[]) AND pk.active AND p.active AND (p.published OR p.requested_by_shop_id = sl.shop_id) AND NOT sl.removed_from_counter AND c.active AND COALESCE(parent.active, true)`,
   [bill.shopId, data.lines.map((line) => line.packId)])).rowCount === data.lines.length;
   // A line's sale must fit one stock movement, and leave stock the shop's Stock list can show; otherwise the
   // whole sync batch would fail and stall the phone's queue. A mismatched bill moves no stock, so it is numbered

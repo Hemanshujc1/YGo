@@ -41,6 +41,7 @@ import { registerShopRoutes } from "./routes/shops";
 import { registerShopAgreementRoutes } from "./routes/shop-agreement";
 import { registerShopHolidayRoutes } from "./routes/shop-holidays";
 import { registerShopHoursRoutes } from "./routes/shop-hours";
+import { registerProductRequestRoutes } from "./routes/product-requests";
 import { registerProofExceptionRoutes } from "./routes/proof-exceptions";
 import { registerShopStaffRoutes } from "./routes/shop-staff";
 import { registerShopOpenRoutes } from "./routes/shop-open";
@@ -154,6 +155,7 @@ export function buildApp({
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds });
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerProductRequestRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopHoursRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopStaffRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

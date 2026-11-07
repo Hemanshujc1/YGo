@@ -38,6 +38,9 @@ import {
   SetStaffCanDeliverResponse,
   ShopDeliverersResponse,
   ShopStaffResponse,
+  ProductRequest,
+  ProductRequestsResponse,
+  type CreateProductRequestBody,
   StaffInviteResponse,
   StaffInvitesResponse,
   type InviteStaffBody,
@@ -588,6 +591,16 @@ export function createApiClient({
 
     async shopDeliverers(): Promise<ApiResult<ShopDeliverersResponse>> {
       return result(await signedIn("GET", "/v1/me/shop-deliverers"), ShopDeliverersResponse);
+    },
+
+    /** `GET /v1/shop/product-requests`: the Owner's requests and the categories a request may name (S38, CAT-3). */
+    async productRequests(): Promise<ApiResult<ProductRequestsResponse>> {
+      return result(await signedIn("GET", "/v1/shop/product-requests"), ProductRequestsResponse);
+    },
+
+    /** `POST /v1/shop/product-requests`: asks for a product the catalog lacks; the shop can bill it at once. The same `clientId` sent again is the same request. */
+    async createProductRequest(body: CreateProductRequestBody): Promise<ApiResult<ProductRequest>> {
+      return result(await signedIn("POST", "/v1/shop/product-requests", body), ProductRequest);
     },
 
     async shopStaff(): Promise<ApiResult<ShopStaffResponse>> {

@@ -5,7 +5,7 @@ import type { Clock } from "../adapters/clock";
 import { applyCounterBill } from "../counter-bills";
 import { withTransaction } from "../db";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { applyOpeningStock, applyOpeningStockCorrection, catalogSql } from "./shop-listings";
+import { applyOpeningStock, applyOpeningStockCorrection, counterCatalogSql } from "./shop-listings";
 
 const openingTypes = new Set(["opening_stock", "opening_stock_correction"]);
 
@@ -43,7 +43,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       if (since && (!since.startsWith(`${shop.id}:`) || BigInt(since.split(":")[1] ?? "0") > BigInt(saved.revision))) return reply.code(400).send({ error: { code: "VALIDATION_FAILED" } });
       // One statement snapshot: a writer committing later is picked up by the next pull.
       const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, held, "outOfStock", "counterPrice"
-        FROM (${catalogSql} AND sl.id IS NOT NULL) current_stock`, [shop.id]);
+        FROM (${counterCatalogSql} AND sl.id IS NOT NULL) current_stock`, [shop.id]);
       const previous = await client.query<{ packId: string; payload: ShopStockResponse["items"][number] | null }>('SELECT pack_id AS "packId", payload FROM stock_sync_items WHERE shop_id = $1', [shop.id]);
       const current = new Map(rows.map((item) => [item.packId, item]));
       const old = new Map(previous.rows.map((row) => [row.packId, row.payload]));

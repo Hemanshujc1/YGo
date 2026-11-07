@@ -88,6 +88,10 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getProofExceptionPhoto: vi.fn(),
     listProofExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { shops: [], deliverers: [] } } }),
     reviewProofException: vi.fn(),
+    listProductRequests: vi.fn().mockResolvedValue({ ok: true, data: { requests: [] } }),
+    approveProductRequest: vi.fn(),
+    mapProductRequest: vi.fn(),
+    rejectProductRequest: vi.fn(),
     getShopApplication: vi.fn(),
     correctShopApplication: vi.fn(),
     assignShopAreaManager: vi.fn(),
@@ -1255,7 +1259,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(10);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(11);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

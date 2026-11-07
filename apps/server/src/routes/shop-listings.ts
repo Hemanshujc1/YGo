@@ -84,13 +84,19 @@ export const catalogSql = `SELECT pk.id AS "packId", p.id AS "productId", p.name
   WHERE pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)
   `;
 
+/**
+ * What the phone's counter can bill (#62): the Stock list plus the shop's own requested products, which are not published yet,
+ * less any that left the counter list (D-9). The sync pull reads this, so a saved request reaches the phone for offline billing.
+ */
+export const counterCatalogSql = `${catalogSql.replace("p.published AND", "(p.published OR p.requested_by_shop_id = $1) AND")} AND NOT COALESCE(sl.removed_from_counter, false)`;
+
 export async function applyOpeningStock(client: PoolClient, accountId: string, shopId: string, packId: string, body: OpeningStockBody): Promise<
   { code: "NOT_FOUND" | "VALIDATION_FAILED" | "OPENING_STOCK_ALREADY_RECORDED" } | { status: 200 | 201; result: OpeningStockResponse }
 > {
   const listing = await client.query<{ id: string; baseUnit: string }>(
     `SELECT sl.id, p.base_unit AS "baseUnit" FROM shop_listings sl
      JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id
-     WHERE sl.shop_id = $1 AND sl.pack_id = $2 FOR UPDATE OF sl`,
+     WHERE sl.shop_id = $1 AND sl.pack_id = $2 AND NOT sl.removed_from_counter FOR UPDATE OF sl`,
     [shopId, packId],
   );
   const row = listing.rows[0];
@@ -132,7 +138,7 @@ export async function applyOpeningStockCorrection(client: PoolClient, accountId:
   const listing = await client.query<{ id: string; baseUnit: string }>(
     `SELECT sl.id, p.base_unit AS "baseUnit" FROM shop_listings sl
      JOIN packs pk ON pk.id = sl.pack_id JOIN master_products p ON p.id = pk.product_id
-     WHERE sl.shop_id = $1 AND sl.pack_id = $2 FOR UPDATE OF sl`,
+     WHERE sl.shop_id = $1 AND sl.pack_id = $2 AND NOT sl.removed_from_counter FOR UPDATE OF sl`,
     [shopId, packId],
   );
   const row = listing.rows[0];
