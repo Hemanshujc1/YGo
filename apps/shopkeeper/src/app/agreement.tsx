@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api";
 import { commissionText, rateCardLines } from "../lib/agreement";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 const words = strings.agreement;
 
@@ -64,7 +65,7 @@ export default function AgreementScreen() {
       contentContainerClassName="gap-4 px-4"
       contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }}
     >
-      <Link href="/" asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+      <Link href={backPath()} asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" />}
       {load.kind === "failed" && <>

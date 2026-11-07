@@ -109,7 +109,8 @@ export default function StockScreen() {
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
       refreshControl={load.kind === "loaded" ? <RefreshControl refreshing={pulling} onRefresh={() => void pull()} progressViewOffset={insets.top} /> : undefined}>
-      <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>
+      {/* No tab bar yet (a shop that doesn't answer orders): Back to Home (#550). */}
+      {!access.answersOrders() && <Link href="/" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.back}</Text></Pressable></Link>}
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator className="text-primary" />}
       {load.kind === "failed" && <>

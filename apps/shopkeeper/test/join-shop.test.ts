@@ -2,7 +2,7 @@ import type { SyncAccessResponse } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { takeUpJoin } from "../src/lib/join-shop";
 
-const access = (role: "owner" | "staff" | null): SyncAccessResponse => ({ shopId: role ? "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e" : null, state: role ? "live" : null, shopName: role ? "Sai" : null, shopGstin: null, role });
+const access = (role: "owner" | "staff" | null): SyncAccessResponse => ({ shopId: role ? "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e" : null, state: role ? "live" : null, shopName: role ? "Sai" : null, shopGstin: null, role, canDeliver: role === "owner" });
 const read = (staffShop: unknown) => () => Promise.resolve({ ok: true as const, data: { application: null, liveCheck: null, staffShop } as never });
 
 describe("taking up a join (#536)", () => {

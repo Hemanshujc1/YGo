@@ -364,6 +364,12 @@ export const strings = {
     shareButton: "Share code", done: "Done",
     shopFallback: "the shop",
   },
+  // The tab bar and S36 More (#550). "Switch to Customer" is plain text until #551 builds the switch.
+  tabs: { orders: "Orders", bill: "Bill", stock: "Stock", deliveries: "Deliveries", more: "More" },
+  more: {
+    title: "More", shopSettings: "Shop settings", switchToCustomer: "Switch to Customer",
+    switchBody: "To order as a customer, open the YGo app on this phone.",
+  },
   // S04 and S05 (#431): a Live or Suspended shop answers its orders.
   orders: {
     open: "Orders", title: "Orders", back: "Back", loading: "Loading orders", retry: "Try again",

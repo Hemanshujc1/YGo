@@ -1,6 +1,8 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
 import { Navigator, Slot } from "expo-router";
+import { View } from "react-native";
 import { api, session, supportEmail } from "../api";
+import { ShopTabs } from "../components/shop-tabs";
 import { StockAccess } from "../components/stock-access";
 import { SignOut } from "../components/sign-out";
 import { removeOldBillPdfs, retryBillPdfClear } from "../lib/bill-pdf-files";
@@ -43,7 +45,7 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
-        <Navigator><StockAccess><Slot /></StockAccess></Navigator>
+        <Navigator><StockAccess><View className="flex-1"><View className="flex-1"><Slot /></View><ShopTabs /></View></StockAccess></Navigator>
       </SessionGate>
     </AppShell>
   );

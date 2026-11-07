@@ -174,7 +174,54 @@ describe("verified offline shop access", () => {
     await again.restore();
     expect(again.shopGstin()).toBe("07AAACG1234H1ZP");
   });
-  it("keeps the account's role from the last check, reads an older record as Owner, and follows a change at the next check (#494)", async () => {
+  it("keeps whether the account can deliver and whether the shop answers orders from the last check, reads an older record by its role, and follows a change at the next check (#550)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: "Sai", role: "staff", canDeliver: true } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(restarted.canDeliver()).toBe(true);
+    expect(restarted.answersOrders()).toBe(true);
+    // A record saved before the flag reads true for an Owner and false for Staff; a role this phone does not know reads as Staff.
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, role: "owner" }))?.canDeliver).toBe(true);
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, role: "staff" }))?.canDeliver).toBe(false);
+    for (const role of [undefined, "admin", 7, null]) {
+      const unknown = readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true, role }));
+      expect(unknown?.role).toBe("staff");
+      expect(unknown?.canDeliver).toBe(false);
+    }
+    // Taken off deliveries while the shop is moved back to Approved: the lease keeps its deadline and the flag still follows.
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "approved", shopName: "Sai", role: "staff", canDeliver: false } });
+    await restarted.verify(account);
+    fetch.mockRejectedValue(new Error("offline"));
+    const again = offlineAccess(storage, fetch, () => time);
+    await again.restore();
+    expect(again.canDeliver()).toBe(false);
+    expect(again.answersOrders()).toBe(true);
+  });
+  it("tells the tab bar at once when the deliver flag or role changes at an access refresh, with no restart (#550)", async () => {
+    const access = offlineAccess(storage, fetch, () => time);
+    const seen: string[] = [];
+    access.subscribe(() => seen.push(`${access.role()}:${access.canDeliver()}`));
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff", canDeliver: false } });
+    await access.verify(account);
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff", canDeliver: true } });
+    await access.verify(account);
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "owner", canDeliver: true } });
+    await access.verify(account);
+    expect(seen).toEqual(["staff:false", "staff:true", "owner:true"]);
+    expect(access.get().mode).toBe("online");
+  });
+  it("answers orders for a Live or Suspended shop only, so the tab bar shows for both and for no other state (#550)", async () => {
+    for (const [state, answers] of [["live", true], ["suspended", true], ["approved", false], ["submitted", false]] as const) {
+      record = null;
+      const access = offlineAccess(storage, fetch, () => time);
+      fetch.mockResolvedValue({ ok: true, data: { shopId, state, shopName: null, role: "owner", canDeliver: true } });
+      await access.verify(account);
+      expect(access.answersOrders()).toBe(answers);
+    }
+  });
+  it("keeps the account's role from the last check, reads a record with no role as Staff, and follows a change at the next check (#494)", async () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "staff" } });
     const first = offlineAccess(storage, fetch, () => time);
     await first.verify(account);
@@ -183,7 +230,7 @@ describe("verified offline shop access", () => {
     const restarted = offlineAccess(storage, fetch, () => time);
     await restarted.restore();
     expect(restarted.role()).toBe("staff");
-    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }))?.role).toBe("owner");
+    expect(readSavedAccess(JSON.stringify({ account, shopId, verifiedAt: time, stockAllowed: true }))?.role).toBe("staff");
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", shopName: null, role: "owner" } });
     await restarted.verify(account);
     expect(restarted.role()).toBe("owner");

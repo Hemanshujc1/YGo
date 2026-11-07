@@ -14,6 +14,7 @@ import { legacyOpeningStock, openOpeningStock } from "../lib/opening-stock-datab
 import { stockLine } from "../lib/stock-line";
 
 import { isCurrentAccount } from "../lib/account";
+import { backPath } from "../lib/back-path";
 
 const words = strings.shopSetup;
 type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; shopId: string; queue: OpeningStockQueue; items: ShopListingCatalogItem[]; epoch: number; accountId: string };
@@ -296,7 +297,7 @@ export default function OpeningStockScreen() {
 
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
-      <Link href="/" asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+      <Link href={backPath()} asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.stock}</Text>
       {load.kind === "loaded" && <SyncStatus />}
       <Text className="text-body text-muted">{words.quantity}</Text>

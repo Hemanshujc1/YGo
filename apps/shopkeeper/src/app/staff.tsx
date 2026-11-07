@@ -9,6 +9,7 @@ import { api } from "../api";
 import { Toggle } from "../components/toggle";
 import { codeRanOut, personLabel } from "../lib/staff";
 import { strings } from "../strings";
+import { backPath } from "../lib/back-path";
 
 const words = strings.staff;
 
@@ -80,7 +81,7 @@ export default function StaffScreen() {
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void pull()} progressViewOffset={insets.top} />}
       >
-        <Link href="/" asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+        <Link href={backPath()} asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
         {load.kind === "loading" && <View className="flex-row items-center gap-2"><ActivityIndicator className="text-primary" /><Text className="text-body text-muted">{words.loading}</Text></View>}
         {load.kind === "failed" && <>

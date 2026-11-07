@@ -23,6 +23,7 @@ vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Press
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
 vi.mock("../src/api", () => ({ api: mock.api, access: { shopName: () => "Sai General Stores" } }));
+vi.mock("../src/lib/back-path", () => ({ backPath: () => "/" }));
 import InviteStaffScreen from "../src/app/invite-staff";
 import StaffScreen from "../src/app/staff";
 
@@ -131,6 +132,14 @@ describe("S16 Staff (#535)", () => {
     mock.api.shopStaff.mockResolvedValue({ ok: false, status: 500, code: "INTERNAL" });
     draw(StaffScreen); await settle();
     expect(button(draw(StaffScreen), "Try again")).toBeDefined();
+  });
+
+  it("shows a Staff account that opens it directly only the server's refusal, with no list and no invite button (#550)", async () => {
+    mock.api.shopStaff.mockResolvedValue({ ok: false, status: 404, code: "NOT_FOUND" });
+    draw(StaffScreen); await settle();
+    const screen = draw(StaffScreen);
+    expect(texts(screen)).toContain("The server does not know this request.");
+    expect(button(screen, "Invite someone")).toBeUndefined();
   });
 });
 
