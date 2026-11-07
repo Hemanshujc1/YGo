@@ -191,6 +191,16 @@ describe("Cancelling after acceptance: the ask (ORD-5, #59)", () => {
     expect((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner })).json()).toMatchObject({ cancelRequest: { status: "asked" } });
   });
 
+  it("refuses the ask on a scheduled_confirmed order: scheduled orders wait for FUL-5 and nothing places one yet", async () => {
+    const { orderId } = await accepted();
+    await database.pool.query("UPDATE orders SET status = 'scheduled_confirmed' WHERE id = $1", [orderId]);
+    const asked = await askToCancel(orderId);
+    expect(asked.statusCode).toBe(409);
+    expect(asked.json()).toMatchObject({ error: { code: "ORDER_STATUS_CHANGED" } });
+    expect(await requestOf(orderId)).toBeUndefined();
+    expect((await shopAction(orderId, "cancel", { reason: "too_busy" })).statusCode).toBe(409);
+  });
+
   it("also lets the Customer ask while preparing", async () => {
     const { orderId } = await accepted();
     await shopAction(orderId, "preparing");

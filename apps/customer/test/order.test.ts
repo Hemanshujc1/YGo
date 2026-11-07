@@ -21,7 +21,7 @@ const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
 };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
+const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>
   ({ ok: false, status, code, ...more }) as ApiResult<never>;
 
 /** Timers the test runs by hand. */
@@ -51,12 +51,14 @@ function fakeServer() {
   const reads: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const cancels: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const itemChecks: Array<(answer: ApiResult<OrderResponse>) => void> = [];
+  const asks: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const client = {
+    askToCancelOrder: () => new Promise<ApiResult<OrderResponse>>((resolve) => asks.push(resolve)),
     order: () => new Promise<ApiResult<OrderResponse>>((resolve) => reads.push(resolve)),
     cancelOrder: () => new Promise<ApiResult<OrderResponse>>((resolve) => cancels.push(resolve)),
     confirmOrderItems: () => new Promise<ApiResult<OrderResponse>>((resolve) => itemChecks.push(resolve)),
   };
-  return { client, reads, cancels, itemChecks };
+  return { client, reads, cancels, itemChecks, asks };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -285,5 +287,86 @@ describe("C09/C19 order (#427)", () => {
     await store.cancel();
     expect(store.get()).toMatchObject({ cancelling: false, notice: strings.order.cancelOffline, order: { status: "placed" } });
     expect(clock.pending.size).toBe(1);
+  });
+});
+
+describe("asking the shop to cancel (ORD-5, #59)", () => {
+  const asked = (status: OrderStatus, request: "asked" | "kept" | "agreed" = "asked"): OrderResponse =>
+    ({ ...order(status), cancelRequest: { status: request, askedAt: "2030-01-01T00:05:00.000Z" } });
+
+  it("asks once, shows the waiting request from the answer, and a read keeps it until the shop answers", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order("accepted"), clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(order("accepted")));
+    await settle();
+    const asking = store.ask();
+    expect(store.get().asking).toBe(true);
+    server.asks.shift()?.(ok(asked("accepted")));
+    await asking;
+    expect(store.get()).toMatchObject({ asking: false, notice: null, order: { cancelRequest: { status: "asked" } } });
+    clock.fire();
+    server.reads.shift()?.(ok(asked("preparing")));
+    await settle();
+    expect(store.get().order).toMatchObject({ status: "preparing", cancelRequest: { status: "asked" } });
+  });
+
+  it("follows the request to agreed, kept, and nothing once the order is ready", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, asked("accepted"), clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(asked("accepted", "kept")));
+    await settle();
+    expect(store.get().order?.cancelRequest?.status).toBe("kept");
+    clock.fire();
+    server.reads.shift()?.(ok(asked("cancelled_by_customer", "agreed")));
+    await settle();
+    expect(store.get().order).toMatchObject({ status: "cancelled_by_customer", cancelRequest: { status: "agreed" } });
+    const ready = createOrder(server.client, id, { ...order("ready"), cancelRequest: { status: "closed_unanswered", askedAt: "2030-01-01T00:05:00.000Z" } }, clock.timers);
+    expect(ready.get().order?.cancelRequest?.status).toBe("closed_unanswered");
+  });
+
+  it("reads nothing while the ask is on its way", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order("accepted"), clock.timers);
+    store.start();
+    const asking = store.ask();
+    store.start();
+    expect(server.reads.length).toBe(1);
+    server.asks.shift()?.(ok(asked("accepted")));
+    await asking;
+  });
+
+  it("shows a stale answer, reads the order again and never sends the ask twice", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createOrder(server.client, id, order("accepted"), clock.timers);
+    const asking = store.ask();
+    server.asks.shift()?.(refused("CANCEL_REQUEST_CLOSED", 409));
+    await settle();
+    expect(store.get().notice).toBe(strings.errors.CANCEL_REQUEST_CLOSED);
+    expect(server.reads.length).toBe(1);
+    server.reads.shift()?.(ok(asked("accepted", "kept")));
+    await asking;
+    expect(store.get()).toMatchObject({ notice: strings.errors.CANCEL_REQUEST_CLOSED, order: { cancelRequest: { status: "kept" } } });
+    expect(server.asks.length).toBe(0);
+  });
+
+  it("says it could not reach the server, reads again, and keeps the notice when that read fails too", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const client = { ...server.client, askToCancelOrder: () => Promise.reject(new Error("offline")) };
+    const store = createOrder(client, id, order("accepted"), clock.timers);
+    const asking = store.ask();
+    await settle();
+    expect(store.get().notice).toBe(strings.order.askOffline);
+    expect(server.reads.length).toBe(1);
+    server.reads.shift()?.(refused("ORDER_STATUS_CHANGED", 409));
+    await asking;
+    expect(store.get().notice).toBe(strings.order.askOffline);
+    expect(store.get().message).toBe(strings.errors.ORDER_STATUS_CHANGED);
   });
 });

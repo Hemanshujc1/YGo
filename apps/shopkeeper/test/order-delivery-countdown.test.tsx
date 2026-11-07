@@ -15,7 +15,7 @@ vi.mock("react", () => ({
   useSyncExternalStore: () => mock.view,
 }));
 vi.mock("expo-router", () => ({ Link: "Link", router: {}, useLocalSearchParams: () => ({ id: "order-1" }) }));
-vi.mock("@ygo/mobile", () => ({ Button: "Button", StatusChip: "StatusChip", Text: "Text", useInFront: () => undefined }));
+vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", StatusChip: "StatusChip", Text: "Text", useInFront: () => undefined }));
 vi.mock("react-native", () => ({
   ActivityIndicator: "Spinner", Image: "Image", Linking: {}, Modal: "Modal", Pressable: "Pressable",
   RefreshControl: "RefreshControl", ScrollView: "ScrollView", TextInput: "TextInput", View: "View",

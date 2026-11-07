@@ -128,8 +128,8 @@ export type OrderView = {
   offset: number;
   message: string | null;
   refreshing: boolean;
-  answering: "accept" | "reject" | null;
-  /** Why Accept or Reject didn't go through. */
+  answering: "accept" | "reject" | "agree" | "keep" | "cancel" | null;
+  /** Why Accept, Reject, Agree, Keep or Cancel didn't go through. */
   notice: string | null;
   shortLines: ShortLine[];
   /** The server said the time is up, whatever the phone's clock shows. */
@@ -140,9 +140,11 @@ type OrderClient = {
   shopOrder(id: string): Promise<ApiResult<ShopOrderResponse>>;
   acceptOrder(id: string): Promise<ApiResult<ShopOrderResponse>>;
   rejectOrder(id: string, body: { reason: RejectReason }): Promise<ApiResult<ShopOrderResponse>>;
+  answerCancelRequest(id: string, answer: "agree" | "keep"): Promise<ApiResult<ShopOrderResponse>>;
+  cancelShopOrder(id: string, body: { reason: RejectReason }): Promise<ApiResult<ShopOrderResponse>>;
 };
 
-/** S05: one order, read every `every` ms while started and still New; Accept and Reject answer it. */
+/** S05: one order, read every `every` ms while started and still New, accepted or preparing; Accept and Reject answer it. */
 export function createShopOrder(client: OrderClient, id: string, timers: Timers = phoneTimers, every = pollEvery, now = Date.now) {
   let view: OrderView = {
     status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false,
@@ -153,8 +155,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     notify();
   };
   const poller = createPoller(() => void read(), every, timers);
-  // Still New and in time: only then is the order read again.
-  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired);
+  // Still New and in time, or accepted or preparing, where the Customer may ask to cancel (ORD-5, #59): only then is the order read again.
+  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired) || view.order.status === "accepted" || view.order.status === "preparing";
 
   // The server marks no order expired when its time runs out, so the store does, by the server's clock.
   let expiry: unknown;
@@ -232,6 +234,27 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     return false;
   }
 
+  /**
+   * Agree, Keep and Cancel an accepted order (ORD-5, #59). A refused or offline answer is shown, the order is read again and
+   * nothing is sent twice; the notice stays even when that read fails. True when the order changed.
+   */
+  async function settle(kind: "agree" | "keep" | "cancel", send: () => Promise<ApiResult<ShopOrderResponse>>): Promise<boolean> {
+    if (view.answering) return false;
+    poller.ticket();
+    poller.unschedule();
+    set({ answering: kind, notice: null, shortLines: [], refreshing: false });
+    const result = await send().catch(() => "offline" as const);
+    if (result !== "offline" && result.ok) {
+      landed(result.data, { answering: null });
+      poller.schedule(waiting());
+      return true;
+    }
+    set({ notice: failure(result) });
+    await read(false, true);
+    set({ answering: null });
+    return false;
+  }
+
   return {
     get: () => view,
     subscribe,
@@ -249,6 +272,9 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     retry: () => read(),
     accept: () => answer("accept", () => client.acceptOrder(id)),
     reject: (reason: RejectReason) => answer("reject", () => client.rejectOrder(id, { reason })),
+    agree: () => settle("agree", () => client.answerCancelRequest(id, "agree")),
+    keep: () => settle("keep", () => client.answerCancelRequest(id, "keep")),
+    cancel: (reason: RejectReason) => settle("cancel", () => client.cancelShopOrder(id, { reason })),
   };
 }
 

@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { ShopOrderResponse, ShopOrdersResponse, ShortLine } from "@ygo/contracts";
+import { type CancelRequestStatus, RejectReason, type ShopOrderResponse, type ShopOrdersResponse, type ShortLine } from "@ygo/contracts";
 import type { Timers } from "@ygo/mobile/poller";
 import { describe, expect, it } from "vitest";
 import { clock, clockOffset, createShopOrder, createShopOrders, lineLabel, secondsLeft, shortLabel, waitingOrder } from "../src/lib/shop-orders";
@@ -24,7 +24,7 @@ function never(): never {
 }
 const list: ShopOrdersResponse = { now: "2030-01-01T00:02:18.000Z", canDeliver: true, new: [], accepted: [], myDeliveries: [], doneToday: [] };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_ENOUGH_STOCK" | "INTERNAL", shortLines?: ShortLine[]) =>
+const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_ENOUGH_STOCK" | "INTERNAL", shortLines?: ShortLine[]) =>
   ({ ok: false, status: 409, code, shortLines }) as ApiResult<never>;
 
 /** Timers the test runs by hand. */
@@ -65,6 +65,14 @@ function fakeServer() {
     shopOrder: () => new Promise<ApiResult<ShopOrderResponse>>((resolve) => reads.push(resolve)),
     acceptOrder: () => new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve)),
     rejectOrder: (_: string, body: unknown) => {
+      sent.push(body);
+      return new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve));
+    },
+    answerCancelRequest: (_: string, answer: string) => {
+      sent.push(answer);
+      return new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve));
+    },
+    cancelShopOrder: (_: string, body: unknown) => {
       sent.push(body);
       return new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve));
     },
@@ -137,10 +145,38 @@ describe("S05 New order (#431)", () => {
     fire();
     reads.shift()?.(ok(order("accepted")));
     await settle();
+    // Accepted: the Customer may still ask to cancel, so it is read again (#59) until it is ready.
+    expect([...pending.values()].map(({ ms }) => ms)).toEqual([15_000]);
+    fire();
+    reads.shift()?.(ok(order("ready")));
+    await settle();
     expect(pending.size).toBe(0);
     one.stop();
     one.start();
     expect(reads).toHaveLength(0);
+  });
+
+  it("shows an ask to cancel that arrives while an accepted or preparing order is open, and stops once it is ready or ended", async () => {
+    const { timers, pending, fire } = fakeTimers();
+    const { client, reads } = fakeServer();
+    const one = createShopOrder(client, id, timers, 15_000);
+    one.start();
+    reads.shift()?.(ok(order("accepted")));
+    await settle();
+    expect(one.get().order?.cancelRequest).toBeNull();
+    fire();
+    reads.shift()?.(ok({ ...order("accepted"), cancelRequest: { status: "asked", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(one.get().order?.cancelRequest?.status).toBe("asked");
+    fire();
+    reads.shift()?.(ok({ ...order("preparing"), cancelRequest: { status: "asked", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(pending.size).toBe(1);
+    fire();
+    reads.shift()?.(ok({ ...order("cancelled_by_customer"), cancelRequest: { status: "agreed", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(pending.size).toBe(0);
+    one.stop();
   });
 
   it("goes back to S04 once accepted or rejected, sending the chosen reason", async () => {
@@ -327,5 +363,94 @@ describe("S03's pinned order (#507)", () => {
     expect(waitingOrder(orders, 0, now - 1_000)?.number).toBe(1);
     expect(waitingOrder(list, 0, now)).toBeNull();
     expect(waitingOrder(null, 0, now)).toBeNull();
+  });
+});
+
+describe("cancelling after acceptance (ORD-5, #59)", () => {
+  const asked = (status: ShopOrderResponse["status"], request: CancelRequestStatus = "asked"): ShopOrderResponse =>
+    ({ ...order(status), cancelRequest: { status: request, askedAt: "2030-01-01T00:05:00.000Z" } });
+  const started = async (first: ShopOrderResponse) => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const store = createShopOrder(server.client, id, clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(first));
+    await settle();
+    return { server, store };
+  };
+
+  it("sends Agree and Keep, lands the answer, and reads nothing while it is on its way", async () => {
+    const { server, store } = await started(asked("accepted"));
+    const agreeing = store.agree();
+    expect(store.get().answering).toBe("agree");
+    expect(await store.agree()).toBe(false);
+    server.answers.shift()?.(ok(asked("cancelled_by_customer", "agreed")));
+    expect(await agreeing).toBe(true);
+    expect(server.sent).toEqual(["agree"]);
+    expect(store.get()).toMatchObject({ answering: null, notice: null, order: { status: "cancelled_by_customer", cancelRequest: { status: "agreed" } } });
+
+    const kept = await started(asked("preparing"));
+    const keeping = kept.store.keep();
+    kept.server.answers.shift()?.(ok(asked("preparing", "kept")));
+    expect(await keeping).toBe(true);
+    expect(kept.server.sent).toEqual(["keep"]);
+    expect(kept.store.get().order?.cancelRequest?.status).toBe("kept");
+  });
+
+  it.each(RejectReason.options)("cancels from accepted, preparing and ready with the reason %s", async (reason) => {
+    for (const status of ["accepted", "preparing", "ready"] as const) {
+      const { server, store } = await started(order(status));
+      const cancelling = store.cancel(reason);
+      expect(store.get().answering).toBe("cancel");
+      server.answers.shift()?.(ok({ ...order("cancelled_by_shop"), rejectReason: reason }));
+      expect(await cancelling).toBe(true);
+      expect(server.sent).toEqual([{ reason }]);
+      expect(store.get().order).toMatchObject({ status: "cancelled_by_shop", rejectReason: reason });
+    }
+  });
+
+  it("shows a stale answer, reads the order again, sends nothing twice and keeps the notice when that read fails", async () => {
+    const { server, store } = await started(asked("accepted"));
+    const keeping = store.keep();
+    server.answers.shift()?.(refused("CANCEL_REQUEST_CLOSED"));
+    await settle();
+    expect(store.get()).toMatchObject({ answering: "keep", notice: strings.errors.CANCEL_REQUEST_CLOSED });
+    server.reads.shift()?.(ok(asked("ready", "closed_unanswered")));
+    expect(await keeping).toBe(false);
+    expect(store.get()).toMatchObject({ answering: null, notice: strings.errors.CANCEL_REQUEST_CLOSED, order: { status: "ready" } });
+    expect(server.sent).toEqual(["keep"]);
+
+    const failing = await started(asked("accepted"));
+    const agreeing = failing.store.agree();
+    failing.server.answers.shift()?.(refused("ORDER_STATUS_CHANGED"));
+    await settle();
+    failing.server.reads.shift()?.(refused("INTERNAL"));
+    expect(await agreeing).toBe(false);
+    expect(failing.store.get()).toMatchObject({ answering: null, notice: strings.errors.ORDER_STATUS_CHANGED, message: strings.errors.INTERNAL });
+  });
+
+  it("says it could not reach the server, then reads again", async () => {
+    const server = fakeServer();
+    const clock = fakeTimers();
+    const client = { ...server.client, cancelShopOrder: () => Promise.reject(new Error("offline")) };
+    const store = createShopOrder(client, id, clock.timers);
+    store.start();
+    server.reads.shift()?.(ok(order("accepted")));
+    await settle();
+    const cancelling = store.cancel("too_busy");
+    await settle();
+    expect(store.get().notice).toBe(words.offline);
+    server.reads.shift()?.(ok(order("accepted")));
+    expect(await cancelling).toBe(false);
+    expect(store.get()).toMatchObject({ answering: null, notice: words.offline });
+  });
+
+  it("keeps cancelAsked on the S04 rows it reads", async () => {
+    const row = { id, number: 1001, status: "accepted", placedAt: "2030-01-01T00:00:00.000Z", expiresAt: null, itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null } as const;
+    const server = { shopOrders: async () => ok({ ...list, accepted: [{ ...row, cancelAsked: true }, { ...row, number: 1002, cancelAsked: false }] }) };
+    const store = createShopOrders(server, fakeTimers().timers);
+    store.start();
+    await settle();
+    expect(store.get().orders?.accepted.map((summary) => summary.cancelAsked)).toEqual([true, false]);
   });
 });
