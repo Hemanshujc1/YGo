@@ -67,11 +67,11 @@ async function world(state = "live") {
   const request = (headers: Record<string, string>, over: Record<string, unknown> = {}) => app.inject({ method: "POST", url: "/v1/shop/product-requests", headers,
     payload: { clientId: randomUUID(), name: "Jaggery block", categoryId, baseUnit: "kg", packQuantity: "0.5", counterPrice: "40", mrp: "45", ...over } });
   const created = async (over: Record<string, unknown> = {}) => (await request(owner.headers, over)).json() as { id: string };
-  let sequence = 0;
   const bill = async (packId: string, count = 1, headers = owner.headers) => {
-    const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers, payload: { deviceId: "00000000-0000-4000-8000-000000000001", sentAt: clock.now().toISOString(),
-      actions: [{ id: randomUUID(), sequence: ++sequence, shopId, type: "counter_bill", createdAt: clock.now().toISOString(), clockSuspect: false,
+    const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers, payload: { deviceId: randomUUID(), sentAt: clock.now().toISOString(),
+      actions: [{ id: randomUUID(), sequence: 1, shopId, type: "counter_bill", createdAt: clock.now().toISOString(), clockSuspect: false,
         payload: { lines: [{ packId, count, unitPrice: "40" }], total: String(40 * count), payment: "cash" } }] } });
+    if (response.statusCode !== 200) throw new Error(response.body);
     return response.json().results[0] as { status: string; result: { heldReason: string | null } };
   };
   const packOf = async (requestId: string) => (await query<{ id: string }>("SELECT pack_id AS id FROM product_requests WHERE id = $1", [requestId]))[0]?.id as string;
@@ -166,6 +166,31 @@ describe("Admin product requests (#62, A11)", () => {
     expect(list[0]).toMatchObject({ shop: { name: "Sai General Stores" }, categoryName: "Staples", hasImage: false, status: "pending" });
   });
 
+  it("returns the first request to retries that arrive at the same moment, never a server error", async () => {
+    const w = await world();
+    const clientId = randomUUID();
+    const answers = await Promise.all(Array.from({ length: 5 }, () => w.request(w.owner.headers, { clientId })));
+    expect(answers.map((answer) => answer.statusCode).sort()).toEqual([200, 200, 200, 200, 201]);
+    expect(new Set(answers.map((answer) => answer.json().id)).size).toBe(1);
+    expect(await query("SELECT 1 FROM product_requests")).toHaveLength(1);
+    expect(await query("SELECT 1 FROM master_products")).toHaveLength(1);
+  });
+
+  it("serializes a map and bills at the same moment: every sale is either moved with the stock or held", async () => {
+    const w = await world();
+    const id = (await w.created()).id;
+    const temp = await w.packOf(id);
+    await app.inject({ method: "POST", url: `/v1/me/shop-listings/${temp}/opening-stock`, headers: w.owner.headers, payload: { quantity: "10", clientId: randomUUID() } });
+    const target = await w.catalogPack("0.5", "kg");
+    const [mapped, ...bills] = await Promise.all([w.act(id, "map", { packId: target }), ...Array.from({ length: 4 }, () => w.bill(temp, 1))]);
+    expect(mapped.statusCode).toBe(200);
+    const sold = bills.filter((bill) => bill.result.heldReason === null).length;
+    expect(bills.filter((bill) => bill.result.heldReason !== null).every((bill) => bill.result.heldReason === "not_listed")).toBe(true);
+    // Nothing is lost or counted twice: the sales that landed before the move left less to move.
+    expect(await w.stockOf(temp)).toBe("0.000");
+    expect(Number(await w.stockOf(target))).toBe(10 - sold * 0.5);
+  });
+
   it("refuses a manager of an Area, because the catalog is Admin's", async () => {
     const w = await world();
     const id = (await w.created()).id;
@@ -244,7 +269,7 @@ describe("Admin product requests (#62, A11)", () => {
     const temp = await w.packOf(id);
     await app.inject({ method: "POST", url: `/v1/me/shop-listings/${temp}/opening-stock`, headers: w.owner.headers, payload: { quantity: "10", clientId: randomUUID() } });
     await w.bill(temp, 3);
-    const target = await w.catalogPack("1", "kg");
+    const target = await w.catalogPack("0.5", "kg");
     await w.pull();
     const mapped = await w.act(id, "map", { packId: target });
     expect(mapped.statusCode).toBe(200);
@@ -259,7 +284,7 @@ describe("Admin product requests (#62, A11)", () => {
     expect((await w.bill(temp, 1)).result.heldReason).toBe("not_listed");
     const changes = (await w.pull()).changes;
     expect(changes.find((change) => change.packId === temp)?.item).toBeNull();
-    expect(changes.find((change) => change.packId === target)?.item?.quantity).toBe("7.500");
+    expect(changes.find((change) => change.packId === target)?.item?.quantity).toBe("8.000");
     expect(await query("SELECT 1 FROM notifications WHERE kind = 'product_request_approved' AND body LIKE '%matched%'")).toHaveLength(2);
   });
 
@@ -268,10 +293,12 @@ describe("Admin product requests (#62, A11)", () => {
     const id = (await w.created()).id;
     const temp = await w.packOf(id);
     await app.inject({ method: "POST", url: `/v1/me/shop-listings/${temp}/opening-stock`, headers: w.owner.headers, payload: { quantity: "10", clientId: randomUUID() } });
-    const listed = await w.catalogPack("1", "kg");
+    const listed = await w.catalogPack("0.5", "kg");
     await query("INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp) VALUES ($1, $2, 1, 1, 1)", [w.shopId, listed]);
     expect((await w.act(id, "map", { packId: listed })).json()).toMatchObject({ error: { code: "PACK_ALREADY_LISTED" } });
     expect((await w.act(id, "map", { packId: await w.catalogPack("2", "each") })).statusCode).toBe(400);
+    expect((await w.act(id, "map", { packId: await w.catalogPack("1", "kg") })).statusCode).toBe(400);
+    expect((await w.act(id, "map", { packId: await w.catalogPack("0.25", "kg") })).statusCode).toBe(400);
     expect((await w.act(id, "map", { packId: randomUUID() })).statusCode).toBe(404);
     expect((await query<{ status: string }>("SELECT status FROM product_requests"))[0]?.status).toBe("pending");
     expect(await w.stockOf(temp)).toBe("10.000");

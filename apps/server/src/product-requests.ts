@@ -26,6 +26,8 @@ export async function listShopRequests(db: Pool | PoolClient, shopId: string): P
  * Null when the category is not one a product may have. A taken name or barcode throws its unique-index error for the route to name.
  */
 export async function createProductRequest(client: PoolClient, shopId: string, accountId: string, body: CreateProductRequestBody): Promise<{ request: ProductRequest; created: boolean } | null> {
+  // Retries of one request run one after another, so the later one finds the first instead of failing on its product's name.
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`product_request:${shopId}:${body.clientId}`]);
   const found = await client.query<ProductRequest>(`${requestSql} WHERE r.shop_id = $1 AND r.client_id = $2`, [shopId, body.clientId]);
   if (found.rows[0]) return { request: found.rows[0], created: false };
   const category = await client.query(
@@ -90,6 +92,12 @@ async function finish(client: PoolClient, request: Locked, adminId: string, at: 
   return { request: saved };
 }
 
+/**
+ * Counter bills sync under the shop's row lock (routes/sync.ts), so taking it here too puts each sale wholly before a map or removal, or
+ * after it, when it is held as not listed. A move of the stock then never misses a sale that was billed at the same moment.
+ */
+const lockShop = (client: PoolClient, request: Locked) => client.query("SELECT 1 FROM shops WHERE id = $1 FOR UPDATE", [request.shopId]);
+
 /** Publishes the temporary product, so customers see it. It needs its three image sizes first, which Admin adds on the product. */
 export async function approveProductRequest(client: PoolClient, id: string, adminId: string, at: Date): Promise<Outcome> {
   const request = await lockPending(client, id);
@@ -107,14 +115,17 @@ export async function approveProductRequest(client: PoolClient, id: string, admi
 export async function mapProductRequest(client: PoolClient, id: string, packId: string, adminId: string, at: Date): Promise<Outcome> {
   const request = await lockPending(client, id);
   if ("code" in request) return request;
-  const { rows: [target] } = await client.query<{ name: string; baseUnit: string }>(
-    `SELECT p.name || ' ' || pk.quantity::text || ' ' || p.base_unit AS name, p.base_unit AS "baseUnit" FROM packs pk JOIN master_products p ON p.id = pk.product_id
+  const { rows: [target] } = await client.query<{ name: string; baseUnit: string; sameSize: boolean }>(
+    `SELECT p.name || ' ' || pk.quantity::text || ' ' || p.base_unit AS name, p.base_unit AS "baseUnit",
+       pk.quantity = (SELECT quantity FROM packs WHERE id = $2) AS "sameSize" FROM packs pk JOIN master_products p ON p.id = pk.product_id
      JOIN categories c ON c.id = p.category_id LEFT JOIN categories parent ON parent.id = c.parent_id
-     WHERE pk.id = $1 AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`, [packId]);
+     WHERE pk.id = $1 AND pk.active AND p.active AND p.published AND c.active AND COALESCE(parent.active, true)`, [packId, request.packId]);
   if (!target) return { code: "NOT_FOUND" };
-  if (target.baseUnit !== request.baseUnit) return { code: "VALIDATION_FAILED" };
-  // The unique index settles a pack the Owner listed a moment ago: no row back means the shop already lists it.
+  // The stock, price and MRP move as they are, so the pack must be the same size: a different size would need a converted price and count.
+  if (target.baseUnit !== request.baseUnit || !target.sameSize) return { code: "VALIDATION_FAILED" };
+  await lockShop(client, request);
   await client.query("SELECT 1 FROM shop_listings WHERE id = $1 FOR UPDATE", [request.listingId]);
+  // The unique index settles a pack the Owner listed a moment ago: no row back means the shop already lists it.
   const { rows: [listing] } = await client.query<{ id: string }>(
     `INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, available) VALUES ($1, $2, $3, $3, $4, false)
      ON CONFLICT (shop_id, pack_id) DO NOTHING RETURNING id`, [request.shopId, packId, request.counterPrice, request.mrp]);
@@ -135,6 +146,7 @@ export async function mapProductRequest(client: PoolClient, id: string, packId: 
 export async function rejectProductRequest(client: PoolClient, id: string, reason: string, excludedGood: boolean, adminId: string, at: Date): Promise<Outcome> {
   const request = await lockPending(client, id);
   if ("code" in request) return request;
+  if (excludedGood) await lockShop(client, request);
   if (excludedGood) await client.query("UPDATE shop_listings SET removed_from_counter = true, available = false, updated_at = $2 WHERE id = $1", [request.listingId, at]);
   return finish(client, request, adminId, at, "product_request.reject", "rejected", { reason, excludedGood }, { title: "Product rejected", body: `${request.name}: ${reason}` });
 }
