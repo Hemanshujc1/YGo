@@ -85,6 +85,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createArea: vi.fn(),
     editArea: vi.fn(),
     listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [] } }),
+    listProofExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { shops: [], deliverers: [] } } }),
+    reviewProofException: vi.fn(),
     getShopApplication: vi.fn(),
     correctShopApplication: vi.fn(),
     assignShopAreaManager: vi.fn(),
@@ -1193,7 +1195,7 @@ describe("Area Manager shell (#343)", () => {
     expect(screen.queryByText(strings.title)).toBeNull();
     expect(screen.getByText(strings.areaManagerScope)).toBeTruthy();
     const links = within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([strings.applications]);
+    expect(links.map((link) => link.textContent)).toEqual([strings.applications, strings.proofExceptions]);
     expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
     expect(api.listShopApplications).toHaveBeenCalled();
@@ -1221,6 +1223,14 @@ describe("Area Manager shell (#343)", () => {
     },
   );
 
+  it.each(["admin", "area_manager"] as const)("opens A28 Proof exceptions for %s from the navigation, and asks the server for the first page", async (role) => {
+    const { api, router } = setup("/applications", asRole(role));
+    fireEvent.click(await screen.findByRole("link", { name: strings.proofExceptions }));
+    expect(await screen.findByText(strings.proofExceptionsNoneOpen)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/proof-exceptions");
+    expect(api.listProofExceptions).toHaveBeenCalledTimes(1);
+  });
+
   it("draws no role's shell while the role is unknown or after the session ends", async () => {
     setup("/applications", { role: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }), currentRole: vi.fn(() => null) });
     expect(await screen.findByRole("link", { name: strings.brand })).toBeTruthy();
@@ -1244,7 +1254,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(9);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(10);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

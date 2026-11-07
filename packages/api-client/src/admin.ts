@@ -29,6 +29,8 @@ import {
   PacksResponse,
   AdminShopApplication,
   LiveCheck,
+  ProofException,
+  ProofExceptionsResponse,
   ShopApplicationsResponse,
   ShopVisit,
   ShopOnboarding,
@@ -326,6 +328,18 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `PATCH /v1/admin/areas/:id`: new pincodes, or pause / resume, with a reason. */
     async editArea(id: string, body: EditAreaBody): Promise<ApiResult<Area>> {
       return result(await adminRequest("PATCH", `/v1/admin/areas/${encodeURIComponent(id)}`, body), Area);
+    },
+
+    /** `GET /v1/admin/proof-exceptions`: A28, one page of Open or Reviewed proof exceptions with the per-shop and per-deliverer counts (DLV-4). */
+    async listProofExceptions(query: { status?: "open" | "reviewed"; shopId?: string; delivererId?: string; limit?: number; cursor?: string } = {}): Promise<ApiResult<ProofExceptionsResponse>> {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+      return result(await adminRequest("GET", `/v1/admin/proof-exceptions?${params}`), ProofExceptionsResponse);
+    },
+
+    /** `POST /v1/admin/proof-exceptions/:orderId/review`: mark one reviewed; marking it again changes nothing. */
+    async reviewProofException(orderId: string): Promise<ApiResult<ProofException>> {
+      return result(await adminRequest("POST", `/v1/admin/proof-exceptions/${encodeURIComponent(orderId)}/review`), ProofException);
     },
 
     /** `GET /v1/admin/shop-applications`: sent applications, the longest waiting first (A06). */

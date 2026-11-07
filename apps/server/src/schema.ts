@@ -790,6 +790,14 @@ export const orderCancelRequests = pgTable("order_cancel_requests", {
   check("order_cancel_requests_settled_by_valid", sql`${table.settledBy} IS NULL OR ${table.status} IN ('agreed', 'kept')`),
 ]);
 
+// An Admin's or Area Manager's mark that a proof exception was looked at (A28, DLV-4, #60). One row per order, one way:
+// nothing acts on it. It sits beside the orders because the freeze trigger lets an order change nothing but its status.
+export const proofExceptionReviews = pgTable("proof_exception_reviews", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id),
+  reviewedBy: uuid("reviewed_by").notNull().references(() => accounts.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull(),
+});
+
 // Append-only order revisions for partial acceptances (ORD-3, ORD-4, #526).
 export const orderRevisions = pgTable("order_revisions", {
   id: uuid("id").primaryKey().defaultRandom(),
