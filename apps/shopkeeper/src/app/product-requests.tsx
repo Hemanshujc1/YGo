@@ -1,7 +1,7 @@
 import { CreateProductRequestBody, invalidFields, type ProductRequest, type ProductRequestsResponse } from "@ygo/contracts";
 import { formatMoney, trimDecimal } from "@ygo/format";
 import { Button, StatusChip, Text, type Treatment } from "@ygo/mobile";
-import { Link } from "expo-router";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
 import { randomUUID } from "expo-crypto";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
@@ -19,12 +19,15 @@ const treatment: Record<ProductRequest["status"], Treatment> = { pending: "waiti
 /**
  * S38 Product request (CAT-3, #62): the Owner asks for a product the catalog lacks and can bill it at the counter at once. Customers see it only
  * once Admin approves. The Request button is off while the phone can't reach the server, with the reason shown. One `clientId` per form, so a
- * retry after a lost answer is the same request.
+ * retry after a lost answer is the same request. A counter bill's typed line opens it with that line's name and price filled in (#565); the MRP
+ * stays blank, since the shop must say it, and Back returns to the bill with its draft.
  */
 export default function ProductRequestsScreen() {
   const insets = useSafeAreaInsets();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
-  const [form, setForm] = useState<Form>(emptyForm);
+  const from = useLocalSearchParams<{ name?: string; price?: string }>();
+  const router = useRouter();
+  const [form, setForm] = useState<Form>(() => ({ ...emptyForm, name: from.name ?? "", counterPrice: from.price ? trimDecimal(from.price) : "" }));
   const [wrong, setWrong] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -65,7 +68,8 @@ export default function ProductRequestsScreen() {
 
   return (
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
-      <Link href={backPath()} asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
+      {from.name ? <Pressable accessibilityRole="button" onPress={() => router.back()}><Text className="text-body font-semibold text-primary">‹ {words.backToBill}</Text></Pressable>
+        : <Link href={backPath()} asChild><Pressable accessibilityRole="button"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>}
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       <Text className="text-body text-muted">{words.intro}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" accessibilityLabel={words.loading} />}

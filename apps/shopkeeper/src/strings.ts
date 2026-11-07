@@ -225,7 +225,7 @@ export const strings = {
     // #53: typed items, a discount, the customer, and finding a bill by either identifier.
     addTyped: "Add a typed item", typedName: "Item name", typedPrice: "Price each (₹)",
     typedLabel: (index: number) => `Typed item ${formatNumber(index)}`,
-    typedCount: (label: string) => `${label}: count`, removeTyped: "Remove",
+    typedCount: (label: string) => `${label}: count`, removeTyped: "Remove", requestTyped: "Request this as a product",
     nameWrong: "Type a name of 1 to 80 characters.", priceWrong: "Type a price such as 40 or 39.50.", countWrong: "Type a count from 1 to 9,999.",
     discount: "Discount (₹)", discountWrong: "Type a discount such as 10 or 9.50.", discountTooBig: "The discount can't be more than the items.",
     sum: (items: string, discount: string) => `Items ${items} · Discount ${discount}`,
@@ -715,6 +715,7 @@ export const strings = {
     title: "Product requests",
     intro: "Ask for a product the catalog doesn't have. You can sell it at your counter straight away; customers see it once YGo approves it.",
     back: "Back",
+    backToBill: "Back to the bill",
     loading: "Loading your requests…",
     loadFailed: "Could not load your requests. Check your connection, then try again.",
     retry: "Try again",

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
-  hooks: [] as unknown[], cursor: 0, started: false, ids: 0,
+  params: {} as Record<string, string>, back: vi.fn(), hooks: [] as unknown[], cursor: 0, started: false, ids: 0,
   api: { productRequests: vi.fn(), createProductRequest: vi.fn() },
 }));
 vi.mock("react", () => ({
@@ -17,7 +17,7 @@ vi.mock("react", () => ({
   },
   useEffect: (effect: () => void) => { if (!mock.started) { mock.started = true; effect(); } },
 }));
-vi.mock("expo-router", () => ({ Link: "Link" }));
+vi.mock("expo-router", () => ({ Link: "Link", useLocalSearchParams: () => mock.params, useRouter: () => ({ back: mock.back }) }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => `00000000-0000-4000-8000-${String(++mock.ids).padStart(12, "0")}` }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", StatusChip: "StatusChip" }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
@@ -57,7 +57,7 @@ const valid = { [words.name]: "Fresh jaggery", [words.packQuantity]: "0.5", [wor
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mock.hooks = []; mock.started = false; mock.ids = 0;
+  mock.hooks = []; mock.started = false; mock.ids = 0; mock.params = {};
   mock.api.productRequests.mockResolvedValue({ ok: true, data: { requests: [listed], categories: [category] } });
 });
 
@@ -140,5 +140,37 @@ describe("S38 Product request (#62, CAT-3)", () => {
     const ids = mock.api.createProductRequest.mock.calls.map(([body]) => (body as { clientId: string }).clientId);
     expect(ids).toHaveLength(2);
     expect(ids[1]).toBe(ids[0]);
+  });
+
+  it("opens from a counter bill's typed line with its name and price filled in, the MRP blank, and Back returning to the bill (#565)", async () => {
+    mock.params = { name: "Fresh jaggery", price: "40.50" };
+    const shown = await open();
+    expect(input(shown, words.name)?.props.value).toBe("Fresh jaggery");
+    expect(input(shown, words.counterPrice)?.props.value).toBe("40.5");
+    expect(input(shown, words.mrp)?.props.value).toBe("");
+    // The MRP is still required: the form refuses to send until the shop gives it.
+    fill({ [words.packQuantity]: "0.5" });
+    (button(draw(), words.request)?.props.onPress as () => void)();
+    await settle();
+    expect(mock.api.createProductRequest).not.toHaveBeenCalled();
+    expect(texts(draw())).toContain(words.fields.mrp);
+    const back = draw().find((n) => n.type === "Pressable" && texts([n]).length === 0 && texts(elements(n.props.children)).includes(`‹ ${words.backToBill}`));
+    (back?.props.onPress as () => void)();
+    expect(mock.back).toHaveBeenCalled();
+  });
+
+  it("sends that prefilled request once the shop adds the MRP and the rest", async () => {
+    mock.params = { name: "Fresh jaggery", price: "40" };
+    mock.api.createProductRequest.mockResolvedValue({ ok: true, data: { ...listed, status: "pending", reason: null } });
+    await open();
+    fill({ [words.packQuantity]: "0.5", [words.mrp]: "45" });
+    (button(draw(), words.request)?.props.onPress as () => void)();
+    await settle();
+    expect(mock.api.createProductRequest).toHaveBeenCalledWith(expect.objectContaining({ name: "Fresh jaggery", counterPrice: "40", mrp: "45" }));
+  });
+
+  it("keeps the usual Back when it is not opened from a bill", async () => {
+    const shown = await open();
+    expect(shown.some((n) => n.type === "Link")).toBe(true);
   });
 });

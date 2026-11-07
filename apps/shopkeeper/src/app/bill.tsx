@@ -221,6 +221,10 @@ export default function BillScreen() {
               </View>
               <TextInput accessibilityLabel={`${label}: ${words.typedName}`} placeholder={words.typedName} value={line.name} maxLength={80} onChangeText={(name) => editTyped(line.key, { name })}
                 className={`h-[52px] rounded-input border bg-bg px-3 text-body text-text ${problem === "name" ? "border-danger" : "border-border"}`} />
+              {/* #565: offered on every named typed line, flagged or not, so it does not wait for the denylist flag (#69). The bill is unchanged. */}
+              {line.name.trim() !== "" && <Link href={{ pathname: "/product-requests", params: { name: line.name.trim(), ...(line.price.trim() && { price: line.price.trim() }) } }} asChild>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${words.requestTyped}`} className="min-h-12 justify-center"><Text className="text-secondary font-medium text-primary">{words.requestTyped}</Text></Pressable>
+              </Link>}
               <TextInput accessibilityLabel={`${label}: ${words.typedPrice}`} placeholder={words.typedPrice} keyboardType="decimal-pad" value={line.price}
                 onChangeText={(price) => editTyped(line.key, { price })} onBlur={() => editTyped(line.key, (current) => ({ price: leave(current.price) }))}
                 className={`h-[52px] rounded-input border bg-bg px-3 text-body text-text ${problem === "price" ? "border-danger" : "border-border"}`} />
