@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { CreateVisitPhotoUploadBody, VISIT_PHOTO_MAX_BYTES } from "@ygo/contracts";
 import ExifReader, { type ExpandedTags } from "exifreader";
 import sharp from "sharp";
-import { FileTooLargeError, type FileStorage } from "./file-storage";
+import { FileTooLargeError, presignedHttpUrl, privateReadUrl, type FileStorage } from "./file-storage";
 
 export class InvalidVisitPhotoError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -51,7 +51,7 @@ export function createVisitPhotoStorage(files: FileStorage) {
       return { key, ...metadata };
     },
     async downloadUrl(key: string) {
-      return presignedHttpUrl(await files.downloadUrl(key, { expiresIn: 5 * 60, cacheControl: "private, no-store" }));
+      return privateReadUrl(files, key);
     },
   };
 }
@@ -92,12 +92,4 @@ function coordinate(value: unknown, ref: unknown, positive: string, negative: st
   if (minutes >= 60 || seconds >= 60) return null;
   const coordinate = degrees + minutes / 60 + seconds / 3600;
   return coordinate <= max ? coordinate * (ref === negative ? -1 : 1) : null;
-}
-
-function presignedHttpUrl(value: string) {
-  const url = new URL(value);
-  if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.searchParams.has("X-Amz-Signature")) {
-    throw new Error("Visit photos require presigned HTTP URLs; use authenticated S3 storage");
-  }
-  return value;
 }

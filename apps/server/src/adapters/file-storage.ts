@@ -19,6 +19,23 @@ export interface FileStorage {
   delete(key: string): Promise<void>;
 }
 
+/** How long a private photo's read link works. */
+export const PRIVATE_READ_SECONDS = 5 * 60;
+
+/** A signed http(s) link or an error: never an unsigned or `file:` one that would not expire or would name a server path. */
+export function presignedHttpUrl(value: string) {
+  const url = new URL(value);
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.searchParams.has("X-Amz-Signature")) {
+    throw new Error("Private photos require presigned HTTP URLs; use authenticated S3 storage");
+  }
+  return value;
+}
+
+/** The one read policy for private photos (visit and delivery proof): a short signed link that no cache keeps. */
+export async function privateReadUrl(files: FileStorage, key: string) {
+  return presignedHttpUrl(await files.downloadUrl(key, { expiresIn: PRIVATE_READ_SECONDS, cacheControl: "private, no-store" }));
+}
+
 /**
  * Files under a local directory, addressed by plain `file:` URLs with no
  * signature. The content type is ignored: nothing here enforces it.

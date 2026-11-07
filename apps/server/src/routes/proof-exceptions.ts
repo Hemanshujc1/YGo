@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { ErrorEnvelope, ProofException, ProofExceptionParams, ProofExceptionPhotoAccess, ProofExceptionsQuery, ProofExceptionsResponse } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { DOWNLOAD_SECONDS, type DeliveryPhotoStorage } from "../adapters/delivery-photos";
+import type { DeliveryPhotoStorage } from "../adapters/delivery-photos";
+import { PRIVATE_READ_SECONDS } from "../adapters/file-storage";
 import { adminWebSignedIn, withAdminWebTransaction } from "../admin";
 import { listProofExceptions, proofExceptionCounts, proofPhotoOf, reviewProofException } from "../proof-exceptions";
 import { deriveKeys } from "../tokens";
@@ -52,7 +53,7 @@ export function registerProofExceptionRoutes(app: FastifyInstance, { pool, clock
       catch { return reply.code(503).send({ error: { code: "UNAVAILABLE" } }); }
       await client.query("INSERT INTO proof_photo_views (order_id, viewed_by, viewed_at) VALUES ($1, $2, $3)", [orderId, who.accountId, now]);
       await client.query("COMMIT");
-      return reply.code(200).send({ downloadUrl, expiresAt: new Date(now.getTime() + DOWNLOAD_SECONDS * 1000).toISOString() });
+      return reply.code(200).send({ downloadUrl, expiresAt: new Date(now.getTime() + PRIVATE_READ_SECONDS * 1000).toISOString() });
     });
   });
 }

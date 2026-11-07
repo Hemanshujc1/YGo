@@ -281,10 +281,46 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     open.mockRestore();
   });
 
-  it("says the photo is removed when the row has none or its 30 days have passed, with no button", async () => {
+  it("says the photo is removed when the server sends none, and trusts the server, not this browser's clock, for the rest", async () => {
     setup(page([row(2, { photo: null }), row(1, { photo: { expiresAt: "2000-01-01T00:00:00.000Z" } })]));
     await screen.findByRole("table");
-    expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull();
-    expect(bodyRows().every((r) => r.textContent?.includes(strings.proofExceptionsPhotoGone))).toBe(true);
+    expect(bodyRows()[0]?.textContent).toContain(strings.proofExceptionsPhotoGone);
+    expect(within(bodyRows()[0] as HTMLElement).queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull();
+    // A date in the past by this browser's clock is still the server's to judge.
+    expect(within(bodyRows()[1] as HTMLElement).getByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeTruthy();
+  });
+
+  it("keeps each row's wait to itself: one row's answer never frees another's button, and a row is never started twice", async () => {
+    const calls = setup(page([row(2), row(1)]));
+    const first = fakeTab(); const second = fakeTab();
+    const open = vi.spyOn(window, "open").mockReturnValueOnce(first as unknown as Window).mockReturnValueOnce(second as unknown as Window);
+    const answers: Array<(value: unknown) => void> = [];
+    calls.getProofExceptionPhoto.mockImplementation(() => new Promise((resolve) => { answers.push(resolve); }));
+    const [a, b] = await screen.findAllByRole("button", { name: strings.proofExceptionsViewPhoto });
+    fireEvent.click(a as HTMLElement); fireEvent.click(a as HTMLElement);
+    fireEvent.click(b as HTMLElement);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(calls.getProofExceptionPhoto).toHaveBeenCalledTimes(2);
+    answers[0]?.(ok({ downloadUrl: link, expiresAt: "2030-01-01T00:05:00.000Z" }));
+    await waitFor(() => expect(first.location.href).toBe(link));
+    // Row B is still waiting, so its button is still off.
+    expect(within(bodyRows()[1] as HTMLElement).getAllByRole("button").every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect((within(bodyRows()[0] as HTMLElement).getAllByRole("button")[0] as HTMLButtonElement).disabled).toBe(false);
+    answers[1]?.(ok({ downloadUrl: link, expiresAt: "2030-01-01T00:05:00.000Z" }));
+    await waitFor(() => expect(second.location.href).toBe(link));
+    open.mockRestore();
+  });
+
+  it("closes the tab, says so and frees the row when the request itself throws", async () => {
+    const calls = setup(page([row(2)]));
+    const tab = fakeTab();
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    calls.getProofExceptionPhoto.mockRejectedValueOnce(new Error("network"));
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.proofExceptionsPhotoFailed);
+    expect(tab.closed).toBe(true);
+    const again = screen.getByRole("button", { name: strings.proofExceptionsViewPhoto }) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    open.mockRestore();
   });
 });

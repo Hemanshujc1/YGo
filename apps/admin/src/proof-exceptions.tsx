@@ -21,7 +21,9 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
   const [rows, setRows] = useState<ProofException[]>(first.exceptions);
   const [next, setNext] = useState(first.nextCursor);
   const [counts, setCounts] = useState(first.counts);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** The orders with a photo or a mark in flight: each row waits on its own, never on another's. */
+  const [busy, setBusy] = useState<ReadonlyMap<string, "photo" | "review">>(new Map());
+  const inFlight = useRef(new Set<string>());
   const [problem, setProblem] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   /** Each load from the top takes a number; an answer that is no longer the latest is dropped, so a slow one can't undo a newer tab or filter. */
@@ -66,33 +68,50 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
     setRows((current) => { const seen = new Set(current.map((row) => row.orderId)); return [...current, ...answer.data.exceptions.filter((row) => !seen.has(row.orderId))]; });
     setNext(answer.data.nextCursor);
   }
+  /** Runs one request for one order, once at a time, and always frees the row, however it ends. */
+  async function working(orderId: string, kind: "photo" | "review", work: () => Promise<void>) {
+    if (inFlight.current.has(orderId)) return;
+    inFlight.current.add(orderId);
+    setBusy((current) => new Map(current).set(orderId, kind));
+    try { await work(); }
+    finally {
+      inFlight.current.delete(orderId);
+      setBusy((current) => { const next = new Map(current); next.delete(orderId); return next; });
+    }
+  }
   /**
    * Asks for a private link only now, on the click (#560). The tab is opened first, inside the click, since a browser blocks a
    * pop-up opened after a wait; its opener is dropped at once, and it is sent to the photo when the link arrives or closed when not.
    */
-  async function viewPhoto(orderId: string) {
+  function viewPhoto(orderId: string) {
+    if (inFlight.current.has(orderId)) return Promise.resolve();
     const tab = window.open("", "_blank");
-    if (!tab) { setProblem(strings.proofExceptionsPhotoBlocked); return; }
+    if (!tab) { setProblem(strings.proofExceptionsPhotoBlocked); return Promise.resolve(); }
     tab.opener = null;
-    setBusy(orderId);
-    const answer = await api.getProofExceptionPhoto(orderId);
-    setBusy(null);
-    if (!answer.ok) {
-      tab.close();
-      // Removed since the list loaded: reload, and the row says so itself.
-      if (answer.code === "PHOTO_EXPIRED") await reload(view.current);
-      else setProblem(strings.proofExceptionsPhotoFailed);
-      return;
-    }
-    setProblem(null);
-    tab.location.href = answer.data.downloadUrl;
+    return working(orderId, "photo", async () => {
+      try {
+        const answer = await api.getProofExceptionPhoto(orderId);
+        if (!answer.ok) {
+          tab.close();
+          // Removed since the list loaded: reload, and the row says so itself.
+          if (answer.code === "PHOTO_EXPIRED") await reload(view.current);
+          else setProblem(strings.proofExceptionsPhotoFailed);
+          return;
+        }
+        setProblem(null);
+        tab.location.href = answer.data.downloadUrl;
+      } catch {
+        tab.close();
+        setProblem(strings.proofExceptionsPhotoFailed);
+      }
+    });
   }
-  async function review(orderId: string) {
-    setBusy(orderId);
-    const answer = await api.reviewProofException(orderId);
-    setBusy(null);
-    if (!answer.ok) { setProblem(strings.proofExceptionsReviewFailed); return; }
-    await reload(view.current);
+  function review(orderId: string) {
+    return working(orderId, "review", async () => {
+      const answer = await api.reviewProofException(orderId);
+      if (!answer.ok) { setProblem(strings.proofExceptionsReviewFailed); return; }
+      await reload(view.current);
+    });
   }
 
   return <>
@@ -148,14 +167,14 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
             <td className="p-3">{row.deliverer.name ?? "—"}</td>
             <td className="p-3">{strings.proofExceptionReasons[row.reason]}</td>
             <td className="p-3 tabular-nums"><time dateTime={row.recordedAt}>{formatDateTime(row.recordedAt)}</time></td>
-            <td className="p-3">{row.photo && Date.parse(row.photo.expiresAt) > Date.now()
-              ? <button disabled={busy === row.orderId} onClick={() => void viewPhoto(row.orderId)} title={strings.proofExceptionsPhotoKept(formatDateTime(row.photo.expiresAt))} className="h-10 rounded-lg border border-border-strong px-4 font-medium disabled:opacity-60">
-                {busy === row.orderId ? strings.proofExceptionsOpeningPhoto : strings.proofExceptionsViewPhoto}</button>
+            <td className="p-3">{row.photo
+              ? <button disabled={busy.has(row.orderId)} onClick={() => void viewPhoto(row.orderId)} title={strings.proofExceptionsPhotoKept(formatDateTime(row.photo.expiresAt))} className="h-10 rounded-lg border border-border-strong px-4 font-medium disabled:opacity-60">
+                {busy.get(row.orderId) === "photo" ? strings.proofExceptionsOpeningPhoto : strings.proofExceptionsViewPhoto}</button>
               : <span className="text-muted">{strings.proofExceptionsPhotoGone}</span>}</td>
             <td className="p-3">{row.reviewed
               ? <span className="text-muted">{strings.proofExceptionsReviewedBy(row.reviewed.by, formatDateTime(row.reviewed.at))}</span>
-              : <button disabled={busy === row.orderId} onClick={() => void review(row.orderId)} className="h-10 rounded-lg border border-border-strong px-4 font-medium disabled:opacity-60">
-                {busy === row.orderId ? strings.proofExceptionsReviewing : strings.proofExceptionsReview}</button>}</td>
+              : <button disabled={busy.has(row.orderId)} onClick={() => void review(row.orderId)} className="h-10 rounded-lg border border-border-strong px-4 font-medium disabled:opacity-60">
+                {busy.get(row.orderId) === "review" ? strings.proofExceptionsReviewing : strings.proofExceptionsReview}</button>}</td>
           </tr>)}</tbody>
         </table>
       </div>}
