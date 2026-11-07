@@ -132,6 +132,14 @@ export {
   WaitlistResponse,
 } from "./areas";
 export {
+  ProofException,
+  ProofExceptionCounts,
+  ProofExceptionParams,
+  ProofExceptionReason,
+  ProofExceptionsQuery,
+  ProofExceptionsResponse,
+} from "./proof-exceptions";
+export {
   AddressLabel,
   AddressPinBody,
   AddressPoint,

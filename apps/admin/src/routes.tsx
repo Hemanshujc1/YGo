@@ -19,6 +19,7 @@ import { CatalogImport } from "./catalog-import";
 import { CounterBills } from "./counter-bills";
 import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
+import { ProofExceptions } from "./proof-exceptions";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
 import { ShopApplications, ShopApplicationReview } from "./shop-applications";
@@ -59,8 +60,9 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/search-terms", label: strings.searchTerms },
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
+    { path: "/proof-exceptions", label: strings.proofExceptions },
     { path: "/waitlist", label: strings.waitlist },
-  ] : role === "area_manager" ? [{ path: "/applications", label: strings.applications }] : [];
+  ] : role === "area_manager" ? [{ path: "/applications", label: strings.applications }, { path: "/proof-exceptions", label: strings.proofExceptions }] : [];
 
   async function signOut() {
     if (!api) return;
@@ -345,6 +347,7 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   const guarded = ({ loader = () => null, areaManager, ...route }: GuardedRoute): RouteObject =>
     ({ ...route, loader: byRole(api, loader, areaManager) });
   const applicationsLoader = listLoader(() => api.listShopApplications(), (data) => data.applications);
+  const proofExceptionsLoader = listLoader(() => api.listProofExceptions(), (data) => data);
   const applicationLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
     if (!id) throw new Error(strings.notFound);
@@ -463,6 +466,15 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: counterBillsLoader,
       element: <Page protectedArea api={api}><CounterBills api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.counterBillsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    // An Area Manager uses A28 too; the server shows them only the proof exceptions of their assigned shops (#60).
+    guarded({
+      path: "/proof-exceptions",
+      loader: proofExceptionsLoader,
+      areaManager: proofExceptionsLoader,
+      element: <Page protectedArea api={api}><ProofExceptions api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.proofExceptionsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({
