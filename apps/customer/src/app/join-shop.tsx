@@ -6,7 +6,7 @@ import { api } from "../api";
 import { TopBar } from "../components/top-bar";
 import { strings } from "../strings";
 
-/** S21 Join a shop (#536), opened from C23. The app can't open the Shopkeeper app yet (#551), so it says where to go. */
+/** S21 Join a shop (#536), opened from C23. */
 export default function JoinShopScreen() {
   const insets = useSafeAreaInsets();
   return (

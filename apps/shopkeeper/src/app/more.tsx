@@ -1,4 +1,4 @@
-import { Text, ThemePicker } from "@ygo/mobile";
+import { customerAppUrl, SwitchApp, Text, ThemePicker } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -31,7 +31,7 @@ function Row({ href, label }: { href: string; label: string }) {
   );
 }
 
-/** S36 More (#550): sync status, Theme, "Switch to Customer" (plain text until #551) and Sign out for everyone; Staff, Void a bill and Shop settings for the Owner only. */
+/** S36 More (#550): sync status, Theme, "Switch to Customer" (#551) and Sign out for everyone; Staff, Void a bill and Shop settings for the Owner only. */
 export default function More() {
   const insets = useSafeAreaInsets();
   const owner = useAccountRole() === "owner";
@@ -48,10 +48,7 @@ export default function More() {
       )}
       <View className="mt-4 gap-8">
         <ThemePicker session={session} words={strings.theme} />
-        <View className="gap-1">
-          <Text className="text-label font-medium text-text">{words.switchToCustomer}</Text>
-          <Text className="text-secondary text-muted">{words.switchBody}</Text>
-        </View>
+        <SwitchApp title={words.switchToCustomer} body={words.switchBody} url={customerAppUrl} notInstalled={words.notInstalled} />
         <SignOut />
       </View>
     </ScrollView>

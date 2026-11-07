@@ -15,6 +15,8 @@ export { SignIn, type SignInProps } from "./sign-in";
 export { PHONE_PREFIX, PhoneField } from "./phone-field";
 export { Button, edgeClass, FieldMessage, SupportEmail } from "./sign-in-parts";
 export type { SignInWords } from "./sign-in-words";
+export { customerAppUrl, openApp, shopkeeperAppUrl } from "./switch-app-flow";
+export { SwitchApp } from "./switch-app";
 export { TabBar, type TabItem } from "./tab-bar";
 export { Text } from "./text";
 export { showUpdateRequired } from "./update-signal";
