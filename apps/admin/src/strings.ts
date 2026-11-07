@@ -591,6 +591,7 @@ export const strings = {
   proofExceptionsOpeningPhoto: "Opening…",
   proofExceptionsPhotoGone: "Photo removed",
   proofExceptionsPhotoKept: (until: string) => `Kept until ${until}`,
+  proofExceptionsPhotoBlocked: "Your browser blocked the new tab. Allow pop-ups for this site and try again.",
   proofExceptionsPhotoFailed: "Could not open the photo. Try again.",
   proofExceptionsMore: "Show more",
   proofExceptionsLoadFailed: "Could not load proof exceptions. Try again.",

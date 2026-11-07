@@ -66,19 +66,26 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
     setRows((current) => { const seen = new Set(current.map((row) => row.orderId)); return [...current, ...answer.data.exceptions.filter((row) => !seen.has(row.orderId))]; });
     setNext(answer.data.nextCursor);
   }
-  /** Asks for a private link only now, on the click, and opens it in a new tab with nothing left behind in the page (#560). */
+  /**
+   * Asks for a private link only now, on the click (#560). The tab is opened first, inside the click, since a browser blocks a
+   * pop-up opened after a wait; its opener is dropped at once, and it is sent to the photo when the link arrives or closed when not.
+   */
   async function viewPhoto(orderId: string) {
+    const tab = window.open("", "_blank");
+    if (!tab) { setProblem(strings.proofExceptionsPhotoBlocked); return; }
+    tab.opener = null;
     setBusy(orderId);
     const answer = await api.getProofExceptionPhoto(orderId);
     setBusy(null);
     if (!answer.ok) {
+      tab.close();
       // Removed since the list loaded: reload, and the row says so itself.
       if (answer.code === "PHOTO_EXPIRED") await reload(view.current);
       else setProblem(strings.proofExceptionsPhotoFailed);
       return;
     }
     setProblem(null);
-    window.open(answer.data.downloadUrl, "_blank", "noopener");
+    tab.location.href = answer.data.downloadUrl;
   }
   async function review(orderId: string) {
     setBusy(orderId);

@@ -216,17 +216,68 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     expect(screen.getByRole("alert").textContent).toBe(strings.proofExceptionsLoadFailed);
   });
 
-  it("asks for the photo link only on the click, and opens it in a new tab without keeping an opener", async () => {
+  /** A stand-in for the tab a click opens: the page can drop its opener, send it to the photo, or close it. */
+  const fakeTab = () => ({ opener: "set" as unknown, closed: false, location: { href: "about:blank" }, close() { this.closed = true; } });
+  const link = "https://photos.example.test/p.jpg?X-Amz-Signature=s";
+
+  it("opens a blank tab inside the click, before asking for the link, drops its opener, then sends it to the photo", async () => {
     const calls = setup(page([row(2)]));
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    calls.getProofExceptionPhoto.mockResolvedValue(ok({ downloadUrl: "https://photos.example.test/p.jpg?X-Amz-Signature=s", expiresAt: "2030-01-01T00:05:00.000Z" }));
+    const tab = fakeTab();
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    let answer: (value: unknown) => void = () => undefined;
+    calls.getProofExceptionPhoto.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
     const button = await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto });
+    expect(open).not.toHaveBeenCalled();
     expect(calls.getProofExceptionPhoto).not.toHaveBeenCalled();
     expect(document.body.innerHTML).not.toContain("photos.example.test");
     fireEvent.click(button);
-    await waitFor(() => expect(open).toHaveBeenCalledWith("https://photos.example.test/p.jpg?X-Amz-Signature=s", "_blank", "noopener"));
+    // Opened at once, while the request is still waiting, and cut loose from this page.
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    expect(tab.opener).toBeNull();
+    expect(tab.location.href).toBe("about:blank");
+    answer(ok({ downloadUrl: link, expiresAt: "2030-01-01T00:05:00.000Z" }));
+    await waitFor(() => expect(tab.location.href).toBe(link));
     expect(calls.getProofExceptionPhoto).toHaveBeenCalledWith(row(2).orderId);
+    expect(tab.closed).toBe(false);
     expect(document.body.innerHTML).not.toContain("photos.example.test");
+    open.mockRestore();
+  });
+
+  it("says so, asks for nothing and opens nothing when the browser blocks the tab", async () => {
+    const calls = setup(page([row(2)]));
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.proofExceptionsPhotoBlocked);
+    expect(calls.getProofExceptionPhoto).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: strings.proofExceptionsViewPhoto }) as HTMLButtonElement).disabled).toBe(false);
+    open.mockRestore();
+  });
+
+  it("closes the blank tab and says so when the photo cannot be reached", async () => {
+    const calls = setup(page([row(2)]));
+    const tab = fakeTab();
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" });
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.proofExceptionsPhotoFailed);
+    expect(tab.closed).toBe(true);
+    expect(tab.location.href).toBe("about:blank");
+    open.mockRestore();
+  });
+
+  it("closes the blank tab and shows the row removed when the photo has just expired", async () => {
+    const calls = setup(page([row(2)]));
+    const tab = fakeTab();
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 404, code: "PHOTO_EXPIRED" });
+    calls.listProofExceptions.mockResolvedValue(ok(page([row(2, { photo: null })])));
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull());
+    expect(bodyRows()[0]?.textContent).toContain(strings.proofExceptionsPhotoGone);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(tab.closed).toBe(true);
+    expect(tab.location.href).toBe("about:blank");
     open.mockRestore();
   });
 
@@ -235,21 +286,5 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     await screen.findByRole("table");
     expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull();
     expect(bodyRows().every((r) => r.textContent?.includes(strings.proofExceptionsPhotoGone))).toBe(true);
-  });
-
-  it("says so when the photo cannot be reached, and shows it removed when it just was, opening nothing", async () => {
-    const calls = setup(page([row(2)]));
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" });
-    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
-    expect((await screen.findByRole("alert")).textContent).toBe(strings.proofExceptionsPhotoFailed);
-    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 404, code: "PHOTO_EXPIRED" });
-    calls.listProofExceptions.mockResolvedValue(ok(page([row(2, { photo: null })])));
-    fireEvent.click(screen.getByRole("button", { name: strings.proofExceptionsViewPhoto }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull());
-    expect(bodyRows()[0]?.textContent).toContain(strings.proofExceptionsPhotoGone);
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(open).not.toHaveBeenCalled();
-    open.mockRestore();
   });
 });
