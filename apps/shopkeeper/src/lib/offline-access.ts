@@ -4,7 +4,7 @@ import { OFFLINE_WINDOW_MS } from "./offline-limits";
 
 /**
  * `shopName` is what a bill PDF prints offline (#53); a record saved before it, or a Draft without a name, has null.
- * `role` and `canDeliver` only decide what the phone shows (#494, #550); a record saved before them reads as Owner, who can deliver, until the next check says otherwise.
+ * `role` and `canDeliver` only decide what the phone shows (#494, #550); a record with no role, or one this phone does not know, reads as Staff who cannot deliver, so Owner-only screens stay hidden until the next check says otherwise.
  */
 export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null; shopGstin: string | null; role: "owner" | "staff"; canDeliver: boolean };
 export type AccessView = { mode: "online" | "offline" | "expired" | "erasing" | "ended" | "signing-out"; accountId?: string; shopId?: string; expiresAt?: number };
@@ -132,6 +132,6 @@ export function readSavedAccess(raw: string | null): SavedAccess | null {
     const value = JSON.parse(raw) as SavedAccess;
     const account = Account.safeParse(value.account);
     return account.success && ShopStockResponse.shape.shopId.safeParse(value.shopId).success && typeof value.stockAllowed === "boolean" && Number.isFinite(value.verifiedAt)
-      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, shopGstin: typeof value.shopGstin === "string" ? value.shopGstin : null, role: value.role === "staff" ? "staff" : "owner", canDeliver: typeof value.canDeliver === "boolean" ? value.canDeliver : value.role !== "staff" } : null;
+      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, shopGstin: typeof value.shopGstin === "string" ? value.shopGstin : null, role: value.role === "owner" ? "owner" : "staff", canDeliver: typeof value.canDeliver === "boolean" ? value.canDeliver : value.role === "owner" } : null;
   } catch { return null; }
 }

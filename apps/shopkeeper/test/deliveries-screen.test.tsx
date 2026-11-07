@@ -20,7 +20,7 @@ function elements(node: unknown): El[] {
   return [element, ...elements(element.props.children)];
 }
 const text = () => elements(DeliveriesScreen()).flatMap(({ props: { children } }) => (typeof children === "string" ? [children] : []));
-const list = (canDeliver: boolean) => ({ status: "ready", refreshing: false, message: null, orders: { canDeliver, myDeliveries: [] } });
+const list = (canDeliver: boolean, myDeliveries: unknown[] = []) => ({ status: "ready", refreshing: false, message: null, orders: { canDeliver, myDeliveries } });
 
 describe("My deliveries reached directly (DLV-1, #536)", () => {
   beforeEach(() => { mock.view = {}; });
@@ -29,6 +29,12 @@ describe("My deliveries reached directly (DLV-1, #536)", () => {
     mock.view = list(false);
     expect(text()).toContain(strings.errors.FORBIDDEN);
     expect(elements(DeliveriesScreen()).some((node) => node.type === "OrderRow")).toBe(false);
+  });
+
+  it("shows no delivery, even one the reply carries, to Staff without can deliver", () => {
+    mock.view = list(false, [{ id: "o1" }]);
+    expect(text()).toContain(strings.errors.FORBIDDEN);
+    expect(elements(DeliveriesScreen()).some((node) => node.type === "OrderRow" || node.type === "Button")).toBe(false);
   });
 
   it("shows an empty list to someone who can deliver", () => {

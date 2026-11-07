@@ -16,6 +16,13 @@ describe("which tabs the Shopkeeper phone shows (#550)", () => {
     expect(tabsFor({ answersOrders: true, role: "staff", canDeliver: false })).toEqual(["orders", "bill", "stock", "more"]);
   });
 
+  it("follows a changed deliver flag or role the moment the saved access changes", () => {
+    const staff = (canDeliver: boolean) => tabsFor({ answersOrders: true, role: "staff", canDeliver });
+    expect(staff(false)).not.toContain("deliveries");
+    expect(staff(true)).toContain("deliveries");
+    expect(staff(false)).not.toContain("deliveries");
+  });
+
   it("knows a tab only by its exact route, so a drill-down screen has no bar", () => {
     expect(tabAt("/orders")).toBe("orders");
     expect(tabAt("/more")).toBe("more");

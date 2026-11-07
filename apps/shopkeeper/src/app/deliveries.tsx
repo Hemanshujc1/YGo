@@ -19,7 +19,7 @@ export default function DeliveriesScreen() {
     {view.status === "loading" && <View className="min-h-12 flex-row items-center gap-2"><ActivityIndicator className="text-primary"/><Text className="text-body text-muted">{words.loading}</Text></View>}
     {view.message && <Text accessibilityLiveRegion="polite" className="text-body text-danger">{view.message}</Text>}
     {view.status === "failed" && <Button label={words.retry} variant="secondary" onPress={() => void orders.retry()} />}
-    {shown?.myDeliveries.map((order) => <OrderRow key={order.id} order={order} chip />)}
+    {shown?.canDeliver && shown.myDeliveries.map((order) => <OrderRow key={order.id} order={order} chip />)}
     {shown?.canDeliver && shown.myDeliveries.length === 0 && <Text className="text-body text-muted">{words.noDeliveries}</Text>}
     {shown && !shown.canDeliver && <Text className="text-body text-danger">{strings.errors.FORBIDDEN}</Text>}
   </ScrollView>;
