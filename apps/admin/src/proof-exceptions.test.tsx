@@ -164,6 +164,23 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1004"]);
   });
 
+  it("reloads the tab and filter on screen, not the ones a mark began in, when it finishes after a change", async () => {
+    const calls = setup(page([row(2), row(1)]));
+    let finish: (value: unknown) => void = () => undefined;
+    calls.reviewProofException.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    calls.listProofExceptions.mockImplementation(async (query: { status: string }) =>
+      ok(query.status === "reviewed" ? page([row(5, { reviewed: { at: "2030-01-05T10:00:00.000Z", by: "Ravi Patil" } })]) : page([row(1)])));
+    fireEvent.click((await screen.findAllByRole("button", { name: strings.proofExceptionsReview })).at(0) as HTMLElement);
+    fireEvent.click(screen.getByRole("tab", { name: strings.proofExceptionsReviewed }));
+    await waitFor(() => expect(bodyRows()[0]?.textContent).toContain("#1005"));
+    finish(ok(row(2, { reviewed: { at: "2030-01-05T10:00:00.000Z", by: "Asha Kulkarni" } })));
+    await waitFor(() => expect(calls.listProofExceptions).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls.listProofExceptions).toHaveBeenLastCalledWith({ status: "reviewed" });
+    expect(screen.getByRole("tab", { name: strings.proofExceptionsReviewed }).getAttribute("aria-selected")).toBe("true");
+    expect(bodyRows().map((r) => r.textContent?.match(/#\d+/)?.[0])).toEqual(["#1005"]);
+  });
+
   it("sends one request and adds no duplicate rows when Show more is clicked repeatedly", async () => {
     const cursor = "2030-01-02T10:00:00.000000Z|00000000-0000-4000-8000-00000000c002";
     const calls = setup(page([row(3), row(2)], cursor));

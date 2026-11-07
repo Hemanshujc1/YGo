@@ -28,6 +28,8 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
   const latest = useRef(0);
   /** Set while a page is being fetched, synchronously, so two quick clicks send one request. */
   const paging = useRef(false);
+  /** The tab and filters on screen right now, so a mark that finishes later reloads what is shown, not what was shown when it began. */
+  const view = useRef({ status: "open" as Status, shopId: "", delivererId: "" });
 
   const query = (state: { status: Status; shopId: string; delivererId: string }) => ({
     status: state.status, ...(state.shopId ? { shopId: state.shopId } : {}), ...(state.delivererId ? { delivererId: state.delivererId } : {}),
@@ -46,6 +48,7 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
   const change = (patch: Partial<{ status: Status; shopId: string; delivererId: string }>) => {
     const state = { status, shopId, delivererId, ...patch };
     setStatus(state.status); setShopId(state.shopId); setDelivererId(state.delivererId);
+    view.current = state;
     void reload(state);
   };
   async function more() {
@@ -68,7 +71,7 @@ export function ProofExceptions({ api }: { api: AdminApi }) {
     const answer = await api.reviewProofException(orderId);
     setBusy(null);
     if (!answer.ok) { setProblem(strings.proofExceptionsReviewFailed); return; }
-    await reload({ status, shopId, delivererId });
+    await reload(view.current);
   }
 
   return <>
