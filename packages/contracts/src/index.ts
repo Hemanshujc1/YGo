@@ -135,6 +135,7 @@ export {
   ProofException,
   ProofExceptionCounts,
   ProofExceptionParams,
+  ProofExceptionPhotoAccess,
   ProofExceptionReason,
   ProofExceptionsQuery,
   ProofExceptionsResponse,

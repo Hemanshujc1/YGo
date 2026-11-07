@@ -20,7 +20,8 @@ const fromSql = `FROM orders o JOIN shops s ON s.id = o.shop_id
 const rowSql = `SELECT o.id AS "orderId", o.number AS "orderNumber", json_build_object('id', o.shop_id, 'name', o.shop_name) AS shop,
   json_build_object('id', o.deliverer_id, 'name', d.name) AS deliverer, o.proof_exception_reason AS reason,
   ${iso("o.status_changed_at")} AS "recordedAt",
-  CASE WHEN r.order_id IS NULL THEN NULL ELSE json_build_object('at', ${iso("r.reviewed_at")}, 'by', ra.name) END AS reviewed`;
+  CASE WHEN r.order_id IS NULL THEN NULL ELSE json_build_object('at', ${iso("r.reviewed_at")}, 'by', ra.name) END AS reviewed,
+  CASE WHEN o.delivery_photo_key IS NULL THEN NULL ELSE json_build_object('expiresAt', ${iso("o.delivery_photo_expires_at")}) END AS photo`;
 /** Where a page ends: the closing time to the microsecond, then the order id. */
 const cursorSql = `${cursorOf("o.status_changed_at")} || '|' || o.id AS cursor`;
 
@@ -45,6 +46,17 @@ export async function listProofExceptions(db: Db, areaManagerId: string | null, 
   const page = rows.slice(0, query.limit);
   const exceptions = page.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => key !== "cursor")) as ProofException);
   return { exceptions, nextCursor: rows.length > query.limit ? page[page.length - 1]?.cursor ?? null : null };
+}
+
+/**
+ * The proof photo's key for one proof exception the caller may see, or null when the order is not theirs, is no proof
+ * exception, or its photo is gone. `{ key: null }` is an order of theirs whose photo is gone, or past its 30 days though not yet swept (#560).
+ */
+export async function proofPhotoOf(client: PoolClient, areaManagerId: string | null, orderId: string, now: Date): Promise<{ key: string | null } | null> {
+  const { rows: [row] } = await client.query<{ key: string | null }>(
+    `SELECT CASE WHEN o.delivery_photo_expires_at > $3 THEN o.delivery_photo_key END AS key FROM orders o JOIN shops s ON s.id = o.shop_id
+     WHERE o.id = $2 AND o.proof_exception AND o.status = 'delivered' AND ($1::uuid IS NULL OR s.area_manager_id = $1)`, [areaManagerId, orderId, now]);
+  return row ?? null;
 }
 
 /** Per shop and per deliverer (each deliverer once, across the shops the caller may see), over every proof exception the caller may see; `open` is those not yet reviewed. */

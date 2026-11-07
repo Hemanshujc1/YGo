@@ -421,6 +421,13 @@
       "when": 1794045594124,
       "tag": "0059_proof_exception_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794050788946,
+      "tag": "0060_proof_photo_views",
+      "breakpoints": true
     }
   ]
 }

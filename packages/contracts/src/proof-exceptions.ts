@@ -21,6 +21,10 @@ export type ProofExceptionsQuery = z.infer<typeof ProofExceptionsQuery>;
 export const ProofExceptionParams = z.strictObject({ orderId: z.uuid() });
 export type ProofExceptionParams = z.infer<typeof ProofExceptionParams>;
 
+/** `GET /v1/admin/proof-exceptions/:orderId/photo`: a private link that stops working after 5 minutes. 404 `PHOTO_EXPIRED` once the photo is removed. */
+export const ProofExceptionPhotoAccess = z.strictObject({ downloadUrl: z.url(), expiresAt: z.iso.datetime() });
+export type ProofExceptionPhotoAccess = z.infer<typeof ProofExceptionPhotoAccess>;
+
 export const ProofException = z.strictObject({
   orderId: z.uuid(),
   orderNumber: z.number().int().positive(),
@@ -31,6 +35,8 @@ export const ProofException = z.strictObject({
   recordedAt: z.iso.datetime(),
   /** Null until an Admin or the shop's Area Manager marks it reviewed. */
   reviewed: z.strictObject({ at: z.iso.datetime(), by: z.string().nullable() }).nullable(),
+  /** The proof photo is kept 30 days: null once it has been removed. Never its key or a link; `GET .../photo` issues one on demand (#560). */
+  photo: z.strictObject({ expiresAt: z.iso.datetime() }).nullable(),
 });
 export type ProofException = z.infer<typeof ProofException>;
 

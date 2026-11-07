@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, inject, it, vi } from "vitest";
+import type { DeliveryPhotoStorage } from "../src/adapters/delivery-photos";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
@@ -18,6 +19,7 @@ let name: string;
 let database: ReturnType<typeof connectDatabase>;
 let app: ReturnType<typeof buildApp>;
 let rateCard: string;
+const photos = { downloadUrl: vi.fn(async (key: string) => `https://photos.example.test/${key}?X-Amz-Signature=sig`) } as unknown as DeliveryPhotoStorage & { downloadUrl: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
   name = `ygo_proof_exceptions_${randomUUID().replaceAll("-", "")}`;
@@ -26,7 +28,8 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, admin);
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, deliveryPhotos: photos });
+  photos.downloadUrl.mockClear();
   const { rows: [actor] } = await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = $1", [admin.email]);
   const { rows: [card] } = await database.pool.query<{ version: string }>(
     "INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) VALUES ($1, 'global', 'test', $2) RETURNING version", [actor?.id, clock.now()]);
@@ -61,15 +64,15 @@ const manager = async (email: string) => {
 const shop = async (areaManagerId: string | null) =>
   String((await database.pool.query<{ id: string }>("INSERT INTO shops (created_at, area_manager_id) VALUES ($1, $2) RETURNING id", [clock.now(), areaManagerId])).rows[0]?.id);
 
-type Seed = { shopId: string; customerId: string; delivererId?: string | null; status?: string; exception?: string | null; failure?: string | null; at?: string; shopName?: string };
+type Seed = { shopId: string; customerId: string; delivererId?: string | null; status?: string; exception?: string | null; failure?: string | null; at?: string; shopName?: string; photo?: { key: string; expiresAt: string } };
 /** A closed order written straight to the table: the delivery flow itself is tested with #521 and #56. */
-async function order({ shopId, customerId, delivererId = null, status = "delivered", exception = null, failure = null, at = "2030-01-01T00:00:00.000Z", shopName = "Sai General Stores" }: Seed) {
+async function order({ shopId, customerId, delivererId = null, status = "delivered", exception = null, failure = null, at = "2030-01-01T00:00:00.000Z", shopName = "Sai General Stores", photo }: Seed) {
   const { rows: [row] } = await database.pool.query<{ id: string }>(
     `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat, address_pincode,
-        address_point, product_value, delivery_fee, total, rate_card_version, quote, deliverer_id, proof_exception, proof_exception_reason, failed_delivery_reason)
+        address_point, product_value, delivery_fee, total, rate_card_version, quote, deliverer_id, proof_exception, proof_exception_reason, failed_delivery_reason, delivery_photo_key, delivery_photo_expires_at)
      VALUES ($1, $2, $3, $4, $4, $5, '12 Lane', '411038', 'home', 'Flat 1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography,
-        100, 20, 120, $6, '{}'::jsonb, $7, $8, $9, $10) RETURNING id`,
-    [customerId, shopId, status, at, shopName, rateCard, delivererId, exception !== null, exception, failure]);
+        100, 20, 120, $6, '{}'::jsonb, $7, $8, $9, $10, $11, $12) RETURNING id`,
+    [customerId, shopId, status, at, shopName, rateCard, delivererId, exception !== null, exception, failure, photo?.key ?? null, photo?.expiresAt ?? null]);
   return String(row?.id);
 }
 
@@ -313,5 +316,101 @@ describe("Customer failed-delivery and refusal counts (TRU-5, #60)", () => {
     const customerId = await account("c@example.com");
     expect(await customerFailedDeliveries(database.pool, customerId, now)).toEqual({ failed: 0, refused: 0 });
     expect((await database.pool.query("SELECT count(*)::int AS n FROM proof_exception_reviews")).rows[0]?.n).toBe(0);
+  });
+});
+
+describe("A28 proof photo access (DLV-4, #560)", () => {
+  const keep = { key: "delivery-proofs/o/p.jpg", expiresAt: "2030-01-31T00:00:00.000Z" };
+  const photo = (headers: Record<string, string>, orderId: string) => app.inject({ method: "GET", url: `/v1/admin/proof-exceptions/${orderId}/photo`, headers });
+  const views = async () => (await database.pool.query<{ order_id: string; viewed_by: string; viewed_at: Date }>("SELECT order_id, viewed_by, viewed_at FROM proof_photo_views ORDER BY viewed_at")).rows;
+
+  it("gives Admin a 5-minute private link for the photo and logs who looked at which order and when", async () => {
+    const customerId = await account("c@example.com");
+    const id = await order({ shopId: await shop(null), customerId, delivererId: await account("asha@example.com"), exception: "other", photo: keep });
+    const headers = await signIn(admin.email);
+    const answer = await photo(headers, id);
+    expect(answer.statusCode).toBe(200);
+    expect(answer.json()).toEqual({ downloadUrl: `https://photos.example.test/${keep.key}?X-Amz-Signature=sig`, expiresAt: "2030-01-01T00:05:00.000Z" });
+    expect(photos.downloadUrl).toHaveBeenCalledWith(keep.key);
+    const logged = await views();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({ order_id: id, viewed_at: clock.now() });
+    expect((await database.pool.query("SELECT email FROM accounts WHERE id = $1", [logged[0]?.viewed_by])).rows[0]?.email).toBe(admin.email);
+    // Each link issued is one row.
+    expect((await photo(headers, id)).statusCode).toBe(200);
+    expect(await views()).toHaveLength(2);
+  });
+
+  it("asks storage for a link of five minutes that no cache keeps", async () => {
+    const files = { downloadUrl: vi.fn(async () => "https://photos.example.test/x?X-Amz-Signature=s") };
+    const { createDeliveryPhotoStorage } = await import("../src/adapters/delivery-photos");
+    await createDeliveryPhotoStorage(files as never).downloadUrl("delivery-proofs/o/p.jpg");
+    expect(files.downloadUrl).toHaveBeenCalledWith("delivery-proofs/o/p.jpg", { expiresIn: 300, cacheControl: "private, no-store" });
+  });
+
+  it("gives an Area Manager their own shop's photo, and NOT_FOUND for another shop's, logging nothing for it", async () => {
+    const customerId = await account("c@example.com");
+    const delivererId = await account("asha@example.com");
+    const mine = await manager("ravi@example.com");
+    const other = await manager("meera@example.com");
+    const [ownShop, otherShop] = [await shop(mine), await shop(other)];
+    const own = await order({ shopId: ownShop, customerId, delivererId, exception: "other", photo: keep });
+    const theirs = await order({ shopId: otherShop, customerId, delivererId, exception: "other", photo: keep });
+    const ravi = await signIn("ravi@example.com");
+    expect((await photo(ravi, own)).statusCode).toBe(200);
+    const refused = await photo(ravi, theirs);
+    expect(refused.statusCode).toBe(404);
+    expect(refused.json().error.code).toBe("NOT_FOUND");
+    expect((await views()).map((row) => row.order_id)).toEqual([own]);
+  });
+
+  it("refuses anyone who is not Admin or an Area Manager, and an order that is no proof exception", async () => {
+    const customerId = await account("c@example.com");
+    const shopId = await shop(null);
+    const plain = await order({ shopId, customerId, delivererId: await account("asha@example.com"), photo: keep });
+    const failed = await order({ shopId, customerId, status: "delivery_failed", failure: "no_one_at_address", photo: keep });
+    const headers = await signIn(admin.email);
+    expect((await photo(headers, plain)).statusCode).toBe(404);
+    expect((await photo(headers, failed)).statusCode).toBe(404);
+    expect((await photo({}, plain)).statusCode).toBe(401);
+    const shopper = await signIn("c@example.com", "/v1/auth");
+    expect([401, 403]).toContain((await photo(shopper, plain)).statusCode);
+    expect(await views()).toEqual([]);
+    expect(photos.downloadUrl).not.toHaveBeenCalled();
+  });
+
+  it("says PHOTO_EXPIRED when the photo is gone, and 503 with no log when storage cannot give a link", async () => {
+    const customerId = await account("c@example.com");
+    const shopId = await shop(null);
+    const gone = await order({ shopId, customerId, delivererId: await account("asha@example.com"), exception: "other" });
+    const there = await order({ shopId, customerId, exception: "other", photo: keep });
+    const headers = await signIn(admin.email);
+    const missing = await photo(headers, gone);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error.code).toBe("PHOTO_EXPIRED");
+    // Past its 30 days but not yet swept: gone as far as Admin is concerned.
+    const stale = await order({ shopId, customerId, exception: "other", photo: { key: keep.key, expiresAt: "2029-12-31T00:00:00.000Z" } });
+    expect((await photo(headers, stale)).json().error.code).toBe("PHOTO_EXPIRED");
+    expect(photos.downloadUrl).not.toHaveBeenCalled();
+    photos.downloadUrl.mockRejectedValueOnce(new Error("storage down"));
+    const down = await photo(headers, there);
+    expect(down.statusCode).toBe(503);
+    expect(down.json().error.code).toBe("UNAVAILABLE");
+    expect(await views()).toEqual([]);
+  });
+
+  it("puts only the photo's expiry in the list, never its key or a link, and null once it is gone", async () => {
+    const customerId = await account("c@example.com");
+    const shopId = await shop(null);
+    const delivererId = await account("asha@example.com");
+    const withPhoto = await order({ shopId, customerId, delivererId, exception: "other", at: "2030-01-02T00:00:00.000Z", photo: keep });
+    const without = await order({ shopId, customerId, delivererId, exception: "other", at: "2030-01-01T00:00:00.000Z" });
+    const answer = await list(await signIn(admin.email));
+    const rows = answer.json().exceptions as Array<{ orderId: string; photo: unknown }>;
+    expect(rows.find((row) => row.orderId === withPhoto)?.photo).toEqual({ expiresAt: "2030-01-31T00:00:00.000Z" });
+    expect(rows.find((row) => row.orderId === without)?.photo).toBeNull();
+    expect(answer.body).not.toContain(keep.key);
+    expect(answer.body).not.toContain("photos.example.test");
+    expect(photos.downloadUrl).not.toHaveBeenCalled();
   });
 });
