@@ -325,7 +325,7 @@ export const strings = {
     asking: "Asking…",
     askTitle: "Ask the shop to cancel?",
     askBody: "The shop has to agree. If it keeps your order, you can call it.",
-    askOffline: "Could not reach the server. The shop has not been asked.",
+    askOffline: "We couldn't confirm whether the shop was asked. We are checking your order; if no request shows, you can ask again.",
     askWaiting: "You asked the shop to cancel. Waiting for its answer.",
     askKept: "The shop is keeping your order. Call the shop if you need to.",
     deliverTo: "Delivering to",

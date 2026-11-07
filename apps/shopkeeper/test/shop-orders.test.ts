@@ -145,10 +145,38 @@ describe("S05 New order (#431)", () => {
     fire();
     reads.shift()?.(ok(order("accepted")));
     await settle();
+    // Accepted: the Customer may still ask to cancel, so it is read again (#59) until it is ready.
+    expect([...pending.values()].map(({ ms }) => ms)).toEqual([15_000]);
+    fire();
+    reads.shift()?.(ok(order("ready")));
+    await settle();
     expect(pending.size).toBe(0);
     one.stop();
     one.start();
     expect(reads).toHaveLength(0);
+  });
+
+  it("shows an ask to cancel that arrives while an accepted or preparing order is open, and stops once it is ready or ended", async () => {
+    const { timers, pending, fire } = fakeTimers();
+    const { client, reads } = fakeServer();
+    const one = createShopOrder(client, id, timers, 15_000);
+    one.start();
+    reads.shift()?.(ok(order("accepted")));
+    await settle();
+    expect(one.get().order?.cancelRequest).toBeNull();
+    fire();
+    reads.shift()?.(ok({ ...order("accepted"), cancelRequest: { status: "asked", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(one.get().order?.cancelRequest?.status).toBe("asked");
+    fire();
+    reads.shift()?.(ok({ ...order("preparing"), cancelRequest: { status: "asked", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(pending.size).toBe(1);
+    fire();
+    reads.shift()?.(ok({ ...order("cancelled_by_customer"), cancelRequest: { status: "agreed", askedAt: "2030-01-01T00:05:00.000Z" } }));
+    await settle();
+    expect(pending.size).toBe(0);
+    one.stop();
   });
 
   it("goes back to S04 once accepted or rejected, sending the chosen reason", async () => {

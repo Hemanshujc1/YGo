@@ -144,7 +144,7 @@ type OrderClient = {
   cancelShopOrder(id: string, body: { reason: RejectReason }): Promise<ApiResult<ShopOrderResponse>>;
 };
 
-/** S05: one order, read every `every` ms while started and still New; Accept and Reject answer it. */
+/** S05: one order, read every `every` ms while started and still New, accepted or preparing; Accept and Reject answer it. */
 export function createShopOrder(client: OrderClient, id: string, timers: Timers = phoneTimers, every = pollEvery, now = Date.now) {
   let view: OrderView = {
     status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false,
@@ -155,8 +155,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     notify();
   };
   const poller = createPoller(() => void read(), every, timers);
-  // Still New and in time: only then is the order read again.
-  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired);
+  // Still New and in time, or accepted or preparing, where the Customer may ask to cancel (ORD-5, #59): only then is the order read again.
+  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired) || view.order.status === "accepted" || view.order.status === "preparing";
 
   // The server marks no order expired when its time runs out, so the store does, by the server's clock.
   let expiry: unknown;
