@@ -85,6 +85,7 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createArea: vi.fn(),
     editArea: vi.fn(),
     listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [] } }),
+    getProofExceptionPhoto: vi.fn(),
     listProofExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { shops: [], deliverers: [] } } }),
     reviewProofException: vi.fn(),
     getShopApplication: vi.fn(),

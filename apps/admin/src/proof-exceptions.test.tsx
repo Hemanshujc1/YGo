@@ -15,7 +15,7 @@ const asha = "00000000-0000-4000-8000-000000000b01";
 const dev = "00000000-0000-4000-8000-000000000b02";
 const row = (n: number, extra: Partial<ProofException> = {}): ProofException => ({
   orderId: `00000000-0000-4000-8000-00000000c0${n}`, orderNumber: 1000 + n, shop: { id: shopA, name: "Sai General Stores" }, deliverer: { id: asha, name: "Asha" },
-  reason: "customer_phone_unavailable", recordedAt: `2030-01-0${n}T10:00:00.000Z`, reviewed: null, ...extra,
+  reason: "customer_phone_unavailable", recordedAt: `2030-01-0${n}T10:00:00.000Z`, reviewed: null, photo: { expiresAt: "2099-01-01T00:00:00.000Z" }, ...extra,
 });
 const counts: ProofExceptionsResponse["counts"] = {
   shops: [{ shopId: shopA, name: "Sai General Stores", total: 3, open: 2 }, { shopId: shopB, name: "Kothrud Mart", total: 1, open: 1 }],
@@ -28,10 +28,10 @@ const page = (exceptions: ProofException[], nextCursor: string | null = null): P
 const ok = <T,>(data: T) => ({ ok: true as const, data });
 
 function setup(first: ProofExceptionsResponse, api: Record<string, unknown> = {}) {
-  const calls = { listProofExceptions: vi.fn(), reviewProofException: vi.fn(), ...api };
+  const calls = { listProofExceptions: vi.fn(), reviewProofException: vi.fn(), getProofExceptionPhoto: vi.fn(), ...api };
   const router = createMemoryRouter([{ path: "/", loader: () => first, element: <ProofExceptions api={calls as unknown as Parameters<typeof ProofExceptions>[0]["api"]} /> }]);
   render(<RouterProvider router={router} />);
-  return calls as { listProofExceptions: ReturnType<typeof vi.fn>; reviewProofException: ReturnType<typeof vi.fn> };
+  return calls as { listProofExceptions: ReturnType<typeof vi.fn>; reviewProofException: ReturnType<typeof vi.fn>; getProofExceptionPhoto: ReturnType<typeof vi.fn> };
 }
 const table = () => screen.getByRole("table");
 const bodyRows = () => within(table()).getAllByRole("row").slice(1);
@@ -214,5 +214,42 @@ describe("A28 Proof exception screen (DLV-4, #60)", () => {
     fireEvent.click(screen.getByRole("tab", { name: strings.proofExceptionsReviewed }));
     await waitFor(() => expect(calls.listProofExceptions).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("alert").textContent).toBe(strings.proofExceptionsLoadFailed);
+  });
+
+  it("asks for the photo link only on the click, and opens it in a new tab without keeping an opener", async () => {
+    const calls = setup(page([row(2)]));
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    calls.getProofExceptionPhoto.mockResolvedValue(ok({ downloadUrl: "https://photos.example.test/p.jpg?X-Amz-Signature=s", expiresAt: "2030-01-01T00:05:00.000Z" }));
+    const button = await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto });
+    expect(calls.getProofExceptionPhoto).not.toHaveBeenCalled();
+    expect(document.body.innerHTML).not.toContain("photos.example.test");
+    fireEvent.click(button);
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://photos.example.test/p.jpg?X-Amz-Signature=s", "_blank", "noopener"));
+    expect(calls.getProofExceptionPhoto).toHaveBeenCalledWith(row(2).orderId);
+    expect(document.body.innerHTML).not.toContain("photos.example.test");
+    open.mockRestore();
+  });
+
+  it("says the photo is removed when the row has none or its 30 days have passed, with no button", async () => {
+    setup(page([row(2, { photo: null }), row(1, { photo: { expiresAt: "2000-01-01T00:00:00.000Z" } })]));
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull();
+    expect(bodyRows().every((r) => r.textContent?.includes(strings.proofExceptionsPhotoGone))).toBe(true);
+  });
+
+  it("says so when the photo cannot be reached, and shows it removed when it just was, opening nothing", async () => {
+    const calls = setup(page([row(2)]));
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 503, code: "UNAVAILABLE" });
+    fireEvent.click(await screen.findByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.proofExceptionsPhotoFailed);
+    calls.getProofExceptionPhoto.mockResolvedValueOnce({ ok: false, status: 404, code: "PHOTO_EXPIRED" });
+    calls.listProofExceptions.mockResolvedValue(ok(page([row(2, { photo: null })])));
+    fireEvent.click(screen.getByRole("button", { name: strings.proofExceptionsViewPhoto }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: strings.proofExceptionsViewPhoto })).toBeNull());
+    expect(bodyRows()[0]?.textContent).toContain(strings.proofExceptionsPhotoGone);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 });

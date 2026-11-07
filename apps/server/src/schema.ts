@@ -798,6 +798,14 @@ export const proofExceptionReviews = pgTable("proof_exception_reviews", {
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull(),
 });
 
+// Every time an Admin or Area Manager was given a link to a proof photo (A28, #560): who, which order, when. Written with the link, read by no screen.
+export const proofPhotoViews = pgTable("proof_photo_views", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  viewedBy: uuid("viewed_by").notNull().references(() => accounts.id),
+  viewedAt: timestamp("viewed_at", { withTimezone: true }).notNull(),
+}, (table) => [index("proof_photo_views_order_id_idx").on(table.orderId)]);
+
 // Append-only order revisions for partial acceptances (ORD-3, ORD-4, #526).
 export const orderRevisions = pgTable("order_revisions", {
   id: uuid("id").primaryKey().defaultRandom(),

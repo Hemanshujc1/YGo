@@ -30,6 +30,7 @@ import {
   AdminShopApplication,
   LiveCheck,
   ProofException,
+  ProofExceptionPhotoAccess,
   ProofExceptionsResponse,
   ShopApplicationsResponse,
   ShopVisit,
@@ -340,6 +341,11 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/proof-exceptions/:orderId/review`: mark one reviewed; marking it again changes nothing. */
     async reviewProofException(orderId: string): Promise<ApiResult<ProofException>> {
       return result(await adminRequest("POST", `/v1/admin/proof-exceptions/${encodeURIComponent(orderId)}/review`), ProofException);
+    },
+
+    /** `GET /v1/admin/proof-exceptions/:orderId/photo`: a private link to the proof photo, good for 5 minutes. 404 `PHOTO_EXPIRED` once it is removed (#560). */
+    async getProofExceptionPhoto(orderId: string): Promise<ApiResult<ProofExceptionPhotoAccess>> {
+      return result(await adminRequest("GET", `/v1/admin/proof-exceptions/${encodeURIComponent(orderId)}/photo`), ProofExceptionPhotoAccess);
     },
 
     /** `GET /v1/admin/shop-applications`: sent applications, the longest waiting first (A06). */

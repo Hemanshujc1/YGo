@@ -13,10 +13,17 @@ export class InvalidDeliveryPhotoError extends Error {
 /** Longest a transcode may run; Sharp stops it there. */
 const TRANSCODE_TIMEOUT_SECONDS = 20;
 
+/** How long a proof-photo read link works. */
+export const DOWNLOAD_SECONDS = 5 * 60;
+
 /** Private proof storage. Upload and validation keys are scoped to the order and assigned account. */
 export function createDeliveryPhotoStorage(files: FileStorage) {
   const uploadKey = (orderId: string, accountId: string, id: string) => `delivery-uploads/${orderId}/${accountId}/${id}.jpg`;
   return {
+    /** A private read link that stops working after 5 minutes (#560); the caller has already checked who may read this order's proof. */
+    async downloadUrl(key: string) {
+      return files.downloadUrl(key, { expiresIn: DOWNLOAD_SECONDS, cacheControl: "private, no-store" });
+    },
     async deleteProof(key: string) {
       await files.delete(key);
     },

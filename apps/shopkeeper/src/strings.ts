@@ -767,6 +767,7 @@ export const strings = {
     DELIVERER_NOT_ELIGIBLE: "Choose the Owner or a Staff member who can deliver.",
     STAFF_HAS_ACTIVE_DELIVERY: "This person is delivering an order now. Deactivate them after it is delivered or closed.",
     DELIVERY_PHOTO_INVALID: "Take a clear proof photo and try again.",
+    PHOTO_EXPIRED: "That photo has been removed.",
     ITEM_CHECK_WAIT: "The customer needs time to check the items.",
     DELIVERY_FAILURE_CALL_REQUIRED: "Call the customer before marking this delivery failed.",
     PROOF_EXCEPTION_CALL_REQUIRED: "Call the customer before recording a proof exception.",
