@@ -1,4 +1,4 @@
-import { Text } from "@ygo/mobile";
+import { shopkeeperAppUrl, SwitchApp, Text } from "@ygo/mobile";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -8,8 +8,8 @@ import { strings } from "../strings";
 const words = strings.account.shop;
 
 /**
- * The shop link on C23 (#536, ACC-4): "Join a shop" opens S21 when the account has no shop link, and a linked account is
- * told which shop it works at. Nothing shows until the server has answered or when it cannot be reached; the link is
+ * The shop link on C23 (#536, #551, ACC-4): "Join a shop" opens S21 when the account has no shop link, and an account
+ * linked to a shop gets "Switch to shop", which opens the Shopkeeper app. Nothing shows until the server has answered or when it cannot be reached; the link is
  * only a convenience, since the Owner's code can still be typed at S21 from a later visit.
  */
 export function ShopLink() {
@@ -21,7 +21,7 @@ export function ShopLink() {
     return () => { live = false; };
   }, []));
   if (link === undefined) return null;
-  if (link) return <Text className="text-body text-muted">{words.linked(link.shopName)}</Text>;
+  if (link) return <SwitchApp title={words.switchToShop} body={words.linkedBody(link.shopName)} url={shopkeeperAppUrl} notInstalled={words.notInstalled} />;
   return (
     <View className="overflow-hidden rounded-card border border-border bg-surface">
       <Pressable accessibilityRole="button" accessibilityLabel={words.join} onPress={() => router.push("/join-shop")} className="min-h-14 justify-center gap-1 px-4 py-3 active:bg-primary-subtle">

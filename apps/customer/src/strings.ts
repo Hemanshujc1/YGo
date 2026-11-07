@@ -76,11 +76,13 @@ export const strings = {
     changeContact: "To change your email or phone number, write to",
     changeContactEnd: ".",
     help: "Help",
-    // The shop link on C23 (#536). "Switch to shop" waits for app switching (#551), so a linked account is told where to go.
+    // The shop link on C23 (#536) and "Switch to shop" (#551).
     shop: {
       join: "Join a shop",
       joinBody: "Working at a shop? Enter the code its Owner gave you.",
-      linked: (shop: string | null) => (shop ? `You work at ${shop}. Open the YGo Shop app to switch.` : "You work at a shop. Open the YGo Shop app to switch."),
+      switchToShop: "Switch to shop",
+      linkedBody: (shop: string | null) => shop ?? "You work at a shop",
+      notInstalled: "Install the YGo Shop app to switch",
     },
     sheet: {
       title: "Change name",

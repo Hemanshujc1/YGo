@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({ role: "owner" as "owner" | "staff" | null }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
-vi.mock("@ygo/mobile", () => ({ Text: "Text", ThemePicker: "ThemePicker" }));
+vi.mock("@ygo/mobile", () => ({ Text: "Text", ThemePicker: "ThemePicker", SwitchApp: "SwitchApp", customerAppUrl: "ygo-customer://" }));
 vi.mock("react-native", () => ({ Pressable: "Pressable", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ session: {} }));
@@ -27,12 +27,15 @@ const texts = () => shown().flatMap(({ props: { children } }) => (typeof childre
 describe("S36 More (#550)", () => {
   beforeEach(() => { mock.role = "owner"; });
 
-  it("gives everyone sync status, Theme, Sign out and the Switch to Customer text", () => {
+  it("gives everyone sync status, Theme, Sign out and the Switch to Customer row, just below Theme", () => {
     for (const role of ["owner", "staff", null] as const) {
       mock.role = role;
       const types = shown().map((node) => node.type);
       expect(types).toEqual(expect.arrayContaining(["SyncStatus", "ThemePicker", "SignOut"]));
-      expect(texts()).toContain(strings.more.switchToCustomer);
+      const order = shown().map((node) => node.type);
+      expect(order.indexOf("SwitchApp")).toBe(order.indexOf("ThemePicker") + 1);
+      const row = shown().find((node) => node.type === "SwitchApp");
+      expect(row?.props).toMatchObject({ title: strings.more.switchToCustomer, url: "ygo-customer://", notInstalled: strings.more.notInstalled });
     }
   });
 
