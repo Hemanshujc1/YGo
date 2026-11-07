@@ -1159,3 +1159,303 @@ describe("Concurrent stock consumption (#64)", () => {
     expect(confirmA.statusCode).toBe(200);
   });
 });
+
+describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
+  it("preview dry-run: validates, writes nothing, returns same total as real call", async () => {
+    const { orderId, dal } = await setupShopWithOrder();
+
+    const { rows: revsBefore } = await database.pool.query("SELECT count(*)::int AS count FROM order_revisions WHERE order_id = $1", [orderId]);
+    const { rows: linesBefore } = await database.pool.query(
+      "SELECT count(*)::int AS count FROM order_revision_lines WHERE revision_id IN (SELECT id FROM order_revisions WHERE order_id = $1)", [orderId]);
+
+    // 1. Dry-run preview
+    const previewRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    expect(previewRes.statusCode).toBe(200);
+    const preview = previewRes.json() as {
+      productValue: string;
+      deliveryFee: string;
+      smallCartFee: string | null;
+      total: string;
+      originalTotal: string;
+    };
+    expect(preview).toMatchObject({
+      productValue: "300.00",
+      deliveryFee: "30.00",
+      total: "330.00",
+      originalTotal: "430.00",
+    });
+
+    // Writes nothing: order status is still placed, no revisions or revision lines written
+    const { rows: [orderRow] } = await database.pool.query<{ status: string }>("SELECT status FROM orders WHERE id = $1", [orderId]);
+    expect(orderRow?.status).toBe("placed");
+    const { rows: revsAfter } = await database.pool.query("SELECT count(*)::int AS count FROM order_revisions WHERE order_id = $1", [orderId]);
+    expect(revsAfter[0]?.count).toBe(revsBefore[0]?.count);
+    const { rows: linesAfter } = await database.pool.query(
+      "SELECT count(*)::int AS count FROM order_revision_lines WHERE revision_id IN (SELECT id FROM order_revisions WHERE order_id = $1)", [orderId]);
+    expect(linesAfter[0]?.count).toBe(linesBefore[0]?.count);
+
+    // 2. Real call returns identical totals
+    const realRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    expect(realRes.statusCode).toBe(200);
+    const realBody = realRes.json() as {
+      status: string;
+      proposal: {
+        productValue: string;
+        deliveryFee: string;
+        smallCartFee: string | null;
+        total: string;
+        originalTotal: string;
+      };
+    };
+    expect(realBody.status).toBe("awaiting_customer_confirm");
+    expect(realBody.proposal.productValue).toBe(preview.productValue);
+    expect(realBody.proposal.deliveryFee).toBe(preview.deliveryFee);
+    expect(realBody.proposal.smallCartFee).toBe(preview.smallCartFee);
+    expect(realBody.proposal.total).toBe(preview.total);
+    expect(realBody.proposal.originalTotal).toBe(preview.originalTotal);
+  });
+
+  it("preview dry-run: rejects invalid bodies identically to partial-accept", async () => {
+    const { orderId, dal, atta } = await setupShopWithOrder();
+
+    // Increasing quantity refused
+    const upRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 3, reason: "out_of_stock" }] },
+    });
+    expect(upRes.statusCode).toBe(400);
+    expect(upRes.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
+
+    // Missing reason on reduction refused
+    const noReasonRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1 }] },
+    });
+    expect(noReasonRes.statusCode).toBe(400);
+    expect(noReasonRes.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
+
+    // No lines changed refused
+    const unchangedRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 2, reason: "out_of_stock" }] },
+    });
+    expect(unchangedRes.statusCode).toBe(400);
+    expect(unchangedRes.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
+
+    // All lines removed refused
+    const emptyRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: {
+        lines: [
+          { listingId: dal, count: 0, reason: "out_of_stock" },
+          { listingId: atta, count: 0, reason: "out_of_stock" },
+        ],
+      },
+    });
+    expect(emptyRes.statusCode).toBe(400);
+    expect(emptyRes.json()).toMatchObject({ error: { code: "EMPTY_ORDER" } });
+
+    // Duplicate listing IDs refused
+    const dupRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: {
+        lines: [
+          { listingId: dal, count: 1, reason: "out_of_stock" },
+          { listingId: dal, count: 0, reason: "out_of_stock" },
+        ],
+      },
+    });
+    expect(dupRes.statusCode).toBe(409);
+    expect(dupRes.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
+  });
+
+  it("listingId present for shop view only, omitted from customer view", async () => {
+    const { orderId } = await setupShopWithOrder();
+
+    // Shopkeeper view: lines must have listingId (ShopOrderLine)
+    const shopRes = await app.inject({
+      method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner,
+    });
+    expect(shopRes.statusCode).toBe(200);
+    const shopOrder = shopRes.json() as { lines: Array<{ listingId?: string; name: string }> };
+    expect(shopOrder.lines.length).toBeGreaterThan(0);
+    for (const line of shopOrder.lines) {
+      expect(typeof line.listingId).toBe("string");
+      expect(line.listingId).toMatch(/^[0-9a-f-]{36}$/i);
+    }
+
+    // Customer view: lines must NOT have listingId (OrderLine)
+    const custRes = await app.inject({
+      method: "GET", url: `/v1/orders/${orderId}`, headers: customer,
+    });
+    expect(custRes.statusCode).toBe(200);
+    const custOrder = custRes.json() as { lines: Array<{ listingId?: string; name: string }> };
+    expect(custOrder.lines.length).toBeGreaterThan(0);
+    for (const line of custOrder.lines) {
+      expect(line.listingId).toBeUndefined();
+    }
+  });
+
+  it("shop notification on customer confirmation: targets owner and staff, skips unrelated accounts, and is non-loud", async () => {
+    const { orderId, dal, shopId } = await setupShopWithOrder();
+
+    // Staff member for the shop
+    await signIn("/v1/auth", "staff@example.com");
+    await database.pool.query(
+      "INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'staff' FROM accounts WHERE email = 'staff@example.com'",
+      [shopId],
+    );
+
+    // Unrelated account belonging to a different shop
+    const otherShopId = await shop("Unrelated Other Shop");
+    await signIn("/v1/auth", "other@example.com");
+    await database.pool.query(
+      "INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'owner' FROM accounts WHERE email = 'other@example.com'",
+      [otherShopId],
+    );
+
+    // Propose partial accept
+    await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+
+    // Customer confirms
+    const confirmRes = await app.inject({
+      method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer,
+    });
+    expect(confirmRes.statusCode).toBe(200);
+
+    // Verify notifications for order_total_confirmed
+    const notifs = await database.pool.query<{ accountId: string; kind: string; app: string; loud: boolean; title: string; body: string; email: string }>(
+      `SELECT n.account_id AS "accountId", n.kind, n.app, n.loud, n.title, n.body, a.email
+       FROM notifications n JOIN accounts a ON a.id = n.account_id
+       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed'`,
+      [orderId],
+    );
+
+    // Exactly 2 notifications: owner and staff
+    expect(notifs.rows.length).toBe(2);
+    const emails = notifs.rows.map((r) => r.email).sort();
+    expect(emails).toEqual(["owner@example.com", "staff@example.com"]);
+
+    for (const row of notifs.rows) {
+      expect(row.app).toBe("shopkeeper");
+      expect(row.loud).toBe(false);
+      expect(row.title).toMatch(/^Order #\d+ confirmed$/);
+      expect(row.body).toBe("The customer confirmed the updated order total.");
+    }
+
+    // Unrelated account received NO notifications of any kind for this order
+    const unrelatedNotifs = await database.pool.query(
+      `SELECT 1 FROM notifications n JOIN accounts a ON a.id = n.account_id
+       WHERE n.order_id = $1 AND a.email = 'other@example.com'`,
+      [orderId],
+    );
+    expect(unrelatedNotifs.rows.length).toBe(0);
+
+    // Customer must have 0 order_total_confirmed notifications
+    const customerConfirmedNotifs = await database.pool.query(
+      `SELECT 1 FROM notifications n JOIN accounts a ON a.id = n.account_id
+       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed' AND a.email = 'customer@example.com'`,
+      [orderId],
+    );
+    expect(customerConfirmedNotifs.rows.length).toBe(0);
+  });
+
+  it("standard order acceptance notifies customer with order_accepted and does not emit order_total_confirmed", async () => {
+    const { orderId } = await setupShopWithOrder();
+
+    // Standard accept directly from placed
+    const acceptRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/accept`, headers: owner,
+    });
+    expect(acceptRes.statusCode).toBe(200);
+
+    // Notifications for this order
+    const notifs = await database.pool.query<{ kind: string; app: string; loud: boolean; title: string; body: string }>(
+      "SELECT kind, app, loud, title, body FROM notifications WHERE order_id = $1",
+      [orderId],
+    );
+
+    // Customer receives order_accepted
+    const acceptedNotif = notifs.rows.find((n) => n.kind === "order_accepted");
+    expect(acceptedNotif).toBeDefined();
+    expect(acceptedNotif).toMatchObject({
+      app: "customer",
+      kind: "order_accepted",
+      title: expect.stringMatching(/^Order #\d+ accepted$/),
+      body: expect.stringContaining("is getting your order ready."),
+    });
+
+    // No order_total_confirmed
+    expect(notifs.rows.some((n) => n.kind === "order_total_confirmed")).toBe(false);
+  });
+
+  it("stock change between preview and submission: preview succeeds, another order claims stock, submission fails with NOT_ENOUGH_STOCK", async () => {
+    const shopId = await shop("Stock Lock Shop");
+    await publish({ type: "global" }, card);
+    const groceries = await category("GroceriesStockLock");
+    // Pack of 1 kg, stock = 5
+    const item = (await product(shopId, groceries, "Basmati", "kg", [{ quantity: "1", price: "100", stock: "5" }])).listings[0] as string;
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) SELECT id, $1, 'owner' FROM accounts WHERE email = 'owner@example.com'", [shopId]);
+    const home = await address("customer@example.com");
+
+    // Order 1: customer orders 4
+    const { revision: r1 } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+    const cart1 = (await app.inject({
+      method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer,
+      payload: { revision: r1, lines: [{ listingId: item, count: 4 }] },
+    })).json() as { revision: number; quote: { total: string } };
+    const placed1 = await app.inject({
+      method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer,
+      payload: { revision: cart1.revision, total: cart1.quote.total, addressId: home },
+    });
+    const order1Id = (placed1.json() as { id: string }).id;
+
+    // Dry-run preview: reduce from 4 to 3 items
+    const previewRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${order1Id}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 3, reason: "out_of_stock" }] },
+    });
+    expect(previewRes.statusCode).toBe(200);
+    // Preview is read-only: wrote nothing
+    const revs = await database.pool.query("SELECT 1 FROM order_revisions WHERE order_id = $1", [order1Id]);
+    expect(revs.rows.length).toBe(0);
+
+    // Another customer places 3 items and shop accepts it -> claims 3 of the 5 stock (available becomes 2)
+    const customer2 = await signIn("/v1/auth", "customer2@example.com");
+    const home2 = await address("customer2@example.com");
+    const { revision: r2 } = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer2 })).json() as { revision: number };
+    const cart2 = (await app.inject({
+      method: "PUT", url: `/v1/carts/${shopId}?${here}`, headers: customer2,
+      payload: { revision: r2, lines: [{ listingId: item, count: 3 }] },
+    })).json() as { revision: number; quote: { total: string } };
+    const placed2 = await app.inject({
+      method: "POST", url: `/v1/carts/${shopId}/order`, headers: customer2,
+      payload: { revision: cart2.revision, total: cart2.quote.total, addressId: home2 },
+    });
+    const order2Id = (placed2.json() as { id: string }).id;
+    const accept2 = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${order2Id}/accept`, headers: owner });
+    expect(accept2.statusCode).toBe(200);
+
+    // Now order1 partial-accept wants 3, but only 2 remain in stock: submission revalidates and fails with 409
+    const submitRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${order1Id}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 3, reason: "out_of_stock" }] },
+    });
+    expect(submitRes.statusCode).toBe(409);
+    expect(submitRes.json()).toMatchObject({
+      error: {
+        code: "NOT_ENOUGH_STOCK",
+        shortLines: [expect.objectContaining({ name: "Basmati", available: "2" })],
+      },
+    });
+  });
+});

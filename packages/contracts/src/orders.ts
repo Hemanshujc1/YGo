@@ -93,6 +93,10 @@ export const OrderLine = z.strictObject({
 });
 export type OrderLine = z.infer<typeof OrderLine>;
 
+/** A line on S05 with its shop listing id for partial acceptance (ORD-3). */
+export const ShopOrderLine = OrderLine.extend({ listingId: z.uuid() });
+export type ShopOrderLine = z.infer<typeof ShopOrderLine>;
+
 /** C09 and C19. Paid in cash or UPI at the door, nothing before (MNY-1). */
 export const OrderResponse = z.strictObject({
   id: z.uuid(),
@@ -170,6 +174,16 @@ export const PartialAcceptOrderBody = z.strictObject({
 });
 export type PartialAcceptOrderBody = z.infer<typeof PartialAcceptOrderBody>;
 
+/** `POST /v1/me/shop-orders/:id/partial-accept/preview`: dry-run quote preview for partial acceptance (ORD-3). */
+export const PartialAcceptPreviewResponse = z.strictObject({
+  productValue: Amount,
+  deliveryFee: Amount,
+  smallCartFee: Amount.nullable(),
+  total: Amount,
+  originalTotal: Amount,
+});
+export type PartialAcceptPreviewResponse = z.infer<typeof PartialAcceptPreviewResponse>;
+
 /** A row on S04 (#425). `itemCount` is the number of distinct lines; `expiresAt` is set only while the order is placed. */
 export const ShopOrderSummary = z.strictObject({
   id: z.uuid(),
@@ -213,7 +227,7 @@ export const ShopOrderResponse = z.strictObject({
   expiresAt: z.iso.datetime().nullable(),
   now: z.iso.datetime(),
   address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }),
-  lines: z.array(OrderLine),
+  lines: z.array(ShopOrderLine),
   productValue: Amount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),

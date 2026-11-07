@@ -19,16 +19,16 @@ import { latestRateCardVersion } from "./price-simulator";
  * The columns C19 and S05 both show of order `o`, as it was frozen: address, lines, amounts, and the shop's
  * reason when it rejected the order (owner's answer 3 on #425).
  */
-export const frozenOrder = (o: string) => `json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
+export const frozenOrder = (o: string, includeListingId = false) => `json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
           'areaLine', ${o}.address_area_line, 'pincode', ${o}.address_pincode) AS address,
         COALESCE(
-          (SELECT json_agg(json_build_object('name', rl.name, 'brand', rl.brand, 'baseUnit', rl.base_unit,
+          (SELECT json_agg(json_build_object(${includeListingId ? "'listingId', rl.listing_id, " : ""}'name', rl.name, 'brand', rl.brand, 'baseUnit', rl.base_unit,
               'quantity', trim_scale(rl.pack_quantity)::text, 'count', rl.count, 'part', trim_scale(rl.part_quantity)::text,
               'unitPrice', rl.unit_price::text, 'lineTotal', rl.line_total::text) ORDER BY rl.position)
             FROM order_revision_lines rl
             WHERE rl.revision_id = (SELECT r.id FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1)
               AND rl.count > 0),
-          (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit,
+          (SELECT json_agg(json_build_object(${includeListingId ? "'listingId', l.listing_id, " : ""}'name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit,
               'quantity', trim_scale(l.pack_quantity)::text, 'count', l.count, 'part', trim_scale(l.part_quantity)::text,
               'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
             FROM order_lines l WHERE l.order_id = ${o}.id)
