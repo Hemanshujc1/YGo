@@ -400,4 +400,24 @@ describe("S06 Counter bill (#468)", () => {
     expect(find((props) => props.accessibilityLabel === "Typed item 1: Price each (₹)")?.value).toBe("15");
     expect(queue.batch(shopId).actions).toHaveLength(0);
   });
+  it("keeps the whole draft when the shopkeeper opens the request from a typed line and comes back (#565)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope"); type("Typed item 1: Price each (₹)", "15");
+    tap((props) => props.accessibilityLabel === "One more Typed item 1");
+    type("Discount (₹)", "5"); type("Customer name", "Asha");
+    const draft = () => ["Typed item 1: Item name", "Typed item 1: Price each (₹)", "Typed item 1: count", "Discount (₹)", "Customer name"]
+      .map((label) => find((props) => props.accessibilityLabel === label)?.value);
+    const before = [draft(), texts().filter((t) => t.includes("Rope") || t.includes("Typed item 1"))];
+    expect(draft()).toEqual(["Rope", "15", "2", "5", "Asha"]);
+
+    // The link pushes S38 on top: it has no `replace`, so the bill stays mounted under it.
+    const link = elements(render()).find((node) => typeof node.props.href === "object")?.props;
+    expect(link?.replace).toBeUndefined();
+    // Returning focuses the bill again, which reopens its queue but must not touch the draft.
+    mock.focused = false; render(); await settle(); render();
+    expect(draft()).toEqual(["Rope", "15", "2", "5", "Asha"]);
+    expect([draft(), texts().filter((t) => t.includes("Rope") || t.includes("Typed item 1"))]).toEqual(before);
+    expect(queue.batch(shopId).actions).toHaveLength(0);
+  });
 });
