@@ -343,6 +343,14 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
        VALUES ($1, 0, $2, 'Toor Dal', 'kg', 1, 2, 100, 200, 2)`,
       [orderId, dal]);
 
+    // The preview says so before the shop sends
+    const negPreview = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    expect(negPreview.statusCode).toBe(200);
+    expect(negPreview.json()).toMatchObject({ cancelsOrder: true });
+
     // Partial accept reduces dal from 2 to 1
     const res = await app.inject({
       method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
@@ -414,6 +422,11 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
 
     // Reduce sugar count to 2 (subtotal ₹100, commission ₹10 + delivery platform share ₹6 = ₹16 contribution).
     // Floor is ₹25, so shortfall is ₹9.00
+    const floorPreview = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: item, count: 2, reason: "out_of_stock" }] },
+    });
+    expect(floorPreview.json()).toMatchObject({ cancelsOrder: false, belowFloor: true });
     const res = await app.inject({
       method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
       payload: { lines: [{ listingId: item, count: 2, reason: "out_of_stock" }] },
@@ -1212,6 +1225,8 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
       deliveryFee: "30.00",
       total: "330.00",
       originalTotal: "430.00",
+      cancelsOrder: false,
+      belowFloor: false,
     });
 
     // Writes nothing: order status is still placed, no revisions or revision lines written
@@ -1328,7 +1343,7 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
     }
   });
 
-  it("shop notification on customer confirmation: targets owner and staff, skips unrelated accounts, and is non-loud", async () => {
+  it("shop notification on customer confirmation: targets owner and staff, skips unrelated accounts, and is loud on a placed order", async () => {
     const { orderId, dal, shopId } = await setupShopWithOrder();
 
     // Staff member for the shop
@@ -1362,7 +1377,7 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
     const notifs = await database.pool.query<{ accountId: string; kind: string; app: string; loud: boolean; title: string; body: string; email: string }>(
       `SELECT n.account_id AS "accountId", n.kind, n.app, n.loud, n.title, n.body, a.email
        FROM notifications n JOIN accounts a ON a.id = n.account_id
-       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed'`,
+       WHERE n.order_id = $1 AND n.kind = 'order_placed' AND n.title LIKE '% confirmed'`,
       [orderId],
     );
 
@@ -1373,9 +1388,9 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
 
     for (const row of notifs.rows) {
       expect(row.app).toBe("shopkeeper");
-      expect(row.loud).toBe(false);
+      expect(row.loud).toBe(true);
       expect(row.title).toMatch(/^Order #\d+ confirmed$/);
-      expect(row.body).toBe("The customer confirmed the updated order total.");
+      expect(row.body).toBe("The customer confirmed the updated order total. Accept or reject it.");
     }
 
     // Unrelated account received NO notifications of any kind for this order
@@ -1389,10 +1404,27 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
     // Customer must have 0 order_total_confirmed notifications
     const customerConfirmedNotifs = await database.pool.query(
       `SELECT 1 FROM notifications n JOIN accounts a ON a.id = n.account_id
-       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed' AND a.email = 'customer@example.com'`,
+       WHERE n.order_id = $1 AND n.title LIKE '% confirmed' AND a.email = 'customer@example.com'`,
       [orderId],
     );
     expect(customerConfirmedNotifs.rows.length).toBe(0);
+  });
+
+  it("shop notification on customer confirmation of an accepted order is quiet", async () => {
+    const { orderId, dal } = await setupShopWithOrder();
+    await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/accept`, headers: owner });
+    await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    expect((await app.inject({ method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer })).statusCode).toBe(200);
+    const notifs = await database.pool.query<{ loud: boolean; body: string }>(
+      "SELECT loud, body FROM notifications WHERE order_id = $1 AND kind = 'order_total_confirmed'", [orderId]);
+    expect(notifs.rows.length).toBeGreaterThan(0);
+    for (const row of notifs.rows) {
+      expect(row.loud).toBe(false);
+      expect(row.body).toBe("The customer confirmed the updated order total.");
+    }
   });
 
   it("standard order acceptance notifies customer with order_accepted and does not emit order_total_confirmed", async () => {

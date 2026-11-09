@@ -277,6 +277,9 @@ function Detail({
         </View>
         {editing && previewFailed && <Text className="mt-2 text-secondary text-danger">{words.previewFailed}</Text>}
         <Text className="mt-2 text-secondary text-muted">{words.collectNote}</Text>
+        {editing && previewTotal?.cancelsOrder ? (
+          <Text className="mt-2 text-secondary font-medium text-warning-text">{words.cancelsOrderWarning}</Text>
+        ) : null}
       </View>
       <View>
         <Text className="text-secondary text-muted">{words.deliverTo}</Text>

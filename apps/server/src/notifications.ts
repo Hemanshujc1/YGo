@@ -91,8 +91,20 @@ export const cancelRules = {
     }) },
 } satisfies Record<string, Rule>;
 
+/**
+ * The customer confirmed a changed total (#64). On an order the shop never accepted it is the new order's real arrival, so it rings
+ * as `order_placed`: the ring, its re-ring and the floor push then stop when the order leaves `placed` or expires. Otherwise it is quiet.
+ */
+export const confirmRules = {
+  placed: { kind: "order_placed", to: "shop", staff: true, loud: true,
+    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total. Accept or reject it." }) },
+  later: { kind: "order_total_confirmed", to: "shop", staff: true,
+    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total." }) },
+} satisfies Record<string, Rule>;
+
 /** The rule for a move: a cancel after acceptance has its own words; any other move uses its status's rule. */
 function ruleFor(to: OrderStatus, from: OrderStatus | null, reason: string | null): Rule | undefined {
+  if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) return to === "placed" ? confirmRules.placed : confirmRules.later;
   if (to === "cancelled_by_customer" && reason === "agreed_cancel") return cancelRules.agreed;
   // Only the shop's own cancel, which always has one of the four reasons; the system's negative-contribution cancel keeps sending nothing.
   if (to === "cancelled_by_shop" && (from === "accepted" || from === "preparing" || from === "ready") && reason !== null && reason in rejectReasons) return cancelRules.byShop;
@@ -109,26 +121,6 @@ export const FLOOR_SECONDS = 15;
 export async function notifyOrderStatus(
   client: PoolClient, orderId: string, to: OrderStatus, at: Date, reason: string | null, from: OrderStatus | null = null,
 ): Promise<void> {
-  // If moving from awaiting_customer_confirm back to accepted/preparing/placed, the customer confirmed the changes.
-  // The shop gets an ordinary notification (#64).
-  if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) {
-    const { rows: [order] } = await client.query<Order & { accountId: string; shopId: string }>(
-      `SELECT o.number, o.account_id AS "accountId", o.shop_id AS "shopId", s.shop_name AS "shopName"
-       FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.id = $1`, [orderId]);
-    if (!order) throw new Error("A notified order is missing");
-    const title = `Order #${order.number} confirmed`;
-    const body = "The customer confirmed the updated order total.";
-    await client.query(
-      `WITH added AS (
-         INSERT INTO notifications (account_id, app, kind, title, body, order_id, loud, created_at)
-         SELECT account_id, 'shopkeeper', 'order_total_confirmed', $2::text, $3::text, $4::uuid, false, $5::timestamptz
-         FROM shop_members WHERE shop_id = $1::uuid AND role IN ('owner', 'staff')
-         RETURNING id)
-       INSERT INTO push_queue (notification_id, send_after)
-       SELECT id, $5::timestamptz FROM added`,
-      [order.shopId, title, body, orderId, at]);
-    return;
-  }
   const rule = ruleFor(to, from, reason);
   if (!rule) return;
   await queueNotification(client, orderId, rule, at, reason);
@@ -198,7 +190,7 @@ const RECEIPT_KEPT_SECONDS = 24 * 60 * 60;
 const CLAIM_SECONDS = 60;
 
 /** The kinds a shop's Staff hear of; the Owner hears every kind (S41). */
-const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind).concat(["product_request_approved", "product_request_rejected"]);
+const staffKinds = [...Object.values(rules), ...Object.values(cancelRules), ...Object.values(confirmRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind).concat(["product_request_approved", "product_request_rejected"]);
 
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of

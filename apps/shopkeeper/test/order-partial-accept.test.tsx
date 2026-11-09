@@ -9,6 +9,7 @@ const mock = vi.hoisted(() => ({
   ordersView: null as unknown,
   ordersViewActive: false,
   previewCalls: [] as unknown[],
+  cancelsOrder: false,
   partialAcceptCalls: [] as unknown[],
   customPreview: null as null | ((lines: unknown) => Promise<unknown>),
   customPartialAccept: null as null | ((lines: unknown) => Promise<unknown>),
@@ -144,6 +145,8 @@ vi.mock("../src/lib/shop-orders", async (importActual) => ({
           smallCartFee: null,
           total: "180.00",
           originalTotal: "230.00",
+          cancelsOrder: mock.cancelsOrder,
+          belowFloor: false,
         } satisfies PartialAcceptPreviewResponse,
       });
     }),
@@ -277,6 +280,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     mock.hooks = [];
     mock.effects = [];
     mock.previewCalls = [];
+    mock.cancelsOrder = false;
     mock.partialAcceptCalls = [];
     mock.customPreview = null;
     mock.customPartialAccept = null;
@@ -454,6 +458,19 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     expect(texts).toContain("₹180");
   });
 
+  it("preview that would cancel the order shows the warning and keeps Send enabled", async () => {
+    mock.cancelsOrder = true;
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+    expect(allTexts()).toContain(words.cancelsOrderWarning);
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBeFalsy();
+  });
+
   it("submit body: sends proposed lines with reductions and reasons to partialAccept", async () => {
     // Enter edit mode
     (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
@@ -532,6 +549,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "100.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -550,6 +569,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -648,6 +669,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -665,6 +688,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -712,6 +737,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();

@@ -190,6 +190,10 @@ export const PartialAcceptPreviewResponse = z.strictObject({
   smallCartFee: Amount.nullable(),
   total: Amount,
   originalTotal: Amount,
+  /** Sending this would cancel the order at no cost, because the platform would lose money on it (D-5). */
+  cancelsOrder: z.boolean(),
+  /** Sending this goes ahead as a recorded exception below the contribution floor (D-5); false when it cancels. */
+  belowFloor: z.boolean(),
 });
 export type PartialAcceptPreviewResponse = z.infer<typeof PartialAcceptPreviewResponse>;
 
