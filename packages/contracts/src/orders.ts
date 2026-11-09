@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AddressLabel } from "./addresses";
 import { ProductBaseUnit } from "./catalog";
 import { Amount, LineCount } from "./pricing";
-import { AppliedShopDiscount } from "./shop-discount";
+import { AppliedShopDiscount, ShopDiscountOffer } from "./shop-discount";
 
 /** Every status an order can be in (#9); the terminal ones end it. */
 export const OrderStatus = z.enum([
@@ -71,6 +71,10 @@ export const OrderProposal = z.strictObject({
   confirmByAt: z.iso.datetime(),
   lines: z.array(OrderRevisionLine),
   productValue: Amount,
+  /** The discount the proposal carries, re-applied from the order's frozen rule version (#572); null when none applies. */
+  shopDiscount: AppliedShopDiscount,
+  /** The offer of the order's rule when this proposal drops a discount the order had (a flat rule whose minimum order the revised basket no longer meets), so C10 can say why; null otherwise. */
+  lostShopDiscount: ShopDiscountOffer.nullable(),
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
   total: Amount,
@@ -111,8 +115,8 @@ export const OrderResponse = z.strictObject({
   lines: z.array(OrderLine),
   productValue: Amount,
   /**
-   * The shop-wide discount frozen at placement and the offer of the rule version that gave it; null when none applied. Also null once a revision
-   * is confirmed: the revision's `productValue` and `total` are its own, and the placement discount is not combined with them (#571, until #572 gives a revision its own).
+   * The shop-wide discount and the offer of the rule version that gave it; null when none applied. Once a revision is confirmed it is the revision's
+   * own (re-applied from the same frozen rule version, #572), beside the revision's `productValue` and `total`.
    */
   shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
@@ -186,6 +190,7 @@ export type PartialAcceptOrderBody = z.infer<typeof PartialAcceptOrderBody>;
 /** `POST /v1/me/shop-orders/:id/partial-accept/preview`: dry-run quote preview for partial acceptance (ORD-3). */
 export const PartialAcceptPreviewResponse = z.strictObject({
   productValue: Amount,
+  shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
   total: Amount,

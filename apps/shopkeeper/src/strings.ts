@@ -426,6 +426,7 @@ export const strings = {
     timeUp: "Time is up",
     part: (part: string, pack: string) => `${part} of a ${pack} pack`,
     collect: "To collect at the door",
+    shopDiscount: "Shop discount",
     collectNote: "Cash or UPI when the order is handed over.",
     deliverTo: "Deliver to",
     labels: { home: "Home", work: "Work", other: "Other" },

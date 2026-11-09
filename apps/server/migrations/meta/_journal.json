@@ -456,6 +456,13 @@
       "when": 1794208748003,
       "tag": "0064_shop_discount",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794223050132,
+      "tag": "0065_revision_shop_discount",
+      "breakpoints": true
     }
   ]
 }

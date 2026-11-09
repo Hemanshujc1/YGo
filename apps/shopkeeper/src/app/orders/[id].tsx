@@ -249,6 +249,12 @@ function Detail({
         )}
       </View>
       <View className="rounded-card border border-border bg-surface p-4">
+        {editing && previewTotal?.shopDiscount && (
+          <View className="mb-2 flex-row items-center justify-between gap-3">
+            <Text className="text-body text-muted">{words.shopDiscount}</Text>
+            <Text className="text-body tabular-nums text-text">{`\u2212${money(previewTotal.shopDiscount.amount)}`}</Text>
+          </View>
+        )}
         <View className="flex-row items-center justify-between gap-3">
           <Text className="text-body font-semibold text-text">{words.collect}</Text>
           <View className="flex-row items-center gap-2">

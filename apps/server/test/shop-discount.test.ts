@@ -622,31 +622,209 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
         expect(await orderOf(who, id)).toEqual(before.order);
       } finally { await app.close(); app = open; }
     });
+  });
 
-    it("does not show the placement discount beside a confirmed revision's own figures", async () => {
+  describe("a partial acceptance re-applies it and the revision carries its own (#572, ORD-3, ORD-4)", () => {
+    const cents = (amount: string) => Math.round(Number(amount) * 100);
+    type View = { status: string; productValue: string; shopDiscount: { amount: string; offer: Record<string, string | null> } | null; deliveryFee: string; smallCartFee: string | null; total: string;
+      lines: Array<{ lineTotal: string }>; proposal: { shopDiscount: { amount: string; offer: unknown } | null; lostShopDiscount: unknown; total: string } | null };
+    const reconciles = (view: { productValue: string; shopDiscount: { amount: string } | null; deliveryFee: string; smallCartFee?: string | null; total: string }) =>
+      cents(view.productValue) - cents(view.shopDiscount?.amount ?? "0") + cents(view.deliveryFee) + cents(view.smallCartFee ?? "0") === cents(view.total);
+    const orderOf = async (who: { headers: Record<string, string> }, id: string) => (await app.inject({ method: "GET", url: `/v1/orders/${id}`, headers: who.headers })).json() as View;
+    const receiptOf = async (who: { headers: Record<string, string> }, id: string) => (await app.inject({ method: "GET", url: `/v1/orders/${id}/receipt`, headers: who.headers })).json() as View;
+    const revisions = async (id: string) => (await database.pool.query<{ revision: number; discount: string; rule: string | null; version: number | null; commission: string; product: string; total: string; lines: string }>(
+      `SELECT r.revision, r.shop_discount::text AS discount, r.shop_discount_rule_id AS rule, r.shop_discount_rule_version AS version, r.commission::text AS commission,
+         r.product_value::text AS product, r.total::text AS total,
+         (SELECT COALESCE(sum(l.shop_discount), 0)::text FROM order_revision_lines l WHERE l.revision_id = r.id) AS lines
+       FROM order_revisions r WHERE r.order_id = $1 ORDER BY r.revision`, [id])).rows;
+
+    /** A placed, accepted order of the given lines at the shop's price, under whatever rule the Owner has saved. */
+    async function accepted(owner: { shopId: string; headers: Record<string, string> }, prices: string[]) {
+      const who = await customer();
+      // "100x2" is two of a ₹100 item.
+      const listings = await Promise.all(prices.map((price) => listing(owner.shopId, price.split("x")[0] ?? "")));
+      const { place } = await order(owner.shopId, who, listings.map((listingId, index) => ({ listingId, count: Number(prices[index]?.split("x")[1] ?? 1) })));
+      const id = (await place()).json().id as string;
+      expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/accept`, headers: owner.headers })).statusCode).toBe(200);
+      return { who, id, listings };
+    }
+    /** A bare id removes the line; `[id, count]` keeps that many. */
+    const remove = (changes: Array<string | [string, number]>) => ({ lines: changes.map((change) => ({ listingId: typeof change === "string" ? change : change[0], count: typeof change === "string" ? 0 : change[1], reason: "out_of_stock" })) });
+    const propose = async (owner: { headers: Record<string, string> }, id: string, listingIds: Array<string | [string, number]>) => {
+      const sent = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/partial-accept`, headers: owner.headers, payload: remove(listingIds) });
+      expect(sent.json()).not.toHaveProperty("error");
+      return sent;
+    };
+    const confirm = (who: { headers: Record<string, string> }, id: string) => app.inject({ method: "POST", url: `/v1/orders/${id}/confirm-total`, headers: who.headers });
+    const cardWith = (base: string) => ({ ...card, commission: { ...card.commission, base } });
+
+    it("recomputes a percentage on the revised base and re-applies its cap, through two revisions, with the order view, receipt and S05 preview agreeing", async () => {
       const owner = await shop();
       await publish({ type: "global" }, card);
-      const who = await customer();
-      await put(owner.headers, percentage("10"));
-      const { cart, place } = await order(owner.shopId, who, [{ listingId: await listing(owner.shopId, "200"), count: 1 }]);
-      expect(cart.quote.total).toBe("210.00");
-      const id = (await place()).json().id as string;
-      expect(await orderOf(who, id)).toMatchObject({ shopDiscount: { amount: "20.00" }, productValue: "200.00", total: "210.00" });
+      await put(owner.headers, percentage("10", "25"));
+      const { who, id, listings } = await accepted(owner, ["200", "100x2"]);
+      const line = listings[1] ?? "";
+      const offer = { form: "percentage", percentage: "10", cap: "25" };
+      expect(await orderOf(who, id)).toMatchObject({ shopDiscount: { amount: "25.00", offer }, total: "405.00" });
 
-      // A confirmed revision brings its own product value and total, and no discount until #572 gives it one.
-      await database.pool.query(
-        `INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission, platform_contribution,
-           quote, below_floor_exception, confirm_by_at, created_at, confirmed_at)
-         VALUES ($1, 1, 'confirmed', 'placed', 'owner', 150, 30, 180, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now(), now())`, [id]);
-      const revised = await orderOf(who, id);
-      expect(revised).toMatchObject({ shopDiscount: null, productValue: "150.00", total: "180.00" });
-      expect(reconciles(revised)).toBe(true);
+      // The S05 preview shows the discount the proposal will carry, before it is sent.
+      const preview = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/partial-accept/preview`, headers: owner.headers, payload: remove([[line, 1]]) });
+      expect(preview.json()).toEqual({ productValue: "300.00", shopDiscount: { amount: "25.00", offer }, deliveryFee: "30.00", smallCartFee: null, total: "305.00", originalTotal: "405.00" });
 
-      // The receipt reads only placement figures, so it keeps the placement discount beside them and still adds up.
+      // First revision: 300 under the 10% is 30, held by the 25 cap.
+      const sent = await propose(owner, id, [[line, 1]]);
+      expect(sent.json().proposal).toMatchObject({ productValue: "300.00", shopDiscount: { amount: "25.00", offer }, lostShopDiscount: null, total: "305.00" });
+      expect((await confirm(who, id)).statusCode).toBe(200);
+      const first = await orderOf(who, id);
+      expect(first).toMatchObject({ productValue: "300.00", shopDiscount: { amount: "25.00", offer }, total: "305.00" });
+      expect(reconciles(first)).toBe(true);
+
+      // The Owner edits the rule meanwhile; the second revision still prices from the frozen version: 200 under the 10% is 20, under the cap.
+      await put(owner.headers, flat("5", "10"));
+      await propose(owner, id, [line]);
+      expect((await confirm(who, id)).statusCode).toBe(200);
+      const second = await orderOf(who, id);
+      expect(second).toMatchObject({ productValue: "200.00", shopDiscount: { amount: "20.00", offer }, total: "210.00" });
+      expect(second.lines).toHaveLength(1);
+      expect(reconciles(second)).toBe(true);
+
+      const order1 = (await database.pool.query<{ rule: string; version: number }>("SELECT shop_discount_rule_id AS rule, shop_discount_rule_version AS version FROM orders WHERE id = $1", [id])).rows[0];
+      expect(await revisions(id)).toMatchObject([
+        { revision: 1, discount: "25.00", lines: "25.00", total: "305.00", rule: order1?.rule, version: order1?.version },
+        { revision: 2, discount: "20.00", lines: "20.00", total: "210.00", rule: order1?.rule, version: order1?.version },
+      ]);
+
+      // The receipt reads the confirmed revision's lines, discount and total.
       await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
       const receipt = await receiptOf(who, id);
-      expect(receipt).toMatchObject({ shopDiscount: { amount: "20.00" }, productValue: "200.00", total: "210.00" });
+      expect(receipt).toMatchObject({ productValue: "200.00", shopDiscount: { amount: "20.00", offer }, total: "210.00" });
+      expect(receipt.lines).toHaveLength(1);
       expect(reconciles(receipt)).toBe(true);
+    });
+
+    it("drops a flat discount to zero when the revised base is under its minimum, keeps the rule on the revision and tells the Customer why", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, flat("50", "300"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      const offer = { form: "flat", amount: "50", minimumOrder: "300" };
+      expect(await orderOf(who, id)).toMatchObject({ shopDiscount: { amount: "50.00", offer }, total: "280.00" });
+
+      const sent = await propose(owner, id, [listings[1] ?? ""]);
+      expect(sent.json().proposal).toMatchObject({ productValue: "200.00", shopDiscount: null, lostShopDiscount: offer, total: "230.00" });
+      expect((await confirm(who, id)).statusCode).toBe(200);
+      const revised = await orderOf(who, id);
+      expect(revised).toMatchObject({ productValue: "200.00", shopDiscount: null, total: "230.00" });
+      expect(reconciles(revised)).toBe(true);
+
+      // The rule id and version stay on the revision with an amount of 0 (not null), so what priced it is never lost.
+      const order1 = (await database.pool.query<{ rule: string; version: number }>("SELECT shop_discount_rule_id AS rule, shop_discount_rule_version AS version FROM orders WHERE id = $1", [id])).rows[0];
+      expect(await revisions(id)).toMatchObject([{ discount: "0.00", lines: "0.00", rule: order1?.rule, version: order1?.version }]);
+    });
+
+    it("keeps a flat discount while the revised base still meets the minimum, tested before the discount like placement", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, flat("50", "300"));
+      const { who, id, listings } = await accepted(owner, ["200", "100", "100"]);
+      await propose(owner, id, [listings[2] ?? ""]);
+      await confirm(who, id);
+      const revised = await orderOf(who, id);
+      expect(revised).toMatchObject({ productValue: "300.00", shopDiscount: { amount: "50.00" }, total: "280.00" });
+      expect(reconciles(revised)).toBe(true);
+    });
+
+    it("prices from the frozen rule version, never the shop's current rule, and is unmoved when it is turned off or edited", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      await put(owner.headers, percentage("50"));
+      await put(owner.headers, percentage("10", null, false));
+      await propose(owner, id, [listings[1] ?? ""]);
+      await confirm(who, id);
+      expect(await orderOf(who, id)).toMatchObject({ productValue: "200.00", shopDiscount: { amount: "20.00", offer: { form: "percentage", percentage: "10", cap: null } }, total: "210.00" });
+    });
+
+    it("keeps the frozen rule when the gate is turned off after placement, while the flag stays the code's only switch", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      const open = app;
+      app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+      try {
+        expect((await propose(owner, id, [listings[1] ?? ""])).statusCode).toBe(200);
+        expect((await confirm(who, id)).statusCode).toBe(200);
+        const revised = await orderOf(who, id);
+        expect(revised).toMatchObject({ productValue: "200.00", shopDiscount: { amount: "20.00" }, total: "210.00" });
+        expect(reconciles(revised)).toBe(true);
+      } finally { await app.close(); app = open; }
+    });
+
+    it.each([["after_shop_discount", "18.00"], ["before_shop_discount", "20.00"]])("commissions on the order's own rate-card base, %s", async (base, commission) => {
+      const owner = await shop();
+      await publish({ type: "global" }, cardWith(base));
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      await publish({ type: "global" }, cardWith(base === "after_shop_discount" ? "before_shop_discount" : "after_shop_discount"));
+      await propose(owner, id, [listings[1] ?? ""]);
+      await confirm(who, id);
+      // 200 of items and a 20 discount; the commission is 10% of 180 or of 200, by the base the order was placed under.
+      expect(await revisions(id)).toMatchObject([{ product: "200.00", discount: "20.00", commission, total: "210.00" }]);
+    });
+
+    it("splits the discount in whole paise across the kept lines and always adds up", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, percentage("5"));
+      const { who, id, listings } = await accepted(owner, ["33.33", "33.33", "33.34"]);
+      await propose(owner, id, [listings[0] ?? ""]);
+      await confirm(who, id);
+      // 66.67 at 5% is 3.3335, rounded half up to 3.33; the 1 paisa left over goes to the largest line.
+      expect(await revisions(id)).toMatchObject([{ product: "66.67", discount: "3.33", lines: "3.33", total: "93.34" }]);
+      expect((await database.pool.query<{ share: string }>(
+        "SELECT shop_discount::text AS share FROM order_revision_lines WHERE revision_id = (SELECT id FROM order_revisions WHERE order_id = $1) AND count > 0 ORDER BY position", [id])).rows.map((row) => row.share)).toEqual(["1.66", "1.67"]);
+    });
+
+    it("gives a revision of an order that had no discount none, and no rule", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      await propose(owner, id, [listings[1] ?? ""]);
+      await confirm(who, id);
+      expect(await orderOf(who, id)).toMatchObject({ productValue: "200.00", shopDiscount: null, total: "230.00" });
+      expect(await revisions(id)).toMatchObject([{ discount: "0.00", rule: null, version: null, total: "230.00" }]);
+    });
+
+    it("refuses at the database a revision that does not add up, and never lets a confirmed one change", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      const { rows: [placed] } = await database.pool.query<{ rule: string; version: number }>("SELECT shop_discount_rule_id AS rule, shop_discount_rule_version AS version FROM orders WHERE id = $1", [id]);
+      const insert = (discount: string, total: string, rule: string | null, version: number | null) => database.pool.query(
+        `INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission, platform_contribution,
+           quote, below_floor_exception, confirm_by_at, created_at, shop_discount, shop_discount_rule_id, shop_discount_rule_version)
+         VALUES ($1, 9, 'proposed', 'accepted', 'owner', 100, 30, $2, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now(), $3, $4, $5)`, [id, total, discount, rule, version]);
+      // A total that does not reconcile to the paisa, a discount over the product value, a discount with no rule, and one that is not the sum of its lines.
+      await expect(insert("10", "121.00", placed?.rule ?? null, placed?.version ?? null)).rejects.toThrow(/order_revisions_total_reconciles/);
+      await expect(insert("101", "29.00", placed?.rule ?? null, placed?.version ?? null)).rejects.toThrow(/order_revisions_shop_discount_valid/);
+      await expect(insert("10", "120.00", null, null)).rejects.toThrow(/order_revisions_shop_discount_valid/);
+      await expect(insert("10", "120.00", placed?.rule ?? null, placed?.version ?? null)).rejects.toThrow(/does not add up/);
+      // A line's discount can never exceed the line's total.
+      const { rows: [proposed] } = await database.pool.query<{ id: string }>("SELECT id FROM order_revisions WHERE order_id = $1", [id]);
+      expect(proposed).toBeUndefined();
+      await propose(owner, id, [listings[1] ?? ""]);
+      const { rows: [rev] } = await database.pool.query<{ id: string }>("SELECT id FROM order_revisions WHERE order_id = $1", [id]);
+      await expect(database.pool.query(
+        `INSERT INTO order_revision_lines (revision_id, position, listing_id, name, base_unit, pack_quantity, original_count, count, unit_price, line_total, commission, shop_discount, stock_quantity)
+         VALUES ($1, 99, $2, 'Item', 'each', 1, 1, 1, 10, 10, 1, 10.01, 1)`, [rev?.id, listings[0]])).rejects.toThrow(/order_revision_lines_shop_discount_valid/);
+
+      // Once sent, a revision's figures and discount cannot change, confirmed or not.
+      await confirm(who, id);
+      await expect(database.pool.query("UPDATE order_revisions SET shop_discount = 0 WHERE id = $1", [rev?.id])).rejects.toThrow(/append-only/);
+      await expect(database.pool.query("UPDATE order_revision_lines SET shop_discount = 0 WHERE revision_id = $1", [rev?.id])).rejects.toThrow();
     });
   });
 });

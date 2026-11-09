@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  AssignDelivererBody, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
+  AssignDelivererBody, type ShopDiscountOffer, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
   ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import { fromPaise, toPaise } from "@ygo/pricing";
@@ -14,6 +14,7 @@ import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
+import { offerSql } from "./cart";
 import { answerExpired, frozenOrder } from "./orders";
 import { resolveRateCard } from "./rate-cards";
 
@@ -227,9 +228,13 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     unitPrice: string;
     lineTotal: string;
     commission: string;
+    shopDiscount: string;
     stockQuantity: string;
     changeReason: string | null;
   };
+
+  /** The rule version the order was priced on, as the pricing function reads it, and its offer (#572). */
+  type FrozenDiscountRule = { ruleId: string; version: number; rule: Record<string, string | null>; offer: ShopDiscountOffer } | null;
 
   type PartialAcceptEvaluation =
     | { ok: false; code: string; status?: number; shortLines?: ShortLine[] }
@@ -247,6 +252,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
             smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
           };
           originalTotal: string;
+          discountRule: FrozenDiscountRule;
         };
         activeLines: Array<{
           position: number;
@@ -264,6 +270,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         }>;
         preparedLines: PreparedRevisionLine[];
         subtotalStr: string;
+        shopDiscountStr: string;
         deliveryFee: { amount: string; platformShare: string; shopShare: string };
         smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
         customerTotalStr: string;
@@ -305,13 +312,18 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
       };
       originalTotal: string;
+      discountRule: FrozenDiscountRule;
     }>(
       `SELECT o.id, o.shop_id AS "shopId", o.status, o.status_changed_at AS "answerFrom", m.role,
               o.rate_card_version AS "rateCardVersion", o.quote,
               COALESCE(
                 (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
                 o.total::text
-              ) AS "originalTotal"
+              ) AS "originalTotal",
+              (SELECT json_build_object('ruleId', v.rule_id, 'version', v.version,
+                  'rule', json_build_object('form', v.form, 'percentage', v.percentage::text, 'cap', v.cap::text, 'amount', v.flat_amount::text, 'minimumOrder', v.minimum_order::text),
+                  'offer', ${offerSql("v")})
+                FROM shop_discount_versions v WHERE v.rule_id = o.shop_discount_rule_id AND v.version = o.shop_discount_rule_version) AS "discountRule"
        FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
        WHERE o.id = $1 AND m.account_id = $2 ${forUpdate ? "FOR UPDATE OF o" : ""}`, [orderId, accountId]);
     if (!order) return { ok: false, code: "NOT_FOUND", status: 404 };
@@ -446,7 +458,6 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       const partQuantity = line.partQuantity !== null && count > 0 ? line.partQuantity : null;
 
       let lineTotalStr = "0.00";
-      let lineCommissionStr = "0.00";
       let stockQuantityStr = "0.000";
 
       if (count > 0) {
@@ -455,17 +466,6 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           : toPaise(line.unitPrice) * BigInt(count);
         lineTotalStr = fromPaise(lineTotalPaise);
         subtotalPaise += lineTotalPaise;
-
-        const categoryCard = byCategory.get(line.categoryId);
-        const commissionRule = categoryCard?.values.commission?.value;
-        if (commissionRule) {
-          const { rows: [commRow] } = await client.query<{ comm: string }>(
-            "SELECT pricing_line_commission($1::numeric, $2::jsonb)::text AS comm",
-            [lineTotalStr, JSON.stringify(commissionRule)]);
-          lineCommissionStr = commRow?.comm ?? "0.00";
-          totalCommissionPaise += toPaise(lineCommissionStr);
-        }
-
         stockQuantityStr = partQuantity ? partQuantity : (count * Number(line.packQuantity)).toFixed(3);
       }
 
@@ -482,10 +482,35 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         partQuantity,
         unitPrice: line.unitPrice,
         lineTotal: lineTotalStr,
-        commission: lineCommissionStr,
+        commission: "0.00",
+        shopDiscount: "0.00",
         stockQuantity: stockQuantityStr,
         changeReason,
       });
+    }
+
+    // The discount is re-applied from the rule version the order was priced on, never the shop's current rule (#572), by the same function placement uses:
+    // a percentage on the revised base under its cap, a flat amount only while the revised pre-discount base still meets its minimum order.
+    // Every line stays eligible until #78 passes bargained lines as ineligible (BRG-5).
+    const { rows: [shared] } = await client.query<{ shares: string[] }>(
+      "SELECT pricing_shop_discount_shares($1::jsonb, $2::numeric[], $3::boolean[])::text[] AS shares",
+      [order.discountRule ? JSON.stringify(order.discountRule.rule) : null, preparedLines.map((pl) => pl.lineTotal), preparedLines.map(() => true)]);
+    let discountPaise = 0n;
+    for (const [index, pl] of preparedLines.entries()) {
+      pl.shopDiscount = shared?.shares[index] ?? "0.00";
+      discountPaise += toPaise(pl.shopDiscount);
+    }
+
+    for (const [index, pl] of preparedLines.entries()) {
+      if (pl.count === 0) continue;
+      const commissionRule = byCategory.get(activeLines[index]?.categoryId ?? "")?.values.commission?.value;
+      if (!commissionRule) continue;
+      // The commission base is the order's own rate card: before or after the shop-funded discount (revenue spec).
+      const base = (commissionRule as { base?: string }).base === "after_shop_discount" ? fromPaise(toPaise(pl.lineTotal) - toPaise(pl.shopDiscount)) : pl.lineTotal;
+      const { rows: [commRow] } = await client.query<{ comm: string }>(
+        "SELECT pricing_line_commission($1::numeric, $2::jsonb)::text AS comm", [base, JSON.stringify(commissionRule)]);
+      pl.commission = commRow?.comm ?? "0.00";
+      totalCommissionPaise += toPaise(pl.commission);
     }
 
     const holdsNow = STOCK_HOLDING_ORDER_STATUSES.includes(order.status);
@@ -515,7 +540,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const deliveryFeeAmountPaise = toPaise(deliveryFee.amount);
     const smallCartFeeAmountPaise = smallCartFee ? toPaise(smallCartFee.amount) : 0n;
 
-    const customerTotalPaise = subtotalPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise;
+    const customerTotalPaise = subtotalPaise - discountPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise;
     const platformContributionPaise = totalCommissionPaise + deliveryPlatformSharePaise + smallCartPlatformSharePaise;
 
     const customerTotalStr = fromPaise(customerTotalPaise);
@@ -529,6 +554,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const revisionQuote = {
       ...order.quote,
       productValue: subtotalStr,
+      shopDiscount: fromPaise(discountPaise),
       customerTotal: customerTotalStr,
       commission: totalCommissionStr,
       platformContribution: platformContributionStr,
@@ -540,6 +566,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       activeLines,
       preparedLines,
       subtotalStr,
+      shopDiscountStr: fromPaise(discountPaise),
       deliveryFee,
       smallCartFee,
       customerTotalStr,
@@ -570,6 +597,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     }
     return {
       productValue: evalResult.subtotalStr,
+      shopDiscount: toPaise(evalResult.shopDiscountStr) > 0n && evalResult.order.discountRule ? { amount: evalResult.shopDiscountStr, offer: evalResult.order.discountRule.offer } : null,
       deliveryFee: evalResult.deliveryFee.amount,
       smallCartFee: evalResult.smallCartFee?.amount ?? null,
       total: evalResult.customerTotalStr,
@@ -599,20 +627,21 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         const { rows: [insertedRev] } = await client.query<{ id: string }>(
           `INSERT INTO order_revisions (
              order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
-             commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at
-           ) VALUES ($1, $2, 'cancelled_negative_contribution', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+             commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at,
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version
+           ) VALUES ($1, $2, 'cancelled_negative_contribution', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
           [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
            evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), true, fromPaise(-evalResult.platformContributionPaise),
-           evalResult.confirmByAt, now]);
+           evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null]);
         if (!insertedRev) throw new Error("Failed to insert order revision");
         for (const pl of evalResult.preparedLines) {
           await client.query(
             `INSERT INTO order_revision_lines (
                revision_id, position, listing_id, name, brand, base_unit, pack_quantity, original_count, count,
-               original_part_quantity, part_quantity, unit_price, line_total, commission, stock_quantity, change_reason
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+               original_part_quantity, part_quantity, unit_price, line_total, commission, shop_discount, stock_quantity, change_reason
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
             [insertedRev.id, pl.position, pl.listingId, pl.name, pl.brand, pl.baseUnit, pl.packQuantity, pl.originalCount, pl.count,
-             pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.stockQuantity, pl.changeReason]);
+             pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.shopDiscount, pl.stockQuantity, pl.changeReason]);
         }
         await moveOrder(client, evalResult.order, "cancelled_by_shop", { id: null, role: "system" }, now, "negative_contribution");
         await client.query("COMMIT");
@@ -626,11 +655,12 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       const { rows: [insertedRev] } = await client.query<{ id: string }>(
         `INSERT INTO order_revisions (
            order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
-           commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at
-         ) VALUES ($1, $2, 'proposed', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+           commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at,
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version
+         ) VALUES ($1, $2, 'proposed', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
         [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
          evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), belowFloorException, belowFloorShortfall,
-         evalResult.confirmByAt, now]);
+         evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null]);
 
       if (!insertedRev) throw new Error("Failed to insert order revision");
 
@@ -638,10 +668,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         await client.query(
           `INSERT INTO order_revision_lines (
              revision_id, position, listing_id, name, brand, base_unit, pack_quantity, original_count, count,
-             original_part_quantity, part_quantity, unit_price, line_total, commission, stock_quantity, change_reason
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+             original_part_quantity, part_quantity, unit_price, line_total, commission, shop_discount, stock_quantity, change_reason
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
           [insertedRev.id, pl.position, pl.listingId, pl.name, pl.brand, pl.baseUnit, pl.packQuantity, pl.originalCount, pl.count,
-           pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.stockQuantity, pl.changeReason]);
+           pl.originalPartQuantity, pl.partQuantity, pl.unitPrice, pl.lineTotal, pl.commission, pl.shopDiscount, pl.stockQuantity, pl.changeReason]);
       }
 
       if (!await moveOrder(client, evalResult.order, "awaiting_customer_confirm", { id: who.accountId, role: evalResult.order.role }, now)) {

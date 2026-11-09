@@ -78,6 +78,11 @@ export const frozenOrder = (o: string, includeListingId = false) => `json_build_
               FROM order_revision_lines pl WHERE pl.revision_id = p.id
             ),
             'productValue', p.product_value::text,
+            'shopDiscount', ${revisionDiscount("p")},
+            'lostShopDiscount', CASE WHEN p.shop_discount = 0 AND p.shop_discount_rule_id IS NOT NULL AND COALESCE(
+                (SELECT prev.shop_discount FROM order_revisions prev WHERE prev.order_id = ${o}.id AND prev.status = 'confirmed' AND prev.revision < p.revision
+                 ORDER BY prev.revision DESC LIMIT 1), ${o}.shop_discount) > 0
+              THEN (SELECT ${offerSql("v")} FROM shop_discount_versions v WHERE v.rule_id = p.shop_discount_rule_id AND v.version = p.shop_discount_rule_version) END,
             'deliveryFee', ${o}.delivery_fee::text,
             'smallCartFee', ${o}.small_cart_fee::text,
             'total', p.total::text,
@@ -99,13 +104,19 @@ export const frozenOrder = (o: string, includeListingId = false) => `json_build_
         (SELECT json_build_object('status', c.status, 'askedAt', to_char(c.asked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
           FROM order_cancel_requests c WHERE c.order_id = ${o}.id) AS "cancelRequest"`;
 
+/** The discount of one revision row `r` and the offer of the exact rule version it names (#572). */
+const revisionDiscount = (r: string) => `CASE WHEN ${r}.shop_discount > 0
+  THEN json_build_object('amount', ${r}.shop_discount::text, 'offer', (SELECT ${offerSql("v")} FROM shop_discount_versions v
+    WHERE v.rule_id = ${r}.shop_discount_rule_id AND v.version = ${r}.shop_discount_rule_version)) END`;
+
 /**
- * The discount frozen on the order and the offer of the exact rule version that gave it (#571). `hideAfterRevision` is true for the order view:
- * once a revision is confirmed its product value and total are its own, and the placement discount is not shown beside them until a revision
- * carries its own (#572). The receipt reads only placement figures, so it keeps the placement discount with them.
+ * The discount in force on order `o` and the offer of the exact rule version that gave it (#571, #572): the latest confirmed revision's own,
+ * else the one frozen at placement. A revision that lost its discount is null, never the placement one.
  */
-const placementDiscount = (o: string, hideAfterRevision: boolean) => `CASE WHEN ${o}.shop_discount_rule_id IS NOT NULL AND ${o}.shop_discount > 0
-  ${hideAfterRevision ? `AND NOT EXISTS (SELECT 1 FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed')` : ""}
+const currentDiscount = (o: string) => `CASE
+  WHEN EXISTS (SELECT 1 FROM order_revisions c WHERE c.order_id = ${o}.id AND c.status = 'confirmed')
+  THEN (SELECT ${revisionDiscount("c")} FROM order_revisions c WHERE c.order_id = ${o}.id AND c.status = 'confirmed' ORDER BY c.revision DESC LIMIT 1)
+  WHEN ${o}.shop_discount_rule_id IS NOT NULL AND ${o}.shop_discount > 0
   THEN json_build_object('amount', ${o}.shop_discount::text, 'offer', (SELECT ${offerSql("v")} FROM shop_discount_versions v
     WHERE v.rule_id = ${o}.shop_discount_rule_id AND v.version = ${o}.shop_discount_rule_version)) END`;
 
@@ -125,7 +136,7 @@ async function orderView(client: Pool | PoolClient, orderId: string, accountId: 
   const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", o.items_checked_at AS "itemsCheckedAt",
         o.handover_code_ciphertext AS "handoverCodeCiphertext", ${shopOf("s")} AS shop, ${frozenOrder("o")},
-        ${placementDiscount("o", true)} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired"
+        ${currentDiscount("o")} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired"
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
   if (!row) return undefined;
@@ -280,19 +291,25 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     return order ?? reply.code(404).send({ error: { code: "NOT_FOUND" } });
   });
 
-  // #61: the receipt of a finished sale. Every figure and the shop's identity are the ones frozen at placement (#537).
+  // #61: the receipt of a finished sale. Every figure and the shop's identity are the ones frozen at placement (#537); lines, discount and total are the confirmed revision's when there is one (#572).
   app.get("/v1/orders/:id/receipt", { schema: { params: OrderParams, response: { 200: ReceiptResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt" | "status"> & { placedAt: Date; status: OrderStatus }>(
       `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', o.shop_name, 'address', o.shop_address, 'pincode', o.shop_pincode, 'gstin', o.shop_gstin) AS shop,
           json_build_object('label', o.address_label, 'areaLine', o.address_area_line) AS address,
-          (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
-              'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
-            FROM order_lines l WHERE l.order_id = o.id) AS lines,
-          o.product_value::text AS "productValue", ${placementDiscount("o", false)} AS "shopDiscount", o.delivery_fee::text AS "deliveryFee",
-          o.small_cart_fee::text AS "smallCartFee", o.total::text AS total, o.delivery_payment AS payment
-        FROM orders o WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
+          COALESCE(
+            (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
+                'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
+              FROM order_revision_lines l WHERE l.revision_id = rev.id AND l.count > 0),
+            (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
+                'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
+              FROM order_lines l WHERE l.order_id = o.id)) AS lines,
+          COALESCE(rev.product_value, o.product_value)::text AS "productValue", ${currentDiscount("o")} AS "shopDiscount", o.delivery_fee::text AS "deliveryFee",
+          o.small_cart_fee::text AS "smallCartFee", COALESCE(rev.total, o.total)::text AS total, o.delivery_payment AS payment
+        FROM orders o
+        LEFT JOIN LATERAL (SELECT r.id, r.product_value, r.total FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1) rev ON true
+        WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
     if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     if (row.status !== "delivered" && row.status !== "picked_up") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
     return { ...row, status: row.status, placedAt: row.placedAt.toISOString() };

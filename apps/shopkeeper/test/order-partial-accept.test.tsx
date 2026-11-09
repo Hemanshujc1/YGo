@@ -147,6 +147,7 @@ vi.mock("../src/lib/shop-orders", async (importActual) => ({
           originalTotal: "230.00",
           cancelsOrder: mock.cancelsOrder,
           belowFloor: false,
+          shopDiscount: null,
         } satisfies PartialAcceptPreviewResponse,
       });
     }),
@@ -551,6 +552,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         originalTotal: "230.00",
         cancelsOrder: false,
         belowFloor: false,
+        shopDiscount: null,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -571,6 +573,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         originalTotal: "230.00",
         cancelsOrder: false,
         belowFloor: false,
+        shopDiscount: null,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -671,6 +674,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         originalTotal: "230.00",
         cancelsOrder: false,
         belowFloor: false,
+        shopDiscount: null,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -690,6 +694,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         originalTotal: "230.00",
         cancelsOrder: false,
         belowFloor: false,
+        shopDiscount: null,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -739,6 +744,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         originalTotal: "230.00",
         cancelsOrder: false,
         belowFloor: false,
+        shopDiscount: null,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -953,6 +959,8 @@ describe("Waiting state and countdown on S05 and S04 (#527)", () => {
       smallCartFee: null,
       total: "130.00",
       originalTotal: "230.00",
+      shopDiscount: null,
+      lostShopDiscount: null,
       lines: [
         {
           listingId: dalListingId,

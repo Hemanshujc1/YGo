@@ -876,7 +876,16 @@ export const orderRevisions = pgTable("order_revisions", {
   belowFloorException: boolean("below_floor_exception").notNull().default(false),
   belowFloorShortfall: numeric("below_floor_shortfall", { precision: 12, scale: 2 }),
   belowFloorReason: text("below_floor_reason"),
+  /** The discount this revision carries, re-applied from the order's frozen rule version (#572); 0 with the rule kept when it no longer applies. */
+  shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+  shopDiscountRuleId: uuid("shop_discount_rule_id"),
+  shopDiscountRuleVersion: integer("shop_discount_rule_version"),
 }, (table) => [
+  foreignKey({ columns: [table.shopDiscountRuleId, table.shopDiscountRuleVersion], foreignColumns: [shopDiscountVersions.ruleId, shopDiscountVersions.version], name: "order_revisions_shop_discount_rule_fk" }),
+  check("order_revisions_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND ${table.shopDiscount} <= ${table.productValue}
+    AND (${table.shopDiscountRuleId} IS NULL) = (${table.shopDiscountRuleVersion} IS NULL)
+    AND (${table.shopDiscount} = 0 OR ${table.shopDiscountRuleId} IS NOT NULL)`),
+  check("order_revisions_total_reconciles", sql`${table.total} = ${table.productValue} - ${table.shopDiscount} + ${table.deliveryFee} + COALESCE(${table.smallCartFee}, 0)`),
   uniqueIndex("order_revisions_order_id_revision_idx").on(table.orderId, table.revision),
   uniqueIndex("order_revisions_one_open_proposal_idx").on(table.orderId).where(sql`${table.status} = 'proposed'`),
   index("order_revisions_order_id_status_idx").on(table.orderId, table.status),
@@ -906,10 +915,12 @@ export const orderRevisionLines = pgTable("order_revision_lines", {
   unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
   lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
   commission: numeric("commission", { precision: 12, scale: 2 }).notNull(),
+  shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
   stockQuantity: numeric("stock_quantity", { precision: 12, scale: 3 }).notNull(),
   changeReason: text("change_reason"),
 }, (table) => [
   primaryKey({ columns: [table.revisionId, table.position] }),
+  check("order_revision_lines_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND ${table.shopDiscount} <= ${table.lineTotal}`),
   index("order_revision_lines_listing_id_idx").on(table.listingId),
   check("order_revision_lines_count_valid", sql`${table.count} BETWEEN 0 AND ${table.originalCount}`),
   check("order_revision_lines_stock_valid", sql`${table.stockQuantity} = CASE WHEN ${table.count} = 0 THEN 0 ELSE COALESCE(${table.partQuantity}, ${table.count} * ${table.packQuantity}) END`),
