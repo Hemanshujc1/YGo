@@ -16,8 +16,7 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
 import { answerExpired, frozenOrder } from "./orders";
 import { resolveRateCard } from "./rate-cards";
 
-/** Until when the shop can answer, while the order still waits for it. */
-/** The shop's answer window runs from when the order last became `placed` (placed_at is frozen, so a confirmed changed total restarts it through status_changed_at, #581). */
+/** Until when the shop can answer, while the order still waits for it. The window runs from when the order last became `placed` (placed_at is frozen, so a confirmed changed total restarts it through status_changed_at, #581). */
 const expiresAt = (status: OrderStatus, enteredAt: Date) => status === "placed" ? new Date(enteredAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
 
 /** Unexpired photo uploads one order may hold at once; retakes after a failed try fit, a flood does not. */

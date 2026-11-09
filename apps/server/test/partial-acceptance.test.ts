@@ -597,7 +597,7 @@ describe("C10 Customer confirmation and decline (#64)", () => {
   it("confirming a proposal on a placed order restarts the shop's answer window; placed_at stays (#581)", async () => {
     const { orderId, dal } = await setupShopWithOrder();
     const before = await database.pool.query<{ t: Date }>("SELECT placed_at AS t FROM orders WHERE id = $1", [orderId]);
-    const start = before.rows[0]!.t.getTime();
+    const start = (before.rows[0] as { t: Date }).t.getTime();
     await app.inject({
       method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
       payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
@@ -606,7 +606,7 @@ describe("C10 Customer confirmation and decline (#64)", () => {
     const confirmed = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer });
     expect(confirmed.statusCode).toBe(200);
     const after = await database.pool.query<{ t: Date }>("SELECT placed_at AS t FROM orders WHERE id = $1", [orderId]);
-    expect(after.rows[0]!.t.getTime()).toBe(start);
+    expect((after.rows[0] as { t: Date }).t.getTime()).toBe(start);
 
     // The shop's view counts 600 s from the confirm
     const view = await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner });
