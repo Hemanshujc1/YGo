@@ -301,7 +301,7 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
         await read(false, true);
         const status = view.order?.status;
         const notice = status === "cancelled_by_customer" ? words.cancelledByCustomer
-          : status === "placed" ? view.message ?? strings.errors.ORDER_STATUS_CHANGED
+          : status === "placed" || status === "accepted" || status === "preparing" ? view.message ?? strings.errors.ORDER_STATUS_CHANGED
           : words.answered;
         set({ answering: null, notice });
         return false;
@@ -309,6 +309,11 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
       if (result !== "offline" && result.code === "ORDER_EXPIRED") {
         disarm();
         set({ answering: null, notice: strings.errors.ORDER_EXPIRED, expired: true });
+        return false;
+      }
+      if (result !== "offline" && result.code === "PROPOSAL_OPEN") {
+        await read(false, true);
+        set({ answering: null, notice: strings.errors.PROPOSAL_OPEN });
         return false;
       }
       set({ answering: null, notice: failure(result), shortLines: result !== "offline" && !result.ok ? result.shortLines ?? [] : [] });

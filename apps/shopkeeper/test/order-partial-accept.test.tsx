@@ -758,6 +758,58 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     expect(texts).toContain("Fortune · 0 × 1 L");
   });
 
+  it("polling: a new order object with the same lines does not refetch the preview or disable Send (#589)", async () => {
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+    expect(mock.previewCalls).toHaveLength(1);
+
+    // A poll lands: same lines, new object.
+    mock.view = { ...(mock.view as object), order: { ...placedOrder, lines: placedOrder.lines.map((l) => ({ ...l })) } };
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(mock.previewCalls).toHaveLength(1);
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(false);
+  });
+
+  it("a failed preview says so and keeps Send disabled (#589)", async () => {
+    mock.customPreview = () => Promise.resolve({ ok: false, status: 500, code: "INTERNAL" });
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(allTexts()).toContain(words.previewFailed);
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(true);
+  });
+
+  it("leaves edit mode when the order was answered while Send was in flight (#589)", async () => {
+    const submission = deferred<boolean>();
+    mock.customPartialAccept = () => submission.promise;
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+    const sending = (findNode((p) => p.label === words.sendNewTotal)?.props.onPress as () => Promise<void>)();
+    render();
+    // The screen reads the order again while the request is open, and it was cancelled.
+    mock.view = { ...(mock.view as object), order: { ...placedOrder, status: "cancelled_by_customer" } };
+    render();
+    submission.resolve(false);
+    await sending;
+    render();
+    expect(findNode((p) => p.label === words.cancelChanges)).toBeUndefined();
+  });
+
   it("pending submission: disables steppers, buttons and reason chips, and prevents mutations or multiple submissions", async () => {
     const submission = deferred<boolean>();
     mock.customPartialAccept = () => submission.promise;
