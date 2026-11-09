@@ -21,6 +21,7 @@ import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
 import { ProductRequests } from "./product-requests";
 import { ProofExceptions } from "./proof-exceptions";
+import { BelowFloorExceptions } from "./below-floor-exceptions";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
 import { ShopApplications, ShopApplicationReview } from "./shop-applications";
@@ -63,8 +64,13 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/areas", label: strings.areas },
     { path: "/applications", label: strings.applications },
     { path: "/proof-exceptions", label: strings.proofExceptions },
+    { path: "/below-floor-exceptions", label: strings.belowFloorExceptions },
     { path: "/waitlist", label: strings.waitlist },
-  ] : role === "area_manager" ? [{ path: "/applications", label: strings.applications }, { path: "/proof-exceptions", label: strings.proofExceptions }] : [];
+  ] : role === "area_manager" ? [
+    { path: "/applications", label: strings.applications },
+    { path: "/proof-exceptions", label: strings.proofExceptions },
+    { path: "/below-floor-exceptions", label: strings.belowFloorExceptions },
+  ] : [];
 
   async function signOut() {
     if (!api) return;
@@ -351,6 +357,7 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   const applicationsLoader = listLoader(() => api.listShopApplications(), (data) => data.applications);
   const productRequestsLoader = listLoader(() => api.listProductRequests(), (data) => data);
   const proofExceptionsLoader = listLoader(() => api.listProofExceptions(), (data) => data);
+  const belowFloorExceptionsLoader = listLoader(() => api.listBelowFloorExceptions(), (data) => data);
   const applicationLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
     if (!id) throw new Error(strings.notFound);
@@ -485,6 +492,15 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       areaManager: proofExceptionsLoader,
       element: <Page protectedArea api={api}><ProofExceptions api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.proofExceptionsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    // Below contribution floor exceptions queue (A30, MNY-4, ADM-7, #529).
+    guarded({
+      path: "/below-floor-exceptions",
+      loader: belowFloorExceptionsLoader,
+      areaManager: belowFloorExceptionsLoader,
+      element: <Page protectedArea api={api}><BelowFloorExceptions api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.belowFloorExceptionsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

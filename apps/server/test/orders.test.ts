@@ -417,7 +417,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, order_lines, order_status_history, order_revision_lines, order_revisions, order_cancel_requests, proof_exception_reviews, proof_photo_views, push_queue, notifications, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, order_lines, order_status_history, order_revision_lines, order_revisions, order_cancel_requests, proof_exception_reviews, proof_photo_views, push_queue, notifications, below_floor_exception_reviews, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });

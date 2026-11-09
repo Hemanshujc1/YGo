@@ -88,6 +88,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     getProofExceptionPhoto: vi.fn(),
     listProofExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { shops: [], deliverers: [] } } }),
     reviewProofException: vi.fn(),
+    listBelowFloorExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { open: 0, total: 0, shops: [], areaManagers: [] } } }),
+    reviewBelowFloorException: vi.fn(),
     listProductRequests: vi.fn().mockResolvedValue({ ok: true, data: { requests: [] } }),
     approveProductRequest: vi.fn(),
     mapProductRequest: vi.fn(),
@@ -1237,7 +1239,7 @@ describe("Area Manager shell (#343)", () => {
     expect(screen.queryByText(strings.title)).toBeNull();
     expect(screen.getByText(strings.areaManagerScope)).toBeTruthy();
     const links = within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([strings.applications, strings.proofExceptions]);
+    expect(links.map((link) => link.textContent)).toEqual([strings.applications, strings.proofExceptions, strings.belowFloorExceptions]);
     expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
     expect(api.listShopApplications).toHaveBeenCalled();
@@ -1273,6 +1275,14 @@ describe("Area Manager shell (#343)", () => {
     expect(api.listProofExceptions).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["admin", "area_manager"] as const)("opens A30 Below contribution floor exceptions for %s from the navigation, and asks the server for the first page", async (role) => {
+    const { api, router } = setup("/applications", asRole(role));
+    fireEvent.click(await screen.findByRole("link", { name: strings.belowFloorExceptions }));
+    expect(await screen.findByText(strings.belowFloorExceptionsNoneOpen)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/below-floor-exceptions");
+    expect(api.listBelowFloorExceptions).toHaveBeenCalledTimes(1);
+  });
+
   it("draws no role's shell while the role is unknown or after the session ends", async () => {
     setup("/applications", { role: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }), currentRole: vi.fn(() => null) });
     expect(await screen.findByRole("link", { name: strings.brand })).toBeTruthy();
@@ -1296,7 +1306,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(11);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(12);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });
