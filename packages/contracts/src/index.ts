@@ -65,6 +65,7 @@ export {
   RATE_CARD_KEYS,
   RateCardKey,
   CommissionRule,
+  DEFAULT_COMMISSION_BASE,
   FeeSplit,
   DeliveryFeeRule,
   SmallCartFeeRule,

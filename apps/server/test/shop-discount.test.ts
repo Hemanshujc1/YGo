@@ -124,10 +124,25 @@ describe("The Owner's shop-wide discount (#63, MNY-5)", () => {
   it("never changes or removes a version an order may name", async () => {
     const owner = await shop();
     await put(owner.headers, percentage("10"));
-    for (const sql of ["UPDATE shop_discount_versions SET percentage = 1", "DELETE FROM shop_discount_versions", "TRUNCATE shop_discount_versions CASCADE"]) {
-      await expect(database.pool.query(sql), sql).rejects.toThrow(/append-only/);
-    }
-    expect(await versions()).toHaveLength(1);
+    const refused = [
+      "UPDATE shop_discount_versions SET percentage = 1",
+      "DELETE FROM shop_discount_versions",
+      "TRUNCATE shop_discount_versions CASCADE",
+      // Wiping the rule table cascades into its versions, and is refused by the same trigger.
+      "TRUNCATE shop_discounts CASCADE",
+      // A retried insert that tries to overwrite a version on conflict.
+      `INSERT INTO shop_discount_versions (rule_id, version, form, percentage, status, created_at)
+         SELECT rule_id, version, form, 1, status, created_at FROM shop_discount_versions
+         ON CONFLICT (rule_id, version) DO UPDATE SET percentage = excluded.percentage`,
+    ];
+    // Named by the versions table's own trigger, not only by the orders trigger a cascade also reaches.
+    for (const sql of refused) await expect(database.pool.query(sql), sql).rejects.toThrow(/shop_discount_versions is append-only/);
+    // Removing the rule cannot take its history with it, and no key into the history cascades.
+    await expect(database.pool.query("DELETE FROM shop_discounts")).rejects.toThrow(/shop_discount_versions_rule_id_shop_discounts_id_fk/);
+    expect(await database.pool.query(
+      `SELECT confdeltype FROM pg_constraint WHERE conname IN ('shop_discount_versions_rule_id_shop_discounts_id_fk', 'shop_discounts_shop_id_shops_id_fk', 'orders_shop_discount_rule_fk')`,
+    ).then(({ rows }) => rows.map((row) => row.confdeltype))).toEqual(["a", "a", "a"]);
+    expect(await versions()).toEqual([{ version: 1, status: "active", actor_id: owner.id }]);
   });
 
   it("refuses a rule whose worst case is over the maximum, naming it, and stores nothing", async () => {
@@ -282,6 +297,50 @@ describe("The pricing engine's split of a shop-wide discount (#63, MNY-6)", () =
     expect(await shares({ form: "percentage", percentage: "10", cap: null }, [] as string[])).toEqual([]);
     expect(await shares({ form: "flat", amount: "500", minimumOrder: "10" }, ["10.00", "30.00"])).toEqual(["10.00", "30.00"]);
   });
+
+  it("never takes more off a line than its eligible total, on every small basket", async () => {
+    // Every basket of one to three lines from tiny, borderline and large paise amounts (four lines from fewer), with the first line eligible or not,
+    // under rules that round, cap, hit the minimum or pass the base. Checked in SQL: each part is whole paise, within
+    // 0 and its line's eligible total, nothing comes off an ineligible line, and the parts add up to the order's discount.
+    const { rows: [result] } = await database.pool.query<{ cases: number; bad: unknown[] | null }>(`
+      WITH amounts(paise) AS (VALUES (1), (2), (3), (99), (100), (101), (100000)), few(paise) AS (VALUES (1), (2), (100000)),
+      baskets AS (
+        SELECT ARRAY[a.paise] AS paise FROM amounts a
+        UNION ALL SELECT ARRAY[a.paise, b.paise] FROM amounts a, amounts b
+        UNION ALL SELECT ARRAY[a.paise, b.paise, c.paise] FROM amounts a, amounts b, amounts c
+        UNION ALL SELECT ARRAY[a.paise, b.paise, c.paise, d.paise] FROM few a, few b, few c, few d),
+      rules(rule) AS (VALUES
+        ('{"form":"percentage","percentage":"0.01","cap":null}'::jsonb), ('{"form":"percentage","percentage":"19.99","cap":null}'),
+        ('{"form":"percentage","percentage":"20","cap":null}'), ('{"form":"percentage","percentage":"33.3333","cap":null}'),
+        ('{"form":"percentage","percentage":"66.6667","cap":"0.05"}'), ('{"form":"percentage","percentage":"100","cap":null}'),
+        ('{"form":"flat","amount":"0.01","minimumOrder":"0.01"}'), ('{"form":"flat","amount":"0.05","minimumOrder":"0.05"}'),
+        ('{"form":"flat","amount":"1","minimumOrder":"1"}'), ('{"form":"flat","amount":"1000","minimumOrder":"0.01"}')),
+      cases AS (
+        SELECT rule, paise, first, ARRAY(SELECT amount / 100.0 FROM unnest(paise) WITH ORDINALITY AS l(amount, i) ORDER BY i) AS totals,
+               ARRAY(SELECT i > 1 OR first FROM generate_subscripts(paise, 1) AS i ORDER BY i) AS eligible
+        FROM baskets, rules, (VALUES (true), (false)) AS f(first)),
+      split AS (SELECT *, pricing_shop_discount_shares(rule, totals, eligible) AS shares FROM cases),
+      checked AS (
+        SELECT *,
+          (SELECT COALESCE(sum(paise[i]), 0) FROM generate_subscripts(paise, 1) AS i WHERE eligible[i]) AS base,
+          (SELECT sum(part) * 100 FROM unnest(shares) AS part) AS taken,
+          -- A missing or null part fails: the lengths must match and every comparison must be true, never null.
+          array_length(shares, 1) IS NOT DISTINCT FROM array_length(paise, 1)
+            AND (SELECT bool_and(COALESCE(shares[i] * 100 = trunc(shares[i] * 100) AND shares[i] >= 0
+                           AND shares[i] * 100 <= CASE WHEN eligible[i] THEN paise[i] ELSE 0 END, false))
+             FROM generate_subscripts(paise, 1) AS i) AS within
+        FROM split),
+      expected AS (
+        SELECT *, CASE rule->>'form'
+          WHEN 'percentage' THEN LEAST(round(base * (rule->>'percentage')::numeric / 100), COALESCE((rule->>'cap')::numeric * 100, base), base)
+          ELSE CASE WHEN base >= (rule->>'minimumOrder')::numeric * 100 THEN LEAST((rule->>'amount')::numeric * 100, base) ELSE 0 END
+        END AS discount FROM checked)
+      SELECT count(*)::int AS cases,
+             (jsonb_agg(jsonb_build_object('rule', rule, 'paise', paise, 'eligible', eligible, 'shares', shares)) FILTER (WHERE within IS NOT TRUE OR taken IS DISTINCT FROM discount)) AS bad
+      FROM expected`);
+    expect(result?.cases).toBe(9_600);
+    expect(result?.bad).toBeNull();
+  }, 60_000);
 
   it("always adds up exactly to the order's discount, whatever the paise", async () => {
     let seed = 7;
