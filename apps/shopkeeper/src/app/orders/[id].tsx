@@ -381,7 +381,7 @@ export default function OrderScreen() {
   const linesRef = useRef(shown?.lines);
   linesRef.current = shown?.lines;
   // Polls hand back a new order object each time; only a change to the lines should redo the preview.
-  const linesSig = shown ? shown.lines.map((l) => `${l.listingId}:${l.count}:${l.lineTotal}`).join(",") : "";
+  const linesSig = (shown?.lines ?? []).map((l) => `${l.listingId}:${l.count}:${l.lineTotal}`).join(",");
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
   const confirmSeconds = useSecondsLeft(shown?.status === "awaiting_customer_confirm" ? shown.confirmByAt : null, view.offset);
