@@ -549,6 +549,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "100.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -567,6 +569,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -665,6 +669,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -682,6 +688,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -729,6 +737,8 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
         smallCartFee: null,
         total: "180.00",
         originalTotal: "230.00",
+        cancelsOrder: false,
+        belowFloor: false,
       },
     });
     for (let i = 0; i < 5; i++) await Promise.resolve();
