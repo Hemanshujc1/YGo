@@ -1398,6 +1398,9 @@ describe("Customer's order list (#426, ORD-1)", () => {
     // Placed in the same instant as `waiting`: the higher number comes first.
     const confirm = await one();
     await move(confirm.id, "awaiting_customer_confirm");
+    await database.pool.query(
+      `INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission, platform_contribution, quote, below_floor_exception, confirm_by_at, created_at)
+       VALUES ($1, 1, 'proposed', 'placed', 'owner', 100, 30, 130, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now())`, [confirm.id]);
     const theirs = (await ordered(shopId, [{ listingId: dal, count: 1 }], await address("other@example.com"), other)).json() as { id: string };
 
     const listed = await list();
@@ -1407,8 +1410,10 @@ describe("Customer's order list (#426, ORD-1)", () => {
     expect(ids(past)).toEqual([rejected.id, cancelled.id]);
     expect(active[2]).toEqual({
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:01:00.000Z",
-      shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" }, total: "180.00", answerExpired: false, confirmByAt: null,
+      shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" }, total: "180.00", answerExpired: false, confirmByAt: null, proposedTotal: null,
     });
+    // The banner shows the proposal's total, not the order's original one (#578).
+    expect(active[0]).toMatchObject({ id: confirm.id, total: "180.00", proposedTotal: "130.00" });
     expect(ids((await list(other)).json().active)).toEqual([theirs.id]);
   });
 

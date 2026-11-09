@@ -1,5 +1,5 @@
 import { Text } from "@ygo/mobile";
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 import { View } from "react-native";
 import { strings } from "../strings";
 
@@ -17,18 +17,17 @@ export function secondsUntil(confirmByAt: string | null, now: number = Date.now(
 
 /** Seconds left ticking once a second, until it reaches 0 (ORD-4, C10). */
 export function useSecondsLeft(confirmByAt: string | null): number | null {
-  const [now, setNow] = useState(Date.now);
+  const [, tick] = useReducer((count: number) => count + 1, 0);
   useEffect(() => {
     if (!confirmByAt) return;
-    setNow(Date.now());
-    const tick = setInterval(() => {
-      const current = Date.now();
-      setNow(current);
-      if ((secondsUntil(confirmByAt, current) ?? 0) === 0) clearInterval(tick);
+    const timer = setInterval(() => {
+      tick();
+      if ((secondsUntil(confirmByAt) ?? 0) === 0) clearInterval(timer);
     }, 1000);
-    return () => clearInterval(tick);
+    return () => clearInterval(timer);
   }, [confirmByAt]);
-  return secondsUntil(confirmByAt, now);
+  // Read at render, so a new `confirmByAt` never meets an older clock reading.
+  return secondsUntil(confirmByAt);
 }
 
 /** 20/28 tabular in a bordered pill; under one minute a 2 px warning border, never flashing (design system section 5). */

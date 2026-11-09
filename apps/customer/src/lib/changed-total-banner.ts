@@ -51,16 +51,19 @@ export function createChangedTotalBannerStore(
     }
     const latest = poller.ticket();
     poller.unschedule();
+    // Polls only while the Customer has an order that could still change; a push, the foreground or the order screen wakes it otherwise (#578).
+    let again = true;
     try {
       const answer = await client.orders().catch(() => null);
       if (!latest()) return;
       if (answer && answer.ok) {
         const earliest = earliestAwaitingOrder(answer.data.active);
         set({ order: earliest });
+        again = answer.data.active.length > 0;
       }
     } finally {
       if (latest() && isSignedIn()) {
-        poller.schedule(true);
+        poller.schedule(again);
       }
     }
   }

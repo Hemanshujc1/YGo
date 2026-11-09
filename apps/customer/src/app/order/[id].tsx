@@ -1,4 +1,4 @@
-import type { OrderLine, OrderResponse } from "@ygo/contracts";
+import type { OrderLine, OrderProposal, OrderResponse } from "@ygo/contracts";
 import { formatTime, trimDecimal } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text } from "@ygo/mobile";
 import { router, useLocalSearchParams } from "expo-router";
@@ -12,7 +12,7 @@ import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
 import { api } from "../../api";
-import { feeText } from "../../lib/cart";
+import { changedTotalBanner } from "../../lib/changed-total-banner";
 import { money } from "../../lib/money";
 import { shownStatus, treatments } from "../../lib/order";
 import { hasReceipt, makeReceipt } from "../../lib/receipt";
@@ -102,11 +102,7 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
 }
 
 /** C10 Changed total screen (#64, #528, ORD-4, NOT-3): review changed items, fee breakdown, reasons, countdown and confirm. */
-function ChangedTotalDetail({ order }: { order: OrderResponse }) {
-  const proposal = order.proposal;
-  if (!proposal) return null;
-  const secondsLeft = useSecondsLeft(order.confirmByAt);
-
+function ChangedTotalDetail({ order, proposal, secondsLeft }: { order: OrderResponse; proposal: OrderProposal; secondsLeft: number | null }) {
   return (
     <View className="gap-4">
       <View className="gap-2">
@@ -167,7 +163,7 @@ function ChangedTotalDetail({ order }: { order: OrderResponse }) {
                   </Text>
                 </View>
               </View>
-              {isReduced && line.changeReason && (
+              {line.changeReason && (
                 <View className="self-start rounded-full border border-border bg-raised px-2.5 py-0.5">
                   <Text className="text-small-label text-muted">
                     {words.changedTotal.reasons[line.changeReason]}
@@ -179,41 +175,12 @@ function ChangedTotalDetail({ order }: { order: OrderResponse }) {
         })}
       </View>
 
-      <View className="rounded-card border border-border bg-surface p-4">
-        <View className="flex-row items-center justify-between gap-3 py-1">
-          <Text className="text-body text-muted">{strings.cart.items}</Text>
-          <View className="flex-row items-center gap-1.5">
-            {proposal.productValue !== proposal.originalProductValue && (
-              <Text className="text-secondary line-through text-muted tabular-nums">
-                {money(proposal.originalProductValue)}
-              </Text>
-            )}
-            <Text className="text-body tabular-nums text-text">{money(proposal.productValue)}</Text>
-          </View>
-        </View>
-        <View className="flex-row items-center justify-between gap-3 py-1">
-          <Text className="text-body text-muted">{strings.cart.delivery}</Text>
-          <Text className="text-body tabular-nums text-text">{feeText(proposal.deliveryFee)}</Text>
-        </View>
-        {proposal.smallCartFee && (
-          <View className="flex-row items-center justify-between gap-3 py-1">
-            <Text className="text-body text-muted">{strings.cart.smallCart}</Text>
-            <Text className="text-body tabular-nums text-text">{money(proposal.smallCartFee)}</Text>
-          </View>
-        )}
-        <View className="mt-2 border-t border-border pt-2 flex-row items-center justify-between gap-3">
-          <Text className="text-body font-semibold text-text">{strings.cart.total}</Text>
-          <View className="flex-row items-center gap-2">
-            <Text className="text-secondary line-through text-muted tabular-nums">
-              {money(proposal.originalTotal)}
-            </Text>
-            <Text className="text-title font-semibold tabular-nums text-text">
-              {money(proposal.total)}
-            </Text>
-          </View>
-        </View>
+      <QuoteRows
+        quote={{ productValue: proposal.productValue, shopDiscount: null, deliveryFee: proposal.deliveryFee, smallCartFee: proposal.smallCartFee, total: proposal.total }}
+        was={{ productValue: proposal.originalProductValue, total: proposal.originalTotal }}
+      >
         <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
-      </View>
+      </QuoteRows>
 
       <View>
         <Text className="text-secondary text-muted">{words.deliverTo}</Text>
@@ -241,6 +208,22 @@ export default function OrderScreen() {
   useEffect(() => {
     refreshedExpiryRef.current = null;
   }, [id]);
+
+  // The banner follows the order's status, so it clears once this one is answered (#578).
+  const status = shown?.status;
+  useEffect(() => {
+    if (status) void changedTotalBanner.refresh();
+  }, [status]);
+
+  // Awaiting an answer with no proposal to show: read it again once rather than show buttons with nothing to review (#578).
+  const lacksProposal = isAwaiting && !shown?.proposal;
+  const refreshedNoProposalRef = useRef(false);
+  useEffect(() => {
+    if (lacksProposal && !refreshedNoProposalRef.current) {
+      refreshedNoProposalRef.current = true;
+      void order.refresh();
+    }
+  }, [lacksProposal, order]);
 
   useEffect(() => {
     if (isAwaiting && secondsLeft === 0 && shown?.confirmByAt && refreshedExpiryRef.current !== shown.confirmByAt) {
@@ -284,7 +267,7 @@ export default function OrderScreen() {
           </View>
         )}
         {isAwaiting && shown?.proposal ? (
-          <ChangedTotalDetail order={shown} />
+          <ChangedTotalDetail order={shown} proposal={shown.proposal} secondsLeft={secondsLeft} />
         ) : shown ? (
           <Detail order={shown} placed={placed === "1"} />
         ) : null}
@@ -317,7 +300,7 @@ export default function OrderScreen() {
           </View>
         )}
 
-        {isAwaiting ? (
+        {isAwaiting && shown?.proposal ? (
           <View className="gap-2.5">
             {view.notice && (
               <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">
@@ -326,7 +309,7 @@ export default function OrderScreen() {
             )}
             {secondsLeft === 0 && !view.notice && (
               <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">
-                {words.changedTotal.timeUpBody}
+                {words.changedTotal.timeUpPending}
               </Text>
             )}
             <Button

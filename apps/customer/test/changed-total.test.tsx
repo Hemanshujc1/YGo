@@ -59,9 +59,11 @@ vi.mock("react-native", async () => {
   };
 });
 
-vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
+vi.mock("react-native-safe-area-context", async () => {
+  const { createContext, useContext } = await import("react");
+  const SafeAreaInsetsContext = createContext({ top: 20, bottom: 0, left: 0, right: 0 });
+  return { SafeAreaInsetsContext, useSafeAreaInsets: () => useContext(SafeAreaInsetsContext) };
+});
 
 vi.mock("react-native-reanimated", () => ({
   default: {
@@ -153,6 +155,8 @@ vi.mock("../src/lib/push", () => ({
 }));
 
 import { ChangedTotalBanner } from "../src/components/changed-total-banner";
+import { useSecondsLeft } from "../src/components/countdown";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 vi.stubGlobal("__DEV__", false);
 
 vi.mock("../src/lib/receipt", () => ({
@@ -246,6 +250,9 @@ const awaitingOrder: OrderResponse = {
   cancelRequest: null,
 };
 
+/** What `/v1/orders` lists: the order's own total stays the original while the proposal's is open (#578). */
+const awaitingSummary: OrderSummary = { ...awaitingOrder, total: "300.00", proposedTotal: "180.00" };
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -255,7 +262,7 @@ afterEach(() => {
 beforeEach(() => {
   mock.segments = ["index"];
   mock.orderResult = { ok: true, data: awaitingOrder };
-  mock.ordersResult = { ok: true, data: { active: [awaitingOrder], past: [] } };
+  mock.ordersResult = { ok: true, data: { active: [awaitingSummary], past: [] } };
   mock.confirmTotalResult = { ok: true, data: { ...awaitingOrder, status: "accepted" } };
   mock.declineTotalResult = { ok: true, data: { ...awaitingOrder, status: "cancelled_by_customer" } };
   mock.refreshCalls = 0;
@@ -267,12 +274,12 @@ describe("earliestAwaitingOrder (#528)", () => {
     expect(earliestAwaitingOrder([])).toBeNull();
     expect(earliestAwaitingOrder(null)).toBeNull();
 
-    const placed: OrderSummary = { ...awaitingOrder, id: "o-placed", status: "placed", confirmByAt: null };
+    const placed: OrderSummary = { ...awaitingSummary, id: "o-placed", status: "placed", confirmByAt: null };
     expect(earliestAwaitingOrder([placed])).toBeNull();
 
-    const o1: OrderSummary = { ...awaitingOrder, id: "o-1", confirmByAt: "2030-01-01T00:10:00.000Z" };
-    const o2: OrderSummary = { ...awaitingOrder, id: "o-2", confirmByAt: "2030-01-01T00:05:00.000Z" };
-    const o3: OrderSummary = { ...awaitingOrder, id: "o-3", confirmByAt: "2030-01-01T00:15:00.000Z" };
+    const o1: OrderSummary = { ...awaitingSummary, id: "o-1", confirmByAt: "2030-01-01T00:10:00.000Z" };
+    const o2: OrderSummary = { ...awaitingSummary, id: "o-2", confirmByAt: "2030-01-01T00:05:00.000Z" };
+    const o3: OrderSummary = { ...awaitingSummary, id: "o-3", confirmByAt: "2030-01-01T00:15:00.000Z" };
 
     const earliest = earliestAwaitingOrder([o1, o2, o3]);
     expect(earliest?.id).toBe("o-2");
@@ -284,7 +291,7 @@ describe("createChangedTotalBannerStore lifecycle and polling (#528)", () => {
     const ordersMock = vi.fn().mockResolvedValue({
       ok: true,
       data: {
-        active: [{ ...awaitingOrder, id: "order-earliest", confirmByAt: "2030-01-01T00:04:00.000Z" }],
+        active: [{ ...awaitingSummary, id: "order-earliest", confirmByAt: "2030-01-01T00:04:00.000Z" }],
         past: [],
       },
     });
@@ -314,6 +321,21 @@ describe("createChangedTotalBannerStore lifecycle and polling (#528)", () => {
     pushCb?.();
     await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
 
+    store.stop();
+  });
+
+  it("polls only while the Customer has an active order (#578)", async () => {
+    const timers = { set: vi.fn(() => 1), clear: vi.fn() };
+    const ordersMock = vi.fn().mockResolvedValue({ ok: true, data: { active: [], past: [] } });
+    const store = createChangedTotalBannerStore({ orders: ordersMock }, { get: () => ({ status: "signed-in" }), subscribe: vi.fn(() => () => undefined) }, undefined, timers, 10_000);
+    store.start();
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(timers.set).not.toHaveBeenCalled();
+
+    ordersMock.mockResolvedValue({ ok: true, data: { active: [awaitingSummary], past: [] } });
+    await store.refresh();
+    expect(timers.set).toHaveBeenCalledTimes(1);
     store.stop();
   });
 
@@ -453,7 +475,7 @@ describe("createChangedTotalBannerStore lifecycle and polling (#528)", () => {
     await waitFor(() => expect(scheduled.length).toBe(1));
 
     // Older request (d1) resolves with an awaiting order
-    const earlierOrder: OrderSummary = { ...awaitingOrder, id: "stale-order" };
+    const earlierOrder: OrderSummary = { ...awaitingSummary, id: "stale-order" };
     d1.resolve({ ok: true, data: { active: [earlierOrder], past: [] } });
     await d1.promise;
     await waitFor(() => expect(store.get().order).toBeNull());
@@ -482,6 +504,23 @@ describe("ChangedTotalBanner component (#528)", () => {
       pathname: "/order/[id]",
       params: { id: "order-1" },
     });
+  });
+
+  it("shows the proposal's total, not the order's original one, with no trailing zeros (#578)", async () => {
+    const { findByText, queryByText } = render(<ChangedTotalBanner />);
+    expect(await findByText("New total: ₹180")).toBeDefined();
+    expect(queryByText("New total: ₹300")).toBeNull();
+  });
+
+  it("takes the status bar inset from the screens below while it shows, and gives it back when it hides (#578)", async () => {
+    const Probe = () => <span data-testid="top">{useSafeAreaInsets().top}</span>;
+    mock.segments = ["index"];
+    const { findByRole, getByTestId, rerender } = render(<ChangedTotalBanner><Probe /></ChangedTotalBanner>);
+    await findByRole("button");
+    expect(getByTestId("top").textContent).toBe("0");
+    mock.segments = ["order", "order-1"];
+    rerender(<ChangedTotalBanner><Probe /></ChangedTotalBanner>);
+    expect(getByTestId("top").textContent).toBe("20");
   });
 
   it("hides when the user is on the order detail screen /order/[id]", () => {
@@ -546,28 +585,50 @@ describe("createOrder C10 actions (#528)", () => {
     expect(orderMock).toHaveBeenCalledWith("order-1");
   });
 
-  it("order.confirmTotal and declineTotal do nothing when confirmByAt has expired", async () => {
-    const confirmMock = vi.fn();
-    const declineMock = vi.fn();
-    const client = {
-      order: vi.fn(),
-      cancelOrder: vi.fn(),
-      askToCancelOrder: vi.fn(),
-      confirmOrderItems: vi.fn(),
-      confirmOrderTotal: confirmMock,
-      declineOrderTotal: declineMock,
-    };
-    const expiredOrder: OrderResponse = {
-      ...awaitingOrder,
-      confirmByAt: "2020-01-01T00:00:00.000Z",
-    };
-    const orderHandler = createOrder(client, "order-1", expiredOrder);
+  const client = (over: object) => ({
+    order: vi.fn(), cancelOrder: vi.fn(), askToCancelOrder: vi.fn(), confirmOrderItems: vi.fn(),
+    confirmOrderTotal: vi.fn(), declineOrderTotal: vi.fn(), ...over,
+  });
+  const lateOrder: OrderResponse = { ...awaitingOrder, confirmByAt: "2020-01-01T00:00:00.000Z" };
 
-    await orderHandler.confirmTotal();
-    await orderHandler.declineTotal();
+  it("sends Confirm and Cancel to the server even when the phone's clock says time is up; the server decides (#578)", async () => {
+    const confirmMock = vi.fn().mockResolvedValue({ ok: true, data: { ...awaitingOrder, status: "accepted" } });
+    const declineMock = vi.fn().mockResolvedValue({ ok: true, data: { ...awaitingOrder, status: "cancelled_by_customer" } });
+    await createOrder(client({ confirmOrderTotal: confirmMock }), "order-1", lateOrder).confirmTotal();
+    await createOrder(client({ declineOrderTotal: declineMock }), "order-1", lateOrder).declineTotal();
+    expect(confirmMock).toHaveBeenCalledWith("order-1");
+    expect(declineMock).toHaveBeenCalledWith("order-1");
+  });
 
-    expect(confirmMock).not.toHaveBeenCalled();
-    expect(declineMock).not.toHaveBeenCalled();
+  it("says the order was cancelled only when the refetched order really is, otherwise what it is now (#578)", async () => {
+    const refused = (code: string) => vi.fn().mockResolvedValue({ ok: false, code });
+    const read = (status: OrderResponse["status"]) => vi.fn().mockResolvedValue({ ok: true, data: { ...awaitingOrder, status } });
+    const words2 = words.changedTotal;
+
+    const waiting = createOrder(client({ confirmOrderTotal: refused("CONFIRMATION_EXPIRED"), order: read("awaiting_customer_confirm") }), "order-1", awaitingOrder);
+    await waiting.confirmTotal();
+    expect(waiting.get().notice).toBe(words2.timeUpPending);
+
+    const moved = createOrder(client({ declineOrderTotal: refused("ORDER_STATUS_CHANGED"), order: read("accepted") }), "order-1", awaitingOrder);
+    await moved.declineTotal();
+    expect(moved.get().notice).toBe(words2.noLongerWaiting);
+
+    const cancelled = createOrder(client({ declineOrderTotal: refused("CONFIRMATION_EXPIRED"), order: read("cancelled_by_customer") }), "order-1", awaitingOrder);
+    await cancelled.declineTotal();
+    expect(cancelled.get().notice).toBe(words2.timeUpBody);
+  });
+});
+
+describe("useSecondsLeft (#578)", () => {
+  it("reads a new deadline against the clock now, not an older reading", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const Left = ({ at }: { at: string }) => <span data-testid="left">{useSecondsLeft(at)}</span>;
+    const { getByTestId, rerender } = render(<Left at="2029-12-31T23:59:59.000Z" />);
+    expect(getByTestId("left").textContent).toBe("0");
+    vi.setSystemTime(new Date("2030-01-01T00:10:00.000Z"));
+    rerender(<Left at="2030-01-01T00:11:00.000Z" />);
+    expect(getByTestId("left").textContent).toBe("60");
   });
 });
 
@@ -619,7 +680,7 @@ describe("OrderScreen C10 Changed total screen (#528)", () => {
     const { findByText, getByText, getByRole } = render(<OrderScreen />);
 
     expect(await findByText(words.changedTotal.heading)).toBeDefined();
-    expect(getByText(words.changedTotal.timeUpBody)).toBeDefined();
+    expect(getByText(words.changedTotal.timeUpPending)).toBeDefined();
 
     // Both buttons are disabled after expiry
     const confirmBtn = getByRole("button", { name: words.changedTotal.confirm }) as HTMLButtonElement;
@@ -660,5 +721,21 @@ describe("OrderScreen C10 Changed total screen (#528)", () => {
     // Initial fetch (1) + single automatic expiry refresh (1) = 2 calls total, no loop!
     expect(orderFetchCount).toBe(2);
     expect(mock.cancelCalls).toBe(0);
+  });
+
+  it("shows no Confirm or Cancel buttons without a proposal, and reads the order again once (#578)", async () => {
+    const bare: OrderResponse = { ...awaitingOrder, proposal: null };
+    mock.orderResult = { ok: true, data: bare };
+    let fetched = 0;
+    vi.mocked(api.order).mockImplementation(() => {
+      fetched++;
+      return Promise.resolve({ ok: true, data: bare });
+    });
+    const { findByText, queryByRole } = render(<OrderScreen />);
+    expect(await findByText(words.statuses.awaiting_customer_confirm)).toBeDefined();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(queryByRole("button", { name: words.changedTotal.confirm })).toBeNull();
+    expect(queryByRole("button", { name: words.changedTotal.cancelFree })).toBeNull();
+    expect(fetched).toBe(2);
   });
 });

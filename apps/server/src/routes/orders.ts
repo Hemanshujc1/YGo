@@ -260,13 +260,16 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
               CASE WHEN o.status = 'awaiting_customer_confirm' THEN (
                 SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                 FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
-              ) END AS "confirmByAt"
+              ) END AS "confirmByAt",
+              CASE WHEN o.status = 'awaiting_customer_confirm' THEN (
+                SELECT p.total::text FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
+              ) END AS "proposedTotal"
             FROM orders o JOIN shops s ON s.id = o.shop_id WHERE o.account_id = $1) AS mine) AS ranked
         WHERE NOT ended OR rank <= ${PAST_SHOWN}
         ORDER BY ended, status IN ('awaiting_customer_confirm', 'arrived') DESC, "placedAt" DESC, number DESC`,
       [who.accountId, TERMINAL_ORDER_STATUSES, clock.now()]);
-    const summary = ({ id, number, status, placedAt, shop, total, answerExpired: late, confirmByAt }: Row): OrderSummary =>
-      ({ id, number, status, placedAt: placedAt.toISOString(), shop, total, answerExpired: late, confirmByAt: confirmByAt ?? null });
+    const summary = ({ id, number, status, placedAt, shop, total, answerExpired: late, confirmByAt, proposedTotal }: Row): OrderSummary =>
+      ({ id, number, status, placedAt: placedAt.toISOString(), shop, total, answerExpired: late, confirmByAt: confirmByAt ?? null, proposedTotal: proposedTotal ?? null });
     return { active: rows.filter((row) => !row.ended).map(summary), past: rows.filter((row) => row.ended).map(summary) };
   });
 

@@ -13,7 +13,7 @@ function elements(node: unknown): El[] {
   if (typeof element.type === "function") return elements((element.type as (props: unknown) => unknown)(element.props));
   return [element, ...elements(element.props.children)];
 }
-const texts = (quote: CartQuote) => elements(QuoteRows({ quote })).flatMap(({ props: { children } }) => typeof children === "string" ? [children] : []);
+const texts = (quote: CartQuote, was?: { productValue: string; total: string }) => elements(QuoteRows({ quote, was })).flatMap(({ props: { children } }) => typeof children === "string" ? [children] : []);
 
 describe("the quote rows (#571, CRT-5)", () => {
   const quote: CartQuote = { productValue: "100.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "130.00" };
@@ -27,5 +27,15 @@ describe("the quote rows (#571, CRT-5)", () => {
       .toEqual(["Items", "₹100", "Shop discount", "5% off, up to ₹50", "−₹5", "Delivery", "₹30", "Total to pay", "₹125"]);
     expect(texts({ ...quote, productValue: "999.50", shopDiscount: { amount: "200.00", offer: { form: "flat", amount: "200", minimumOrder: "1000" } }, total: "829.50" }))
       .toContain("₹200 off orders of ₹1,000 or more");
+  });
+
+  it("shows no small cart fee row for a zero fee, and the fee when there is one (#578)", () => {
+    expect(texts({ ...quote, smallCartFee: "0.00" })).not.toContain("Small cart fee");
+    expect(texts({ ...quote, smallCartFee: "15.00", total: "145.00" })).toContain("Small cart fee");
+  });
+
+  it("strikes the replaced items and total only where they differ (#578)", () => {
+    expect(texts({ ...quote, productValue: "50.00", total: "80.00" }, { productValue: "100.00", total: "130.00" })).toEqual(["Items", "₹100", "₹50", "Delivery", "₹30", "Total to pay", "₹130", "₹80"]);
+    expect(texts(quote, { productValue: "100.00", total: "130.00" })).toEqual(["Items", "₹100", "Delivery", "₹30", "Total to pay", "₹130"]);
   });
 });
