@@ -381,7 +381,7 @@ export default function OrderScreen() {
   const linesRef = useRef(shown?.lines);
   linesRef.current = shown?.lines;
   // Polls hand back a new order object each time; only a change to the lines should redo the preview.
-  const linesSig = shown ? shown.lines.map((l) => `${l.listingId}:${l.count}`).join(",") : "";
+  const linesSig = shown ? shown.lines.map((l) => `${l.listingId}:${l.count}:${l.lineTotal}`).join(",") : "";
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
   const confirmSeconds = useSecondsLeft(shown?.status === "awaiting_customer_confirm" ? shown.confirmByAt : null, view.offset);
@@ -497,6 +497,7 @@ export default function OrderScreen() {
   }, []);
 
   const canEditOrder = shown?.status === "placed" || shown?.status === "accepted" || shown?.status === "preparing";
+  // `submitting` is a dependency on purpose: cancelEditing refuses while Send is in flight, so the effect must run again once it ends.
   useEffect(() => {
     if (editing && !canEditOrder) {
       cancelEditing();
@@ -504,7 +505,7 @@ export default function OrderScreen() {
   }, [editing, canEditOrder, submitting]);
 
   useEffect(() => {
-    if (!editing || !shown) {
+    if (!editing || !linesRef.current) {
       previewSeq.current++;
       setPreviewFailed(false);
       setPreviewState(null);
@@ -515,6 +516,7 @@ export default function OrderScreen() {
     const currentKey = proposalKey(lines, lineEdits);
     if (!currentKey) {
       previewSeq.current++;
+      setPreviewFailed(false);
       setPreviewState(null);
       setPreviewLoading(false);
       return;
