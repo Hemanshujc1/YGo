@@ -6,6 +6,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, api, session } from "../../api";
 import { AlertPanel } from "../../components/alert-panel";
+import { ExpiryCountdown } from "../../components/countdown";
 import { OpenSwitch } from "../../components/open-switch";
 import { OrderRow } from "../../components/order-row";
 import { useAccountRole } from "../../lib/account-role";
@@ -56,7 +57,13 @@ export default function OrdersScreen() {
       {shown && groups.map((group) => shown[group].length > 0 && (
         <View key={group} className="gap-2.5">
           <Text accessibilityRole="header" className="text-title font-semibold text-text">{words.groups[group]}</Text>
-          {shown[group].map((order) => <OrderRow key={order.id} order={order} chip={group !== "new"} />)}
+          {shown[group].map((order) => (
+            <OrderRow key={order.id} order={order} chip={group !== "new"}>
+              {order.status === "awaiting_customer_confirm" && order.confirmByAt && (
+                <ExpiryCountdown expiresAt={order.confirmByAt} offset={view.offset} />
+              )}
+            </OrderRow>
+          ))}
         </View>
       ))}
     </ScrollView>

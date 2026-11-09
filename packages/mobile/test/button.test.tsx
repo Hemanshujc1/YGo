@@ -36,8 +36,15 @@ describe("Button (#492)", () => {
     expect(render({ variant: "destructive", busy: true })).toMatchObject({ box: expect.stringContaining("bg-danger"), disabled: true, spinner: "text-on-danger" });
   });
 
+  it("draws destructive-outline with danger border and text", () => {
+    const outline = render({ variant: "destructive-outline" });
+    expect(outline.box).toContain("border-danger");
+    expect(outline.label).toContain("text-danger");
+    expect(render({ variant: "destructive-outline", busy: true })).toMatchObject({ box: expect.stringContaining("border-danger"), disabled: true, spinner: "text-danger" });
+  });
+
   it("greys every filled button the same way when it is off", () => {
-    for (const variant of ["primary", "secondary", "destructive"] as const) {
+    for (const variant of ["primary", "secondary", "destructive", "destructive-outline"] as const) {
       expect(render({ variant, disabled: true })).toMatchObject({ box: expect.stringContaining("bg-disabled-bg"), disabled: true, label: expect.stringContaining("text-disabled-text") });
     }
   });

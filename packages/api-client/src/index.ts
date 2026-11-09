@@ -46,6 +46,8 @@ import {
   type InviteStaffBody,
   type JoinShopBody,
   JoinShopResponse,
+  type PartialAcceptOrderBody,
+  PartialAcceptPreviewResponse,
   ShopOrderResponse,
   ShopOrdersResponse,
   ShopCounterBill,
@@ -564,6 +566,16 @@ export function createApiClient({
     /** `POST /v1/me/shop-orders/:id/reject`: with one of the fixed reasons. */
     async rejectOrder(id: string, body: RejectOrderBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/reject`, body), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/partial-accept/preview`: dry-run quote preview for partial acceptance (#527). */
+    async previewPartialAccept(id: string, body: PartialAcceptOrderBody): Promise<ApiResult<PartialAcceptPreviewResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/partial-accept/preview`, body), PartialAcceptPreviewResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/partial-accept`: propose partial acceptance (#527). */
+    async partialAcceptOrder(id: string, body: PartialAcceptOrderBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/partial-accept`, body), ShopOrderResponse);
     },
 
     /** `POST /v1/me/shop-orders/:id/cancel-request/agree` or `/keep`: the shop's answer to the Customer's ask to cancel (ORD-5). */

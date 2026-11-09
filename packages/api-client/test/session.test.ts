@@ -316,6 +316,31 @@ describe("each call", () => {
     ]);
   });
 
+  it("previews and proposes partial acceptance on a shop's order (#527)", async () => {
+    const orderId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
+    const listingId = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
+    const previewData = {
+      productValue: "200.00",
+      deliveryFee: "30.00",
+      smallCartFee: null,
+      total: "230.00",
+      originalTotal: "300.00",
+    };
+    const body = { lines: [{ listingId, count: 1, reason: "out_of_stock" as const }] };
+    const { client, calls } = setup((call) => {
+      if (call.path === "/v1/auth/verify") return answer(200, pair(1));
+      if (call.path.endsWith("/partial-accept/preview")) return answer(200, previewData);
+      return answer(409, { error: { code: "INVALID_PARTIAL_ACCEPT" } });
+    });
+    await client.verifyCode(signIn);
+    expect(await client.previewPartialAccept(orderId, body)).toEqual({ ok: true, data: previewData });
+    expect(await client.partialAcceptOrder(orderId, body)).toMatchObject({ ok: false, status: 409, code: "INVALID_PARTIAL_ACCEPT" });
+    expect(calls.slice(1).map(({ method, path, body: sent }) => ({ method, path, sent }))).toEqual([
+      { method: "POST", path: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, sent: body },
+      { method: "POST", path: `/v1/me/shop-orders/${orderId}/partial-accept`, sent: body },
+    ]);
+  });
+
   it("lists the shop's counter bills and voids one with its reason (#492)", async () => {
     const billId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
     const { client, calls } = setup((call) => {

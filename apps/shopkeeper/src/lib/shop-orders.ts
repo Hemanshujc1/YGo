@@ -1,5 +1,15 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { OrderLine, OrderStatus, RejectReason, ShopOrderResponse, ShopOrdersResponse, ShortLine } from "@ygo/contracts";
+import type {
+  OrderLine,
+  OrderStatus,
+  PartialAcceptLine,
+  PartialAcceptOrderBody,
+  PartialAcceptPreviewResponse,
+  RejectReason,
+  ShopOrderResponse,
+  ShopOrdersResponse,
+  ShortLine,
+} from "@ygo/contracts";
 import { formatNumber } from "@ygo/format";
 import type { Treatment } from "@ygo/mobile";
 import { packLabel } from "@ygo/mobile/pack-label";
@@ -128,7 +138,7 @@ export type OrderView = {
   offset: number;
   message: string | null;
   refreshing: boolean;
-  answering: "accept" | "reject" | "agree" | "keep" | "cancel" | null;
+  answering: "accept" | "reject" | "agree" | "keep" | "cancel" | "partial_accept" | null;
   /** Why Accept, Reject, Agree, Keep or Cancel didn't go through. */
   notice: string | null;
   shortLines: ShortLine[];
@@ -140,6 +150,8 @@ type OrderClient = {
   shopOrder(id: string): Promise<ApiResult<ShopOrderResponse>>;
   acceptOrder(id: string): Promise<ApiResult<ShopOrderResponse>>;
   rejectOrder(id: string, body: { reason: RejectReason }): Promise<ApiResult<ShopOrderResponse>>;
+  previewPartialAccept?: (id: string, body: PartialAcceptOrderBody) => Promise<ApiResult<PartialAcceptPreviewResponse>>;
+  partialAcceptOrder?: (id: string, body: PartialAcceptOrderBody) => Promise<ApiResult<ShopOrderResponse>>;
   answerCancelRequest(id: string, answer: "agree" | "keep"): Promise<ApiResult<ShopOrderResponse>>;
   cancelShopOrder(id: string, body: { reason: RejectReason }): Promise<ApiResult<ShopOrderResponse>>;
 };
@@ -155,8 +167,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     notify();
   };
   const poller = createPoller(() => void read(), every, timers);
-  // Still New and in time, or accepted or preparing, where the Customer may ask to cancel (ORD-5, #59): only then is the order read again.
-  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired) || view.order.status === "accepted" || view.order.status === "preparing";
+  // Still New and in time, or accepted, preparing, or awaiting customer confirm: only then is the order read again.
+  const waiting = () => view.order === null || (view.order.status === "placed" && !view.expired) || view.order.status === "accepted" || view.order.status === "preparing" || view.order.status === "awaiting_customer_confirm";
 
   // The server marks no order expired when its time runs out, so the store does, by the server's clock.
   let expiry: unknown;
@@ -272,6 +284,37 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     retry: () => read(),
     accept: () => answer("accept", () => client.acceptOrder(id)),
     reject: (reason: RejectReason) => answer("reject", () => client.rejectOrder(id, { reason })),
+    previewPartialAccept: (lines: PartialAcceptLine[]): Promise<ApiResult<PartialAcceptPreviewResponse>> =>
+      client.previewPartialAccept ? client.previewPartialAccept(id, { lines }) : Promise.resolve({ ok: false as const, status: 500, code: "INTERNAL" as const }),
+    partialAccept: async (lines: PartialAcceptLine[]): Promise<boolean> => {
+      if (!client.partialAcceptOrder || view.answering || view.expired) return false;
+      poller.ticket();
+      poller.unschedule();
+      set({ answering: "partial_accept", notice: null, shortLines: [], refreshing: false });
+      const result = await client.partialAcceptOrder(id, { lines }).catch(() => "offline" as const);
+      if (result !== "offline" && result.ok) {
+        landed(result.data, { answering: null });
+        poller.schedule(waiting());
+        return true;
+      }
+      if (result !== "offline" && result.code === "ORDER_STATUS_CHANGED") {
+        await read(false, true);
+        const status = view.order?.status;
+        const notice = status === "cancelled_by_customer" ? words.cancelledByCustomer
+          : status === "placed" ? view.message ?? strings.errors.ORDER_STATUS_CHANGED
+          : words.answered;
+        set({ answering: null, notice });
+        return false;
+      }
+      if (result !== "offline" && result.code === "ORDER_EXPIRED") {
+        disarm();
+        set({ answering: null, notice: strings.errors.ORDER_EXPIRED, expired: true });
+        return false;
+      }
+      set({ answering: null, notice: failure(result), shortLines: result !== "offline" && !result.ok ? result.shortLines ?? [] : [] });
+      poller.schedule(waiting());
+      return false;
+    },
     agree: () => settle("agree", () => client.answerCancelRequest(id, "agree")),
     keep: () => settle("keep", () => client.answerCancelRequest(id, "keep")),
     cancel: (reason: RejectReason) => settle("cancel", () => client.cancelShopOrder(id, { reason })),

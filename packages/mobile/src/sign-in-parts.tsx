@@ -52,7 +52,7 @@ type ButtonProps = {
   /** Shows a spinner in place of the label, and takes no taps. */
   busy?: boolean;
   /** `destructive` is the design system's red button, for an action that can't be undone, such as "Void bill" (#492). */
-  variant?: "primary" | "secondary" | "destructive" | "text";
+  variant?: "primary" | "secondary" | "destructive" | "destructive-outline" | "text";
   /** A 20 px icon before the label, coloured like it: a Lucide icon the app has given `className` (C15, C03). */
   icon?: ComponentType<{ size?: number; className?: string }>;
   /** Puts the icon and label at the start, as on "Use my current location" (C15). */
@@ -63,6 +63,7 @@ const boxClass = {
   primary: "h-[52px] bg-primary active:bg-primary-pressed",
   secondary: "h-[52px] border border-border-strong bg-surface active:bg-primary-subtle",
   destructive: "h-[52px] bg-danger active:opacity-80",
+  "destructive-outline": "h-[52px] border border-danger bg-surface active:bg-primary-subtle",
   text: "min-h-12 active:bg-primary-subtle",
 };
 
@@ -77,7 +78,13 @@ export function Button({
   alignStart = false,
 }: ButtonProps) {
   const off = disabled || busy;
-  const onFill = { primary: "text-on-primary", destructive: "text-on-danger", secondary: "text-primary", text: "text-primary" }[variant];
+  const onFill = {
+    primary: "text-on-primary",
+    destructive: "text-on-danger",
+    "destructive-outline": "text-danger",
+    secondary: "text-primary",
+    text: "text-primary",
+  }[variant];
   const colour = off ? "text-disabled-text" : onFill;
   const box = off && !busy && variant !== "text" ? "h-[52px] bg-disabled-bg" : boxClass[variant];
   return (

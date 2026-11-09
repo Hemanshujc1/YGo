@@ -7,7 +7,13 @@ vi.mock("react", () => ({
     if (!(index in mock.hooks)) mock.hooks[index] = typeof initial === "function" ? (initial as () => unknown)() : initial;
     return [mock.hooks[index], () => undefined];
   },
+  useRef: (initial: unknown) => {
+    const index = mock.cursor++;
+    if (!(index in mock.hooks)) mock.hooks[index] = { current: initial };
+    return mock.hooks[index];
+  },
   useSyncExternalStore: () => mock.view,
+  useEffect: () => undefined,
 }));
 vi.mock("expo-router", () => ({ Link: "Link", router: {}, useLocalSearchParams: () => ({ id: "order-1" }) }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", StatusChip: "StatusChip", Text: "Text", useInFront: () => undefined }));
@@ -21,9 +27,10 @@ vi.mock("react-native-qrcode-svg", () => ({ default: "QRCode" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ api: {}, access: { role: () => "owner" }, session: { get: () => ({ account: { id: "owner-1" } }) } }));
 vi.mock("../src/components/countdown", () => ({ Countdown: "Countdown", useSecondsLeft: () => null }));
+vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus" }));
 vi.mock("../src/components/reason-picker", () => ({ ReasonPicker: "ReasonPicker" }));
 vi.mock("../src/lib/shop-orders", async (importActual) => ({
-  ...(await importActual<typeof import("../src/lib/shop-orders")>()),
+  ...((await importActual()) as Record<string, unknown>),
   createShopOrder: () => ({ subscribe: () => () => undefined, get: () => mock.view }),
 }));
 import OrderScreen from "../src/app/orders/[id]";
