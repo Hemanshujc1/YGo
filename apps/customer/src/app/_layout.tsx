@@ -1,6 +1,7 @@
 import { AppShell, applySavedTheme, SessionGate } from "@ygo/mobile";
 import { Stack } from "expo-router";
 import { api, session, supportEmail } from "../api";
+import { ChangedTotalBanner } from "../components/changed-total-banner";
 import { strings } from "../strings";
 // At launch, so a tap that opened the app is not missed (#506).
 import "../lib/push";
@@ -36,6 +37,8 @@ export default function Layout() {
           notCleared: strings.session.notCleared,
         }}
       >
+        {/* Persistent banner stays on every screen while an order is awaiting confirmation (ORD-4, NOT-3, #528). */}
+        <ChangedTotalBanner />
         {/* A stack, so Account opens over the home screen and Back returns to it (#156, Q5). */}
         <Stack screenOptions={{ headerShown: false }} />
       </SessionGate>

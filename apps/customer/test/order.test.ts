@@ -52,13 +52,17 @@ function fakeServer() {
   const cancels: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const itemChecks: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const asks: Array<(answer: ApiResult<OrderResponse>) => void> = [];
+  const confirms: Array<(answer: ApiResult<OrderResponse>) => void> = [];
+  const declines: Array<(answer: ApiResult<OrderResponse>) => void> = [];
   const client = {
     askToCancelOrder: () => new Promise<ApiResult<OrderResponse>>((resolve) => asks.push(resolve)),
     order: () => new Promise<ApiResult<OrderResponse>>((resolve) => reads.push(resolve)),
     cancelOrder: () => new Promise<ApiResult<OrderResponse>>((resolve) => cancels.push(resolve)),
     confirmOrderItems: () => new Promise<ApiResult<OrderResponse>>((resolve) => itemChecks.push(resolve)),
+    confirmOrderTotal: () => new Promise<ApiResult<OrderResponse>>((resolve) => confirms.push(resolve)),
+    declineOrderTotal: () => new Promise<ApiResult<OrderResponse>>((resolve) => declines.push(resolve)),
   };
-  return { client, reads, cancels, itemChecks, asks };
+  return { client, reads, cancels, itemChecks, asks, confirms, declines };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
