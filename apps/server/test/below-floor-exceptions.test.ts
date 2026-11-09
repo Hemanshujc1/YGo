@@ -125,7 +125,7 @@ async function createRevision({
        commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall,
        confirm_by_at, created_at, confirmed_at
      ) VALUES (
-       $1, $2, $3, 'owner', $4, 'accepted', 80, 20, $5,
+       $1, $2, $3, 'owner', $4, 'accepted', 0, $5, $5,
        10, $6, '{}'::jsonb, $7, $8,
        $9, $10, $11
      ) RETURNING id`,
