@@ -194,6 +194,8 @@ const sampleProposal: OrderProposal = {
   smallCartFee: "15.00",
   total: "180.00",
   originalTotal: "300.00",
+  shopDiscount: null,
+  lostShopDiscount: null,
   lines: [
     {
       listingId: "00000000-0000-4000-8000-000000000001",
@@ -659,6 +661,21 @@ describe("OrderScreen C10 Changed total screen (#528)", () => {
     await waitFor(() => {
       expect(mock.confirmTotalResult).toBeDefined();
     });
+  });
+
+  it("shows the proposal's own discount, and why a lost one is gone, before confirming (#572)", async () => {
+    const offer = { form: "flat" as const, amount: "20", minimumOrder: "200" };
+    mock.orderResult = { ok: true, data: { ...awaitingOrder, proposal: { ...sampleProposal, shopDiscount: { amount: "13.50", offer } } } };
+    const first = render(<OrderScreen />);
+    expect(await first.findByText("\u2212₹13.50")).toBeDefined();
+    expect(first.getByText("₹20 off orders of ₹200 or more")).toBeDefined();
+    expect(first.queryByText(words.changedTotal.lostDiscount("₹20 off orders of ₹200 or more"))).toBeNull();
+    cleanup();
+
+    mock.orderResult = { ok: true, data: { ...awaitingOrder, proposal: { ...sampleProposal, shopDiscount: null, lostShopDiscount: offer } } };
+    const second = render(<OrderScreen />);
+    expect(await second.findByText(words.changedTotal.lostDiscount("₹20 off orders of ₹200 or more"))).toBeDefined();
+    expect(second.queryByText("Shop discount")).toBeNull();
   });
 
   it("when timer reaches 0, disables both Confirm and Cancel buttons and refetches order without client-side cancel", async () => {

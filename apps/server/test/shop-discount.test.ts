@@ -797,6 +797,22 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       expect(await revisions(id)).toMatchObject([{ discount: "0.00", rule: null, version: null, total: "230.00" }]);
     });
 
+    it("lets a second partial acceptance follow one that removed a line entirely (#579)", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100x2"]);
+      await propose(owner, id, [listings[0] ?? ""]);
+      expect((await confirm(who, id)).statusCode).toBe(200);
+      // The removed line is gone; the next proposal reduces what is left, and a revision cannot bring the removed line back.
+      const back = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/partial-accept/preview`, headers: owner.headers, payload: remove([listings[0] ?? ""]) });
+      expect(back.statusCode).toBe(400);
+      const again = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/partial-accept`, headers: owner.headers, payload: remove([[listings[1] ?? "", 1]]) });
+      expect(again.statusCode).toBe(200);
+      expect(again.json().proposal).toMatchObject({ productValue: "100.00", shopDiscount: { amount: "10.00" } });
+      expect(again.json().proposal.lines).toHaveLength(1);
+    });
+
     it("refuses at the database a revision that does not add up, and never lets a confirmed one change", async () => {
       const owner = await shop();
       await publish({ type: "global" }, card);
@@ -812,6 +828,8 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       await expect(insert("101", "29.00", placed?.rule ?? null, placed?.version ?? null)).rejects.toThrow(/order_revisions_shop_discount_valid/);
       await expect(insert("10", "120.00", null, null)).rejects.toThrow(/order_revisions_shop_discount_valid/);
       await expect(insert("10", "120.00", placed?.rule ?? null, placed?.version ?? null)).rejects.toThrow(/does not add up/);
+      // A product value that is not the sum of its lines' totals (here, no lines at all).
+      await expect(insert("0", "130.00", null, null)).rejects.toThrow(/does not add up/);
       // A line's discount can never exceed the line's total.
       const { rows: [proposed] } = await database.pool.query<{ id: string }>("SELECT id FROM order_revisions WHERE order_id = $1", [id]);
       expect(proposed).toBeUndefined();

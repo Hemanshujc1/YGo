@@ -17,9 +17,10 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM order_revisions r
     WHERE r.id = NEW.id
-      AND r.shop_discount <> (SELECT COALESCE(sum(l.shop_discount), 0) FROM order_revision_lines l WHERE l.revision_id = r.id)
+      AND (r.shop_discount <> (SELECT COALESCE(sum(l.shop_discount), 0) FROM order_revision_lines l WHERE l.revision_id = r.id)
+        OR r.product_value <> (SELECT COALESCE(sum(l.line_total), 0) FROM order_revision_lines l WHERE l.revision_id = r.id))
   ) THEN
-    RAISE EXCEPTION 'Revision % does not add up: its discount must equal the sum of its lines'' discounts', NEW.id;
+    RAISE EXCEPTION 'Revision % does not add up: its product value and discount must equal the sums of its lines'' totals and discounts', NEW.id;
   END IF;
   RETURN NULL;
 END;

@@ -362,6 +362,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       categoryId: string;
     };
 
+    // A line an earlier revision removed entirely (count 0) is gone: it cannot be carried forward with an original count of 0 (#579).
     const { rows: activeLines } = confirmedRev
       ? await client.query<ActiveLine>(
           `SELECT rl.position, rl.listing_id AS "listingId", rl.name, rl.brand, rl.base_unit AS "baseUnit",
@@ -372,7 +373,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
            JOIN shop_listings l ON l.id = rl.listing_id
            JOIN packs pk ON pk.id = l.pack_id
            JOIN master_products p ON p.id = pk.product_id
-           WHERE rl.revision_id = $1
+           WHERE rl.revision_id = $1 AND rl.count > 0
            ORDER BY rl.position`, [confirmedRev.id])
       : await client.query<ActiveLine>(
           `SELECT ol.position, ol.listing_id AS "listingId", ol.name, ol.brand, ol.base_unit AS "baseUnit",

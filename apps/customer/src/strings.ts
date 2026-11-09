@@ -350,6 +350,7 @@ export const strings = {
     changedTotal: {
       heading: "The shop accepted in part",
       subtitle: "Review the changes. Confirm the new total to keep your order, or cancel for free.",
+      lostDiscount: (offer: string) => `The shop's discount (${offer}) no longer applies to the changed items.`,
       reasons: {
         out_of_stock: "Out of stock",
         damaged: "Damaged",
