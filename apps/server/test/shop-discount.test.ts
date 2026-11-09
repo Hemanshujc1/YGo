@@ -576,6 +576,53 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       } finally { await app.close(); app = open; }
     });
 
+    it("keeps an order's frozen discount and offer when the gate is turned off later, while new quotes and orders get none", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const who = await customer();
+      await put(owner.headers, percentage("5", "50.00"));
+      const { cart, place } = await order(owner.shopId, who, await basket(owner));
+      expect((cart as unknown as { quote: { total: string } }).quote.total).toBe("125.00");
+      const id = (await place()).json().id as string;
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
+      const offer = { form: "percentage", percentage: "5", cap: "50" };
+      const before = { order: await orderOf(who, id), receipt: await receiptOf(who, id) };
+      expect(before.order.shopDiscount).toEqual({ amount: "5.00", offer });
+      expect(before.receipt.shopDiscount).toEqual({ amount: "5.00", offer });
+
+      // The gate goes off with the rule still active in the database: the same server code, `shopDiscountsAvailable` left at its default.
+      const open = app;
+      app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+      try {
+        expect((await database.pool.query("SELECT status FROM shop_discounts")).rows[0]).toEqual({ status: "active" });
+        // History is not erased: the order and its receipt are exactly as they were, and each adds up.
+        const order1 = await orderOf(who, id);
+        const receipt1 = await receiptOf(who, id);
+        expect(order1).toEqual(before.order);
+        expect(receipt1).toEqual(before.receipt);
+        expect(order1.shopDiscount).toEqual({ amount: "5.00", offer });
+        expect(receipt1.shopDiscount).toEqual({ amount: "5.00", offer });
+        expect(reconciles(order1)).toBe(true);
+        expect(reconciles(receipt1)).toBe(true);
+        expect([order1.total, receipt1.total]).toEqual(["125.00", "125.00"]);
+
+        // New quotes and new orders get none.
+        const fresh = await order(owner.shopId, who, await basket(owner));
+        const quote = (fresh.cart as unknown as { quote: { productValue: string; shopDiscount: unknown; deliveryFee: string; smallCartFee: string | null; total: string } }).quote;
+        expect(quote).toMatchObject({ productValue: "100.00", shopDiscount: null, total: "130.00" });
+        expect(reconciles({ ...quote, shopDiscount: null })).toBe(true);
+        const freshId = (await fresh.place()).json().id as string;
+        const placed = await orderOf(who, freshId);
+        expect(placed).toMatchObject({ shopDiscount: null, productValue: "100.00", total: "130.00" });
+        expect(reconciles(placed)).toBe(true);
+        expect((await database.pool.query("SELECT shop_discount::text AS discount, shop_discount_rule_id AS rule FROM orders WHERE id = $1", [freshId])).rows[0]).toEqual({ discount: "0.00", rule: null });
+        await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [freshId]);
+        expect((await receiptOf(who, freshId)).shopDiscount).toBeNull();
+        // The historical order is still untouched after the new one.
+        expect(await orderOf(who, id)).toEqual(before.order);
+      } finally { await app.close(); app = open; }
+    });
+
     it("does not show the placement discount beside a confirmed revision's own figures", async () => {
       const owner = await shop();
       await publish({ type: "global" }, card);
