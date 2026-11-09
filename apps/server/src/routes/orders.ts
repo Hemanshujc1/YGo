@@ -118,7 +118,7 @@ const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.sho
  * listing it as New (owner's answer 4 on #426). The one place the 600 s cut-off is written in SQL.
  */
 export const answerExpired = (o: string, now: string) =>
-  `(${o}.status = 'placed' AND ${o}.placed_at + make_interval(secs => ${orderTiming.expireSeconds}) <= ${now}::timestamptz)`;
+  `(${o}.status = 'placed' AND ${o}.status_changed_at + make_interval(secs => ${orderTiming.expireSeconds}) <= ${now}::timestamptz)`;
 
 /** C09 and C19: one of the Customer's orders as it was frozen. */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, secret: string): Promise<OrderResponse | undefined> {

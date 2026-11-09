@@ -17,22 +17,25 @@ import { answerExpired, frozenOrder } from "./orders";
 import { resolveRateCard } from "./rate-cards";
 
 /** Until when the shop can answer, while the order still waits for it. */
-const expiresAt = (status: OrderStatus, placedAt: Date) => status === "placed" ? new Date(placedAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
+/** The shop's answer window runs from when the order last became `placed` (placed_at is frozen, so a confirmed changed total restarts it through status_changed_at, #581). */
+const expiresAt = (status: OrderStatus, enteredAt: Date) => status === "placed" ? new Date(enteredAt.getTime() + orderTiming.expireSeconds * 1000).toISOString() : null;
 
 /** Unexpired photo uploads one order may hold at once; retakes after a failed try fit, a flood does not. */
 const DELIVERY_PHOTO_OPEN_UPLOADS_MAX = 5;
 
 /** S05: one order of the shop the account is Owner or Staff of, whether or not the shop is Live now (owner's answer 13 on #425). */
 async function shopOrderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, failureWaitSeconds: number): Promise<ShopOrderResponse | undefined> {
-  const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; deliveryFailureReadyAt: Date | null }>(
-    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", ${frozenOrder("o", true)}, o.deliverer_id AS "delivererId",
+  const { rows: [row] } = await client.query<Omit<ShopOrderResponse, "placedAt" | "expiresAt" | "now" | "deliveryFailureReadyAt"> & { placedAt: Date; statusChangedAt: Date; deliveryFailureReadyAt: Date | null }>(
+    `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", ${frozenOrder("o", true)}, o.deliverer_id AS "delivererId",
         json_build_object('name', a.name, 'phone', CASE WHEN o.deliverer_id = $2 THEN a.phone END) AS customer,
         CASE WHEN o.deliverer_id = $2 THEN s.upi_id END AS "shopUpiId", (o.delivery_photo_key IS NOT NULL) AS "deliveryPhotoAvailable",
         CASE WHEN o.deliverer_id = $2 AND o.delivery_call_attempt_at IS NOT NULL THEN o.delivery_call_attempt_at + make_interval(secs => $3) END AS "deliveryFailureReadyAt"
       FROM orders o JOIN shops s ON s.id = o.shop_id JOIN shop_members m ON m.shop_id = o.shop_id
       JOIN accounts a ON a.id = o.account_id
       WHERE o.id = $1 AND m.account_id = $2`, [orderId, accountId, failureWaitSeconds]);
-  return row && { ...row, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, row.placedAt), now: now.toISOString(), deliveryFailureReadyAt: row.deliveryFailureReadyAt?.toISOString() ?? null };
+  if (!row) return row;
+  const { statusChangedAt, ...shown } = row;
+  return { ...shown, placedAt: row.placedAt.toISOString(), expiresAt: expiresAt(row.status, statusChangedAt), now: now.toISOString(), deliveryFailureReadyAt: row.deliveryFailureReadyAt?.toISOString() ?? null };
 }
 
 export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, secret, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: { pool: Pool; clock: Clock; secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number }): void {
@@ -59,10 +62,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const { rows: [member] } = await pool.query<{ shopId: string; canDeliver: boolean }>('SELECT shop_id AS "shopId", (role = \'owner\' OR can_deliver) AS "canDeliver" FROM shop_members WHERE account_id = $1', [who.accountId]);
     if (!member) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     const now = clock.now();
-    type Row = Omit<ShopOrderSummary, "placedAt" | "expiresAt"> & { placedAt: Date };
+    type Row = Omit<ShopOrderSummary, "placedAt" | "expiresAt"> & { placedAt: Date; statusChangedAt: Date };
     // A placed order past its time is in no group until #57 moves it to Expired, so no Accept shows that can't work.
     const { rows } = await pool.query<Row>(
-        `SELECT o.id, o.number, o.status, o.deliverer_id AS "delivererId", o.placed_at AS "placedAt",
+        `SELECT o.id, o.number, o.status, o.deliverer_id AS "delivererId", o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt",
             COALESCE(
               (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
               o.total::text
@@ -87,10 +90,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
             OR (o.status = ANY($4::text[]) AND (o.status_changed_at AT TIME ZONE 'Asia/Kolkata')::date = ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date))
           ORDER BY CASE WHEN o.status = ANY($4::text[]) THEN -extract(epoch FROM o.status_changed_at) ELSE extract(epoch FROM o.placed_at) END`,
         [member.shopId, now, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES]);
-    const summary = (row: Row): ShopOrderSummary => ({
+    const summary = ({ statusChangedAt, ...row }: Row): ShopOrderSummary => ({
       ...row,
       placedAt: row.placedAt.toISOString(),
-      expiresAt: expiresAt(row.status, row.placedAt),
+      expiresAt: expiresAt(row.status, statusChangedAt),
       confirmByAt: row.confirmByAt ?? null,
     });
     return {
@@ -133,14 +136,14 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const reason = to === "rejected_by_shop" ? (request.body as RejectOrderBody).reason : null;
     type Outcome = { code: "NOT_FOUND" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" } | { code: "NOT_ENOUGH_STOCK"; shortLines: ShortLine[] } | { now: Date };
     const outcome = await withTransaction(pool, async (client): Promise<Outcome> => {
-      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; placedAt: Date; role: "owner" | "staff" }>(
-        `SELECT o.id, o.status, o.placed_at AS "placedAt", m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; answerFrom: Date; role: "owner" | "staff" }>(
+        `SELECT o.id, o.status, o.status_changed_at AS "answerFrom", m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
          WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
       if (!order) return { code: "NOT_FOUND" };
       if (order.status !== "placed") return { code: "ORDER_STATUS_CHANGED" };
       // Read after the lock, so a wait on it can't stamp an earlier time.
       const now = clock.now();
-      if (now.getTime() >= order.placedAt.getTime() + orderTiming.expireSeconds * 1000) return { code: "ORDER_EXPIRED" };
+      if (now.getTime() >= order.answerFrom.getTime() + orderTiming.expireSeconds * 1000) return { code: "ORDER_EXPIRED" };
       if (to === "accepted") {
         // A listing switched off or repriced since placement doesn't block Accept: the order keeps its price (answer 14).
         // NO KEY UPDATE queues behind placement's FOR SHARE and other Accepts, but not behind cart saves' key checks.
@@ -253,7 +256,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           id: string;
           shopId: string;
           status: OrderStatus;
-          placedAt: Date;
+          answerFrom: Date;
           role: "owner" | "staff";
           rateCardVersion: string;
           quote: {
@@ -304,7 +307,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       id: string;
       shopId: string;
       status: OrderStatus;
-      placedAt: Date;
+      answerFrom: Date;
       role: "owner" | "staff";
       rateCardVersion: string;
       quote: {
@@ -313,7 +316,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       };
       originalTotal: string;
     }>(
-      `SELECT o.id, o.shop_id AS "shopId", o.status, o.placed_at AS "placedAt", m.role,
+      `SELECT o.id, o.shop_id AS "shopId", o.status, o.status_changed_at AS "answerFrom", m.role,
               o.rate_card_version AS "rateCardVersion", o.quote,
               COALESCE(
                 (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
@@ -323,7 +326,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
        WHERE o.id = $1 AND m.account_id = $2 ${forUpdate ? "FOR UPDATE OF o" : ""}`, [orderId, accountId]);
     if (!order) return { ok: false, code: "NOT_FOUND", status: 404 };
 
-    if (order.status === "placed" && now.getTime() >= order.placedAt.getTime() + orderTimingConfig.expireSeconds * 1000) {
+    if (order.status === "placed" && now.getTime() >= order.answerFrom.getTime() + orderTimingConfig.expireSeconds * 1000) {
       return { ok: false, code: "ORDER_EXPIRED", status: 409 };
     }
 
@@ -383,7 +386,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
 
     const proposedListingIds = proposedLines.map((l) => l.listingId);
     if (new Set(proposedListingIds).size !== proposedListingIds.length) {
-      return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 409 };
+      return { ok: false, code: "INVALID_PARTIAL_ACCEPT", status: 400 };
     }
 
     const proposedMap = new Map(proposedLines.map((l) => [l.listingId, l]));
