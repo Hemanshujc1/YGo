@@ -495,11 +495,13 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const { rows: [shared] } = await client.query<{ shares: string[] }>(
       "SELECT pricing_shop_discount_shares($1::jsonb, $2::numeric[], $3::boolean[])::text[] AS shares",
       [order.discountRule ? JSON.stringify(order.discountRule.rule) : null, preparedLines.map((pl) => pl.lineTotal), preparedLines.map(() => true)]);
+    if (shared?.shares.length !== preparedLines.length) throw new Error("Failed to split the shop discount across the revision lines");
     let discountPaise = 0n;
     for (const [index, pl] of preparedLines.entries()) {
-      pl.shopDiscount = shared?.shares[index] ?? "0.00";
+      pl.shopDiscount = shared.shares[index] ?? "0.00";
       discountPaise += toPaise(pl.shopDiscount);
     }
+    const shopDiscountStr = fromPaise(discountPaise);
 
     for (const [index, pl] of preparedLines.entries()) {
       if (pl.count === 0) continue;
@@ -554,7 +556,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const revisionQuote = {
       ...order.quote,
       productValue: subtotalStr,
-      shopDiscount: fromPaise(discountPaise),
+      shopDiscount: shopDiscountStr,
       customerTotal: customerTotalStr,
       commission: totalCommissionStr,
       platformContribution: platformContributionStr,
@@ -566,7 +568,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       activeLines,
       preparedLines,
       subtotalStr,
-      shopDiscountStr: fromPaise(discountPaise),
+      shopDiscountStr,
       deliveryFee,
       smallCartFee,
       customerTotalStr,
