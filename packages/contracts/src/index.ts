@@ -246,8 +246,10 @@ export {
   Weekday,
 } from "./shop-hours";
 export {
+  AppliedShopDiscount,
   DEFAULT_MAXIMUM_SHOP_DISCOUNT_PERCENTAGE,
   ShopDiscountBody,
+  ShopDiscountOffer,
   ShopDiscountResponse,
   ShopDiscountRule,
   ShopDiscountStatus,

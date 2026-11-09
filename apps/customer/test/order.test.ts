@@ -13,12 +13,12 @@ const order = (status: OrderStatus = "placed"): OrderResponse => ({
   shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
   address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
+  productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
   handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
-  quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
+  quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
 };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
 const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>

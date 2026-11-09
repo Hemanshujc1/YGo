@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RatePercentage, ShopPrice } from "./fields";
+import { Amount } from "./pricing";
 
 const positive = (value: string) => Number(value) > 0;
 
@@ -39,3 +40,17 @@ export type ShopDiscountResponse = z.infer<typeof ShopDiscountResponse>;
 
 /** The default maximum effective shop-funded discount percentage, used until a rate card sets one (MNY-5). */
 export const DEFAULT_MAXIMUM_SHOP_DISCOUNT_PERCENTAGE = "20";
+
+/**
+ * The offer a discount came from, exactly as the rule version that priced the order held it (frozen with the order: a later edit of the
+ * rule never changes it). Numbers only; each app words them from its own strings (#571).
+ */
+export const ShopDiscountOffer = z.discriminatedUnion("form", [
+  z.strictObject({ form: z.literal("percentage"), percentage: z.string(), cap: z.string().nullable() }),
+  z.strictObject({ form: z.literal("flat"), amount: z.string(), minimumOrder: z.string() }),
+]);
+export type ShopDiscountOffer = z.infer<typeof ShopDiscountOffer>;
+
+/** What the Customer sees on the cart, order and receipt: the amount taken off and the offer it came from. Null when no discount applied (CRT-5, MNY-6). */
+export const AppliedShopDiscount = z.strictObject({ amount: Amount, offer: ShopDiscountOffer }).nullable();
+export type AppliedShopDiscount = z.infer<typeof AppliedShopDiscount>;

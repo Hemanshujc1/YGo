@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import type { CartLine, CartResponse, SaveCartBody } from "@ygo/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cartBarLabel, createCart, feeText, nextSave, reasonText, rebase, saveBody, stockLeft, withCount } from "../src/lib/cart";
+import { cartBarLabel, createCart, discountText, feeText, nextSave, offerText, reasonText, rebase, saveBody, stockLeft, withCount } from "../src/lib/cart";
 
 const shopId = "8a0e4f8e-1c55-4d3c-9b8e-6b6f1f7f2a10";
 const place = { pincode: "411045", latitude: 18.56, longitude: 73.78 };
@@ -14,7 +14,7 @@ const line = (listingId: string, count: number, more: Partial<CartLine> = {}): C
 });
 const cart = (revision: number, lines: CartLine[], more: Partial<CartResponse> = {}): CartResponse => ({
   shop: { id: shopId, name: "Day Dairy" }, revision, lines,
-  quote: lines.length ? { productValue: "60", deliveryFee: "20", smallCartFee: null, total: "80" } : null,
+  quote: lines.length ? { productValue: "60", shopDiscount: null, deliveryFee: "20", smallCartFee: null, total: "80" } : null,
   placeable: lines.length > 0, reasons: [], ...more,
 });
 const ok = (data: CartResponse): ApiResult<CartResponse> => ({ ok: true, data });
@@ -340,9 +340,20 @@ describe("the cart store (#406)", () => {
     const older = store.load(place);
     expect(store.get().pricedFor).toEqual(place);
     const work = { ...place, latitude: 18.6 };
-    store.adopt(cart(3, [line(atta, 1, { lineTotal: "70" })], { quote: { productValue: "70", deliveryFee: "20", smallCartFee: null, total: "90" } }), work);
+    store.adopt(cart(3, [line(atta, 1, { lineTotal: "70" })], { quote: { productValue: "70", shopDiscount: null, deliveryFee: "20", smallCartFee: null, total: "90" } }), work);
     server.loads.shift()?.(ok(cart(2, [line(atta, 1)])));
     await older;
     expect(store.get()).toMatchObject({ status: "ready", server: { revision: 3, quote: { total: "90" } }, pricedFor: work });
+  });
+});
+
+describe("the shop discount's words (#571)", () => {
+  it("words each offer with no trailing zeros, and the amount as a minus", () => {
+    expect(offerText({ form: "percentage", percentage: "10", cap: null })).toBe("10% off");
+    expect(offerText({ form: "percentage", percentage: "12.5000", cap: "50" })).toBe("12.5% off, up to ₹50");
+    expect(offerText({ form: "percentage", percentage: "5", cap: "20.5" })).toBe("5% off, up to ₹20.50");
+    expect(offerText({ form: "flat", amount: "200", minimumOrder: "1000" })).toBe("₹200 off orders of ₹1,000 or more");
+    expect(discountText("50.00")).toBe("\u2212₹50");
+    expect(discountText("5.50")).toBe("\u2212₹5.50");
   });
 });

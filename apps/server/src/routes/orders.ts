@@ -11,7 +11,7 @@ import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder, recordStatus } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { packsOf, pricedCart, savedCart } from "./cart";
+import { offerSql, packsOf, pricedCart, savedCart } from "./cart";
 import { servingShops } from "./feed";
 import { latestRateCardVersion } from "./price-simulator";
 
@@ -99,6 +99,16 @@ export const frozenOrder = (o: string, includeListingId = false) => `json_build_
         (SELECT json_build_object('status', c.status, 'askedAt', to_char(c.asked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
           FROM order_cancel_requests c WHERE c.order_id = ${o}.id) AS "cancelRequest"`;
 
+/**
+ * The discount frozen on the order and the offer of the exact rule version that gave it (#571). `hideAfterRevision` is true for the order view:
+ * once a revision is confirmed its product value and total are its own, and the placement discount is not shown beside them until a revision
+ * carries its own (#572). The receipt reads only placement figures, so it keeps the placement discount with them.
+ */
+const placementDiscount = (o: string, hideAfterRevision: boolean) => `CASE WHEN ${o}.shop_discount_rule_id IS NOT NULL AND ${o}.shop_discount > 0
+  ${hideAfterRevision ? `AND NOT EXISTS (SELECT 1 FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed')` : ""}
+  THEN json_build_object('amount', ${o}.shop_discount::text, 'offer', (SELECT ${offerSql("v")} FROM shop_discount_versions v
+    WHERE v.rule_id = ${o}.shop_discount_rule_id AND v.version = ${o}.shop_discount_rule_version)) END`;
+
 /** The shop as C18 and C19 show it, with the Owner's phone read now (ORD-8). */
 const shopOf = (s: string) => `json_build_object('id', ${s}.id, 'name', ${s}.shop_name, 'phone', (SELECT a.phone FROM shop_members m
           JOIN accounts a ON a.id = m.account_id WHERE m.shop_id = ${s}.id AND m.role = 'owner' ORDER BY a.id LIMIT 1))`;
@@ -115,7 +125,7 @@ async function orderView(client: Pool | PoolClient, orderId: string, accountId: 
   const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", o.items_checked_at AS "itemsCheckedAt",
         o.handover_code_ciphertext AS "handoverCodeCiphertext", ${shopOf("s")} AS shop, ${frozenOrder("o")},
-        ${answerExpired("o", "$3")} AS "answerExpired"
+        ${placementDiscount("o", true)} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired"
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
   if (!row) return undefined;
@@ -277,8 +287,8 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
           (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
               'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
             FROM order_lines l WHERE l.order_id = o.id) AS lines,
-          o.product_value::text AS "productValue", o.delivery_fee::text AS "deliveryFee", o.small_cart_fee::text AS "smallCartFee", o.total::text AS total,
-          o.delivery_payment AS payment
+          o.product_value::text AS "productValue", ${placementDiscount("o", false)} AS "shopDiscount", o.delivery_fee::text AS "deliveryFee",
+          o.small_cart_fee::text AS "smallCartFee", o.total::text AS total, o.delivery_payment AS payment
         FROM orders o WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);
     if (!row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     if (row.status !== "delivered" && row.status !== "picked_up") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });

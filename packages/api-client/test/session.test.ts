@@ -471,7 +471,7 @@ describe("each call", () => {
     const cart = {
       shop: { id, name: "Sai General Stores" }, revision: 1,
       lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count: 2, state: "orderable", part: null, left: null, lineTotal: "270.00" }],
-      quote: { productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
+      quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
     };
     let changed = false;
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : changed ? answer(409, { error: { code: "CART_CHANGED" } }) : answer(200, cart));

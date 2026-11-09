@@ -270,6 +270,13 @@ export const strings = {
     unavailable: "No longer available",
     outOfStock: "Out of stock",
     items: "Items",
+    shopDiscount: "Shop discount",
+    /** The offer a discount came from, in words (#571): amounts and percentages arrive already without trailing zeros. */
+    offer: {
+      percentage: (percent: string) => `${percent}% off`,
+      percentageUpTo: (percent: string, cap: string) => `${percent}% off, up to ${cap}`,
+      flat: (amount: string, minimum: string) => `${amount} off orders of ${minimum} or more`,
+    },
     delivery: "Delivery",
     smallCart: "Small cart fee",
     total: "Total to pay",
@@ -352,7 +359,7 @@ export const strings = {
       failed: "Couldn't make the receipt. Check your connection and try again.",
       pdf: {
         number: (number: number) => `Order #${number}`, item: "Item", count: "Count", price: "Price", amount: "Amount",
-        items: "Items", deliveryFee: "Delivery fee", smallCartFee: "Small order fee", total: "Total",
+        items: "Items", shopDiscount: "Shop discount", deliveryFee: "Delivery fee", smallCartFee: "Small order fee", total: "Total",
         paidBy: (payment: string) => `Paid by ${payment}`, payments: { cash: "cash", upi: "UPI" },
         pincode: (pincode: string) => `Pin ${pincode}`, gstin: (gstin: string) => `GSTIN: ${gstin}`, address: { delivered: "Delivered to", picked_up: "Order address" }, file: (number: number) => `YGo receipt #${number}`,
       },

@@ -144,14 +144,14 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
         dalLine(dal, 2, { lineTotal: "270.00" }),
         { listingId: atta, name: "Atta", brand: null, baseUnit: "kg", quantity: "5", price: "199.99", count: 1, state: "orderable", part: null, left: null, lineTotal: "199.99" },
       ],
-      quote: { productValue: "469.99", deliveryFee: "30.00", smallCartFee: null, total: "499.99" },
+      quote: { productValue: "469.99", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "499.99" },
       placeable: true, reasons: [],
     });
     expect((await read(shopId)).json()).toEqual(saved.json());
 
     // Below the small-cart threshold its fee is named before checkout (CRT-5).
     expect((await save(shopId, 1, [{ listingId: dal, count: 1 }])).json()).toMatchObject({
-      revision: 2, quote: { productValue: "135.00", deliveryFee: "30.00", smallCartFee: "15.00", total: "180.00" }, placeable: true,
+      revision: 2, quote: { productValue: "135.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: "15.00", total: "180.00" }, placeable: true,
     });
     // Emptying the cart keeps its revision going.
     expect((await save(shopId, 2, [])).json()).toMatchObject({ revision: 3, lines: [], quote: null, placeable: false });

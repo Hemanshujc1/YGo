@@ -2,6 +2,7 @@ import type { ReceiptResponse } from "@ygo/contracts";
 import { formatDateTime, formatNumber } from "@ygo/format";
 import { colors } from "@ygo/tokens";
 import { strings } from "../strings";
+import { discountText, offerText } from "./cart";
 import { money } from "./money";
 import { packLabel } from "./shop-page";
 
@@ -29,7 +30,9 @@ function lineLabel(line: ReceiptResponse["lines"][number]): string {
  */
 export function receiptHtml({ receipt, fonts }: { receipt: ReceiptResponse; fonts: ReceiptFonts }): string {
   const rows = receipt.lines.map((line) => `<tr><td>${escapeHtml(line.name)}<br><span class="muted">${escapeHtml(lineLabel(line))}</span></td><td class="n">${money(line.unitPrice)}</td><td class="n">${money(line.lineTotal)}</td></tr>`).join("");
-  const sum = (label: string, amount: string) => `<p><span>${label}</span><span>${money(amount)}</span></p>`;
+  const row = (label: string, shown: string) => `<p><span>${label}</span><span>${shown}</span></p>`;
+  const sum = (label: string, amount: string) => row(label, money(amount));
+  const discount = receipt.shopDiscount;
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 ${face(400, fonts.regular)}${face(500, fonts.medium)}${face(600, fonts.semibold)}
 @page{size:A4;margin:16mm}
@@ -57,6 +60,7 @@ ${receipt.shop.gstin ? `<p>${escapeHtml(words.gstin(receipt.shop.gstin))}</p>` :
 <table><thead><tr><th>${words.item}</th><th class="n">${words.price}</th><th class="n">${words.amount}</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="sums">
 ${sum(words.items, receipt.productValue)}
+${discount ? row(`${words.shopDiscount}<br><span class="muted">${escapeHtml(offerText(discount.offer))}</span>`, discountText(discount.amount)) : ""}
 ${some(receipt.deliveryFee) ? sum(words.deliveryFee, receipt.deliveryFee) : ""}
 ${receipt.smallCartFee && some(receipt.smallCartFee) ? sum(words.smallCartFee, receipt.smallCartFee) : ""}
 <p class="total"><span>${words.total}</span><span>${money(receipt.total)}</span></p>
