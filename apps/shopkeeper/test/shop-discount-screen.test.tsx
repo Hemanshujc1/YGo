@@ -16,7 +16,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button" }));
-vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch", TextInput: "TextInput", View: "View" }));
+vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", KeyboardAvoidingView: "KeyboardAvoidingView", Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/api", () => ({ api: mock.api }));
 vi.mock("../src/lib/back-path", () => ({ backPath: () => "/" }));
@@ -48,8 +48,8 @@ beforeEach(() => { vi.clearAllMocks(); mock.hooks = []; mock.started = false; })
 
 describe("S34 Shop discount (#63)", () => {
   it("starts empty with the maximum shown, and sends a valid rule", async () => {
-    mock.api.saveShopDiscount.mockResolvedValue({ ok: true, data: { rule: { ...rule, percentage: "10.0000", status: "active" }, maximumPercentage: "20.0000" } });
-    const shown = await open({ rule: null, maximumPercentage: "20" });
+    mock.api.saveShopDiscount.mockResolvedValue({ ok: true, data: { rule: { ...rule, percentage: "10.0000", status: "active" }, maximumPercentage: "20.0000", available: true } });
+    const shown = await open({ rule: null, maximumPercentage: "20", available: true });
     expect(texts(shown)).toEqual(expect.arrayContaining([words.maximum("20")]));
     (input(shown, words.percentage)?.props.onChangeText as (text: string) => void)("10");
     await save(draw());
@@ -57,16 +57,43 @@ describe("S34 Shop discount (#63)", () => {
     expect(texts(draw())).toContain(words.saved);
   });
 
-  it("says a rule is paused by a lower maximum, leaves its percentage unchanged and shows it off", async () => {
-    const shown = await open({ rule, maximumPercentage: "15" });
+  it("says a rule is paused by a lower maximum, leaves its percentage unchanged, and turns it back on when saved lower", async () => {
+    const shown = await open({ rule, maximumPercentage: "15", available: true });
     expect(texts(shown)).toContain(words.paused("15"));
     expect(input(shown, words.percentage)?.props.value).toBe("18");
-    expect(shown.find((n) => n.type === "Switch")?.props.value).toBe(false);
+    expect(shown.find((n) => n.type === "Switch")?.props.value).toBe(true);
+    mock.api.saveShopDiscount.mockResolvedValue({ ok: true, data: { rule: { ...rule, version: 3, percentage: "15.0000", status: "active" }, maximumPercentage: "15", available: true } });
+    (input(shown, words.percentage)?.props.onChangeText as (text: string) => void)("15");
+    await save(draw());
+    expect(mock.api.saveShopDiscount).toHaveBeenCalledWith({ form: "percentage", percentage: "15", cap: null, active: true });
+    const after = draw();
+    expect(texts(after)).not.toContain(words.paused("15"));
+    expect(texts(after)).toContain(words.saved);
+  });
+
+  it("says a discount cannot be turned on yet, keeps the switch off and saves the rule off (#571)", async () => {
+    mock.api.saveShopDiscount.mockResolvedValue({ ok: true, data: { rule: { ...rule, percentage: "10.0000", status: "off" }, maximumPercentage: "20", available: false } });
+    const shown = await open({ rule: null, maximumPercentage: "20", available: false });
+    expect(texts(shown)).toContain(words.notYet);
+    const toggle = shown.find((n) => n.type === "Switch");
+    expect(toggle?.props).toMatchObject({ value: false, disabled: true });
+    (input(shown, words.percentage)?.props.onChangeText as (text: string) => void)("10");
+    await save(draw());
+    expect(mock.api.saveShopDiscount).toHaveBeenCalledWith({ form: "percentage", percentage: "10", cap: null, active: false });
+    expect(texts(draw())).toContain(words.off);
+  });
+
+  it("shows no paused banner while discounts cannot be turned on, since lowering the rule could not turn it on", async () => {
+    expect(texts(await open({ rule, maximumPercentage: "15", available: false }))).not.toContain(words.paused("15"));
+  });
+
+  it("hides the not-yet note once discounts can be turned on", async () => {
+    expect(texts(await open({ rule: null, maximumPercentage: "20", available: true }))).not.toContain(words.notYet);
   });
 
   it("shows the server's refusal above the maximum and keeps what was typed", async () => {
     mock.api.saveShopDiscount.mockResolvedValue({ ok: false, status: 400, code: "DISCOUNT_ABOVE_MAXIMUM", maximumPercentage: "20.0000" });
-    const shown = await open({ rule: null, maximumPercentage: "20" });
+    const shown = await open({ rule: null, maximumPercentage: "20", available: true });
     (input(shown, words.percentage)?.props.onChangeText as (text: string) => void)("25");
     await save(draw());
     const after = draw();
@@ -75,7 +102,7 @@ describe("S34 Shop discount (#63)", () => {
   });
 
   it("does not send an empty form", async () => {
-    await save(await open({ rule: null, maximumPercentage: "20" }));
+    await save(await open({ rule: null, maximumPercentage: "20", available: true }));
     expect(mock.api.saveShopDiscount).not.toHaveBeenCalled();
     expect(texts(draw())).toContain(words.invalid);
   });

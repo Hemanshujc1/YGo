@@ -27,7 +27,9 @@ export async function latestRateCardVersion(pool: Pool | PoolClient): Promise<st
  * The delivered quote the cart will also use (MNY-10, MNY-15). TypeScript only picks the rules;
  * every amount comes from `pricing_delivered_quote` in PostgreSQL.
  */
-export async function deliveredQuote(pool: Pool, shopId: string, lines: BasketLine[], version?: string, draft?: RateCardDraft): Promise<DeliveredQuote> {
+export async function deliveredQuote(
+  pool: Pool, shopId: string, lines: BasketLine[], shopDiscounts: boolean, version?: string, draft?: RateCardDraft,
+): Promise<DeliveredQuote> {
   // Order-level values resolve shop → global; resolving without a category ignores category cards (#357).
   const resolve = async (categoryId?: string) => {
     const card = await resolveRateCard(pool, shopId, categoryId, version, undefined, draft);
@@ -41,8 +43,9 @@ export async function deliveredQuote(pool: Pool, shopId: string, lines: BasketLi
   if ([...byCategory.values()].some((card) => card.missing.includes("commission"))) missing.unshift("commission");
   if (missing.length) return { status: "incomplete", rateCardVersion: order.version, missing };
 
-  // The shop's one rule applies while it is active; a paused or switched-off rule takes nothing off (MNY-5, NOT-6).
-  const { rows: [rule] } = await pool.query<{ id: string; version: number; form: string; percentage: string | null; cap: string | null; amount: string | null; minimumOrder: string | null }>(
+  // The shop's one rule applies while it is active; a paused or switched-off rule takes nothing off (MNY-5, NOT-6). Until customers can
+  // see a discount (`shopDiscounts`, #571), no rule applies, even one left active in the database.
+  const { rows: [rule] } = !shopDiscounts ? { rows: [] } : await pool.query<{ id: string; version: number; form: string; percentage: string | null; cap: string | null; amount: string | null; minimumOrder: string | null }>(
     `SELECT id, version, form, trim_scale(percentage)::text AS percentage, trim_scale(cap)::text AS cap, trim_scale(flat_amount)::text AS amount,
         trim_scale(minimum_order)::text AS "minimumOrder"
       FROM shop_discounts WHERE shop_id = $1 AND status = 'active'`, [shopId]);
@@ -69,7 +72,7 @@ export async function deliveredQuote(pool: Pool, shopId: string, lines: BasketLi
   };
 }
 
-export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock, secret, shopDiscounts }: { pool: Pool; clock: Clock; secret: string; shopDiscounts: boolean }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
   // What A05 builds a basket from: the shop's listed packs a customer can see, each with its quantity-price options (#358).
@@ -110,7 +113,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
     const basket = rows.map((row, index) => ({ ...row, count: lines[index]?.count ?? 0 }));
     // Both quotes read the same cards.
     const pinned = await latestRateCardVersion(pool);
-    const [now, tried] = await Promise.all([deliveredQuote(pool, shopId, basket, pinned), draft && deliveredQuote(pool, shopId, basket, pinned, draft)]);
+    const [now, tried] = await Promise.all([deliveredQuote(pool, shopId, basket, shopDiscounts, pinned), draft && deliveredQuote(pool, shopId, basket, shopDiscounts, pinned, draft)]);
     return { now, draft: tried ?? null };
   });
 }

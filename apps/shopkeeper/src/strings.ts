@@ -604,7 +604,7 @@ export const strings = {
     cap: "Most you will give per order (₹, optional)",
     amount: "Amount off (₹)",
     minimumOrder: "On orders of at least (₹)",
-    on: "Discount is on",
+    on: "Turn the discount on",
     save: "Save discount",
     saved: "Saved.",
     loading: "Loading your discount",
@@ -616,6 +616,7 @@ export const strings = {
     above: (percent: string) => `This discount can take off more than ${percent}% of an order. Lower it.`,
     paused: (percent: string) => `Your discount is paused because the most YGo lets a shop give is now ${percent}%, and yours is higher. It is not changed. Lower it to turn it back on.`,
     off: "Your discount is off.",
+    notYet: "Customers can't see shop discounts in their cart and bill yet, so a discount can't be turned on. You can set one up and save it off now.",
     worst: (percent: string) => `At most ${percent}% of an order.`,
   },
   // Opening hours (#371): owner's answers 3–5 and 20 on #371.
@@ -869,6 +870,7 @@ export const strings = {
     EMPTY_ORDER: "You cannot accept an order with no items. Reject it instead.",
     INVALID_PARTIAL_ACCEPT: "You can only reduce quantities or remove items.",
     DISCOUNT_ABOVE_MAXIMUM: "This discount is above the largest your shop can give.",
+    DISCOUNT_NOT_AVAILABLE: "You can't turn a discount on yet. Save it off for now.",
     CANCEL_REQUEST_CLOSED: "The customer's ask to cancel has already been answered.",
   } satisfies Record<ErrorCode, string>,
 };

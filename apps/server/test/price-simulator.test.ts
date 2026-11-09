@@ -26,7 +26,7 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, shopDiscountsAvailable: true });
   await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: adminEmail } });
   const code = mailer.sent.findLast((sent) => sent.to === adminEmail)?.text.match(/code is (\d{6})/)?.[1];
   const signed = await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: adminEmail, code } });

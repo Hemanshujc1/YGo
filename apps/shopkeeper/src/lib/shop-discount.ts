@@ -1,17 +1,20 @@
 import { ShopDiscountBody, type ShopDiscountRule } from "@ygo/contracts";
-import { trimDecimal } from "@ygo/format";
+import { formatNumber, trimDecimal } from "@ygo/format";
 
 /** What S34's fields hold while the Owner types: text, as typed, until Save. */
 export type DiscountForm = { form: "percentage" | "flat"; percentage: string; cap: string; amount: string; minimumOrder: string; active: boolean };
 
 export const emptyDiscount: DiscountForm = { form: "percentage", percentage: "", cap: "", amount: "", minimumOrder: "", active: true };
 
-/** The saved rule as form text, amounts without trailing zeros; a paused rule shows as off until the Owner turns it on again. */
-export function toForm(rule: ShopDiscountRule | null): DiscountForm {
-  if (!rule) return emptyDiscount;
+/**
+ * The saved rule as form text, amounts without trailing zeros. A paused rule shows as on: lowering it and saving turns it back on, as its
+ * banner says. While discounts are not `available` (#571) every rule shows as off, the only state a save can take.
+ */
+export function toForm(rule: ShopDiscountRule | null, available = true): DiscountForm {
+  if (!rule) return { ...emptyDiscount, active: available };
   return {
     form: rule.form, percentage: trimDecimal(rule.percentage ?? ""), cap: trimDecimal(rule.cap ?? ""), amount: trimDecimal(rule.amount ?? ""),
-    minimumOrder: trimDecimal(rule.minimumOrder ?? ""), active: rule.status === "active",
+    minimumOrder: trimDecimal(rule.minimumOrder ?? ""), active: available && rule.status !== "off",
   };
 }
 
@@ -25,9 +28,12 @@ export function toBody(form: DiscountForm): { ok: true; body: ShopDiscountBody }
   return { ok: false, fields };
 }
 
-/** The worst case the server will hold to the maximum, shown as the Owner types: the percentage, or the amount over the minimum order. */
+/**
+ * The worst case the server will hold to the maximum, shown as the Owner types: the percentage, or the amount over the minimum order.
+ * A flat one rounds up to the hundredth, so it never shows within a maximum the server's exact check refuses (200 over 999.99 is 20.01).
+ */
 export function worstPercent(form: DiscountForm): string | null {
   if (form.form === "percentage") return Number(form.percentage) > 0 ? trimDecimal(form.percentage) : null;
   const amount = Number(form.amount), minimum = Number(form.minimumOrder);
-  return amount > 0 && minimum > 0 ? trimDecimal(((amount * 100) / minimum).toFixed(2)) : null;
+  return amount > 0 && minimum > 0 ? formatNumber(Math.ceil((amount * 10000) / minimum - 1e-9) / 100) : null;
 }

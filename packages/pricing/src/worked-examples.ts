@@ -48,9 +48,13 @@ export type DeliveredExample = {
   };
 };
 
-const commission = (formula: string, rule: { fixedAmount?: string; percentage?: string; minimum?: string; maximum?: string; base?: "after_shop_discount" }) => ({
+/**
+ * A commission rule. Its base defaults to after the shop-funded discount, the configured default in CONTEXT.md (Pricing engine), the revenue
+ * spec and FR-PRC-04: a shop's own discount lowers what it is charged commission on; a platform-funded one (#70) never will.
+ */
+const commission = (formula: string, rule: { fixedAmount?: string; percentage?: string; minimum?: string; maximum?: string; base?: "before_shop_discount" | "after_shop_discount" }) => ({
   formula, fixedAmount: rule.fixedAmount ?? null, percentage: rule.percentage ?? null,
-  minimum: rule.minimum ?? null, maximum: rule.maximum ?? null, base: rule.base ?? "before_shop_discount",
+  minimum: rule.minimum ?? null, maximum: rule.maximum ?? null, base: rule.base ?? "after_shop_discount",
 });
 
 /** A complete global card: 10% commission, ₹30 delivery split 20/80, floor ₹15, minimum cart ₹100. */
@@ -166,15 +170,15 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
     },
   },
   {
-    // 10% of 400 is 40, held to the 20 cap. Commission keeps its before-discount base, so it is 10% of 400.
+    // 10% of 400 is 40, held to the 20 cap. Commission is on the default base after the discount: 10% of 380.
     name: "Shop-wide discount: a percentage held to its cap",
     cards: [globalCard()],
     shopDiscount: { form: "percentage", percentage: "10", cap: "20" },
     lines: [{ category: "Groceries", unitPrice: "200.00", count: 2 }],
     expected: {
-      lines: [{ lineTotal: "400.00", commission: "40.00", shopDiscount: "20.00" }], productValue: "400.00", shopDiscount: "20.00", commission: "40.00",
-      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "410.00", shopKeeps: "364.00",
-      platformContribution: "46.00", placeable: true, reasons: [],
+      lines: [{ lineTotal: "400.00", commission: "38.00", shopDiscount: "20.00" }], productValue: "400.00", shopDiscount: "20.00", commission: "38.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "410.00", shopKeeps: "366.00",
+      platformContribution: "44.00", placeable: true, reasons: [],
     },
   },
   {
@@ -183,9 +187,9 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
     shopDiscount: { form: "percentage", percentage: "10" },
     lines: [{ category: "Groceries", unitPrice: "250.00", count: 1 }],
     expected: {
-      lines: [{ lineTotal: "250.00", commission: "25.00", shopDiscount: "25.00" }], productValue: "250.00", shopDiscount: "25.00", commission: "25.00",
-      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "255.00", shopKeeps: "224.00",
-      platformContribution: "31.00", placeable: true, reasons: [],
+      lines: [{ lineTotal: "250.00", commission: "22.50", shopDiscount: "25.00" }], productValue: "250.00", shopDiscount: "25.00", commission: "22.50",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "255.00", shopKeeps: "226.50",
+      platformContribution: "28.50", placeable: true, reasons: [],
     },
   },
   {
@@ -194,9 +198,9 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
     shopDiscount: { form: "flat", amount: "200", minimumOrder: "1000" },
     lines: [{ category: "Groceries", unitPrice: "600.00", count: 2 }],
     expected: {
-      lines: [{ lineTotal: "1200.00", commission: "120.00", shopDiscount: "200.00" }], productValue: "1200.00", shopDiscount: "200.00", commission: "120.00",
-      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "1030.00", shopKeeps: "904.00",
-      platformContribution: "126.00", placeable: true, reasons: [],
+      lines: [{ lineTotal: "1200.00", commission: "100.00", shopDiscount: "200.00" }], productValue: "1200.00", shopDiscount: "200.00", commission: "100.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "1030.00", shopKeeps: "924.00",
+      platformContribution: "106.00", placeable: true, reasons: [],
     },
   },
   {
@@ -212,31 +216,32 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
   },
   {
     // 5% of 100.00 is 5.00. The pro-rata parts round down to 1.66, 1.66 and 1.66; the 2 paise left go to the largest line, so 1.66 + 1.66 + 1.68 = 5.00 (MNY-6).
+    // Commission is per line on what is left: 10% of 31.67, 31.67 and 31.66, each rounding to 3.17.
     name: "Shop-wide discount: the split across lines in paise adds up, the remainder to the largest line",
     cards: [globalCard()],
     shopDiscount: { form: "percentage", percentage: "5" },
     lines: [{ category: "Groceries", unitPrice: "33.33", count: 1 }, { category: "Groceries", unitPrice: "33.33", count: 1 }, { category: "Groceries", unitPrice: "33.34", count: 1 }],
     expected: {
-      lines: [{ lineTotal: "33.33", commission: "3.33", shopDiscount: "1.66" }, { lineTotal: "33.33", commission: "3.33", shopDiscount: "1.66" }, { lineTotal: "33.34", commission: "3.33", shopDiscount: "1.68" }],
-      productValue: "100.00", shopDiscount: "5.00", commission: "9.99", deliveryFee: standardDelivery, smallCartFee: null,
-      customerTotal: "125.00", shopKeeps: "109.01", platformContribution: "15.99", placeable: true, reasons: [],
+      lines: [{ lineTotal: "33.33", commission: "3.17", shopDiscount: "1.66" }, { lineTotal: "33.33", commission: "3.17", shopDiscount: "1.66" }, { lineTotal: "33.34", commission: "3.17", shopDiscount: "1.68" }],
+      productValue: "100.00", shopDiscount: "5.00", commission: "9.51", deliveryFee: standardDelivery, smallCartFee: null,
+      customerTotal: "125.00", shopKeeps: "109.49", platformContribution: "15.51", placeable: true, reasons: [],
     },
   },
   {
-    // The minimum cart tests product value before the discount: 110 passes, though 88 would not.
+    // The minimum cart tests product value before the discount: 110 passes, though 99 would not.
     name: "Shop-wide discount: the minimum cart is tested before the discount",
     cards: [globalCard()],
-    shopDiscount: { form: "percentage", percentage: "20" },
+    shopDiscount: { form: "percentage", percentage: "10" },
     lines: [{ category: "Groceries", unitPrice: "110.00", count: 1 }],
     expected: {
-      lines: [{ lineTotal: "110.00", commission: "11.00", shopDiscount: "22.00" }], productValue: "110.00", shopDiscount: "22.00", commission: "11.00",
-      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "118.00", shopKeeps: "101.00",
-      platformContribution: "17.00", placeable: true, reasons: [],
+      lines: [{ lineTotal: "110.00", commission: "9.90", shopDiscount: "11.00" }], productValue: "110.00", shopDiscount: "11.00", commission: "9.90",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "129.00", shopKeeps: "113.10",
+      platformContribution: "15.90", placeable: true, reasons: [],
     },
   },
   {
-    name: "Commission base before the shop discount is the default: the discount does not shrink it",
-    cards: [globalCard()],
+    name: "Commission base before the shop discount, when Admin chooses it: the discount does not shrink it",
+    cards: [globalCard({ commission: commission("percentage", { percentage: "10", base: "before_shop_discount" }) })],
     shopDiscount: { form: "percentage", percentage: "10" },
     lines: [{ category: "Groceries", unitPrice: "60.00", count: 2 }, { category: "Groceries", unitPrice: "80.00", count: 1 }],
     expected: {
@@ -247,8 +252,8 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
   },
   {
     // Each line's commission is on its total less its own part of the discount: 10% of 108.00 and of 72.00.
-    name: "Commission base after the shop discount uses each line's apportioned share",
-    cards: [globalCard({ commission: commission("percentage", { percentage: "10", base: "after_shop_discount" }) })],
+    name: "Commission base after the shop discount is the default, and uses each line's apportioned share",
+    cards: [globalCard()],
     shopDiscount: { form: "percentage", percentage: "10" },
     lines: [{ category: "Groceries", unitPrice: "60.00", count: 2 }, { category: "Groceries", unitPrice: "80.00", count: 1 }],
     expected: {

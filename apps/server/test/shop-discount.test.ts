@@ -26,7 +26,7 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, shopDiscountsAvailable: true });
   await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: adminEmail } });
   const code = mailer.sent.findLast((sent) => sent.to === adminEmail)?.text.match(/code is (\d{6})/)?.[1];
   const signed = await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: adminEmail, code } });
@@ -69,7 +69,8 @@ async function staffOf(shopId: string) {
 const publish = (scope: object, values: object) =>
   app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers: admin, payload: { scope, values, reason: "Pilot card" } });
 const card = {
-  commission: { formula: "percentage", fixedAmount: null, percentage: "10", minimum: null, maximum: null, base: "before_shop_discount" },
+  // The configured default base (CONTEXT.md, Pricing engine): commission after the shop-funded discount.
+  commission: { formula: "percentage", fixedAmount: null, percentage: "10", minimum: null, maximum: null, base: "after_shop_discount" },
   deliveryFee: { amount: "30", split: { platformPercentage: "20", shopPercentage: "80" } },
   deliveredContributionFloor: "15", minimumCart: "100", statementGraceDays: 7,
 };
@@ -83,13 +84,13 @@ const versions = async () => (await database.pool.query("SELECT version, status,
 describe("The Owner's shop-wide discount (#63, MNY-5)", () => {
   it("starts with no rule, saves one, keeps every version and does not bump an unchanged save", async () => {
     const owner = await shop();
-    expect((await get(owner.headers)).json()).toEqual({ rule: null, maximumPercentage: "20" });
+    expect((await get(owner.headers)).json()).toEqual({ rule: null, maximumPercentage: "20", available: true });
 
     const saved = await put(owner.headers, percentage("10", "20"));
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toEqual({
       rule: { id: expect.any(String), version: 1, form: "percentage", percentage: "10", cap: "20", amount: null, minimumOrder: null, status: "active" },
-      maximumPercentage: "20",
+      maximumPercentage: "20", available: true,
     });
     expect((await get(owner.headers)).json()).toEqual(saved.json());
     // The same save again, as a retry, is the same version.
@@ -102,6 +103,31 @@ describe("The Owner's shop-wide discount (#63, MNY-5)", () => {
       { version: 1, status: "active", actor_id: owner.id }, { version: 2, status: "active", actor_id: owner.id }, { version: 3, status: "off", actor_id: owner.id },
     ]);
     expect(await rules()).toHaveLength(1);
+  });
+
+  it("cannot be turned on until customers can see it (#571), but can be saved off", async () => {
+    const owner = await shop();
+    const gated = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+    try {
+      const read = await gated.inject({ method: "GET", url: "/v1/me/shop-discount", headers: owner.headers });
+      expect(read.json()).toEqual({ rule: null, maximumPercentage: "20", available: false });
+      const on = await gated.inject({ method: "PUT", url: "/v1/me/shop-discount", headers: owner.headers, payload: percentage("10") });
+      expect(on.statusCode).toBe(409);
+      expect(on.json()).toEqual({ error: { code: "DISCOUNT_NOT_AVAILABLE" } });
+      expect(await rules()).toHaveLength(0);
+      const off = await gated.inject({ method: "PUT", url: "/v1/me/shop-discount", headers: owner.headers, payload: percentage("10", null, false) });
+      expect(off.statusCode).toBe(200);
+      expect(off.json()).toMatchObject({ rule: { status: "off" }, available: false });
+    } finally { await gated.close(); }
+  });
+
+  it("never changes or removes a version an order may name", async () => {
+    const owner = await shop();
+    await put(owner.headers, percentage("10"));
+    for (const sql of ["UPDATE shop_discount_versions SET percentage = 1", "DELETE FROM shop_discount_versions", "TRUNCATE shop_discount_versions CASCADE"]) {
+      await expect(database.pool.query(sql), sql).rejects.toThrow(/append-only/);
+    }
+    expect(await versions()).toHaveLength(1);
   });
 
   it("refuses a rule whose worst case is over the maximum, naming it, and stores nothing", async () => {
@@ -167,7 +193,7 @@ describe("A lower maximum pauses the discounts it breaks (#63, NOT-6)", () => {
 
     expect((await publish({ type: "global" }, { ...card, maximumShopDiscountPercentage: "15" })).statusCode).toBe(201);
     expect((await get(over.headers)).json()).toEqual({
-      rule: { id: expect.any(String), version: 2, form: "percentage", percentage: "18", cap: "30", amount: null, minimumOrder: null, status: "paused" }, maximumPercentage: "15",
+      rule: { id: expect.any(String), version: 2, form: "percentage", percentage: "18", cap: "30", amount: null, minimumOrder: null, status: "paused" }, maximumPercentage: "15", available: true,
     });
     expect((await get(under.headers)).json().rule).toMatchObject({ version: 1, status: "active" });
     // YGo's pause is a version of its own, with no actor.
@@ -212,8 +238,8 @@ describe("A lower maximum pauses the discounts it breaks (#63, NOT-6)", () => {
   });
 
   it("never leaves a rule active over the maximum when an Owner's save and the Admin's publish race", async () => {
+    // Each round has its own shop, and only that shop's rule is checked.
     for (let round = 0; round < 6; round++) {
-      await database.pool.query("TRUNCATE shop_discount_versions, shop_discounts, notifications, push_queue CASCADE").catch(() => undefined);
       const owner = await shop("live", `racer${round}@example.com`);
       const maximum = String(19 - round);
       const [saved] = await Promise.all([put(owner.headers, percentage("18")), publish({ type: "global" }, { ...card, maximumShopDiscountPercentage: maximum })]);
@@ -233,8 +259,16 @@ describe("The pricing engine's split of a shop-wide discount (#63, MNY-6)", () =
       [rule && JSON.stringify(rule), totals, eligible ?? totals.map(() => true)])).rows[0]?.shares;
 
   it("gives a tie's remainder to the first of the largest lines", async () => {
-    // 7 off 20.00: 3.50 and 3.50 would be exact, so use three equal lines: 1.00 off 0.03 each is capped at the base.
+    // 1.00 off three equal lines: 0.33 each rounded down, and the paisa left over goes to the first.
     expect(await shares({ form: "flat", amount: "1", minimumOrder: "3" }, ["1.00", "1.00", "1.00"])).toEqual(["0.34", "0.33", "0.33"]);
+  });
+
+  it("spills a remainder the largest line cannot hold to the next largest, so no part passes its line", async () => {
+    // 20% of ten 1-paisa lines is 2 paise: each takes 0 rounded down, and the 2 left over cannot both go on one 1-paisa line.
+    const tiny = Array.from({ length: 10 }, () => "0.01");
+    expect(await shares({ form: "percentage", percentage: "20", cap: null }, tiny)).toEqual(["0.01", "0.01", ...Array.from({ length: 8 }, () => "0.00")]);
+    // The largest takes what it can, then the next largest, ties in line order.
+    expect(await shares({ form: "flat", amount: "0.05", minimumOrder: "0.05" }, ["0.01", "0.02", "0.01", "0.02"])).toEqual(["0.01", "0.02", "0.00", "0.02"]);
   });
 
   it("leaves an ineligible line out of the base and takes nothing off it", async () => {
@@ -252,8 +286,11 @@ describe("The pricing engine's split of a shop-wide discount (#63, MNY-6)", () =
   it("always adds up exactly to the order's discount, whatever the paise", async () => {
     let seed = 7;
     const next = (limit: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % limit; };
-    for (let run = 0; run < 150; run++) {
-      const totals = Array.from({ length: 1 + next(8) }, () => `${1 + next(900)}.${String(next(100)).padStart(2, "0")}`);
+    for (let run = 0; run < 200; run++) {
+      // One run in four is many lines of a few paise, where the remainder can outgrow the largest line.
+      const totals = run % 4 === 3
+        ? Array.from({ length: 5 + next(20) }, () => `0.0${1 + next(9)}`)
+        : Array.from({ length: 1 + next(8) }, () => `${1 + next(900)}.${String(next(100)).padStart(2, "0")}`);
       const rule = run % 2 ? { form: "percentage", percentage: `${1 + next(20)}.${next(100)}`, cap: run % 4 === 1 ? String(1 + next(50)) : null }
         : { form: "flat", amount: String(1 + next(60)), minimumOrder: String(1 + next(300)) };
       const parts = (await shares(rule, totals)) ?? [];
@@ -316,6 +353,9 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       "SELECT shop_discount::text AS discount, shop_discount_rule_id AS rule, shop_discount_rule_version AS version, total::text AS total, product_value::text AS product, quote FROM orders WHERE id = $1", [id])).rows[0];
     expect(frozen).toMatchObject({ discount: "5.00", rule: saved.id, version: 1, total: "125.00", product: "100.00" });
     expect(frozen.quote.shopDiscount).toEqual({ amount: "5.00", ruleId: saved.id, ruleVersion: 1 });
+    // Commission is per line on what each line keeps after its part: 10% of 31.67, 31.67 and 31.66.
+    expect(frozen.quote.commission).toBe("9.51");
+    expect(frozen.quote.lines.map((line: { commission: string }) => line.commission)).toEqual(["3.17", "3.17", "3.17"]);
     const parts = (await database.pool.query<{ part: string }>("SELECT shop_discount::text AS part FROM order_lines WHERE order_id = $1 ORDER BY position", [id])).rows.map((row) => row.part);
     expect(parts).toEqual(["1.66", "1.66", "1.68"]);
     // The order's amount is the sum of its lines' parts, to the paisa.
@@ -329,6 +369,10 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       .toEqual({ discount: "5.00", version: 1, total: "125.00" });
     expect((await database.pool.query("SELECT form, percentage::text AS percentage, status FROM shop_discount_versions WHERE rule_id = $1 AND version = 1", [saved.id])).rows[0])
       .toEqual({ form: "percentage", percentage: "5.0000", status: "active" });
+    // Nor can anything write over the frozen amounts.
+    for (const sql of ["UPDATE orders SET shop_discount = 0, shop_discount_rule_id = NULL, shop_discount_rule_version = NULL", "UPDATE order_lines SET shop_discount = 0"]) {
+      await expect(database.pool.query(sql), sql).rejects.toThrow(/frozen|append-only/);
+    }
   });
 
   it("refuses to place at a total made under a rule that has since been paused, quoting the cart again", async () => {
@@ -345,6 +389,23 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
     expect(refused.json().error.code).toBe("CART_CHANGED");
     expect(refused.json().error.cart.quote.total).toBe("230.00");
     expect((await database.pool.query("SELECT count(*)::int AS n FROM orders")).rows[0]).toEqual({ n: 0 });
+  });
+
+  it("applies no rule while discounts are not available, even one left active in the database (#571)", async () => {
+    const owner = await shop();
+    await publish({ type: "global" }, card);
+    const who = await customer();
+    const item = await listing(owner.shopId, "200");
+    expect((await put(owner.headers, percentage("10"))).json().rule.status).toBe("active");
+    const open = app;
+    app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+    try {
+      const { cart, place } = await order(owner.shopId, who, [{ listingId: item, count: 1 }]);
+      expect(cart.quote.total).toBe("230.00");
+      expect((await place()).statusCode).toBe(201);
+    } finally { await app.close(); app = open; }
+    expect((await database.pool.query("SELECT shop_discount::text AS discount, shop_discount_rule_id AS rule, total::text AS total FROM orders")).rows[0])
+      .toEqual({ discount: "0.00", rule: null, total: "230.00" });
   });
 
   it("places with no discount, recording none, while the rule is off or paused", async () => {

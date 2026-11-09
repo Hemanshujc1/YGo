@@ -145,7 +145,7 @@ async function orderView(client: Pool | PoolClient, orderId: string, accountId: 
 /** C18 shows this many past orders, with no paging yet (owner's answer 2 on #426). */
 const PAST_SHOWN = 50;
 
-export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret, shopDiscounts }: { pool: Pool; clock: Clock; secret: string; shopDiscounts: boolean }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
 
@@ -169,7 +169,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
     const quote = async ({ address, cart }: NonNullable<Awaited<ReturnType<typeof current>>>) => {
       const [serving] = await servingShops(pool, clock.now(), { pincode: address.pincode, latitude: address.latitude, longitude: address.longitude }, shopId);
       const version = await latestRateCardVersion(pool);
-      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines) };
+      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines, shopDiscounts) };
     };
     const first = await current();
     if (!first) return reply.code(404).send({ error: { code: "NOT_FOUND" } });

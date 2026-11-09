@@ -53,10 +53,18 @@ CREATE FUNCTION shop_discount_exceeds(form text, percentage numeric, flat_amount
   SELECT CASE form WHEN 'percentage' THEN percentage > maximum ELSE flat_amount * 100 > maximum * minimum_order END
 $$;
 --> statement-breakpoint
+-- A rule's history can only grow: an order names the exact version it was priced on, so no version row is changed or removed.
+CREATE TRIGGER shop_discount_versions_no_update_delete BEFORE UPDATE OR DELETE ON shop_discount_versions
+FOR EACH ROW EXECUTE FUNCTION reject_order_record_change();
+--> statement-breakpoint
+CREATE TRIGGER shop_discount_versions_no_truncate BEFORE TRUNCATE ON shop_discount_versions
+FOR EACH STATEMENT EXECUTE FUNCTION reject_order_record_change();
+--> statement-breakpoint
 -- The shop-funded discount of one order, split across its lines in whole paise (MNY-6, CRT-3). `rule` is the shop's one active rule or null,
 -- `totals` the line totals and `eligible` which lines may take a discount (a bargained line does not). The base is the eligible product value before
 -- any discount, never fees or taxes. Each line takes its pro-rata part rounded down and the remainder goes to the largest eligible line (the first on a tie),
--- so the parts always add up to the discount. The discount rounds half-up once, and never exceeds the base.
+-- so the parts always add up to the discount. A remainder the largest line cannot hold without its part passing its total (only with many tiny lines)
+-- spills to the next largest in the same order. The discount rounds half-up once, and never exceeds the base, so the spill always fits.
 CREATE FUNCTION pricing_shop_discount_shares(rule jsonb, totals numeric[], eligible boolean[]) RETURNS numeric[] LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
   count integer := COALESCE(array_length(totals, 1), 0);
@@ -64,7 +72,8 @@ DECLARE
   shares bigint[] := ARRAY[]::bigint[];
   base bigint := 0;
   discount numeric := 0;
-  largest integer;
+  remainder bigint;
+  step bigint;
   index integer;
 BEGIN
   FOR index IN 1..count LOOP
@@ -80,11 +89,14 @@ BEGIN
   END IF;
   FOR index IN 1..count LOOP
     shares := shares || floor(discount * paise[index] / GREATEST(base, 1))::bigint;
-    IF paise[index] > 0 AND (largest IS NULL OR paise[index] > paise[largest]) THEN largest := index; END IF;
   END LOOP;
-  IF largest IS NOT NULL THEN
-    shares[largest] := shares[largest] + (discount::bigint - (SELECT sum(part) FROM unnest(shares) AS part));
-  END IF;
+  remainder := discount::bigint - (SELECT COALESCE(sum(part), 0) FROM unnest(shares) AS part);
+  FOR index IN SELECT position FROM unnest(paise) WITH ORDINALITY AS lines(amount, position) WHERE amount > 0 ORDER BY amount DESC, position LOOP
+    EXIT WHEN remainder = 0;
+    step := LEAST(remainder, paise[index] - shares[index]);
+    shares[index] := shares[index] + step;
+    remainder := remainder - step;
+  END LOOP;
   RETURN ARRAY(SELECT round(part / 100.0, 2) FROM unnest(shares) WITH ORDINALITY AS shares(part, position) ORDER BY position);
 END;
 $$;

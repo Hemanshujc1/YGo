@@ -168,6 +168,7 @@ export const ErrorCode = z.enum([
   "EMPTY_ORDER",
   "INVALID_PARTIAL_ACCEPT",
   "DISCOUNT_ABOVE_MAXIMUM",
+  "DISCOUNT_NOT_AVAILABLE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

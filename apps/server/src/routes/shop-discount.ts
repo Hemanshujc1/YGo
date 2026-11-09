@@ -9,8 +9,9 @@ import { deriveKeys, mobileSignedIn } from "../tokens";
 /**
  * S34, the Owner's shop-wide discount (MNY-5, CRT-3, #63): one rule per shop, read and saved by the Owner only. Staff get 403 and an
  * account with no shop 404. Every save keeps a new version, so an order can name the exact terms it was priced under (MNY-6).
+ * Until `available`, a rule can be saved off but not turned on (409 DISCOUNT_NOT_AVAILABLE): see `ShopDiscountResponse`.
  */
-export function registerShopDiscountRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerShopDiscountRoutes(app: FastifyInstance, { pool, clock, secret, available }: { pool: Pool; clock: Clock; secret: string; available: boolean }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const response = { 200: ShopDiscountResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope };
   const member = async (client: Pool | PoolClient, accountId: string) => (await client.query<{ shopId: string; role: string; state: string }>(
@@ -19,7 +20,7 @@ export function registerShopDiscountRoutes(app: FastifyInstance, { pool, clock, 
     const { rows: [rule] } = await client.query<ShopDiscountRule>(
       `SELECT id, version, form, trim_scale(percentage)::text AS percentage, trim_scale(cap)::text AS cap, trim_scale(flat_amount)::text AS amount,
           trim_scale(minimum_order)::text AS "minimumOrder", status FROM shop_discounts WHERE shop_id = $1`, [shopId]);
-    return { rule: rule ?? null, maximumPercentage: await maximumDiscountPercentage(client, shopId) };
+    return { rule: rule ?? null, maximumPercentage: await maximumDiscountPercentage(client, shopId), available };
   };
 
   app.get("/v1/me/shop-discount", { schema: { response } }, async (request, reply) => {
@@ -44,6 +45,7 @@ export function registerShopDiscountRoutes(app: FastifyInstance, { pool, clock, 
       if (!shop) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       if (shop.role !== "owner") return reply.code(403).send({ error: { code: "FORBIDDEN" } });
       if (shop.state !== "approved" && shop.state !== "live") return reply.code(409).send({ error: { code: "SHOP_NOT_APPROVED" } });
+      if (body.active && !available) return reply.code(409).send({ error: { code: "DISCOUNT_NOT_AVAILABLE" } });
       // A rate-card publish holds the first lock for as long as it works out which rules it pauses, so this save reads the maximum
       // after it, or the publish pauses this rule after it: a rule over the maximum is never left active. The second keeps one shop's saves in turn.
       await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('rate_card.publish'))");

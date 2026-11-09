@@ -1647,19 +1647,30 @@ describe("Price simulator (A05, #358)", () => {
     expect(screen.getByRole("link", { name: strings.simulator.openRateCards }).getAttribute("href")).toBe("/rate-cards");
   });
 
-  it("checks the basket on this page: an empty basket, a bad count and more than 100 lines", async () => {
-    const many = Array.from({ length: 101 }, (_, index) => ({
-      ...rice, listingId: `00000000-0000-4000-8000-${String(900000000000 + index)}`, name: `Item ${index}`, quantityOptions: [],
-    }));
-    const { api } = await open({ listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice, ...many] } }) });
+  it("checks the basket on this page: an empty basket and a bad count", async () => {
+    const { api } = await open();
     calculate();
     expect(await screen.findByText(strings.simulator.emptyBasket)).toBeTruthy();
     count(riceLabel, "1000");
     calculate();
     expect(await screen.findByText(strings.simulator.invalidCount)).toBeTruthy();
-    // One query for all 102 count boxes; a role lookup per box is too slow in jsdom.
-    for (const input of document.querySelectorAll("input[aria-label^='Count of']")) fireEvent.change(input, { target: { value: "1" } });
-    calculate();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("checks the basket on this page: more than 100 lines", async () => {
+    const many = Array.from({ length: 101 }, (_, index) => ({
+      ...rice, listingId: `00000000-0000-4000-8000-${String(900000000000 + index)}`, name: `Item ${index}`, quantityOptions: [],
+    }));
+    const { api } = await open({ listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice, ...many] } }) });
+    // This test once ran past 10 s under `pnpm check` load: every change re-rendered all 103 rows and each role query walked them.
+    // The rows are now memoised (price-simulator.tsx), the changes run in one act, and plain selectors skip the accessibility tree.
+    act(() => {
+      for (const input of document.querySelectorAll("input[aria-label^='Count of']")) fireEvent.change(input, { target: { value: "1" } });
+    });
+    const values = Array.from(document.querySelectorAll<HTMLInputElement>("input[aria-label^='Count of']"), (input) => input.value);
+    expect(values.length).toBeGreaterThan(100);
+    expect(values.every((value) => value === "1")).toBe(true);
+    fireEvent.click(screen.getByText(strings.simulator.calculate, { selector: "button" }));
     expect(await screen.findByText(strings.simulator.tooManyLines)).toBeTruthy();
     expect(api.simulatePrice).not.toHaveBeenCalled();
   });

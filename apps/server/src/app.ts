@@ -74,6 +74,11 @@ export interface AppOptions {
   counterBillVoidSeconds?: number;
   deliveryFailureWaitSeconds?: number;
   deliveryPhotoSaveTimeoutMs?: number;
+  /**
+   * Whether an Owner may turn a shop-wide discount on, and whether quotes apply one (#63). Off until customers see the discount in their cart, order and receipt
+   * (#571) and partial acceptance re-applies it (#572); tests turn it on.
+   */
+  shopDiscountsAvailable?: boolean;
   logger?: FastifyServerOptions["logger"];
 }
 
@@ -109,6 +114,7 @@ export function buildApp({
   counterBillVoidSeconds = 86400,
   deliveryFailureWaitSeconds = 120,
   deliveryPhotoSaveTimeoutMs,
+  shopDiscountsAvailable = false,
   logger = false,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy: "127.0.0.1" }).withTypeProvider<ZodTypeProvider>();
@@ -158,7 +164,7 @@ export function buildApp({
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProductRequestRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerShopDiscountRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerShopDiscountRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, available: shopDiscountsAvailable });
     registerShopHoursRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopStaffRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProofExceptionRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos });
@@ -169,12 +175,12 @@ export function buildApp({
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
     registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
+    registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
     registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
     registerNotificationRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
   }
 
   app.get(

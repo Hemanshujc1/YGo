@@ -2,7 +2,7 @@ import type { ShopDiscountResponse } from "@ygo/contracts";
 import { Button, Text } from "@ygo/mobile";
 import { Link } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Switch, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { trimDecimal } from "@ygo/format";
 import { api } from "../api";
@@ -16,12 +16,12 @@ type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: 
 /**
  * S34 Shop discount (MNY-5, CRT-3, NOT-6, #63): the Owner's one shop-wide discount, a percentage with an optional cap or a flat amount over a
  * minimum order. The server refuses one whose worst case is over the maximum; a rule YGo paused when the maximum was lowered says so and is
- * never reduced. Online only. Coupons join this screen with #70.
+ * never reduced. Until customers can see a discount (#571) the switch stays off and says why. Online only. Coupons join this screen with #70.
  */
 export default function ShopDiscountScreen() {
   const insets = useSafeAreaInsets();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
-  const [form, setForm] = useState<DiscountForm>(() => toForm(null));
+  const [form, setForm] = useState<DiscountForm>(() => toForm(null, false));
   const [wrong, setWrong] = useState<string[]>([]);
   const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,7 +31,7 @@ export default function ShopDiscountScreen() {
     setLoad({ kind: "loading" });
     const answer = await api.shopDiscount().catch(() => null);
     if (!answer?.ok) return setLoad({ kind: "failed", message: answer ? strings.errors[answer.code] : words.loadFailed });
-    setForm(toForm(answer.data.rule));
+    setForm(toForm(answer.data.rule, answer.data.available));
     setLoad({ kind: "loaded", data: answer.data });
   }
   useEffect(() => { void fetchRule(); }, []);
@@ -56,12 +56,14 @@ export default function ShopDiscountScreen() {
       return setMessage({ text: answer.code === "DISCOUNT_ABOVE_MAXIMUM" && answer.maximumPercentage ? words.above(trimDecimal(answer.maximumPercentage)) : strings.errors[answer.code], failed: true });
     }
     setLoad({ kind: "loaded", data: answer.data });
-    setForm(toForm(answer.data.rule));
+    setForm(toForm(answer.data.rule, answer.data.available));
     setMessage({ text: words.saved, failed: false });
   }
 
   const worst = worstPercent(form);
   return (
+    // Padding on Android too: edge to edge, the window no longer shrinks for the keyboard, which would cover the field being typed in.
+    <KeyboardAvoidingView behavior="padding" className="flex-1 bg-bg">
     <ScrollView className="flex-1 bg-bg" contentContainerClassName="gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
       <Link href={backPath()} asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
@@ -70,7 +72,8 @@ export default function ShopDiscountScreen() {
       {load.kind === "loaded" && <>
         <Text className="text-body text-muted">{words.intro}</Text>
         <Text className="text-secondary text-muted">{words.maximum(trimDecimal(load.data.maximumPercentage))}</Text>
-        {load.data.rule?.status === "paused" && <Text accessibilityLiveRegion="polite" className="rounded-card border border-danger p-3 text-body text-danger">{words.paused(trimDecimal(load.data.maximumPercentage))}</Text>}
+        {!load.data.available && <Text className="rounded-card border border-border p-3 text-body text-text">{words.notYet}</Text>}
+        {load.data.available && load.data.rule?.status === "paused" && <Text accessibilityLiveRegion="polite" className="rounded-card border border-danger p-3 text-body text-danger">{words.paused(trimDecimal(load.data.maximumPercentage))}</Text>}
         <View className="flex-row gap-2">
           {(["percentage", "flat"] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ selected: form.form === kind }} onPress={() => edit({ form: kind })}
             className={`min-h-[44px] justify-center rounded-button border px-4 ${form.form === kind ? "border-primary bg-primary-subtle" : "border-border"}`}>
@@ -85,13 +88,14 @@ export default function ShopDiscountScreen() {
         {worst && <Text className="text-secondary text-muted">{words.worst(worst)}</Text>}
         <View className="flex-row items-center justify-between">
           <Text className="text-body text-text">{words.on}</Text>
-          <Switch accessibilityLabel={words.on} value={form.active} onValueChange={(active) => edit({ active })} />
+          <Switch accessibilityLabel={words.on} value={form.active} disabled={!load.data.available} onValueChange={(active) => edit({ active })} />
         </View>
         {load.data.rule && !form.active && load.data.rule.status === "off" && <Text className="text-secondary text-muted">{words.off}</Text>}
         {message && <Text accessibilityLiveRegion="polite" className={`text-secondary ${message.failed ? "text-danger" : "text-success"}`}>{message.text}</Text>}
         <Button label={words.save} onPress={() => void save()} busy={busy} />
       </>}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

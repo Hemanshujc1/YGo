@@ -29,8 +29,12 @@ export const ShopDiscountRule = z.strictObject({
 });
 export type ShopDiscountRule = z.infer<typeof ShopDiscountRule>;
 
-/** S34: the shop's one rule (null before the first save) and the maximum effective percentage it is held to now. */
-export const ShopDiscountResponse = z.strictObject({ rule: ShopDiscountRule.nullable(), maximumPercentage: z.string() });
+/**
+ * S34: the shop's one rule (null before the first save), the maximum effective percentage it is held to now, and whether a rule may be
+ * turned on yet. `available` stays false until customers see the discount in their cart, order and receipt (#571): until then a rule
+ * can be saved off but not turned on, so no customer is charged a total that is not the sum of what they were shown.
+ */
+export const ShopDiscountResponse = z.strictObject({ rule: ShopDiscountRule.nullable(), maximumPercentage: z.string(), available: z.boolean() });
 export type ShopDiscountResponse = z.infer<typeof ShopDiscountResponse>;
 
 /** The default maximum effective shop-funded discount percentage, used until a rate card sets one (MNY-5). */
