@@ -53,6 +53,7 @@ function Detail({
   order,
   editing = false,
   lineEdits,
+  disabled = false,
   onStepDown,
   onStepUp,
   onRemoveLine,
@@ -63,6 +64,7 @@ function Detail({
   order: ShopOrderResponse;
   editing?: boolean;
   lineEdits?: Map<string, { count: number; reason: OrderLineChangeReason | null }>;
+  disabled?: boolean;
   onStepDown?: (listingId: string) => void;
   onStepUp?: (listingId: string) => void;
   onRemoveLine?: (listingId: string) => void;
@@ -129,9 +131,9 @@ function Detail({
                   {isPart ? (
                     <View className="flex-row items-center gap-2">
                       {count === 1 ? (
-                        <Button label={words.removeLine} variant="text" onPress={() => onRemoveLine?.(line.listingId)} />
+                        <Button label={words.removeLine} variant="text" disabled={disabled} onPress={() => onRemoveLine?.(line.listingId)} />
                       ) : (
-                        <Button label={words.undoLine} variant="text" onPress={() => onUndoLine?.(line.listingId)} />
+                        <Button label={words.undoLine} variant="text" disabled={disabled} onPress={() => onUndoLine?.(line.listingId)} />
                       )}
                     </View>
                   ) : (
@@ -140,28 +142,28 @@ function Detail({
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={words.reduceCount}
-                          disabled={count === 0}
+                          disabled={disabled || count === 0}
                           onPress={() => onStepDown?.(line.listingId)}
                           className="size-10 items-center justify-center rounded-full active:bg-primary-subtle"
                         >
-                          <Minus size={18} className={count === 0 ? "text-disabled-text" : "text-primary"} />
+                          <Minus size={18} className={disabled || count === 0 ? "text-disabled-text" : "text-primary"} />
                         </Pressable>
                         <Text className="min-w-8 text-center text-label font-semibold tabular-nums text-text">{count}</Text>
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={words.increaseCount}
-                          disabled={count >= line.count}
+                          disabled={disabled || count >= line.count}
                           onPress={() => onStepUp?.(line.listingId)}
                           className="size-10 items-center justify-center rounded-full active:bg-primary-subtle"
                         >
-                          <Plus size={18} className={count >= line.count ? "text-disabled-text" : "text-primary"} />
+                          <Plus size={18} className={disabled || count >= line.count ? "text-disabled-text" : "text-primary"} />
                         </Pressable>
                       </View>
                       {count > 0 && (
-                        <Button label={words.removeLine} variant="text" onPress={() => onRemoveLine?.(line.listingId)} />
+                        <Button label={words.removeLine} variant="text" disabled={disabled} onPress={() => onRemoveLine?.(line.listingId)} />
                       )}
                       {isReduced && (
-                        <Button label={words.undoLine} variant="text" onPress={() => onUndoLine?.(line.listingId)} />
+                        <Button label={words.undoLine} variant="text" disabled={disabled} onPress={() => onUndoLine?.(line.listingId)} />
                       )}
                     </View>
                   )}
@@ -171,6 +173,7 @@ function Detail({
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={reason ? words.lineChangeReasons[reason] : words.reasonSheetTitle}
+                    disabled={disabled}
                     onPress={() => onOpenReason?.(line.listingId)}
                     className={`self-start rounded-full px-3 py-1 ${reason ? "border border-border bg-surface" : "border border-warning bg-warning-subtle"}`}
                   >
@@ -367,6 +370,7 @@ export default function OrderScreen() {
   const [previewState, setPreviewState] = useState<{ key: string; data: PartialAcceptPreviewResponse } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const identity = session.get();
   const accountId = "account" in identity ? identity.account.id : null;
   const shown = view.order;
@@ -378,7 +382,7 @@ export default function OrderScreen() {
   const done = (answered: boolean) => answered && router.replace("/orders");
 
   function startEditing() {
-    if (!shown) return;
+    if (!shown || submitting || submittingRef.current) return;
     previewSeq.current++;
     setPreviewState(null);
     setPreviewLoading(false);
@@ -391,6 +395,7 @@ export default function OrderScreen() {
   }
 
   function cancelEditing() {
+    if (submitting || submittingRef.current) return;
     previewSeq.current++;
     setEditing(false);
     setLineEdits(new Map());
@@ -400,7 +405,7 @@ export default function OrderScreen() {
   }
 
   function onStepDown(listingId: string) {
-    if (!shown) return;
+    if (!shown || submitting || submittingRef.current) return;
     const original = shown.lines.find((l) => l.listingId === listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
@@ -419,7 +424,7 @@ export default function OrderScreen() {
   }
 
   function onStepUp(listingId: string) {
-    if (!shown) return;
+    if (!shown || submitting || submittingRef.current) return;
     const original = shown.lines.find((l) => l.listingId === listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
@@ -434,7 +439,7 @@ export default function OrderScreen() {
   }
 
   function onRemoveLine(listingId: string) {
-    if (!shown) return;
+    if (!shown || submitting || submittingRef.current) return;
     const original = shown.lines.find((l) => l.listingId === listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
@@ -450,7 +455,7 @@ export default function OrderScreen() {
   }
 
   function onUndoLine(listingId: string) {
-    if (!shown) return;
+    if (!shown || submitting || submittingRef.current) return;
     const original = shown.lines.find((l) => l.listingId === listingId);
     if (!original) return;
     previewSeq.current++;
@@ -464,7 +469,7 @@ export default function OrderScreen() {
   }
 
   function onSelectReason(reason: OrderLineChangeReason) {
-    if (!reasonTargetListingId) return;
+    if (!reasonTargetListingId || submitting || submittingRef.current) return;
     const edit = lineEdits.get(reasonTargetListingId);
     if (edit) {
       previewSeq.current++;
@@ -572,10 +577,11 @@ export default function OrderScreen() {
     allReducedHaveReasons &&
     previewMatchesCurrent &&
     !previewLoading &&
+    !submitting &&
     !timeUp;
 
   async function handleSendNewTotal() {
-    if (!shown || !canSend || submitting) return;
+    if (!shown || !canSend || submitting || submittingRef.current) return;
     const keyAtSend = proposalKey(shown.lines ?? [], lineEdits);
     if (!keyAtSend || previewState?.key !== keyAtSend) return;
     const proposed: PartialAcceptLine[] = [];
@@ -593,14 +599,19 @@ export default function OrderScreen() {
       }
     }
     if (proposed.length === 0) return;
+    submittingRef.current = true;
     setSubmitting(true);
-    const ok = await order.partialAccept(proposed);
-    setSubmitting(false);
-    if (ok) {
-      previewSeq.current++;
-      setEditing(false);
-      setLineEdits(new Map());
-      setPreviewState(null);
+    try {
+      const ok = await order.partialAccept(proposed);
+      if (ok) {
+        previewSeq.current++;
+        setEditing(false);
+        setLineEdits(new Map());
+        setPreviewState(null);
+      }
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -663,11 +674,16 @@ export default function OrderScreen() {
             order={shown}
             editing={editing}
             lineEdits={lineEdits}
+            disabled={submitting}
             onStepDown={onStepDown}
             onStepUp={onStepUp}
             onRemoveLine={onRemoveLine}
             onUndoLine={onUndoLine}
-            onOpenReason={(listingId) => setReasonTargetListingId(listingId)}
+            onOpenReason={(listingId) => {
+              if (!submitting && !submittingRef.current) {
+                setReasonTargetListingId(listingId);
+              }
+            }}
             previewTotal={previewTotal}
           />
         )}
@@ -855,7 +871,7 @@ export default function OrderScreen() {
           }}
         />
       )}
-      {reasonTargetListingId && (
+      {reasonTargetListingId && !submitting && (
         <PartialAcceptReasonSheet
           chosen={lineEdits.get(reasonTargetListingId)?.reason ?? null}
           onChoose={onSelectReason}

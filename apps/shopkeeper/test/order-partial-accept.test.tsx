@@ -11,6 +11,7 @@ const mock = vi.hoisted(() => ({
   previewCalls: [] as unknown[],
   partialAcceptCalls: [] as unknown[],
   customPreview: null as null | ((lines: unknown) => Promise<unknown>),
+  customPartialAccept: null as null | ((lines: unknown) => Promise<unknown>),
 }));
 
 vi.mock("react", () => ({
@@ -148,6 +149,9 @@ vi.mock("../src/lib/shop-orders", async (importActual) => ({
     }),
     partialAccept: vi.fn((lines: unknown) => {
       mock.partialAcceptCalls.push(lines);
+      if (mock.customPartialAccept) {
+        return mock.customPartialAccept(lines);
+      }
       return Promise.resolve(true);
     }),
   }),
@@ -275,6 +279,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     mock.previewCalls = [];
     mock.partialAcceptCalls = [];
     mock.customPreview = null;
+    mock.customPartialAccept = null;
     mock.ordersViewActive = false;
     mock.view = {
       status: "ready",
@@ -751,6 +756,102 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     texts = allTexts();
     expect(texts).toContain("Fortune · 500 ml of a 1 L pack");
     expect(texts).toContain("Fortune · 0 × 1 L");
+  });
+
+  it("pending submission: disables steppers, buttons and reason chips, and prevents mutations or multiple submissions", async () => {
+    const submission = deferred<boolean>();
+    mock.customPartialAccept = () => submission.promise;
+
+    // 1. Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // 2. Reduce Dal from 2 to 1 and choose reason
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+
+    // 3. Debounce and resolve preview
+    render();
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Verify ready to send
+    const sendBtn = findNode((p) => p.label === words.sendNewTotal);
+    expect(sendBtn?.props.disabled).toBe(false);
+
+    // 4. Tap "Send new total to customer" (triggers pending submission)
+    const sendPromise = (sendBtn?.props.onPress as () => Promise<void>)();
+    render();
+
+    // Verify UI state while submitting === true
+    const submittingSendBtn = findNode((p) => p.label === words.sendingNewTotal);
+    expect(submittingSendBtn).toBeDefined();
+    expect(submittingSendBtn?.props.busy).toBe(true);
+    expect(submittingSendBtn?.props.disabled).toBe(true);
+
+    const cancelBtn = findNode((p) => p.label === words.cancelChanges);
+    expect(cancelBtn?.props.disabled).toBe(true);
+
+    // All steppers disabled
+    const minusBtns = findNodes((p) => p.accessibilityLabel === words.reduceCount);
+    for (const btn of minusBtns) {
+      expect(btn.props.disabled).toBe(true);
+    }
+    const plusBtns = findNodes((p) => p.accessibilityLabel === words.increaseCount);
+    for (const btn of plusBtns) {
+      expect(btn.props.disabled).toBe(true);
+    }
+
+    // Remove & undo buttons disabled
+    const removeBtns = findNodes((p) => p.label === words.removeLine);
+    for (const btn of removeBtns) {
+      expect(btn.props.disabled).toBe(true);
+    }
+    const undoBtns = findNodes((p) => p.label === words.undoLine);
+    for (const btn of undoBtns) {
+      expect(btn.props.disabled).toBe(true);
+    }
+
+    // Reason chip disabled
+    const reasonChip = findNode((p) => p.accessibilityLabel === "Out of stock");
+    expect(reasonChip?.props.disabled).toBe(true);
+
+    // 5. Attempt mutations while submission is pending
+    // Try stepper down on Dal
+    (minusBtns[0]?.props.onPress as () => void)();
+    // Try stepper up on Dal
+    (plusBtns[0]?.props.onPress as () => void)();
+    // Try remove on Mustard Oil
+    (removeBtns[removeBtns.length - 1]?.props.onPress as () => void)();
+    // Try undo on Dal
+    (undoBtns[0]?.props.onPress as () => void)();
+    // Try pressing reason chip
+    (reasonChip?.props.onPress as () => void)();
+    // Try cancel editing
+    (cancelBtn?.props.onPress as () => void)();
+    // Try double-tapping submit
+    (submittingSendBtn?.props.onPress as () => void)();
+
+    render();
+
+    // Verify quantities and reasons remain unchanged:
+    // Dal is still 1 × 1 kg (not 0, not 2)
+    const texts = allTexts();
+    expect(texts).toContain("Tata · 1 × 1 kg");
+    // Reason sheet did NOT open
+    expect(findNode((p) => p.children === words.reasonSheetTitle)).toBeUndefined();
+    // Submission was NOT called a second time
+    expect(mock.partialAcceptCalls).toHaveLength(1);
+
+    // 6. Resolve submission
+    submission.resolve(true);
+    await sendPromise;
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // After success: edit mode exited, regular buttons restored
+    expect(findNode((p) => p.label === words.sendNewTotal)).toBeUndefined();
+    expect(findNode((p) => p.label === words.accept)).toBeDefined();
   });
 });
 
