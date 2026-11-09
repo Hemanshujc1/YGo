@@ -1,10 +1,9 @@
-import type { OrderSummary } from "@ygo/contracts";
 import { Text } from "@ygo/mobile";
 import { router, useSegments } from "expo-router";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
-import { changedTotalBanner } from "../lib/changed-total-banner";
+import { type AwaitingOrder, changedTotalBanner } from "../lib/changed-total-banner";
 import { money } from "../lib/money";
 import { strings } from "../strings";
 import { ExpiryCountdown } from "./countdown";
@@ -35,19 +34,19 @@ export function ChangedTotalBanner({ children }: { children?: ReactNode }) {
   );
 }
 
-function Banner({ order, top }: { order: OrderSummary; top: number }) {
+function Banner({ order, top }: { order: AwaitingOrder; top: number }) {
   return (
     <View style={{ paddingTop: top }} className="border-b border-warning bg-warning-subtle">
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${words.title}: ${words.totalChangedTo(money(order.proposedTotal ?? order.total))}`}
+        accessibilityLabel={`${words.title}: ${words.totalChangedTo(money(order.proposedTotal))}`}
         onPress={() => router.navigate({ pathname: "/order/[id]", params: { id: order.id } })}
         className="flex-row items-center justify-between gap-3 px-4 py-2.5 active:opacity-80"
       >
         <View className="flex-1 gap-0.5">
           <Text className="text-secondary font-semibold text-warning-text">{words.title}</Text>
           <Text className="text-body font-bold tabular-nums text-text">
-            {words.totalChangedTo(money(order.proposedTotal ?? order.total))}
+            {words.totalChangedTo(money(order.proposedTotal))}
           </Text>
         </View>
         <View className="flex-row items-center gap-2">

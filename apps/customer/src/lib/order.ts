@@ -140,11 +140,11 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
   }
 
   /** Confirm or Decline was refused as too late or out of date: the server decides, so say what the order now is (#578). */
-  async function settleChangedTotal() {
+  async function settleChangedTotal(code: "CONFIRMATION_EXPIRED" | "ORDER_STATUS_CHANGED") {
     await read();
     const words = strings.order.changedTotal;
     const status = view.order?.status;
-    set({ notice: status === "cancelled_by_customer" ? words.timeUpBody : status === "awaiting_customer_confirm" ? words.timeUpPending : words.noLongerWaiting });
+    set({ notice: status === "cancelled_by_customer" ? words.timeUpBody : status === "awaiting_customer_confirm" ? (code === "ORDER_STATUS_CHANGED" ? words.changedAgain : words.timeUpPending) : words.noLongerWaiting });
   }
 
   return {
@@ -240,7 +240,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ status: "ready", order: answer.data, notice: null });
         schedule();
       } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
-        await settleChangedTotal();
+        await settleChangedTotal(answer.code);
       } else {
         // Network or server error: keep screen, show inline error with retry, keep countdown running.
         set({ notice: answer === "offline" ? strings.order.changedTotal.confirmFailed : strings.errors[answer.code] });
@@ -260,7 +260,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ status: "ready", order: answer.data, notice: null });
         schedule();
       } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
-        await settleChangedTotal();
+        await settleChangedTotal(answer.code);
       } else {
         set({ notice: answer === "offline" ? strings.order.changedTotal.declineFailed : strings.errors[answer.code] });
         schedule();

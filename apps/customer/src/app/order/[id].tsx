@@ -204,9 +204,11 @@ export default function OrderScreen() {
   const isAwaiting = shown?.status === "awaiting_customer_confirm";
   const secondsLeft = useSecondsLeft(isAwaiting ? shown.confirmByAt : null);
   const refreshedExpiryRef = useRef<string | null>(null);
+  const refreshedNoProposalRef = useRef(false);
 
   useEffect(() => {
     refreshedExpiryRef.current = null;
+    refreshedNoProposalRef.current = false;
   }, [id]);
 
   // The banner follows the order's status, so it clears once this one is answered (#578).
@@ -217,7 +219,6 @@ export default function OrderScreen() {
 
   // Awaiting an answer with no proposal to show: read it again once rather than show buttons with nothing to review (#578).
   const lacksProposal = isAwaiting && !shown?.proposal;
-  const refreshedNoProposalRef = useRef(false);
   useEffect(() => {
     if (lacksProposal && !refreshedNoProposalRef.current) {
       refreshedNoProposalRef.current = true;

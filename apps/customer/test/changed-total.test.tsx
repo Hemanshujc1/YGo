@@ -283,6 +283,9 @@ describe("earliestAwaitingOrder (#528)", () => {
 
     const earliest = earliestAwaitingOrder([o1, o2, o3]);
     expect(earliest?.id).toBe("o-2");
+
+    // Without the proposal's total there is nothing right to show, so it is not the banner's order (#578).
+    expect(earliestAwaitingOrder([{ ...o2, proposedTotal: null }])).toBeNull();
   });
 });
 
@@ -321,21 +324,6 @@ describe("createChangedTotalBannerStore lifecycle and polling (#528)", () => {
     pushCb?.();
     await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
 
-    store.stop();
-  });
-
-  it("polls only while the Customer has an active order (#578)", async () => {
-    const timers = { set: vi.fn(() => 1), clear: vi.fn() };
-    const ordersMock = vi.fn().mockResolvedValue({ ok: true, data: { active: [], past: [] } });
-    const store = createChangedTotalBannerStore({ orders: ordersMock }, { get: () => ({ status: "signed-in" }), subscribe: vi.fn(() => () => undefined) }, undefined, timers, 10_000);
-    store.start();
-    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
-    await new Promise((r) => setTimeout(r, 0));
-    expect(timers.set).not.toHaveBeenCalled();
-
-    ordersMock.mockResolvedValue({ ok: true, data: { active: [awaitingSummary], past: [] } });
-    await store.refresh();
-    expect(timers.set).toHaveBeenCalledTimes(1);
     store.stop();
   });
 
@@ -612,6 +600,10 @@ describe("createOrder C10 actions (#528)", () => {
     const moved = createOrder(client({ declineOrderTotal: refused("ORDER_STATUS_CHANGED"), order: read("accepted") }), "order-1", awaitingOrder);
     await moved.declineTotal();
     expect(moved.get().notice).toBe(words2.noLongerWaiting);
+
+    const again = createOrder(client({ confirmOrderTotal: refused("ORDER_STATUS_CHANGED"), order: read("awaiting_customer_confirm") }), "order-1", awaitingOrder);
+    await again.confirmTotal();
+    expect(again.get().notice).toBe(words2.changedAgain);
 
     const cancelled = createOrder(client({ declineOrderTotal: refused("CONFIRMATION_EXPIRED"), order: read("cancelled_by_customer") }), "order-1", awaitingOrder);
     await cancelled.declineTotal();

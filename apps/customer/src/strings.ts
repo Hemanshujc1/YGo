@@ -363,6 +363,7 @@ export const strings = {
       timeUp: "Time is up",
       timeUpBody: "Time is up, the order was cancelled at no cost.",
       timeUpPending: "Time is up. The order will be cancelled at no cost.",
+      changedAgain: "The shop changed the total again. Review the new total.",
       noLongerWaiting: "This order is no longer waiting for your answer.",
       expiresIn: (clock: string) => `Confirm within ${clock}`,
       confirmFailed: "Couldn't confirm the new total. Check your connection and try again.",
