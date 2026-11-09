@@ -7,6 +7,11 @@ vi.mock("react", () => ({
     if (!(index in mock.hooks)) mock.hooks[index] = typeof initial === "function" ? (initial as () => unknown)() : initial;
     return [mock.hooks[index], () => undefined];
   },
+  useRef: (initial: unknown) => {
+    const index = mock.cursor++;
+    if (!(index in mock.hooks)) mock.hooks[index] = { current: initial };
+    return mock.hooks[index];
+  },
   useSyncExternalStore: () => mock.view,
   useEffect: () => undefined,
 }));

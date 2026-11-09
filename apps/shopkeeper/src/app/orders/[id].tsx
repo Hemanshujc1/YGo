@@ -1,17 +1,17 @@
 import {
   OrderLineChangeReason,
-  type OrderLine,
   type PartialAcceptLine,
   type PartialAcceptPreviewResponse,
   RejectReason,
   type ShopDeliverersResponse,
+  type ShopOrderLine,
   type ShopOrderResponse,
 } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import { formatTime } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -22,12 +22,32 @@ import { Countdown, useSecondsLeft } from "../../components/countdown";
 import { Minus, Plus } from "../../components/icons";
 import { ReasonPicker } from "../../components/reason-picker";
 import { money } from "../../lib/money";
-import { createShopOrder, lineLabel, shortLabel, treatments } from "../../lib/shop-orders";
+import { createShopOrder, lineLabel, pack, shortLabel, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
 
 // S05 New order detail (#431): Accept is the biggest and lowest button; Reject asks for a reason first.
 
 const words = strings.orders;
+
+function proposalKey(
+  lines: ShopOrderLine[],
+  lineEdits: Map<string, { count: number; reason: OrderLineChangeReason | null }>
+): string | null {
+  let hasChanges = false;
+  let remainingCount = 0;
+  const parts: string[] = [];
+  for (const l of lines) {
+    const edit = lineEdits.get(l.listingId);
+    const count = edit !== undefined ? edit.count : l.count;
+    if (count < l.count) {
+      hasChanges = true;
+      parts.push(`${l.listingId}:${count}:${edit?.reason ?? ""}`);
+    }
+    if (count > 0) remainingCount++;
+  }
+  if (!hasChanges || remainingCount === 0) return null;
+  return parts.sort().join("|");
+}
 
 function Detail({
   order,
@@ -69,13 +89,28 @@ function Detail({
             const reason = edit?.reason ?? null;
             const isReduced = count < line.count;
             const isPart = line.part !== null;
+            const originalLabel = lineLabel(line);
+            const proposedLabel = line.part !== null
+              ? [line.brand, count === 0 ? `0 × ${pack(line.quantity, line.baseUnit)}` : words.part(pack(line.part, line.baseUnit), pack(line.quantity, line.baseUnit))].filter(Boolean).join(" · ")
+              : lineLabel({ ...line, count });
 
             return (
               <View key={line.listingId} className={`gap-2 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
                 <View className="flex-row items-center justify-between gap-3">
                   <View className="flex-1">
                     <Text className="text-body font-semibold text-text">{line.name}</Text>
-                    <Text className="text-secondary tabular-nums text-muted">{lineLabel(line)}</Text>
+                    {isReduced ? (
+                      <View className="flex-row items-center gap-1.5 flex-wrap">
+                        <Text className="text-secondary line-through text-muted tabular-nums">
+                          {originalLabel}
+                        </Text>
+                        <Text className="text-secondary font-medium tabular-nums text-text">
+                          {proposedLabel}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text className="text-secondary tabular-nums text-muted">{originalLabel}</Text>
+                    )}
                   </View>
                   <View className="items-end">
                     {isReduced ? (
@@ -150,11 +185,35 @@ function Detail({
         ) : isAwaiting && proposal ? (
           proposal.lines.map((line, index) => {
             const isReduced = line.count < line.originalCount;
+            const originalLabel = [
+              line.brand,
+              line.originalPart
+                ? words.part(pack(line.originalPart, line.baseUnit), pack(line.quantity, line.baseUnit))
+                : `${line.originalCount} × ${pack(line.quantity, line.baseUnit)}`,
+            ].filter(Boolean).join(" · ");
+            const proposedLabel = [
+              line.brand,
+              line.part
+                ? words.part(pack(line.part, line.baseUnit), pack(line.quantity, line.baseUnit))
+                : `${line.count} × ${pack(line.quantity, line.baseUnit)}`,
+            ].filter(Boolean).join(" · ");
+
             return (
               <View key={index} className={`flex-row gap-3 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
                 <View className="flex-1">
                   <Text className="text-body font-semibold text-text">{line.name}</Text>
-                  <Text className="text-secondary tabular-nums text-muted">{lineLabel(line as unknown as OrderLine)}</Text>
+                  {isReduced ? (
+                    <View className="flex-row items-center gap-1.5 flex-wrap">
+                      <Text className="text-secondary line-through text-muted tabular-nums">
+                        {originalLabel}
+                      </Text>
+                      <Text className="text-secondary font-medium tabular-nums text-text">
+                        {proposedLabel}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text className="text-secondary tabular-nums text-muted">{originalLabel}</Text>
+                  )}
                   {isReduced && line.changeReason && (
                     <View className="mt-1 self-start rounded-full border border-border bg-surface px-2.5 py-0.5">
                       <Text className="text-small-label text-muted">{words.lineChangeReasons[line.changeReason]}</Text>
@@ -304,7 +363,8 @@ export default function OrderScreen() {
   const [editing, setEditing] = useState(false);
   const [lineEdits, setLineEdits] = useState<Map<string, { count: number; reason: OrderLineChangeReason | null }>>(() => new Map());
   const [reasonTargetListingId, setReasonTargetListingId] = useState<string | null>(null);
-  const [previewTotal, setPreviewTotal] = useState<PartialAcceptPreviewResponse | null>(null);
+  const previewSeq = useRef(0);
+  const [previewState, setPreviewState] = useState<{ key: string; data: PartialAcceptPreviewResponse } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const identity = session.get();
@@ -319,19 +379,23 @@ export default function OrderScreen() {
 
   function startEditing() {
     if (!shown) return;
+    previewSeq.current++;
+    setPreviewState(null);
+    setPreviewLoading(false);
     const initial = new Map<string, { count: number; reason: OrderLineChangeReason | null }>();
     for (const l of shown.lines) {
       initial.set(l.listingId, { count: l.count, reason: null });
     }
     setLineEdits(initial);
-    setPreviewTotal(null);
     setEditing(true);
   }
 
   function cancelEditing() {
+    previewSeq.current++;
     setEditing(false);
     setLineEdits(new Map());
-    setPreviewTotal(null);
+    setPreviewState(null);
+    setPreviewLoading(false);
     setReasonTargetListingId(null);
   }
 
@@ -342,6 +406,8 @@ export default function OrderScreen() {
     const edit = lineEdits.get(listingId);
     const currentCount = edit !== undefined ? edit.count : original.count;
     if (currentCount <= 0) return;
+    previewSeq.current++;
+    setPreviewState(null);
     const newCount = currentCount - 1;
     const existingReason = edit?.reason ?? null;
     const nextEdits = new Map(lineEdits);
@@ -359,6 +425,8 @@ export default function OrderScreen() {
     const edit = lineEdits.get(listingId);
     const currentCount = edit !== undefined ? edit.count : original.count;
     if (currentCount >= original.count) return;
+    previewSeq.current++;
+    setPreviewState(null);
     const newCount = currentCount + 1;
     const nextEdits = new Map(lineEdits);
     nextEdits.set(listingId, { count: newCount, reason: newCount === original.count ? null : (edit?.reason ?? null) });
@@ -371,6 +439,8 @@ export default function OrderScreen() {
     if (!original) return;
     const edit = lineEdits.get(listingId);
     const existingReason = edit?.reason ?? null;
+    previewSeq.current++;
+    setPreviewState(null);
     const nextEdits = new Map(lineEdits);
     nextEdits.set(listingId, { count: 0, reason: existingReason });
     setLineEdits(nextEdits);
@@ -383,6 +453,8 @@ export default function OrderScreen() {
     if (!shown) return;
     const original = shown.lines.find((l) => l.listingId === listingId);
     if (!original) return;
+    previewSeq.current++;
+    setPreviewState(null);
     const nextEdits = new Map(lineEdits);
     nextEdits.set(listingId, { count: original.count, reason: null });
     setLineEdits(nextEdits);
@@ -395,6 +467,8 @@ export default function OrderScreen() {
     if (!reasonTargetListingId) return;
     const edit = lineEdits.get(reasonTargetListingId);
     if (edit) {
+      previewSeq.current++;
+      setPreviewState(null);
       const nextEdits = new Map(lineEdits);
       nextEdits.set(reasonTargetListingId, { count: edit.count, reason });
       setLineEdits(nextEdits);
@@ -403,44 +477,71 @@ export default function OrderScreen() {
   }
 
   useEffect(() => {
-    if (!editing || !shown) return;
-    let hasChanged = false;
-    let remaining = 0;
-    const proposed: PartialAcceptLine[] = [];
+    return () => {
+      previewSeq.current++;
+    };
+  }, []);
+
+  const canEditOrder = shown?.status === "placed" || shown?.status === "accepted" || shown?.status === "preparing";
+  useEffect(() => {
+    if (editing && !canEditOrder) {
+      cancelEditing();
+    }
+  }, [editing, canEditOrder]);
+
+  useEffect(() => {
+    if (!editing || !shown) {
+      previewSeq.current++;
+      setPreviewState(null);
+      setPreviewLoading(false);
+      return;
+    }
     const lines = shown.lines ?? [];
+    const currentKey = proposalKey(lines, lineEdits);
+    if (!currentKey) {
+      previewSeq.current++;
+      setPreviewState(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    const proposed: PartialAcceptLine[] = [];
     for (const l of lines) {
       const edit = lineEdits.get(l.listingId);
       const count = edit !== undefined ? edit.count : l.count;
       if (count < l.count) {
-        hasChanged = true;
         proposed.push({
           listingId: l.listingId,
           count,
           reason: edit?.reason ?? "out_of_stock",
         });
       }
-      if (count > 0) remaining++;
     }
-    if (!hasChanged || remaining === 0) {
-      setPreviewTotal(null);
-      setPreviewLoading(false);
-      return;
-    }
+
     setPreviewLoading(true);
+    const reqId = ++previewSeq.current;
     const timer = setTimeout(() => {
-      void order.previewPartialAccept(proposed).then((result) => {
-        setPreviewLoading(false);
-        if (result && result.ok) {
-          setPreviewTotal(result.data);
-        } else {
-          setPreviewTotal(null);
-        }
-      }).catch(() => {
-        setPreviewLoading(false);
-        setPreviewTotal(null);
-      });
+      void order
+        .previewPartialAccept(proposed)
+        .then((result) => {
+          if (reqId !== previewSeq.current) return;
+          setPreviewLoading(false);
+          if (result && result.ok) {
+            setPreviewState({ key: currentKey, data: result.data });
+          } else {
+            setPreviewState(null);
+          }
+        })
+        .catch(() => {
+          if (reqId !== previewSeq.current) return;
+          setPreviewLoading(false);
+          setPreviewState(null);
+        });
     }, 250);
-    return () => clearTimeout(timer);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [editing, lineEdits, shown, order]);
 
   let hasChanges = false;
@@ -460,10 +561,23 @@ export default function OrderScreen() {
       if (count > 0) remainingCount++;
     }
   }
-  const canSend = hasChanges && remainingCount > 0 && allReducedHaveReasons && previewTotal !== null && !previewLoading && !timeUp;
+
+  const currentKey = shown ? proposalKey(shown.lines ?? [], lineEdits) : null;
+  const previewMatchesCurrent = previewState !== null && currentKey !== null && previewState.key === currentKey;
+  const previewTotal = previewMatchesCurrent ? previewState.data : null;
+
+  const canSend =
+    hasChanges &&
+    remainingCount > 0 &&
+    allReducedHaveReasons &&
+    previewMatchesCurrent &&
+    !previewLoading &&
+    !timeUp;
 
   async function handleSendNewTotal() {
     if (!shown || !canSend || submitting) return;
+    const keyAtSend = proposalKey(shown.lines ?? [], lineEdits);
+    if (!keyAtSend || previewState?.key !== keyAtSend) return;
     const proposed: PartialAcceptLine[] = [];
     const lines = shown.lines ?? [];
     for (const l of lines) {
@@ -483,9 +597,10 @@ export default function OrderScreen() {
     const ok = await order.partialAccept(proposed);
     setSubmitting(false);
     if (ok) {
+      previewSeq.current++;
       setEditing(false);
       setLineEdits(new Map());
-      setPreviewTotal(null);
+      setPreviewState(null);
     }
   }
 

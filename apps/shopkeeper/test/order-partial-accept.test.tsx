@@ -10,6 +10,7 @@ const mock = vi.hoisted(() => ({
   ordersViewActive: false,
   previewCalls: [] as unknown[],
   partialAcceptCalls: [] as unknown[],
+  customPreview: null as null | ((lines: unknown) => Promise<unknown>),
 }));
 
 vi.mock("react", () => ({
@@ -24,6 +25,13 @@ vi.mock("react", () => ({
         mock.hooks[index] = typeof next === "function" ? (next as (prev: unknown) => unknown)(mock.hooks[index]) : next;
       },
     ];
+  },
+  useRef: (initial: unknown) => {
+    const index = mock.cursor++;
+    if (!(index in mock.hooks)) {
+      mock.hooks[index] = { current: initial };
+    }
+    return mock.hooks[index] as { current: unknown };
   },
   useSyncExternalStore: (subscribe: (cb: () => void) => () => void, get: () => unknown) => {
     return mock.ordersViewActive ? mock.ordersView : (mock.view ?? get());
@@ -124,6 +132,9 @@ vi.mock("../src/lib/shop-orders", async (importActual) => ({
     reject: vi.fn().mockResolvedValue(true),
     previewPartialAccept: vi.fn((lines: unknown) => {
       mock.previewCalls.push(lines);
+      if (mock.customPreview) {
+        return mock.customPreview(lines);
+      }
       return Promise.resolve({
         ok: true,
         data: {
@@ -246,6 +257,16 @@ function selectReason(reasonText: string) {
   (radio?.props.onPress as () => void)();
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -253,6 +274,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     mock.effects = [];
     mock.previewCalls = [];
     mock.partialAcceptCalls = [];
+    mock.customPreview = null;
     mock.ordersViewActive = false;
     mock.view = {
       status: "ready",
@@ -410,6 +432,7 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     selectReason("Out of stock");
 
     // Run timer to fire debounced preview call
+    render();
     vi.advanceTimersByTime(300);
     for (let i = 0; i < 5; i++) await Promise.resolve();
     render();
@@ -451,6 +474,283 @@ describe("S05 Accept in part: Steppers, reasons, preview, and submit (#527)", ()
     expect(mock.partialAcceptCalls[0]).toEqual([
       { listingId: dalListingId, count: 1, reason: "out_of_stock" },
     ]);
+  });
+
+  it("out-of-order preview responses: older in-flight preview resolving late does not overwrite latest preview", async () => {
+    const d1 = deferred<{ ok: boolean; data: PartialAcceptPreviewResponse }>();
+    const d2 = deferred<{ ok: boolean; data: PartialAcceptPreviewResponse }>();
+
+    mock.customPreview = (lines: unknown) => {
+      const arr = lines as Array<{ listingId: string; count: number }>;
+      const dal = arr.find((l) => l.listingId === dalListingId);
+      if (dal?.count === 1) return d1.promise;
+      if (dal?.count === 0) return d2.promise;
+      return Promise.resolve({
+        ok: true,
+        data: {
+          productValue: "150.00",
+          deliveryFee: "30.00",
+          smallCartFee: null,
+          total: "180.00",
+          originalTotal: "230.00",
+        },
+      });
+    };
+
+    // Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Step down Dal: 2 -> 1
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+
+    // Advance timer so preview request 1 (Dal count 1) is fired
+    render();
+    vi.advanceTimersByTime(300);
+
+    // Step down Dal again: 1 -> 0
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+
+    // Advance timer so preview request 2 (Dal count 0) is fired
+    render();
+    vi.advanceTimersByTime(300);
+
+    // While both are in-flight, send should be disabled and preview is null
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(true);
+
+    // Request 2 resolves FIRST (latest proposal, total = 100)
+    d2.resolve({
+      ok: true,
+      data: {
+        productValue: "70.00",
+        deliveryFee: "30.00",
+        smallCartFee: null,
+        total: "100.00",
+        originalTotal: "230.00",
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Latest total is shown and send is enabled
+    expect(allTexts()).toContain("₹100");
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(false);
+
+    // Request 1 resolves OUT-OF-ORDER (outdated proposal, total = 180)
+    d1.resolve({
+      ok: true,
+      data: {
+        productValue: "150.00",
+        deliveryFee: "30.00",
+        smallCartFee: null,
+        total: "180.00",
+        originalTotal: "230.00",
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Outdated request 1 does NOT overwrite preview total
+    expect(allTexts()).toContain("₹100");
+    expect(allTexts()).not.toContain("₹180");
+
+    // Submitting sends the current proposal (count 0), not the stale one (count 1)
+    const sendBtn = findNode((p) => p.label === words.sendNewTotal);
+    expect(sendBtn?.props.disabled).toBe(false);
+    await (sendBtn?.props.onPress as () => Promise<void>)();
+
+    expect(mock.partialAcceptCalls[0]).toEqual([
+      { listingId: dalListingId, count: 0, reason: "out_of_stock" },
+    ]);
+  });
+
+  it("rapid quantity changes: intermediate requests are debounced and previous preview cleared immediately", async () => {
+    // Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Rapidly step down Dal twice before timer fires
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    // Dismiss reason modal
+    (findNode((p) => p.label === words.reasonCancel)?.props.onPress as () => void)();
+
+    // Step down again immediately
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    // Select reason for Dal
+    selectReason("Out of stock");
+
+    // Fire timer
+    vi.advanceTimersByTime(300);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Only one preview call was dispatched with the final count (0), not intermediate (1)
+    expect(mock.previewCalls).toHaveLength(1);
+    expect(mock.previewCalls[0]).toEqual([
+      { listingId: dalListingId, count: 0, reason: "out_of_stock" },
+    ]);
+  });
+
+  it("reason changes: changing a reason immediately clears preview and invalidates in-flight response", async () => {
+    const d1 = deferred<{ ok: boolean; data: PartialAcceptPreviewResponse }>();
+    const d2 = deferred<{ ok: boolean; data: PartialAcceptPreviewResponse }>();
+
+    mock.customPreview = (lines: unknown) => {
+      const arr = lines as Array<{ listingId: string; reason: string }>;
+      const dal = arr.find((l) => l.listingId === dalListingId);
+      if (dal?.reason === "out_of_stock") return d1.promise;
+      if (dal?.reason === "damaged") return d2.promise;
+      return Promise.resolve({
+        ok: true,
+        data: {
+          productValue: "150.00",
+          deliveryFee: "30.00",
+          smallCartFee: null,
+          total: "180.00",
+          originalTotal: "230.00",
+        },
+      });
+    };
+
+    // Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Step down Dal: 2 -> 1
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+
+    // Advance timer so preview request 1 (reason "out_of_stock") is fired
+    render();
+    vi.advanceTimersByTime(300);
+
+    // Now change reason: open reason sheet and choose "Damaged"
+    const chip = findNode((p) => p.accessibilityLabel === "Out of stock");
+    (chip?.props.onPress as () => void)();
+    selectReason("Damaged");
+
+    // Immediately after changing reason, previous preview is cleared and send is disabled
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(true);
+
+    // Advance timer so preview request 2 (reason "damaged") is fired
+    render();
+    vi.advanceTimersByTime(300);
+
+    // Request 1 resolves with old reason
+    d1.resolve({
+      ok: true,
+      data: {
+        productValue: "150.00",
+        deliveryFee: "30.00",
+        smallCartFee: null,
+        total: "180.00",
+        originalTotal: "230.00",
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Send should STILL be disabled because request 1 does not match current proposal reason
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(true);
+
+    // Request 2 resolves with new reason
+    d2.resolve({
+      ok: true,
+      data: {
+        productValue: "150.00",
+        deliveryFee: "30.00",
+        smallCartFee: null,
+        total: "180.00",
+        originalTotal: "230.00",
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // Now send is enabled and submits with "damaged"
+    const sendBtn = findNode((p) => p.label === words.sendNewTotal);
+    expect(sendBtn?.props.disabled).toBe(false);
+    await (sendBtn?.props.onPress as () => Promise<void>)();
+
+    expect(mock.partialAcceptCalls[0]).toEqual([
+      { listingId: dalListingId, count: 1, reason: "damaged" },
+    ]);
+  });
+
+  it("cancellation and reopening edit mode: in-flight preview from cancelled session never populates reopened edit session", async () => {
+    const d1 = deferred<{ ok: boolean; data: PartialAcceptPreviewResponse }>();
+
+    mock.customPreview = () => d1.promise;
+
+    // Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Step down Dal: 2 -> 1
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    selectReason("Out of stock");
+
+    // Advance timer to trigger preview request
+    render();
+    vi.advanceTimersByTime(300);
+
+    // Cancel changes
+    const cancelChangesBtn = findNode((p) => p.label === words.cancelChanges);
+    (cancelChangesBtn?.props.onPress as () => void)();
+
+    // Reopen edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Now resolve the in-flight preview request from the cancelled session
+    d1.resolve({
+      ok: true,
+      data: {
+        productValue: "150.00",
+        deliveryFee: "30.00",
+        smallCartFee: null,
+        total: "180.00",
+        originalTotal: "230.00",
+      },
+    });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    render();
+
+    // The reopened edit session must remain unedited with send disabled and no stale total
+    expect(findNode((p) => p.label === words.sendNewTotal)?.props.disabled).toBe(true);
+    expect(allTexts()).not.toContain("₹180");
+  });
+
+  it("quantity display: edit mode clearly distinguishes original quantities from proposed quantities, including part-of-pack lines", () => {
+    // Enter edit mode
+    (findNode((p) => p.label === words.acceptInPart)?.props.onPress as () => void)();
+
+    // Before reductions:
+    // Dal original: "Tata · 2 × 1 kg"
+    // Oil original: "Fortune · 500 ml of a 1 L pack"
+    expect(allTexts()).toContain("Tata · 2 × 1 kg");
+    expect(allTexts()).toContain("Fortune · 500 ml of a 1 L pack");
+
+    // Reduce Dal from 2 to 1
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    // Dismiss reason sheet
+    (findNode((p) => p.label === words.reasonCancel)?.props.onPress as () => void)();
+
+    // Both original ("Tata · 2 × 1 kg") and proposed ("Tata · 1 × 1 kg") must be visible
+    let texts = allTexts();
+    expect(texts).toContain("Tata · 2 × 1 kg");
+    expect(texts).toContain("Tata · 1 × 1 kg");
+
+    // Reduce Dal to 0
+    (findNodes((p) => p.accessibilityLabel === words.reduceCount)[0]?.props.onPress as () => void)();
+    texts = allTexts();
+    expect(texts).toContain("Tata · 2 × 1 kg");
+    expect(texts).toContain("Tata · 0 × 1 kg");
+
+    // Remove Mustard Oil (part of pack line)
+    const removeBtns = findNodes((p) => p.label === words.removeLine);
+    (removeBtns[removeBtns.length - 1]?.props.onPress as () => void)();
+
+    // For part-of-pack line: original "Fortune · 500 ml of a 1 L pack" and proposed "Fortune · 0 × 1 L"
+    texts = allTexts();
+    expect(texts).toContain("Fortune · 500 ml of a 1 L pack");
+    expect(texts).toContain("Fortune · 0 × 1 L");
   });
 });
 
