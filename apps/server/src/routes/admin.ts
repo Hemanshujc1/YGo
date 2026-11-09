@@ -108,6 +108,7 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
   );
 
   // A30 Below the contribution floor exceptions (MNY-4, ADM-7, #529).
+  // Consistent database snapshot across list and count queries via a repeatable-read read-only transaction.
   app.get(
     "/v1/admin/orders/below-floor-exceptions",
     { schema: { querystring: BelowFloorExceptionsQuery, response: { 200: BelowFloorExceptionsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
@@ -116,15 +117,23 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
       if (!who) return reply;
       const query = request.query as BelowFloorExceptionsQuery;
       const scope = who.role === "area_manager" ? who.accountId : null;
-      const [page, counts] = await Promise.all([
-        listBelowFloorExceptions(pool, scope, query),
-        belowFloorExceptionCounts(pool, scope),
-      ]);
-      return reply.code(200).send({
-        exceptions: page.exceptions,
-        nextCursor: page.nextCursor,
-        counts,
-      });
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const page = await listBelowFloorExceptions(client, scope, query);
+        const counts = await belowFloorExceptionCounts(client, scope);
+        await client.query("COMMIT");
+        return reply.code(200).send({
+          exceptions: page.exceptions,
+          nextCursor: page.nextCursor,
+          counts,
+        });
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
     },
   );
 

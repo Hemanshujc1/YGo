@@ -58,7 +58,7 @@ export function BelowFloorExceptions({ api }: { api: AdminApi }) {
   }, [api]);
 
   const change = (patch: Partial<{ status: Status; shopId: string; areaManagerId: string }>) => {
-    const state = { status, shopId, areaManagerId, ...patch };
+    const state = { ...view.current, ...patch };
     setStatus(state.status);
     setShopId(state.shopId);
     setAreaManagerId(state.areaManagerId);

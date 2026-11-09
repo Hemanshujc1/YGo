@@ -424,4 +424,23 @@ describe("A30 Below contribution floor exceptions queue (MNY-4, ADM-7, #529)", (
     expect(reviewedBody.exceptions[0]?.shortfall).toBe("8.00");
     expect(reviewedBody.exceptions[0]?.reviewed?.by).toBe(admin.name);
   });
+
+  it("keeps below-floor exception reviews append-only against UPDATE, DELETE and TRUNCATE", async () => {
+    const adminHeaders = await signIn(admin.email);
+    const customerId = await account("cust-append@example.com");
+    const ownerId = await account("owner-append@example.com");
+    const shopId = await shop("Append Shop", null);
+    const ord = await createOrder({ shopId, shopName: "Append Shop", customerId });
+    const revId = await createRevision({ orderId: ord.id, actorId: ownerId, total: "100.00", shortfall: "10.00" });
+
+    const reviewRes = await review(adminHeaders, revId);
+    expect(reviewRes.statusCode).toBe(200);
+
+    const refused = (sql: string, params: unknown[] = []) =>
+      expect(database.pool.query(sql, params)).rejects.toThrow(/below_floor_exception_reviews is append-only/);
+
+    await refused("UPDATE below_floor_exception_reviews SET reviewed_at = now() WHERE revision_id = $1", [revId]);
+    await refused("DELETE FROM below_floor_exception_reviews WHERE revision_id = $1", [revId]);
+    await refused("TRUNCATE below_floor_exception_reviews");
+  });
 });

@@ -52,6 +52,16 @@ const page = (exceptions: BelowFloorException[], nextCursor: string | null = nul
 
 const ok = <T,>(data: T) => ({ ok: true as const, data });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function setup(first: BelowFloorExceptionsResponse, apiOverrides: Record<string, unknown> = {}) {
   const calls = {
     listBelowFloorExceptions: vi.fn(),
@@ -208,5 +218,128 @@ describe("A30 Below contribution floor exceptions screen (MNY-4, ADM-7, #529)", 
     await waitFor(() => expect(bodyRows()).toHaveLength(2));
     expect(calls.listBelowFloorExceptions).toHaveBeenCalledWith({ status: "open", cursor: "cursor-1" });
     expect(screen.queryByRole("button", { name: strings.belowFloorExceptionsMore })).toBeNull();
+  });
+
+  it("handles overlapping pagination and filter changes deterministically without stale page leaking", async () => {
+    const calls = setup(page([row(1)], "cursor-1"));
+    const pageDeferred = deferred<unknown>();
+    calls.listBelowFloorExceptions.mockReturnValueOnce(pageDeferred.promise);
+
+    // User clicks "Show more" -> pagination is in flight
+    fireEvent.click(await screen.findByRole("button", { name: strings.belowFloorExceptionsMore }));
+    expect(calls.listBelowFloorExceptions).toHaveBeenCalledWith({ status: "open", cursor: "cursor-1" });
+
+    // While pagination is pending, user changes shop filter to shopB
+    const filterDeferred = deferred<unknown>();
+    calls.listBelowFloorExceptions.mockReturnValueOnce(filterDeferred.promise);
+    const shopSelect = screen.getByLabelText(strings.belowFloorExceptionsFilterShop);
+    fireEvent.change(shopSelect, { target: { value: shopB } });
+
+    // Filter request resolves first with shopB row 2
+    filterDeferred.resolve(ok(page([row(2, { shopId: shopB, shopName: "Kothrud Mart" })])));
+    await waitFor(() => expect(bodyRows()).toHaveLength(1));
+    expect(bodyRows()[0]?.textContent).toContain("Kothrud Mart");
+
+    // Stale pagination request resolves later with row 3
+    pageDeferred.resolve(ok(page([row(3)])));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(bodyRows()).toHaveLength(1);
+    expect(bodyRows()[0]?.textContent).toContain("Kothrud Mart");
+    expect(screen.queryByText("#1003")).toBeNull();
+  });
+
+  it("handles out-of-order rapid filter changes deterministically, keeping latest selection", async () => {
+    const calls = setup(page([row(1)]));
+    await screen.findByRole("heading", { name: strings.belowFloorExceptions });
+
+    const reqA = deferred<unknown>();
+    const reqB = deferred<unknown>();
+    calls.listBelowFloorExceptions.mockReturnValueOnce(reqA.promise).mockReturnValueOnce(reqB.promise);
+
+    const shopSelect = screen.getByLabelText(strings.belowFloorExceptionsFilterShop);
+    // User selects shopA
+    fireEvent.change(shopSelect, { target: { value: shopA } });
+    // User quickly selects shopB before shopA responds
+    fireEvent.change(shopSelect, { target: { value: shopB } });
+
+    // Request B resolves first with row 2 (shopB)
+    reqB.resolve(ok(page([row(2, { shopId: shopB, shopName: "Kothrud Mart" })])));
+    await waitFor(() => expect(bodyRows()).toHaveLength(1));
+
+    // Request A resolves later with row 3 (shopA)
+    reqA.resolve(ok(page([row(3, { shopId: shopA, shopName: "Sai General Stores" })])));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // View must strictly keep shopB result and drop stale shopA
+    expect(bodyRows()).toHaveLength(1);
+    expect(bodyRows()[0]?.textContent).toContain("Kothrud Mart");
+    expect(screen.queryByText("#1003")).toBeNull();
+  });
+
+  it("tracks concurrent review operations independently across different rows", async () => {
+    const calls = setup(page([row(1), row(2)]));
+    await screen.findByRole("heading", { name: strings.belowFloorExceptions });
+
+    const rev1 = deferred<unknown>();
+    const rev2 = deferred<unknown>();
+    calls.reviewBelowFloorException
+      .mockImplementation((id: string) => (id === row(1).revisionId ? rev1.promise : rev2.promise));
+
+    const buttons = screen.getAllByRole("button", { name: strings.belowFloorExceptionsReview });
+    expect(buttons).toHaveLength(2);
+
+    // Click review on row 1
+    const btn1 = buttons[0];
+    const btn2 = buttons[1];
+    expect(btn1).toBeDefined();
+    expect(btn2).toBeDefined();
+    if (btn1 && btn2) {
+      fireEvent.click(btn1);
+      fireEvent.click(btn2);
+    }
+
+    expect(calls.reviewBelowFloorException).toHaveBeenCalledWith(row(1).revisionId);
+    expect(calls.reviewBelowFloorException).toHaveBeenCalledWith(row(2).revisionId);
+
+    // Both buttons indicate review is underway
+    await waitFor(() => {
+      const reviewingButtons = screen.getAllByRole("button", { name: strings.belowFloorExceptionsReviewing });
+      expect(reviewingButtons).toHaveLength(2);
+    });
+
+    // Resolve row 1
+    calls.listBelowFloorExceptions.mockResolvedValue(ok(page([row(2)])));
+    rev1.resolve(ok(row(1, { reviewed: { at: "2030-01-02T10:00:00.000Z", by: "Admin" } })));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: strings.belowFloorExceptionsReviewing })).toHaveLength(1));
+
+    // Resolve row 2
+    calls.listBelowFloorExceptions.mockResolvedValue(ok(page([])));
+    rev2.resolve(ok(row(2, { reviewed: { at: "2030-01-02T10:05:00.000Z", by: "Admin" } })));
+    await waitFor(() => expect(screen.queryByRole("table")).toBeNull());
+  });
+
+  it("review completion reloads using the updated filter when user switched filter in-flight", async () => {
+    const calls = setup(page([row(1)]));
+    await screen.findByRole("heading", { name: strings.belowFloorExceptions });
+
+    const revPromise = deferred<unknown>();
+    calls.reviewBelowFloorException.mockReturnValueOnce(revPromise.promise);
+
+    // User clicks review on row 1
+    fireEvent.click(screen.getByRole("button", { name: strings.belowFloorExceptionsReview }));
+    expect(calls.reviewBelowFloorException).toHaveBeenCalledWith(row(1).revisionId);
+
+    // While review is in-flight, user switches shop to shopB
+    calls.listBelowFloorExceptions.mockResolvedValueOnce(ok(page([row(2, { shopId: shopB })])));
+    const shopSelect = screen.getByLabelText(strings.belowFloorExceptionsFilterShop);
+    fireEvent.change(shopSelect, { target: { value: shopB } });
+    await waitFor(() => expect(calls.listBelowFloorExceptions).toHaveBeenCalledWith({ status: "open", shopId: shopB }));
+
+    // Now review completes
+    calls.listBelowFloorExceptions.mockResolvedValueOnce(ok(page([row(3, { shopId: shopB })])));
+    revPromise.resolve(ok(row(1, { reviewed: { at: "2030-01-02T10:00:00.000Z", by: "Admin" } })));
+
+    // Review reload must query with shopId: shopB, not reset to empty
+    await waitFor(() => expect(calls.listBelowFloorExceptions).toHaveBeenLastCalledWith({ status: "open", shopId: shopB }));
   });
 });
