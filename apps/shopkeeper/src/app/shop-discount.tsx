@@ -11,7 +11,8 @@ import { type DiscountForm, toBody, toForm, worstPercent } from "../lib/shop-dis
 import { strings } from "../strings";
 
 const words = strings.shopDiscount;
-type Load = { kind: "loading" } | { kind: "failed"; message: string } | { kind: "loaded"; data: ShopDiscountResponse };
+// `retry` only when trying again can help: no answer or a server fault. A refusal (Staff 403, no shop 404) leaves the Back link.
+type Load = { kind: "loading" } | { kind: "failed"; message: string; retry: boolean } | { kind: "loaded"; data: ShopDiscountResponse };
 
 /**
  * S34 Shop discount (MNY-5, CRT-3, NOT-6, #63): the Owner's one shop-wide discount, a percentage with an optional cap or a flat amount over a
@@ -30,7 +31,7 @@ export default function ShopDiscountScreen() {
   async function fetchRule() {
     setLoad({ kind: "loading" });
     const answer = await api.shopDiscount().catch(() => null);
-    if (!answer?.ok) return setLoad({ kind: "failed", message: answer ? strings.errors[answer.code] : words.loadFailed });
+    if (!answer?.ok) return setLoad({ kind: "failed", message: answer ? strings.errors[answer.code] : words.loadFailed, retry: !answer || answer.status >= 500 });
     setForm(toForm(answer.data.rule, answer.data.available));
     setLoad({ kind: "loaded", data: answer.data });
   }
@@ -68,7 +69,7 @@ export default function ShopDiscountScreen() {
       <Link href={backPath()} asChild><Pressable accessibilityRole="button" className="min-h-12 justify-center self-start"><Text className="text-body font-semibold text-primary">‹ {words.back}</Text></Pressable></Link>
       <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
       {load.kind === "loading" && <ActivityIndicator size="large" className="text-primary" accessibilityLabel={words.loading} />}
-      {load.kind === "failed" && <><Text accessibilityLiveRegion="polite" className="text-body text-danger">{load.message}</Text><Button label={words.retry} onPress={() => void fetchRule()} variant="secondary" /></>}
+      {load.kind === "failed" && <><Text accessibilityLiveRegion="polite" className="text-body text-danger">{load.message}</Text>{load.retry && <Button label={words.retry} onPress={() => void fetchRule()} variant="secondary" />}</>}
       {load.kind === "loaded" && <>
         <Text className="text-body text-muted">{words.intro}</Text>
         <Text className="text-secondary text-muted">{words.maximum(trimDecimal(load.data.maximumPercentage))}</Text>

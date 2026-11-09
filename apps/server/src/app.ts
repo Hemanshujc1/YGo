@@ -75,8 +75,9 @@ export interface AppOptions {
   deliveryFailureWaitSeconds?: number;
   deliveryPhotoSaveTimeoutMs?: number;
   /**
-   * Whether an Owner may turn a shop-wide discount on, and whether quotes apply one (#63). Off until customers see the discount in their cart, order and receipt
-   * (#571) and partial acceptance re-applies it (#572); tests turn it on.
+   * Whether an Owner may turn a shop-wide discount on, and whether quotes apply one (#63). It must stay OFF until all three are merged and verified:
+   * customers see the discount in their cart, order and receipt (#571); partial acceptance re-applies it (#572); and a bargained line is passed to
+   * the engine as `eligible: false` so the discount skips it (#78, BRG-5). Only then is it turned on, in code, deliberately. Tests turn it on.
    */
   shopDiscountsAvailable?: boolean;
   logger?: FastifyServerOptions["logger"];

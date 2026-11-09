@@ -106,4 +106,23 @@ describe("S34 Shop discount (#63)", () => {
     expect(mock.api.saveShopDiscount).not.toHaveBeenCalled();
     expect(texts(draw())).toContain(words.invalid);
   });
+
+  it("offers no retry to Staff opening it by a direct link, only the Back link, but does after a lost answer", async () => {
+    const retry = (nodes: El[]) => nodes.find((n) => n.type === "Button" && n.props.label === words.retry);
+    const back = (nodes: El[]) => nodes.find((n) => n.type === "Link" && n.props.href === "/");
+    mock.api.shopDiscount.mockResolvedValue({ ok: false, status: 403, code: "FORBIDDEN" });
+    draw(); await settle();
+    const refused = draw();
+    expect(texts(refused)).toContain(strings.errors.FORBIDDEN);
+    expect(retry(refused)).toBeUndefined();
+    expect(back(refused)).toBeDefined();
+
+    mock.hooks = []; mock.started = false;
+    mock.api.shopDiscount.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ ok: true, data: { rule: null, maximumPercentage: "20", available: true } });
+    draw(); await settle();
+    const lost = draw();
+    expect(texts(lost)).toContain(words.loadFailed);
+    (retry(lost)?.props.onPress as () => void)(); await settle();
+    expect(texts(draw())).toContain(words.maximum("20"));
+  });
 });

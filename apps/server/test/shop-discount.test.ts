@@ -300,9 +300,13 @@ describe("The pricing engine's split of a shop-wide discount (#63, MNY-6)", () =
 
   it("never takes more off a line than its eligible total, on every small basket", async () => {
     // Every basket of one to three lines from tiny, borderline and large paise amounts (four lines from fewer), with the first line eligible or not,
-    // under rules that round, cap, hit the minimum or pass the base. Checked in SQL: each part is whole paise, within
-    // 0 and its line's eligible total, nothing comes off an ineligible line, and the parts add up to the order's discount.
-    const { rows: [result] } = await database.pool.query<{ cases: number; bad: unknown[] | null }>(`
+    // under rules that round, cap, hit the minimum or pass the base. Each invariant is checked on its own in SQL, so a failure names it:
+    // - whole: every part is whole paise and not negative, one part per line (a missing or null part fails, never passes as null);
+    // - ineligible: a line that is not eligible gets nothing;
+    // - line: no part passes its line's eligible total;
+    // - total: the parts add up to the intended discount, worked out here in rupees from the rule's own words (MNY-6), not from the engine's paise;
+    // - aggregate: the order's discount never passes the eligible value.
+    const { rows: [result] } = await database.pool.query<{ cases: number; uneven: number; ineligible: number; bad: Array<{ broken: string[] }> | null }>(`
       WITH amounts(paise) AS (VALUES (1), (2), (3), (99), (100), (101), (100000)), few(paise) AS (VALUES (1), (2), (100000)),
       baskets AS (
         SELECT ARRAY[a.paise] AS paise FROM amounts a
@@ -320,25 +324,41 @@ describe("The pricing engine's split of a shop-wide discount (#63, MNY-6)", () =
                ARRAY(SELECT i > 1 OR first FROM generate_subscripts(paise, 1) AS i ORDER BY i) AS eligible
         FROM baskets, rules, (VALUES (true), (false)) AS f(first)),
       split AS (SELECT *, pricing_shop_discount_shares(rule, totals, eligible) AS shares FROM cases),
-      checked AS (
+      valued AS (
         SELECT *,
-          (SELECT COALESCE(sum(paise[i]), 0) FROM generate_subscripts(paise, 1) AS i WHERE eligible[i]) AS base,
-          (SELECT sum(part) * 100 FROM unnest(shares) AS part) AS taken,
-          -- A missing or null part fails: the lengths must match and every comparison must be true, never null.
-          array_length(shares, 1) IS NOT DISTINCT FROM array_length(paise, 1)
-            AND (SELECT bool_and(COALESCE(shares[i] * 100 = trunc(shares[i] * 100) AND shares[i] >= 0
-                           AND shares[i] * 100 <= CASE WHEN eligible[i] THEN paise[i] ELSE 0 END, false))
-             FROM generate_subscripts(paise, 1) AS i) AS within
+          (SELECT COALESCE(sum(totals[i]), 0) FROM generate_subscripts(totals, 1) AS i WHERE eligible[i]) AS eligible_rupees,
+          (SELECT sum(part) FROM unnest(shares) AS part) AS taken
         FROM split),
-      expected AS (
-        SELECT *, CASE rule->>'form'
-          WHEN 'percentage' THEN LEAST(round(base * (rule->>'percentage')::numeric / 100), COALESCE((rule->>'cap')::numeric * 100, base), base)
-          ELSE CASE WHEN base >= (rule->>'minimumOrder')::numeric * 100 THEN LEAST((rule->>'amount')::numeric * 100, base) ELSE 0 END
-        END AS discount FROM checked)
+      intended AS (
+        -- Percentage: that share of eligible value, rounded to the paisa, no more than the cap. Flat: the amount once eligible value reaches the
+        -- minimum order. Never more than eligible value.
+        SELECT *, LEAST(eligible_rupees, CASE rule->>'form'
+          WHEN 'percentage' THEN LEAST(round(eligible_rupees * (rule->>'percentage')::numeric / 100, 2), COALESCE((rule->>'cap')::numeric, eligible_rupees))
+          ELSE CASE WHEN eligible_rupees >= (rule->>'minimumOrder')::numeric THEN (rule->>'amount')::numeric ELSE 0 END
+        END) AS discount FROM valued),
+      checked AS (
+        SELECT *, array_remove(ARRAY[
+          CASE WHEN array_length(shares, 1) IS NOT DISTINCT FROM array_length(totals, 1)
+                AND (SELECT bool_and(COALESCE(shares[i] = round(shares[i], 2) AND shares[i] >= 0, false)) FROM generate_subscripts(totals, 1) AS i)
+               THEN NULL ELSE 'whole' END,
+          CASE WHEN (SELECT bool_and(COALESCE(shares[i] = 0, false)) FROM generate_subscripts(totals, 1) AS i WHERE NOT eligible[i]) IS NOT FALSE
+               THEN NULL ELSE 'ineligible' END,
+          CASE WHEN (SELECT bool_and(COALESCE(shares[i] <= totals[i], false)) FROM generate_subscripts(totals, 1) AS i) IS NOT FALSE
+               THEN NULL ELSE 'line' END,
+          CASE WHEN taken IS NOT DISTINCT FROM discount THEN NULL ELSE 'total' END,
+          CASE WHEN COALESCE(taken <= eligible_rupees, false) THEN NULL ELSE 'aggregate' END
+        ], NULL) AS broken FROM intended)
       SELECT count(*)::int AS cases,
-             (jsonb_agg(jsonb_build_object('rule', rule, 'paise', paise, 'eligible', eligible, 'shares', shares)) FILTER (WHERE within IS NOT TRUE OR taken IS DISTINCT FROM discount)) AS bad
-      FROM expected`);
+             -- How many cases reach the rounding and spill paths, and have an ineligible line, so the sweep is known to cover them.
+             count(*) FILTER (WHERE EXISTS (SELECT 1 FROM generate_subscripts(totals, 1) AS i
+               WHERE eligible_rupees > 0 AND shares[i] * eligible_rupees <> discount * totals[i] AND eligible[i]))::int AS uneven,
+             count(*) FILTER (WHERE NOT (SELECT bool_and(e) FROM unnest(eligible) AS e))::int AS ineligible,
+             (jsonb_agg(jsonb_build_object('broken', broken, 'rule', rule, 'paise', paise, 'eligible', eligible, 'shares', shares, 'discount', discount))
+               FILTER (WHERE cardinality(broken) > 0)) AS bad
+      FROM checked`);
     expect(result?.cases).toBe(9_600);
+    expect(result?.uneven).toBeGreaterThan(1_000);
+    expect(result?.ineligible).toBe(4_800);
     expect(result?.bad).toBeNull();
   }, 60_000);
 
