@@ -331,6 +331,7 @@ describe("each call", () => {
       originalTotal: "300.00",
       cancelsOrder: false,
       belowFloor: false,
+      shopDiscount: null,
     };
     const body = { lines: [{ listingId, count: 1, reason: "out_of_stock" as const }] };
     const { client, calls } = setup((call) => {
