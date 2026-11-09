@@ -928,6 +928,14 @@ export const orderRevisionLines = pgTable("order_revision_lines", {
   check("order_revision_lines_reduction_reason", sql`(${table.count} = ${table.originalCount} AND (${table.partQuantity} IS NULL OR ${table.partQuantity} = ${table.originalPartQuantity})) OR ${table.changeReason} IS NOT NULL`),
 ]);
 
+// An Admin's or Area Manager's mark that a below-floor contribution exception was looked at (A30, MNY-4, ADM-7, #529).
+// One row per revision, one way: nothing acts on it.
+export const belowFloorExceptionReviews = pgTable("below_floor_exception_reviews", {
+  revisionId: uuid("revision_id").primaryKey().references(() => orderRevisions.id),
+  reviewedBy: uuid("reviewed_by").notNull().references(() => accounts.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull(),
+});
+
 export const deliveryPhotoUploads = pgTable("delivery_photo_uploads", {
   id: uuid("id").primaryKey(),
   orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),

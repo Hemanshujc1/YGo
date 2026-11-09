@@ -43,6 +43,8 @@ import {
   AdminCounterBillsResponse,
   type ResolveCounterBillBody,
   OnboardingFee,
+  BelowFloorException,
+  BelowFloorExceptionsResponse,
   VisitPhotoUpload,
   VisitPhotoAccess,
   type CreateVisitPhotoUploadBody,
@@ -360,6 +362,18 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/product-requests/:id/reject`: with a reason; `excludedGood` also takes the product off the shop's counter list (D-9). */
     async rejectProductRequest(id: string, body: RejectProductRequestBody): Promise<ApiResult<AdminProductRequest>> {
       return result(await adminRequest("POST", `/v1/admin/product-requests/${encodeURIComponent(id)}/reject`, body), AdminProductRequest);
+    },
+
+    /** `GET /v1/admin/orders/below-floor-exceptions`: A30, one page of Open or Reviewed below-floor contribution exceptions with shop counts (MNY-4, ADM-7). */
+    async listBelowFloorExceptions(query: { status?: "open" | "reviewed"; shopId?: string; areaManagerId?: string; limit?: number; cursor?: string } = {}): Promise<ApiResult<BelowFloorExceptionsResponse>> {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+      return result(await adminRequest("GET", `/v1/admin/orders/below-floor-exceptions?${params}`), BelowFloorExceptionsResponse);
+    },
+
+    /** `POST /v1/admin/orders/below-floor-exceptions/:revisionId/review`: mark one reviewed; marking it again changes nothing. */
+    async reviewBelowFloorException(revisionId: string): Promise<ApiResult<BelowFloorException>> {
+      return result(await adminRequest("POST", `/v1/admin/orders/below-floor-exceptions/${encodeURIComponent(revisionId)}/review`), BelowFloorException);
     },
 
     /** `POST /v1/admin/proof-exceptions/:orderId/review`: mark one reviewed; marking it again changes nothing. */

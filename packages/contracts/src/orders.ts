@@ -300,8 +300,26 @@ export const ShortLine = OrderLine.pick({ name: true, brand: true, baseUnit: tru
   .extend({ available: z.string() });
 export type ShortLine = z.infer<typeof ShortLine>;
 
-/** An order that went ahead below the contribution floor as a recorded exception (D-5, #526). */
+const belowFloorCursor = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+
+/** `GET /v1/admin/orders/below-floor-exceptions` (A30, MNY-4, ADM-7, #529). */
+export const BelowFloorExceptionsQuery = z.strictObject({
+  status: z.enum(["open", "reviewed"]).default("open"),
+  shopId: z.uuid().optional(),
+  areaManagerId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: belowFloorCursor.optional(),
+});
+export type BelowFloorExceptionsQuery = z.infer<typeof BelowFloorExceptionsQuery>;
+
+export const BelowFloorExceptionParams = z.strictObject({
+  revisionId: z.uuid(),
+});
+export type BelowFloorExceptionParams = z.infer<typeof BelowFloorExceptionParams>;
+
+/** An order revision that went ahead below the contribution floor as a recorded exception (D-5, #526, #529). */
 export const BelowFloorException = z.strictObject({
+  revisionId: z.uuid(),
   orderId: z.uuid(),
   orderNumber: z.number().int().positive(),
   shopId: z.uuid(),
@@ -312,11 +330,36 @@ export const BelowFloorException = z.strictObject({
   revisedTotal: Amount,
   shortfall: Amount,
   platformContribution: Amount,
-  reason: z.string(),
+  reason: z.string().nullable(),
+  reviewed: z.strictObject({
+    at: z.iso.datetime(),
+    by: z.string().nullable(),
+  }).nullable(),
 });
 export type BelowFloorException = z.infer<typeof BelowFloorException>;
 
+/** How many below-floor exceptions exist in scope: open and total (ADM-8, R-8). Worked out from the rows. */
+export const BelowFloorExceptionCounts = z.strictObject({
+  open: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  shops: z.array(z.strictObject({
+    shopId: z.uuid(),
+    name: z.string(),
+    total: z.number().int().nonnegative(),
+    open: z.number().int().nonnegative(),
+  })),
+  areaManagers: z.array(z.strictObject({
+    accountId: z.uuid(),
+    name: z.string().nullable(),
+    total: z.number().int().nonnegative(),
+    open: z.number().int().nonnegative(),
+  })),
+});
+export type BelowFloorExceptionCounts = z.infer<typeof BelowFloorExceptionCounts>;
+
 export const BelowFloorExceptionsResponse = z.strictObject({
   exceptions: z.array(BelowFloorException),
+  nextCursor: z.string().nullable(),
+  counts: BelowFloorExceptionCounts,
 });
 export type BelowFloorExceptionsResponse = z.infer<typeof BelowFloorExceptionsResponse>;

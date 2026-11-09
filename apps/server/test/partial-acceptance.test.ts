@@ -438,12 +438,21 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     expect(rev.rows[0]?.below_floor_exception).toBe(true);
     expect(rev.rows[0]?.below_floor_shortfall).toBe("9.00");
 
-    // Check admin exceptions queue endpoint
-    const adminRes = await app.inject({
+    // Check admin exceptions queue endpoint: proposal not confirmed yet, so should NOT appear (#529)
+    const adminRes1 = await app.inject({
       method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin,
     });
-    expect(adminRes.statusCode).toBe(200);
-    const exceptions = adminRes.json().exceptions as Array<{ orderId: string; shortfall: string }>;
+    expect(adminRes1.statusCode).toBe(200);
+    const ex1 = adminRes1.json().exceptions as Array<{ orderId: string }>;
+    expect(ex1.some((e) => e.orderId === orderId)).toBe(false);
+
+    // Customer confirms -> appears in exceptions queue
+    await app.inject({ method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer });
+    const adminRes2 = await app.inject({
+      method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin,
+    });
+    expect(adminRes2.statusCode).toBe(200);
+    const exceptions = adminRes2.json().exceptions as Array<{ orderId: string; shortfall: string }>;
     expect(exceptions.some((e) => e.orderId === orderId && e.shortfall === "9.00")).toBe(true);
   });
 
@@ -558,13 +567,13 @@ describe("S05 Accept in part: partial acceptance (#64)", () => {
     });
     expect(propRes.statusCode).toBe(200);
 
-    // Pending proposal must appear
+    // Pending proposal must NOT appear (only confirmed revisions count #529)
     const adminRes1 = await app.inject({ method: "GET", url: "/v1/admin/orders/below-floor-exceptions", headers: admin });
     expect(adminRes1.statusCode).toBe(200);
     const ex1 = adminRes1.json().exceptions as Array<{ orderId: string; shortfall: string }>;
-    expect(ex1.some((e) => e.orderId === orderId && e.shortfall === "9.00")).toBe(true);
+    expect(ex1.some((e) => e.orderId === orderId)).toBe(false);
 
-    // Customer confirms → revision becomes confirmed; must still appear
+    // Customer confirms → revision becomes confirmed; must appear
     const confirmRes = await app.inject({
       method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer,
     });

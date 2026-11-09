@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, AdminAccount, AdminAccountsResponse, BelowFloorExceptionsResponse, CreateAdminBody, ErrorEnvelope, type OrderStatus, SetThemeBody, type AdminRole } from "@ygo/contracts";
+import { Account, AdminAccount, AdminAccountsResponse, BelowFloorException, BelowFloorExceptionParams, BelowFloorExceptionsQuery, BelowFloorExceptionsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody, type AdminRole } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn } from "../admin";
+import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn, withAdminWebTransaction } from "../admin";
+import { belowFloorExceptionCounts, listBelowFloorExceptions, reviewBelowFloorException } from "../below-floor-exceptions";
 import { deriveKeys } from "../tokens";
 
 // Where each role's membership lives and the action that records its creation (#343).
@@ -106,49 +107,49 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
     },
   );
 
-  // A read-only list of partial-acceptance orders that fell below the contribution floor (#64, D-5).
+  // A30 Below the contribution floor exceptions (MNY-4, ADM-7, #529).
+  // Consistent database snapshot across list and count queries via a repeatable-read read-only transaction.
   app.get(
     "/v1/admin/orders/below-floor-exceptions",
-    { schema: { response: { 200: BelowFloorExceptionsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    { schema: { querystring: BelowFloorExceptionsQuery, response: { 200: BelowFloorExceptionsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
     async (request, reply) => {
-      if (!await adminSignedIn(request, reply, auth)) return reply;
-      const { rows } = await pool.query<{
-        orderId: string;
-        orderNumber: number;
-        shopId: string;
-        shopName: string;
-        placedAt: Date;
-        status: OrderStatus;
-        originalTotal: string;
-        revisedTotal: string;
-        shortfall: string;
-        platformContribution: string;
-        reason: string;
-      }>(
-        `SELECT r.order_id AS "orderId", o.number AS "orderNumber", o.shop_id AS "shopId", s.shop_name AS "shopName",
-                o.placed_at AS "placedAt", o.status,
-                COALESCE(
-                  (SELECT prev.total::text FROM order_revisions prev
-                   WHERE prev.order_id = r.order_id AND prev.status = 'confirmed' AND prev.revision < r.revision
-                   ORDER BY prev.revision DESC LIMIT 1),
-                  o.total::text
-                ) AS "originalTotal",
-                r.total::text AS "revisedTotal",
-                COALESCE(r.below_floor_shortfall::text, '0.00') AS shortfall,
-                r.platform_contribution::text AS "platformContribution",
-                COALESCE(r.below_floor_reason, 'below_contribution_floor') AS reason
-         FROM order_revisions r
-         JOIN orders o ON o.id = r.order_id
-         JOIN shops s ON s.id = o.shop_id
-         WHERE r.below_floor_exception = true
-           AND r.status IN ('proposed', 'confirmed')
-         ORDER BY r.created_at DESC`,
-      );
-      return reply.code(200).send({
-        exceptions: rows.map((row) => ({
-          ...row,
-          placedAt: row.placedAt.toISOString(),
-        })),
+      const who = await adminWebSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const query = request.query as BelowFloorExceptionsQuery;
+      const scope = who.role === "area_manager" ? who.accountId : null;
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const page = await listBelowFloorExceptions(client, scope, query);
+        const counts = await belowFloorExceptionCounts(client, scope);
+        await client.query("COMMIT");
+        return reply.code(200).send({
+          exceptions: page.exceptions,
+          nextCursor: page.nextCursor,
+          counts,
+        });
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  app.post(
+    "/v1/admin/orders/below-floor-exceptions/:revisionId/review",
+    { schema: { params: BelowFloorExceptionParams, response: { 200: BelowFloorException, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminWebSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const { revisionId } = request.params as BelowFloorExceptionParams;
+      return withAdminWebTransaction(pool, who, reply, async (client) => {
+        const scope = who.role === "area_manager" ? who.accountId : null;
+        const reviewed = await reviewBelowFloorException(client, scope, revisionId, who.accountId, clock.now());
+        if (!reviewed) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        await client.query("COMMIT");
+        return reply.code(200).send(reviewed);
       });
     },
   );
