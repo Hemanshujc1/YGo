@@ -60,6 +60,7 @@ function Detail({
   onUndoLine,
   onOpenReason,
   previewTotal,
+  previewFailed = false,
 }: {
   order: ShopOrderResponse;
   editing?: boolean;
@@ -71,6 +72,7 @@ function Detail({
   onUndoLine?: (listingId: string) => void;
   onOpenReason?: (listingId: string) => void;
   previewTotal?: PartialAcceptPreviewResponse | null;
+  previewFailed?: boolean;
 }) {
   const { address } = order;
   const proposal = order.proposal;
@@ -273,6 +275,7 @@ function Detail({
             )}
           </View>
         </View>
+        {editing && previewFailed && <Text className="mt-2 text-secondary text-danger">{words.previewFailed}</Text>}
         <Text className="mt-2 text-secondary text-muted">{words.collectNote}</Text>
       </View>
       <View>
@@ -369,11 +372,16 @@ export default function OrderScreen() {
   const previewSeq = useRef(0);
   const [previewState, setPreviewState] = useState<{ key: string; data: PartialAcceptPreviewResponse } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const identity = session.get();
   const accountId = "account" in identity ? identity.account.id : null;
   const shown = view.order;
+  const linesRef = useRef(shown?.lines);
+  linesRef.current = shown?.lines;
+  // Polls hand back a new order object each time; only a change to the lines should redo the preview.
+  const linesSig = shown ? shown.lines.map((l) => `${l.listingId}:${l.count}`).join(",") : "";
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
   const confirmSeconds = useSecondsLeft(shown?.status === "awaiting_customer_confirm" ? shown.confirmByAt : null, view.offset);
@@ -404,9 +412,13 @@ export default function OrderScreen() {
     setReasonTargetListingId(null);
   }
 
+  function editableLine(listingId: string) {
+    if (!shown || submitting || submittingRef.current) return undefined;
+    return shown.lines.find((l) => l.listingId === listingId);
+  }
+
   function onStepDown(listingId: string) {
-    if (!shown || submitting || submittingRef.current) return;
-    const original = shown.lines.find((l) => l.listingId === listingId);
+    const original = editableLine(listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
     const currentCount = edit !== undefined ? edit.count : original.count;
@@ -424,8 +436,7 @@ export default function OrderScreen() {
   }
 
   function onStepUp(listingId: string) {
-    if (!shown || submitting || submittingRef.current) return;
-    const original = shown.lines.find((l) => l.listingId === listingId);
+    const original = editableLine(listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
     const currentCount = edit !== undefined ? edit.count : original.count;
@@ -439,8 +450,7 @@ export default function OrderScreen() {
   }
 
   function onRemoveLine(listingId: string) {
-    if (!shown || submitting || submittingRef.current) return;
-    const original = shown.lines.find((l) => l.listingId === listingId);
+    const original = editableLine(listingId);
     if (!original) return;
     const edit = lineEdits.get(listingId);
     const existingReason = edit?.reason ?? null;
@@ -455,8 +465,7 @@ export default function OrderScreen() {
   }
 
   function onUndoLine(listingId: string) {
-    if (!shown || submitting || submittingRef.current) return;
-    const original = shown.lines.find((l) => l.listingId === listingId);
+    const original = editableLine(listingId);
     if (!original) return;
     previewSeq.current++;
     setPreviewState(null);
@@ -492,16 +501,17 @@ export default function OrderScreen() {
     if (editing && !canEditOrder) {
       cancelEditing();
     }
-  }, [editing, canEditOrder]);
+  }, [editing, canEditOrder, submitting]);
 
   useEffect(() => {
     if (!editing || !shown) {
       previewSeq.current++;
+      setPreviewFailed(false);
       setPreviewState(null);
       setPreviewLoading(false);
       return;
     }
-    const lines = shown.lines ?? [];
+    const lines = linesRef.current ?? [];
     const currentKey = proposalKey(lines, lineEdits);
     if (!currentKey) {
       previewSeq.current++;
@@ -524,6 +534,7 @@ export default function OrderScreen() {
     }
 
     setPreviewLoading(true);
+    setPreviewFailed(false);
     const reqId = ++previewSeq.current;
     const timer = setTimeout(() => {
       void order
@@ -535,19 +546,21 @@ export default function OrderScreen() {
             setPreviewState({ key: currentKey, data: result.data });
           } else {
             setPreviewState(null);
+            setPreviewFailed(true);
           }
         })
         .catch(() => {
           if (reqId !== previewSeq.current) return;
           setPreviewLoading(false);
           setPreviewState(null);
+          setPreviewFailed(true);
         });
     }, 250);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [editing, lineEdits, shown, order]);
+  }, [editing, lineEdits, linesSig, order]);
 
   let hasChanges = false;
   let remainingCount = 0;
@@ -685,6 +698,7 @@ export default function OrderScreen() {
               }
             }}
             previewTotal={previewTotal}
+            previewFailed={previewFailed}
           />
         )}
         {shown && ["accepted", "preparing"].includes(shown.status) && access.role() !== null && !editing && (

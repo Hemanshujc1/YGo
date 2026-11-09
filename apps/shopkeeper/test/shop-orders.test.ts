@@ -24,7 +24,7 @@ function never(): never {
 }
 const list: ShopOrdersResponse = { now: "2030-01-01T00:02:18.000Z", canDeliver: true, new: [], accepted: [], myDeliveries: [], doneToday: [] };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
-const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_ENOUGH_STOCK" | "INTERNAL", shortLines?: ShortLine[]) =>
+const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "PROPOSAL_OPEN" | "ORDER_EXPIRED" | "NOT_ENOUGH_STOCK" | "INTERNAL", shortLines?: ShortLine[]) =>
   ({ ok: false, status: 409, code, shortLines }) as ApiResult<never>;
 
 /** Timers the test runs by hand. */
@@ -70,6 +70,10 @@ function fakeServer() {
     },
     answerCancelRequest: (_: string, answer: string) => {
       sent.push(answer);
+      return new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve));
+    },
+    partialAcceptOrder: (_: string, body: unknown) => {
+      sent.push(body);
       return new Promise<ApiResult<ShopOrderResponse>>((resolve) => answers.push(resolve));
     },
     cancelShopOrder: (_: string, body: unknown) => {
@@ -195,6 +199,27 @@ describe("S05 New order (#431)", () => {
     answers.shift()?.(ok(order("rejected_by_shop")));
     expect(await rejecting).toBe(true);
     expect(sent).toEqual([{ reason: "too_busy" }]);
+  });
+
+  it("accept in part: names the server's reason for an accepted order, and refreshes into a waiting proposal (#589)", async () => {
+    const lines = [{ listingId: id, count: 1, reason: "out_of_stock" as const }];
+    for (const [code, status, notice] of [
+      ["ORDER_STATUS_CHANGED", "accepted", strings.errors.ORDER_STATUS_CHANGED],
+      ["ORDER_STATUS_CHANGED", "rejected_by_shop", words.answered],
+      ["PROPOSAL_OPEN", "awaiting_customer_confirm", strings.errors.PROPOSAL_OPEN],
+    ] as const) {
+      const { client, reads, answers } = fakeServer();
+      const one = createShopOrder(client, id, fakeTimers().timers);
+      one.start();
+      reads.shift()?.(ok(order()));
+      await settle();
+      const sending = one.partialAccept(lines);
+      answers.shift()?.(refused(code));
+      await settle();
+      reads.shift()?.(ok(order(status)));
+      expect(await sending).toBe(false);
+      expect(one.get()).toMatchObject({ notice, order: { status } });
+    }
   });
 
   it("says the customer cancelled, or that another phone answered, from the order read again", async () => {
