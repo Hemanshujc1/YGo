@@ -135,7 +135,10 @@ export const OrderResponse = z.strictObject({
 export type OrderResponse = z.infer<typeof OrderResponse>;
 
 /** A row on C18 (#426). */
-export const OrderSummary = OrderResponse.pick({ id: true, number: true, status: true, placedAt: true, shop: true, total: true, answerExpired: true, confirmByAt: true });
+export const OrderSummary = OrderResponse.pick({ id: true, number: true, status: true, placedAt: true, shop: true, total: true, answerExpired: true, confirmByAt: true }).extend({
+  /** The open proposal's total while the order awaits the Customer's confirmation, for the changed-total banner (#578); null otherwise. */
+  proposedTotal: Amount.nullable(),
+});
 export type OrderSummary = z.infer<typeof OrderSummary>;
 
 /**

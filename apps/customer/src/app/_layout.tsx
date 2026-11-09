@@ -38,9 +38,10 @@ export default function Layout() {
         }}
       >
         {/* Persistent banner stays on every screen while an order is awaiting confirmation (ORD-4, NOT-3, #528). */}
-        <ChangedTotalBanner />
-        {/* A stack, so Account opens over the home screen and Back returns to it (#156, Q5). */}
-        <Stack screenOptions={{ headerShown: false }} />
+        <ChangedTotalBanner>
+          {/* A stack, so Account opens over the home screen and Back returns to it (#156, Q5). */}
+          <Stack screenOptions={{ headerShown: false }} />
+        </ChangedTotalBanner>
       </SessionGate>
     </AppShell>
   );

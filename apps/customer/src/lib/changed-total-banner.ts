@@ -5,15 +5,18 @@ import { AppState, type AppStateStatus } from "react-native";
 import { api, session } from "../api";
 import { push } from "./push";
 
+/** An order waiting on the Customer, with the total its proposal asks for (#578). */
+export type AwaitingOrder = OrderSummary & { proposedTotal: string };
+
 export type ChangedTotalBannerView = {
-  order: OrderSummary | null;
+  order: AwaitingOrder | null;
 };
 
 /** Finds the active order with status `awaiting_customer_confirm` having the earliest `confirmByAt` (#528). */
-export function earliestAwaitingOrder(orders: readonly OrderSummary[] | undefined | null): OrderSummary | null {
+export function earliestAwaitingOrder(orders: readonly OrderSummary[] | undefined | null): AwaitingOrder | null {
   if (!orders || orders.length === 0) return null;
   const waiting = orders.filter(
-    (o) => o.status === "awaiting_customer_confirm" && o.confirmByAt !== null,
+    (o): o is AwaitingOrder => o.status === "awaiting_customer_confirm" && o.confirmByAt !== null && o.proposedTotal !== null,
   );
   if (waiting.length === 0) return null;
   return waiting.reduce((earliest, current) => {

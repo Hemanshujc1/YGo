@@ -139,6 +139,14 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     schedule();
   }
 
+  /** Confirm or Decline was refused as too late or out of date: the server decides, so say what the order now is (#578). */
+  async function settleChangedTotal(code: "CONFIRMATION_EXPIRED" | "ORDER_STATUS_CHANGED") {
+    await read();
+    const words = strings.order.changedTotal;
+    const status = view.order?.status;
+    set({ notice: status === "cancelled_by_customer" ? words.timeUpBody : status === "awaiting_customer_confirm" ? (code === "ORDER_STATUS_CHANGED" ? words.changedAgain : words.timeUpPending) : words.noLongerWaiting });
+  }
+
   return {
     get: () => view,
     subscribe(listener: () => void) {
@@ -223,7 +231,6 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     /** C10: Customer confirms partial acceptance proposal (ORD-4, #64, #528). */
     async confirmTotal() {
       if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
-      if (view.order?.confirmByAt && Date.parse(view.order.confirmByAt) <= Date.now()) return;
       poller.ticket();
       poller.unschedule();
       set({ confirmingTotal: true, notice: null });
@@ -233,9 +240,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ status: "ready", order: answer.data, notice: null });
         schedule();
       } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
-        // Deadline passed or status changed: show "Time is up, the order was cancelled at no cost" and refetch without retry.
-        set({ notice: strings.order.changedTotal.timeUpBody });
-        await read();
+        await settleChangedTotal(answer.code);
       } else {
         // Network or server error: keep screen, show inline error with retry, keep countdown running.
         set({ notice: answer === "offline" ? strings.order.changedTotal.confirmFailed : strings.errors[answer.code] });
@@ -246,7 +251,6 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     /** C10: Customer declines partial acceptance proposal; cancels order at no cost with reason declined_total (ORD-4, #64, #528). */
     async declineTotal() {
       if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
-      if (view.order?.confirmByAt && Date.parse(view.order.confirmByAt) <= Date.now()) return;
       poller.ticket();
       poller.unschedule();
       set({ decliningTotal: true, notice: null });
@@ -256,8 +260,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ status: "ready", order: answer.data, notice: null });
         schedule();
       } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
-        set({ notice: strings.order.changedTotal.timeUpBody });
-        await read();
+        await settleChangedTotal(answer.code);
       } else {
         set({ notice: answer === "offline" ? strings.order.changedTotal.declineFailed : strings.errors[answer.code] });
         schedule();
