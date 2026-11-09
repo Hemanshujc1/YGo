@@ -18,6 +18,7 @@ const shopSettings = [
   { href: "/agreement", label: strings.agreement.open },
   { href: "/listings", label: strings.shopSetup.listings },
   { href: "/hours", label: strings.hours.open },
+  { href: "/shop-discount", label: strings.shopDiscount.open },
   { href: "/opening-stock", label: strings.shopSetup.stock },
 ] as const;
 

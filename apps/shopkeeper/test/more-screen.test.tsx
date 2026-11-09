@@ -40,7 +40,7 @@ describe("S36 More (#550)", () => {
   });
 
   it("gives the Owner Staff, Void a bill and the Shop settings screens", () => {
-    expect(links()).toEqual(["/staff", "/void-bill", "/agreement", "/listings", "/hours", "/opening-stock"]);
+    expect(links()).toEqual(["/staff", "/void-bill", "/agreement", "/listings", "/hours", "/shop-discount", "/opening-stock"]);
     expect(texts()).toContain(strings.more.shopSettings);
   });
 

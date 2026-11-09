@@ -244,6 +244,13 @@ export {
   ShopOpenStatus,
   Weekday,
 } from "./shop-hours";
+export {
+  DEFAULT_MAXIMUM_SHOP_DISCOUNT_PERCENTAGE,
+  ShopDiscountBody,
+  ShopDiscountResponse,
+  ShopDiscountRule,
+  ShopDiscountStatus,
+} from "./shop-discount";
 export { ReceiptResponse } from "./receipt";
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";

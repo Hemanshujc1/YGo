@@ -489,6 +489,7 @@ export const strings = {
     NEGATIVE_CONTRIBUTION_CANCELLED: "This order was cancelled because it could not be fulfilled.",
     EMPTY_ORDER: "An order must have at least one item.",
     INVALID_PARTIAL_ACCEPT: "Invalid item update.",
+    DISCOUNT_ABOVE_MAXIMUM: "This discount is above the maximum.",
     CANCEL_REQUEST_CLOSED: "You already asked to cancel this order. You can call the shop.",
   } satisfies Record<ErrorCode, string>,
 };

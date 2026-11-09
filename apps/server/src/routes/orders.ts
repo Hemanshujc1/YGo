@@ -195,25 +195,33 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret 
       if (JSON.stringify(locked) !== JSON.stringify(address) || cart?.revision !== read.revision
         || JSON.stringify(await packsOf(client, shopId, read.lines)) !== JSON.stringify(packs)
         || await latestRateCardVersion(client) !== version) return "CHANGED";
+      // A discount the quote took off still stands: the rule is still active at that version, or an Owner's save or a lower maximum came in between (MNY-6).
+      if (priced.shopDiscount) {
+        const { rows: [rule] } = await client.query<{ status: string; version: number }>("SELECT status, version FROM shop_discounts WHERE id = $1 FOR SHARE", [priced.shopDiscount.ruleId]);
+        if (rule?.status !== "active" || rule.version !== priced.shopDiscount.ruleVersion) return "CHANGED";
+      }
       // Read after the locks, so a wait on them doesn't stamp an earlier time.
       const now = clock.now();
 
       const { rows: [order] } = await client.query<{ id: string }>(
         `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
-           address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote)
+           address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote,
+           shop_discount, shop_discount_rule_id, shop_discount_rule_version)
          SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin,
-           a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10
+           a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10, $11, $12, $13
          FROM saved_addresses a, shops shop WHERE a.id = $4 AND shop.id = $2 RETURNING id`,
         [who.accountId, shopId, now, addressId, priced.productValue, priced.deliveryFee.amount, priced.smallCartFee?.amount ?? null,
-          priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced)]);
+          priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced),
+          priced.shopDiscount?.amount ?? "0", priced.shopDiscount?.ruleId ?? null, priced.shopDiscount?.ruleVersion ?? null]);
       if (!order) throw new Error("A locked address disappeared");
       // Each line takes from stock in the listing's own unit: count × pack size, or the part bought (#377).
       await client.query(
-        `INSERT INTO order_lines (order_id, position, listing_id, name, brand, base_unit, pack_quantity, count, part_quantity, unit_price, line_total, stock_quantity)
+        `INSERT INTO order_lines (order_id, position, listing_id, name, brand, base_unit, pack_quantity, count, part_quantity, unit_price, line_total, shop_discount, stock_quantity)
          SELECT $1, entry.position, (line->>'listingId')::uuid, line->>'name', line->>'brand', line->>'baseUnit', (line->>'quantity')::numeric,
-           (line->>'count')::int, (line->'part'->>'quantity')::numeric, COALESCE(line->'part'->>'price', line->>'price')::numeric, (line->>'lineTotal')::numeric,
+           (line->>'count')::int, (line->'part'->>'quantity')::numeric, COALESCE(line->'part'->>'price', line->>'price')::numeric, (line->>'lineTotal')::numeric, ($3::numeric[])[entry.position],
            COALESCE((line->'part'->>'quantity')::numeric, (line->>'count')::int * (line->>'quantity')::numeric)
-         FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`, [order.id, JSON.stringify(view.lines)]);
+         FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`,
+        [order.id, JSON.stringify(view.lines), priced.lines.map((line) => line.shopDiscount)]);
       await recordStatus(client, order.id, null, "placed", { id: who.accountId, role: "customer" }, now);
       await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [read.id]);
       await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [read.id, now]);

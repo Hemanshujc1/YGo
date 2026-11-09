@@ -5,6 +5,7 @@ import {
   customType,
   date,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -687,6 +688,39 @@ const orderStatuses = sql.raw(`'placed', 'scheduled_pending_review', 'awaiting_c
 
 // An order (#424). Everything but its status is frozen at placement (MNY-7): a trigger refuses any other
 // change and any delete. The number comes from the identity's sequence, one series for all shops.
+// A shop's one shop-wide discount rule (MNY-5, #63): a percentage with an optional cap, or a flat amount over a minimum order.
+// `version` goes up on every save and every pause, and each version is kept in `shop_discount_versions`, so an order can name
+// the exact terms it was priced under. `paused` is set only when the maximum was lowered under the rule (NOT-6).
+const discountTerms = {
+  form: text("form").notNull(),
+  percentage: numeric("percentage", { precision: 7, scale: 4 }),
+  cap: numeric("cap", { precision: 12, scale: 2 }),
+  flatAmount: numeric("flat_amount", { precision: 12, scale: 2 }),
+  minimumOrder: numeric("minimum_order", { precision: 12, scale: 2 }),
+  status: text("status").notNull(),
+};
+const discountShape = (table: { form: AnyPgColumn; percentage: AnyPgColumn; cap: AnyPgColumn; flatAmount: AnyPgColumn; minimumOrder: AnyPgColumn; status: AnyPgColumn }, name: string) => [
+  check(`${name}_form_valid`, sql`(${table.form} = 'percentage' AND ${table.percentage} > 0 AND ${table.flatAmount} IS NULL AND ${table.minimumOrder} IS NULL AND (${table.cap} IS NULL OR ${table.cap} > 0))
+    OR (${table.form} = 'flat' AND ${table.flatAmount} > 0 AND ${table.minimumOrder} > 0 AND ${table.percentage} IS NULL AND ${table.cap} IS NULL)`),
+  check(`${name}_status_valid`, sql`${table.status} IN ('active', 'off', 'paused')`),
+];
+export const shopDiscounts = pgTable("shop_discounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().unique().references(() => shops.id),
+  version: integer("version").notNull(),
+  ...discountTerms,
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => discountShape(table, "shop_discounts"));
+
+export const shopDiscountVersions = pgTable("shop_discount_versions", {
+  ruleId: uuid("rule_id").notNull().references(() => shopDiscounts.id),
+  version: integer("version").notNull(),
+  ...discountTerms,
+  // Who changed it: the Owner's account, or null when YGo paused it.
+  actorId: uuid("actor_id").references(() => accounts.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [primaryKey({ columns: [table.ruleId, table.version] }), ...discountShape(table, "shop_discount_versions")]);
+
 export const orders = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   number: integer("number").notNull().generatedAlwaysAsIdentity({ startWith: 1001 }),
@@ -713,6 +747,10 @@ export const orders = pgTable("orders", {
   rateCardVersion: bigint("rate_card_version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version),
   // The pricing engine's whole result: commission, shares and the floor, which the Customer never sees.
   quote: jsonb("quote").notNull(),
+  // The shop-funded discount and the exact rule version it came from (MNY-6, #63). A platform-funded amount will be its own column (#70).
+  shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+  shopDiscountRuleId: uuid("shop_discount_rule_id"),
+  shopDiscountRuleVersion: integer("shop_discount_rule_version"),
   delivererId: uuid("deliverer_id").references(() => accounts.id),
   handoverCodeHash: text("handover_code_hash"),
   handoverCodeSalt: text("handover_code_salt"),
@@ -735,6 +773,9 @@ export const orders = pgTable("orders", {
   check("orders_address_label_valid", sql`${table.addressLabel} IN ('home', 'work', 'other')`),
   check("orders_handover_code_pair", sql`(${table.handoverCodeHash} IS NULL) = (${table.handoverCodeSalt} IS NULL) AND (${table.handoverCodeHash} IS NULL) = (${table.handoverCodeCiphertext} IS NULL)`),
   check("orders_delivery_payment_valid", sql`${table.deliveryPayment} IS NULL OR ${table.deliveryPayment} IN ('cash', 'upi')`),
+  foreignKey({ name: "orders_shop_discount_rule_fk", columns: [table.shopDiscountRuleId, table.shopDiscountRuleVersion], foreignColumns: [shopDiscountVersions.ruleId, shopDiscountVersions.version] }),
+  check("orders_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND (${table.shopDiscountRuleId} IS NULL) = (${table.shopDiscountRuleVersion} IS NULL)
+    AND (${table.shopDiscount} = 0 OR ${table.shopDiscountRuleId} IS NOT NULL)`),
 ]);
 
 // A line as it was priced at placement. `stock_quantity` is what it takes from the listing's stock,
@@ -751,10 +792,13 @@ export const orderLines = pgTable("order_lines", {
   partQuantity: numeric("part_quantity", { precision: 12, scale: 3 }),
   unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
   lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+  // This line's part of the order's shop-funded discount, in whole paise (MNY-6, #63).
+  shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
   stockQuantity: numeric("stock_quantity", { precision: 12, scale: 3 }).notNull(),
 }, (table) => [
   primaryKey({ columns: [table.orderId, table.position] }),
   index("order_lines_listing_id_idx").on(table.listingId),
+  check("order_lines_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND ${table.shopDiscount} <= ${table.lineTotal}`),
   check("order_lines_count_valid", sql`${table.count} BETWEEN 1 AND 999`),
   check("order_lines_part_valid", sql`${table.partQuantity} IS NULL OR (${table.count} = 1 AND ${table.partQuantity} > 0)`),
   check("order_lines_stock_valid", sql`${table.stockQuantity} = COALESCE(${table.partQuantity}, ${table.count} * ${table.packQuantity})`),
@@ -930,13 +974,16 @@ export const notifications = pgTable("notifications", {
   orderId: uuid("order_id").references(() => orders.id),
   // The shop a shop-level notice belongs to, when no order does (#62); a push is still sent only while the recipient is in it.
   shopId: uuid("shop_id").references(() => shops.id),
+  // Names a notice that must reach a person once however often it is tried again (#63); null for the rest.
+  dedupeKey: text("dedupe_key"),
   loud: boolean("loud").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
 }, (table) => [
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
+  uniqueIndex("notifications_dedupe_key_idx").on(table.accountId, table.dedupeKey).where(sql`${table.dedupeKey} IS NOT NULL`),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session

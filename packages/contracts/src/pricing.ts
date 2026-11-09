@@ -41,10 +41,15 @@ export const PricedQuote = z.strictObject({
     lineTotal: Amount,
     commission: Amount,
     commissionSource: RateCardSource,
+    /** This line's part of the shop-funded discount, in whole paise; the parts add up to the order's (MNY-6). */
+    shopDiscount: Amount,
   })),
   /** Order-level values come from shop and global cards only; a category card's minimum cart or floor is ignored (#357). */
   sources: z.partialRecord(RateCardKey, RateCardSource),
+  /** Before any discount, fees and taxes. */
   productValue: Amount,
+  /** The shop-funded discount and the rule it came from, or null when none applied. A platform-funded amount will be its own field (#70). */
+  shopDiscount: z.strictObject({ amount: Amount, ruleId: z.uuid(), ruleVersion: z.number().int().positive() }).nullable(),
   commission: Amount,
   deliveryFee: SplitFee,
   /** Null when the basket is not below an enabled small-cart threshold. */
