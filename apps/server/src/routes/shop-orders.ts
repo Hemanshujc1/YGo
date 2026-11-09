@@ -8,6 +8,7 @@ import type { Clock } from "../adapters/clock";
 import { InvalidDeliveryPhotoError, type DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { withTransaction } from "../db";
 import { createHandoverCode, HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN, HANDOVER_CODE_COOLDOWN_MS, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, matchesHandoverCode, recordDeliverySale } from "../delivery";
+import { fromPaise, toPaise } from "@ygo/pricing";
 import { stockOf } from "../listings";
 import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder } from "../orders";
@@ -212,23 +213,6 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
   app.post("/v1/me/shop-orders/:id/cancel-request/keep", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("keep"));
   app.post("/v1/me/shop-orders/:id/cancel", { schema: { params: OrderParams, body: CancelOrderBody, response: { 200: ShopOrderResponse, ...errors } } }, cancelling("cancel"));
 
-  const toPaise = (str: string): bigint => {
-    const isNegative = str.startsWith("-");
-    const s = isNegative ? str.slice(1) : str;
-    const [whole = "0", frac = ""] = s.split(".");
-    const cents = (frac + "00").slice(0, 2);
-    const paise = BigInt(whole) * 100n + BigInt(cents);
-    return isNegative ? -paise : paise;
-  };
-
-  const fromPaise = (paise: bigint): string => {
-    const isNegative = paise < 0n;
-    const abs = isNegative ? -paise : paise;
-    const whole = abs / 100n;
-    const frac = abs % 100n;
-    return `${isNegative ? "-" : ""}${whole}.${frac.toString().padStart(2, "0")}`;
-  };
-
   type PreparedRevisionLine = {
     position: number;
     listingId: string;
@@ -292,6 +276,13 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         confirmByAt: Date;
         revision: number;
       };
+
+  /** The shortfall below the contribution floor in paise, 0 when the order meets it (D-5: a recorded exception, not a cancel). */
+  const floorShortfallPaise = (e: { orderCard?: { values: { deliveredContributionFloor?: { value?: unknown } } } | null; platformContributionPaise: bigint }): bigint => {
+    const floorValue = e.orderCard?.values.deliveredContributionFloor?.value;
+    const floorPaise = typeof floorValue === "string" ? toPaise(floorValue) : 0n;
+    return e.platformContributionPaise < floorPaise ? floorPaise - e.platformContributionPaise : 0n;
+  };
 
   async function evaluatePartialAccept(
     client: Pool | PoolClient,
@@ -583,6 +574,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       smallCartFee: evalResult.smallCartFee?.amount ?? null,
       total: evalResult.customerTotalStr,
       originalTotal: evalResult.originalTotal,
+      cancelsOrder: evalResult.platformContributionPaise < 0n,
+      belowFloor: floorShortfallPaise(evalResult) > 0n,
     };
   });
 
@@ -626,11 +619,9 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         return { code: "NEGATIVE_CONTRIBUTION_CANCELLED", status: 409 };
       }
 
-      const floorValue = evalResult.orderCard?.values.deliveredContributionFloor?.value;
-      const floorPaise = typeof floorValue === "string" ? toPaise(floorValue) : 0n;
-
-      const belowFloorException = evalResult.platformContributionPaise < floorPaise;
-      const belowFloorShortfall = belowFloorException ? fromPaise(floorPaise - evalResult.platformContributionPaise) : null;
+      const shortfallPaise = floorShortfallPaise(evalResult);
+      const belowFloorException = shortfallPaise > 0n;
+      const belowFloorShortfall = belowFloorException ? fromPaise(shortfallPaise) : null;
 
       const { rows: [insertedRev] } = await client.query<{ id: string }>(
         `INSERT INTO order_revisions (

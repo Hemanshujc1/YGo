@@ -435,6 +435,7 @@ export const strings = {
     sendingNewTotal: "Sending new total…",
     cancelChanges: "Cancel changes",
     previewFailed: "Couldn't work out the new total. Change a line to try again.",
+    cancelsOrderWarning: "Sending this cancels the order at no cost to the customer, because YGo would lose money on it.",
     waitingForConfirm: "Waiting for customer to confirm",
     reasonSheetTitle: "Reason for change",
     reasonCancel: "Cancel",
