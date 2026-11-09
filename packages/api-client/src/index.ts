@@ -63,6 +63,8 @@ import {
   ShopAgreementResponse,
   type AcceptShopAgreementBody,
   ShopHoursResponse,
+  ShopDiscountResponse,
+  type ShopDiscountBody,
   ShopHolidaysResponse,
   ShopOpenStatus,
   type ShopHoliday,
@@ -705,6 +707,16 @@ export function createApiClient({
     /** `PUT /v1/me/shop-hours`: replaces the whole week. */
     async saveShopHours(body: ShopHours): Promise<ApiResult<ShopHoursResponse>> {
       return result(await signedIn("PUT", "/v1/me/shop-hours", body), ShopHoursResponse);
+    },
+
+    /** `GET /v1/me/shop-discount`: the Owner's shop-wide discount and the maximum it is held to (#63). */
+    async shopDiscount(): Promise<ApiResult<ShopDiscountResponse>> {
+      return result(await signedIn("GET", "/v1/me/shop-discount"), ShopDiscountResponse);
+    },
+
+    /** `PUT /v1/me/shop-discount`: saves the rule; one over the maximum is refused with DISCOUNT_ABOVE_MAXIMUM. */
+    async saveShopDiscount(body: ShopDiscountBody): Promise<ApiResult<ShopDiscountResponse>> {
+      return result(await signedIn("PUT", "/v1/me/shop-discount", body), ShopDiscountResponse);
     },
 
     /** `GET /v1/me/shop-holidays`: the Owner's holidays, upcoming and ended (#382). */

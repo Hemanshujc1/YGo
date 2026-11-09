@@ -167,6 +167,8 @@ export const ErrorCode = z.enum([
   "NEGATIVE_CONTRIBUTION_CANCELLED",
   "EMPTY_ORDER",
   "INVALID_PARTIAL_ACCEPT",
+  "DISCOUNT_ABOVE_MAXIMUM",
+  "DISCOUNT_NOT_AVAILABLE",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -179,6 +181,7 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
  * With SHOP_NOT_READY, `liveCheck` names what still blocks Live.
  * With CART_CHANGED from placing an order, `cart` is the cart as it is now.
  * With NOT_ENOUGH_STOCK, `shortLines` names each line Accept can't fill.
+ * With DISCOUNT_ABOVE_MAXIMUM, `maximumPercentage` is the largest effective percentage allowed.
  */
 export const ErrorEnvelope = z.object({
   error: z.object({
@@ -190,6 +193,7 @@ export const ErrorEnvelope = z.object({
     liveCheck: LiveCheck.optional(),
     cart: CartResponse.optional(),
     shortLines: z.array(ShortLine).optional(),
+    maximumPercentage: z.string().optional(),
   }).refine((error) => error.code !== "CATALOG_IMPORT_ROWS_INVALID" || error.rowErrors !== undefined),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;

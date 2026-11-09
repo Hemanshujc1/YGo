@@ -10,6 +10,8 @@ export const RateCardKey = z.enum(RATE_CARD_KEYS);
 export type RateCardKey = z.infer<typeof RateCardKey>;
 
 const OptionalMoney = ShopPrice.nullable().default(null);
+/** The configured default commission base: after the shop-funded discount (CONTEXT.md, Pricing engine; FR-PRC-04). Admin may choose the other. */
+export const DEFAULT_COMMISSION_BASE = "after_shop_discount" as const;
 export const CommissionRule = z.strictObject({
   formula: z.enum(["fixed", "percentage", "fixed_plus_percentage", "higher_of", "lower_of"]),
   fixedAmount: OptionalMoney,

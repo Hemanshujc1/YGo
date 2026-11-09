@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { DELIVERED_EXAMPLES, type ExampleLine } from "@ygo/pricing";
+import { DELIVERED_EXAMPLES, type ExampleLine, type ExampleShopDiscount } from "@ygo/pricing";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
@@ -26,7 +26,7 @@ beforeEach(async () => {
   await bootstrapAdmin(database.pool, { email: adminEmail, name: "Ravi Admin", phone: "+919812345678" });
   clock.set(new Date("2030-01-01T00:00:00.000Z"));
   mailer.sent.length = 0;
-  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+  app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, shopDiscountsAvailable: true });
   await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email: adminEmail } });
   const code = mailer.sent.findLast((sent) => sent.to === adminEmail)?.text.match(/code is (\d{6})/)?.[1];
   const signed = await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email: adminEmail, code } });
@@ -66,6 +66,18 @@ async function stock(shopId: string, line: ExampleLine): Promise<{ listingId: st
   return { quantityOptionId: optionId, count: line.count };
 }
 
+/** Saves the shop's one shop-wide discount rule as active, as the Owner's save leaves it (#63). */
+export async function saveRule(shopId: string, rule: ExampleShopDiscount, status = "active"): Promise<string> {
+  const terms = rule.form === "percentage" ? [rule.percentage, rule.cap ?? null, null, null] : [null, null, rule.amount, rule.minimumOrder];
+  const { rows: [saved] } = await database.pool.query(
+    `INSERT INTO shop_discounts (shop_id, version, form, percentage, cap, flat_amount, minimum_order, status, updated_at)
+     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, [shopId, rule.form, ...terms, status, clock.now()]);
+  await database.pool.query(
+    `INSERT INTO shop_discount_versions (rule_id, version, form, percentage, cap, flat_amount, minimum_order, status, created_at)
+     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)`, [saved.id, rule.form, ...terms, status, clock.now()]);
+  return String(saved.id);
+}
+
 function publish(scope: object, values: object) {
   return app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason: "Worked example" } });
 }
@@ -88,6 +100,7 @@ describe("Delivered-route worked examples through the price simulator (#357, Q-6
         : card.scope.type === "category" ? { type: "category", id: await category(card.scope.category) } : card.scope;
       expect((await publish(scope, card.values)).statusCode).toBe(201);
     }
+    const ruleId = example.shopDiscount && await saveRule(shopId, example.shopDiscount);
     const lines = [];
     for (const line of example.lines) lines.push(await stock(shopId, line));
 
@@ -95,7 +108,13 @@ describe("Delivered-route worked examples through the price simulator (#357, Q-6
     expect(response.statusCode).toBe(200);
     const { now, draft } = response.json();
     expect(draft).toBeNull();
-    expect(now).toMatchObject({ status: "priced", ...example.expected });
+    const { shopDiscount, ...expected } = example.expected;
+    expect(now).toMatchObject({ status: "priced", ...expected });
+    // The order's amount is the sum of its lines' parts, to the paisa (MNY-6).
+    const parts = now.lines.map((line: { shopDiscount: string }) => Math.round(Number(line.shopDiscount) * 100));
+    expect(parts.reduce((sum: number, part: number) => sum + part, 0)).toBe(Math.round(Number(shopDiscount ?? "0") * 100));
+    // The quote names the rule and version it was made under; a rule that took nothing off is not named.
+    expect(now.shopDiscount).toEqual(shopDiscount && Number(shopDiscount) > 0 ? { amount: shopDiscount, ruleId, ruleVersion: 1 } : null);
   });
 });
 
@@ -111,7 +130,7 @@ describe("Price simulator (#357)", () => {
     expect(now.rateCardVersion).toBe("2");
     expect(now.lines).toEqual([{
       ...line, quantityOptionId: null, categoryId: dairy, unitPrice: "120.00", count: 1, lineTotal: "120.00", commission: "6.00",
-      commissionSource: { type: "category", id: dairy, version: "2" },
+      commissionSource: { type: "category", id: dairy, version: "2" }, shopDiscount: "0.00",
     }]);
     expect(now.sources).toEqual({
       deliveryFee: { type: "global", id: null, version: "1" },

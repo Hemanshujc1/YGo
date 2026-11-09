@@ -7,6 +7,7 @@ import {
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn, withAdminTransaction } from "../admin";
+import { pauseOverMaximum } from "../shop-discounts";
 import { deriveKeys } from "../tokens";
 
 // Versions stay decimal strings, as pg returns bigint, so no value is rounded (#355).
@@ -182,6 +183,8 @@ export function registerRateCardRoutes(app: FastifyInstance, { pool, clock, secr
           VALUES ($1, $2, $3, $4, $5, $6, $7)`, [version, leaf.field, slots.money, slots.percentage, slots.integer, slots.boolean, slots.text]);
       }
       await client.query("INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'rate_card.publish', $2, 'rate_card', $3)", [who.accountId, scopeId ?? who.accountId, reason]);
+      // A lower maximum pauses the shop-wide discounts now over it, in this same transaction (NOT-6, #63). A category card never sets it.
+      if (scope.type !== "category") await pauseOverMaximum(client, scopeId, clock.now());
       await client.query("COMMIT"); return reply.code(201).send({ version });
     });
   });

@@ -154,6 +154,43 @@ describe("Admin web", () => {
     expect(await screen.findByText(strings.rateCardPublished("8"))).toBeTruthy();
   });
 
+  it("starts a new commission rule on the base after the shop discount, and keeps a base Admin or the card chose", async () => {
+    const api = {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [] } }),
+      getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "7", values: {} } }),
+      publishRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: "8" } }),
+    };
+    setup("/rate-cards", api);
+    await waitFor(() => expect(api.getRateCardScope).toHaveBeenCalledWith({ type: "global" }));
+    const section = (await screen.findByRole("heading", { name: strings.rateCardFields.commission })).closest("section") as HTMLElement;
+    fireEvent.click(within(section).getByRole("button", { name: strings.rateCardConfigure }));
+    const base = within(section).getByRole("combobox", { name: strings.rateCardCommissionBase });
+    expect(base).toHaveProperty("value", "after_shop_discount");
+    // A base is required, so there is no empty choice to fall back to.
+    expect(within(base).queryByText(strings.rateCardSelect)).toBeNull();
+    // Admin's own choice stands.
+    fireEvent.change(base, { target: { value: "before_shop_discount" } });
+    fireEvent.change(within(section).getByRole("combobox", { name: strings.rateCardFormula }), { target: { value: "fixed" } });
+    fireEvent.change(within(section).getByRole("textbox", { name: strings.rateCardFixedAmount }), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.rateCardPublish }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.reason }), { target: { value: "Commission" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.rateCardPublish }));
+    await waitFor(() => expect(api.publishRateCard).toHaveBeenCalledWith(expect.objectContaining({
+      values: { commission: expect.objectContaining({ formula: "fixed", fixedAmount: "4", base: "before_shop_discount" }) },
+    })));
+  });
+
+  it("keeps the base of a commission rule loaded from a card", async () => {
+    setup("/rate-cards", {
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [] } }),
+      getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "7", values: {
+        commission: { formula: "fixed", fixedAmount: "4", percentage: null, minimum: null, maximum: null, base: "before_shop_discount" },
+      } } }),
+    });
+    const base = await screen.findByRole("combobox", { name: strings.rateCardCommissionBase });
+    await waitFor(() => expect(base).toHaveProperty("value", "before_shop_discount"));
+  });
+
   it("formats structured current and draft rate-card values without exposing storage syntax", async () => {
     const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
     const draft = {
@@ -1647,19 +1684,30 @@ describe("Price simulator (A05, #358)", () => {
     expect(screen.getByRole("link", { name: strings.simulator.openRateCards }).getAttribute("href")).toBe("/rate-cards");
   });
 
-  it("checks the basket on this page: an empty basket, a bad count and more than 100 lines", async () => {
-    const many = Array.from({ length: 101 }, (_, index) => ({
-      ...rice, listingId: `00000000-0000-4000-8000-${String(900000000000 + index)}`, name: `Item ${index}`, quantityOptions: [],
-    }));
-    const { api } = await open({ listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice, ...many] } }) });
+  it("checks the basket on this page: an empty basket and a bad count", async () => {
+    const { api } = await open();
     calculate();
     expect(await screen.findByText(strings.simulator.emptyBasket)).toBeTruthy();
     count(riceLabel, "1000");
     calculate();
     expect(await screen.findByText(strings.simulator.invalidCount)).toBeTruthy();
-    // One query for all 102 count boxes; a role lookup per box is too slow in jsdom.
-    for (const input of document.querySelectorAll("input[aria-label^='Count of']")) fireEvent.change(input, { target: { value: "1" } });
-    calculate();
+    expect(api.simulatePrice).not.toHaveBeenCalled();
+  });
+
+  it("checks the basket on this page: more than 100 lines", async () => {
+    const many = Array.from({ length: 101 }, (_, index) => ({
+      ...rice, listingId: `00000000-0000-4000-8000-${String(900000000000 + index)}`, name: `Item ${index}`, quantityOptions: [],
+    }));
+    const { api } = await open({ listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [rice, ...many] } }) });
+    // This test once ran past 10 s under `pnpm check` load: every change re-rendered all 103 rows and each role query walked them.
+    // The rows are now memoised (price-simulator.tsx), the changes run in one act, and plain selectors skip the accessibility tree.
+    act(() => {
+      for (const input of document.querySelectorAll("input[aria-label^='Count of']")) fireEvent.change(input, { target: { value: "1" } });
+    });
+    const values = Array.from(document.querySelectorAll<HTMLInputElement>("input[aria-label^='Count of']"), (input) => input.value);
+    expect(values.length).toBeGreaterThan(100);
+    expect(values.every((value) => value === "1")).toBe(true);
+    fireEvent.click(screen.getByText(strings.simulator.calculate, { selector: "button" }));
     expect(await screen.findByText(strings.simulator.tooManyLines)).toBeTruthy();
     expect(api.simulatePrice).not.toHaveBeenCalled();
   });

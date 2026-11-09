@@ -11,7 +11,7 @@ export type PushTokenBody = z.infer<typeof PushTokenBody>;
 export const NotificationKind = z.enum([
   "order_placed", "order_cancelled_by_customer", "order_accepted", "order_rejected", "order_expired", "order_partially_accepted",
   "order_cancel_requested", "order_cancel_agreed", "order_cancel_kept", "order_cancelled_by_shop", "order_total_confirmed",
-  "product_request_approved", "product_request_rejected",
+  "product_request_approved", "product_request_rejected", "shop_discount_paused",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 

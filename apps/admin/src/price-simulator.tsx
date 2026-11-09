@@ -4,7 +4,7 @@ import {
   type RateCardValues as Values, type SimulatorListing,
 } from "@ygo/contracts";
 import { formatMoney, trimDecimal } from "@ygo/format";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLoaderData } from "react-router";
 import { RateCardFields, rateCardIssues, type FieldIssue } from "./components/rate-card-fields";
 import { ScopeChip, ScopePicker } from "./components/scope";
@@ -22,6 +22,15 @@ const text = strings.simulator;
 
 /** Display only: every amount arrives worked out by the server's one calculation (MNY-15). */
 const money = (amount: string) => formatMoney(amount);
+
+/** One basket row; memoised so typing a count re-renders that row alone, not every row of a long list. */
+const CountRow = memo(function CountRow({ row, count, bad, onCount }: { row: Row; count: string; bad: boolean; onCount: (key: string, value: string) => void }) {
+  return <tr className="border-t border-border">
+    <td className="p-3">{row.label}</td><td className="p-3 tabular-nums">{money(row.price)}</td>
+    <td className="p-3"><input aria-label={text.countFor(row.label)} inputMode="numeric" value={count} onChange={(event) => onCount(row.key, event.target.value)} className="h-10 w-24 rounded-lg border border-border-strong bg-surface px-3 tabular-nums" />
+      {bad && <span role="alert" className="block text-sm text-danger">{text.invalidCount}</span>}</td>
+  </tr>;
+});
 
 function rows(listings: SimulatorListing[]): Row[] {
   return listings.flatMap((listing) => {
@@ -180,6 +189,7 @@ export function PriceSimulator({ api }: { api: Api }) {
   }
 
   const allRows = useMemo(() => rows(listings ?? []), [listings]);
+  const changeCount = useCallback((key: string, value: string) => setCounts((current) => ({ ...current, [key]: value })), []);
   const shown = useMemo(() => allRows.filter((row) => row.label.toLowerCase().includes(filter.trim().toLowerCase())), [allRows, filter]);
   const inBasket = allRows.filter((row) => (counts[row.key] ?? "").trim() !== "");
   const hiddenInBasket = inBasket.filter((row) => !shown.includes(row)).length;
@@ -199,11 +209,7 @@ export function PriceSimulator({ api }: { api: Api }) {
           <label className="mt-4 block max-w-md">{text.filter}<input aria-label={text.filter} value={filter} onChange={(event) => setFilter(event.target.value)} className="mt-1 block h-10 w-full rounded-lg border border-border-strong bg-surface px-3" /></label>
           <div className="mt-4 max-h-96 overflow-auto"><table className="w-full min-w-xl text-left">
             <thead className="sticky top-0 bg-sunken"><tr><th className="p-3 font-medium">{text.item}</th><th className="p-3 font-medium">{text.price}</th><th className="w-32 p-3 font-medium">{text.count}</th></tr></thead>
-            <tbody>{shown.map((row) => <tr key={row.key} className="border-t border-border">
-              <td className="p-3">{row.label}</td><td className="p-3 tabular-nums">{money(row.price)}</td>
-              <td className="p-3"><input aria-label={text.countFor(row.label)} inputMode="numeric" value={counts[row.key] ?? ""} onChange={(event) => setCounts((current) => ({ ...current, [row.key]: event.target.value }))} className="h-10 w-24 rounded-lg border border-border-strong bg-surface px-3 tabular-nums" />
-                {badCounts.includes(row.key) && <span role="alert" className="block text-sm text-danger">{text.invalidCount}</span>}</td>
-            </tr>)}</tbody>
+            <tbody>{shown.map((row) => <CountRow key={row.key} row={row} count={counts[row.key] ?? ""} bad={badCounts.includes(row.key)} onCount={changeCount} />)}</tbody>
           </table></div>
           <p role="status" className="mt-4 text-muted">{text.inBasket(inBasket.length, hiddenInBasket)}</p>
           {hiddenBadCount && <p role="alert" className="mt-2 text-danger">{text.hiddenBadCount}</p>}

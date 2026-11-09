@@ -161,6 +161,22 @@ export async function notifyShop(client: PoolClient, shopId: string, kind: "prod
     [shopId, kind, title, body, at]);
 }
 
+/**
+ * Tells a shop's Owner, and only the Owner, something that belongs to no order, with its push queued, in the caller's transaction.
+ * `dedupeKey` names the notice, so a retry of the step that sends it never tells the Owner twice (#63, NOT-6).
+ */
+export async function notifyShopOwner(client: PoolClient, shopId: string, kind: "shop_discount_paused", title: string, body: string, at: Date, dedupeKey: string): Promise<void> {
+  await client.query(
+    `WITH added AS (
+       INSERT INTO notifications (account_id, app, kind, title, body, shop_id, dedupe_key, loud, created_at)
+       SELECT account_id, 'shopkeeper', $2::text, $3::text, $4::text, $1::uuid, $6::text, false, $5::timestamptz
+       FROM shop_members WHERE shop_id = $1::uuid AND role = 'owner'
+       ON CONFLICT (account_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+       RETURNING id)
+     INSERT INTO push_queue (notification_id, send_after) SELECT id, $5::timestamptz FROM added`,
+    [shopId, kind, title, body, at, dedupeKey]);
+}
+
 /** A phone's push is tried this many times in all, then dropped (NOT-2). */
 const MAX_TRIES = 3;
 const RETRY_SECONDS = 30;

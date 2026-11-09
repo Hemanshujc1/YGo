@@ -47,7 +47,8 @@ export async function savedCart(client: Pool | PoolClient, accountId: string, sh
  * Placing an order (#424) also keeps the engine's whole result and each line's pack.
  */
 export async function pricedCart(
-  client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], read?: Array<Pack | undefined>,
+  client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], shopDiscounts: boolean,
+  read?: Array<Pack | undefined>,
 ): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined> }> {
   // ACC-9: an Owner or Staff member can't order from their own shop. Read alongside the packs.
   const [member, packs] = await Promise.all([
@@ -72,7 +73,7 @@ export async function pricedCart(
   if (serving && orderable.length) {
     const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
       listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.part?.price ?? line.price, count: line.count,
-    })), await latestRateCardVersion(client));
+    })), shopDiscounts, await latestRateCardVersion(client));
     // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
     if (priced.status === "incomplete") delivering = false;
     else {
@@ -97,7 +98,7 @@ export async function pricedCart(
 
 const cartView = async (...args: Parameters<typeof pricedCart>) => (await pricedCart(...args)).view;
 
-export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }: { pool: Pool; clock: Clock; secret: string }): void {
+export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret, shopDiscounts }: { pool: Pool; clock: Clock; secret: string; shopDiscounts: boolean }): void {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const errors = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
 
@@ -109,7 +110,7 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
     const [[serving], cart] = await Promise.all([
       servingShops(pool, clock.now(), request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false)]);
     if (!serving && !cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    return cartView(pool, who.accountId, shopId, serving, cart?.revision ?? 0, cart?.lines ?? []);
+    return cartView(pool, who.accountId, shopId, serving, cart?.revision ?? 0, cart?.lines ?? [], shopDiscounts);
   });
 
   // Saves the whole cart and answers with its new quote (CRT-2). Saves of one cart run one at a time,
@@ -151,6 +152,6 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret }
     });
     if (typeof saved === "string") return reply.code(saved === "NOT_FOUND" ? 404 : 409).send({ error: { code: saved } });
     // Priced after the commit, from the packs the save checked: the quote reads in parallel, which one transaction's connection can't.
-    return cartView(pool, who.accountId, shopId, serving, revision + 1, saved.held, saved.packs);
+    return cartView(pool, who.accountId, shopId, serving, revision + 1, saved.held, shopDiscounts, saved.packs);
   });
 }
