@@ -446,6 +446,16 @@ export function createApiClient({
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel`), OrderResponse);
     },
 
+    /** `POST /v1/orders/:id/confirm-total`: Customer confirms partial acceptance proposal (C10, #64). */
+    async confirmOrderTotal(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/confirm-total`), OrderResponse);
+    },
+
+    /** `POST /v1/orders/:id/decline-total`: Customer declines partial acceptance proposal and cancels at no cost (C10, #64). */
+    async declineOrderTotal(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/decline-total`), OrderResponse);
+    },
+
     /** `GET /v1/search`: C16, the shops that can serve this place matching the typed text, each with up to 5 matching products (DSC-3). */
     async search({ pincode, latitude, longitude, q }: SearchQuery): Promise<ApiResult<SearchResponse>> {
       const query = new URLSearchParams({ pincode, latitude: String(latitude), longitude: String(longitude), q });

@@ -285,12 +285,16 @@ describe("each call", () => {
     expect(await client.orders()).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     expect(await client.order(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     expect(await client.cancelOrder(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
+    expect(await client.confirmOrderTotal(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
+    expect(await client.declineOrderTotal(orderId)).toMatchObject({ ok: false, code: "ORDER_STATUS_CHANGED" });
     await client.savedAddresses(shopId);
     expect(calls.slice(1).map(({ method, path, body: sent }) => ({ method, path, sent }))).toEqual([
       { method: "POST", path: `/v1/carts/${shopId}/order`, sent: body },
       { method: "GET", path: "/v1/orders", sent: undefined },
       { method: "GET", path: `/v1/orders/${orderId}`, sent: undefined },
       { method: "POST", path: `/v1/orders/${orderId}/cancel`, sent: undefined },
+      { method: "POST", path: `/v1/orders/${orderId}/confirm-total`, sent: undefined },
+      { method: "POST", path: `/v1/orders/${orderId}/decline-total`, sent: undefined },
       { method: "GET", path: `/v1/me/addresses?shopId=${shopId}`, sent: undefined },
     ]);
   });

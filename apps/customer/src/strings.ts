@@ -1,4 +1,4 @@
-import type { ErrorCode, OrderStatus, RejectReason } from "@ygo/contracts";
+import type { ErrorCode, OrderLineChangeReason, OrderStatus, RejectReason } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -346,6 +346,34 @@ export const strings = {
     handoverCode: "Give this code to the deliverer",
     codeSoon: "Your code will appear when the item check ends.",
     part: (part: string, pack: string) => `${part} of a ${pack} pack`,
+    // C10 Changed total (ORD-3, ORD-4, NOT-3, #64, #528)
+    changedTotal: {
+      heading: "The shop accepted in part",
+      subtitle: "Review the changes. Confirm the new total to keep your order, or cancel for free.",
+      itemsTitle: "Items in your order",
+      reasons: {
+        out_of_stock: "Out of stock",
+        damaged: "Damaged",
+        near_expiry: "Near expiry",
+        quality_issue: "Quality issue",
+      } satisfies Record<OrderLineChangeReason, string>,
+      originalTotal: "Original total",
+      newTotal: "New total",
+      confirm: "Confirm new total",
+      confirming: "Confirming…",
+      cancelFree: "Cancel order, free",
+      cancelling: "Cancelling…",
+      timeUp: "Time is up",
+      timeUpBody: "Time is up, the order was cancelled at no cost.",
+      expiresIn: (clock: string) => `Confirm within ${clock}`,
+      confirmFailed: "Couldn't confirm the new total. Check your connection and try again.",
+      declineFailed: "Couldn't cancel the order. Check your connection and try again.",
+    },
+    changedTotalBanner: {
+      title: "Total changed",
+      totalChangedTo: (total: string) => `New total: ${total}`,
+      review: "Review",
+    },
     // The shop's reason, in the words its Reject list shows (owner's answer 3 on #425).
     rejectReasons: {
       out_of_stock: "Items out of stock",

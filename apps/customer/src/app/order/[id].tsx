@@ -1,16 +1,18 @@
 import type { OrderLine, OrderResponse } from "@ygo/contracts";
-import { formatTime } from "@ygo/format";
+import { formatTime, trimDecimal } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text } from "@ygo/mobile";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
+import { Countdown, useSecondsLeft } from "../../components/countdown";
 import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
 import { api } from "../../api";
+import { feeText } from "../../lib/cart";
 import { money } from "../../lib/money";
 import { shownStatus, treatments } from "../../lib/order";
 import { hasReceipt, makeReceipt } from "../../lib/receipt";
@@ -99,6 +101,128 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
   );
 }
 
+/** C10 Changed total screen (#64, #528, ORD-4, NOT-3): review changed items, fee breakdown, reasons, countdown and confirm. */
+function ChangedTotalDetail({ order }: { order: OrderResponse }) {
+  const proposal = order.proposal;
+  if (!proposal) return null;
+  const secondsLeft = useSecondsLeft(order.confirmByAt);
+
+  return (
+    <View className="gap-4">
+      <View className="gap-2">
+        <StatusChip word={words.statuses.awaiting_customer_confirm} treatment={treatments.awaiting_customer_confirm} />
+        <Text className="text-secondary tabular-nums text-muted">{`${order.shop.name} · ${formatTime(order.placedAt)}`}</Text>
+      </View>
+
+      <View className="gap-2 rounded-card border border-warning bg-warning-subtle p-4">
+        <Text className="text-title font-semibold text-warning-text">{words.changedTotal.heading}</Text>
+        {secondsLeft !== null && <Countdown seconds={secondsLeft} />}
+        <Text className="text-secondary text-text">{words.changedTotal.subtitle}</Text>
+      </View>
+
+      <View className="rounded-card border border-border bg-surface px-4">
+        {proposal.lines.map((line, index) => {
+          const isReduced = line.count < line.originalCount || (line.part !== null && line.part !== line.originalPart);
+          const originalPack = packLabel(line.quantity, line.baseUnit);
+          const originalLabel = [
+            line.brand,
+            line.originalPart
+              ? words.part(packLabel(line.originalPart, line.baseUnit), originalPack)
+              : `${trimDecimal(String(line.originalCount))} × ${originalPack}`,
+          ].filter(Boolean).join(" · ");
+          const proposedPack = packLabel(line.quantity, line.baseUnit);
+          const proposedLabel = [
+            line.brand,
+            line.part
+              ? words.part(packLabel(line.part, line.baseUnit), proposedPack)
+              : `${trimDecimal(String(line.count))} × ${proposedPack}`,
+          ].filter(Boolean).join(" · ");
+
+          return (
+            <View key={index} className={`gap-1.5 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
+              <View className="flex-row items-center justify-between gap-3">
+                <View className="flex-1">
+                  <Text className="text-body font-semibold text-text">{line.name}</Text>
+                  {isReduced ? (
+                    <View className="flex-row items-center gap-1.5 flex-wrap">
+                      <Text className="text-secondary line-through text-muted tabular-nums">
+                        {originalLabel}
+                      </Text>
+                      <Text className="text-secondary font-medium tabular-nums text-text">
+                        {proposedLabel}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text className="text-secondary tabular-nums text-muted">{originalLabel}</Text>
+                  )}
+                </View>
+                <View className="items-end">
+                  {isReduced ? (
+                    <Text className="text-secondary line-through text-muted tabular-nums">
+                      {money(line.originalLineTotal)}
+                    </Text>
+                  ) : null}
+                  <Text className="text-label font-semibold tabular-nums text-text">
+                    {money(line.lineTotal)}
+                  </Text>
+                </View>
+              </View>
+              {isReduced && line.changeReason && (
+                <View className="self-start rounded-full border border-border bg-raised px-2.5 py-0.5">
+                  <Text className="text-small-label text-muted">
+                    {words.changedTotal.reasons[line.changeReason]}
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
+
+      <View className="rounded-card border border-border bg-surface p-4">
+        <View className="flex-row items-center justify-between gap-3 py-1">
+          <Text className="text-body text-muted">{strings.cart.items}</Text>
+          <View className="flex-row items-center gap-1.5">
+            {proposal.productValue !== proposal.originalProductValue && (
+              <Text className="text-secondary line-through text-muted tabular-nums">
+                {money(proposal.originalProductValue)}
+              </Text>
+            )}
+            <Text className="text-body tabular-nums text-text">{money(proposal.productValue)}</Text>
+          </View>
+        </View>
+        <View className="flex-row items-center justify-between gap-3 py-1">
+          <Text className="text-body text-muted">{strings.cart.delivery}</Text>
+          <Text className="text-body tabular-nums text-text">{feeText(proposal.deliveryFee)}</Text>
+        </View>
+        {proposal.smallCartFee && (
+          <View className="flex-row items-center justify-between gap-3 py-1">
+            <Text className="text-body text-muted">{strings.cart.smallCart}</Text>
+            <Text className="text-body tabular-nums text-text">{money(proposal.smallCartFee)}</Text>
+          </View>
+        )}
+        <View className="mt-2 border-t border-border pt-2 flex-row items-center justify-between gap-3">
+          <Text className="text-body font-semibold text-text">{strings.cart.total}</Text>
+          <View className="flex-row items-center gap-2">
+            <Text className="text-secondary line-through text-muted tabular-nums">
+              {money(proposal.originalTotal)}
+            </Text>
+            <Text className="text-title font-semibold tabular-nums text-text">
+              {money(proposal.total)}
+            </Text>
+          </View>
+        </View>
+        <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
+      </View>
+
+      <View>
+        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
+        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function OrderScreen() {
   const insets = useSafeAreaInsets();
   // `phone` comes with a link from a list of orders, so Call the shop shows while the order loads or fails (#52 answer 13).
@@ -110,11 +234,20 @@ export default function OrderScreen() {
   const shown = view.order;
   // Unknown until the order is read, when no phone came with the link.
   const phone = shown ? shown.shop.phone : carried || undefined;
+  const isAwaiting = shown?.status === "awaiting_customer_confirm";
+  const secondsLeft = useSecondsLeft(isAwaiting ? shown.confirmByAt : null);
+
+  useEffect(() => {
+    if (isAwaiting && secondsLeft === 0) {
+      void order.refresh();
+    }
+  }, [secondsLeft, isAwaiting, order]);
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
       <TopBar
         title={shown ? words.title(shown.number) : words.titleLoading}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace("/orders"))}
         action={phone && (
           <Pressable
             accessibilityRole="button"
@@ -144,7 +277,11 @@ export default function OrderScreen() {
             <Button label={words.retry} onPress={() => void order.retry()} variant="text" />
           </View>
         )}
-        {shown && <Detail order={shown} placed={placed === "1"} />}
+        {isAwaiting && shown?.proposal ? (
+          <ChangedTotalDetail order={shown} />
+        ) : shown ? (
+          <Detail order={shown} placed={placed === "1"} />
+        ) : null}
 
         {shown?.status === "arrived" && (
           <View className="items-center gap-3 rounded-card border border-primary bg-surface p-5">
@@ -174,7 +311,34 @@ export default function OrderScreen() {
           </View>
         )}
 
-        {phone !== undefined && (
+        {isAwaiting ? (
+          <View className="gap-2.5">
+            {view.notice && (
+              <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">
+                {view.notice}
+              </Text>
+            )}
+            {secondsLeft === 0 && !view.notice && (
+              <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">
+                {words.changedTotal.timeUpBody}
+              </Text>
+            )}
+            <Button
+              label={view.confirmingTotal ? words.changedTotal.confirming : words.changedTotal.confirm}
+              disabled={secondsLeft === 0 || view.confirmingTotal || view.decliningTotal}
+              busy={view.confirmingTotal}
+              onPress={() => void order.confirmTotal()}
+            />
+            <Button
+              label={view.decliningTotal ? words.changedTotal.cancelling : words.changedTotal.cancelFree}
+              variant="secondary"
+              disabled={view.confirmingTotal || view.decliningTotal}
+              busy={view.decliningTotal}
+              onPress={() => void order.declineTotal()}
+            />
+            {phone !== undefined && <CallShop phone={phone} />}
+          </View>
+        ) : phone !== undefined ? (
           <View className="gap-2.5">
             <CallShop phone={phone} />
             {/* Past its answer time the shop can't take it, so there is nothing left to cancel. */}
@@ -189,7 +353,7 @@ export default function OrderScreen() {
             {shown?.cancelRequest?.status === "kept" && <Text className="text-secondary text-muted">{words.askKept}</Text>}
             {view.notice && <Text accessibilityLiveRegion="polite" className="text-secondary text-text">{view.notice}</Text>}
           </View>
-        )}
+        ) : null}
       </ScrollView>
       <Confirm
         visible={asking}

@@ -77,6 +77,10 @@ export type OrderView = {
   /** The ask to cancel is on its way (ORD-5, #59). */
   asking: boolean;
   confirmingItems: boolean;
+  /** Confirming a partial acceptance proposal is on its way (C10, #64, #528). */
+  confirmingTotal: boolean;
+  /** Declining a partial acceptance proposal is on its way (C10, #64, #528). */
+  decliningTotal: boolean;
   /** Why Cancel didn't go through. */
   notice: string | null;
 };
@@ -86,6 +90,8 @@ type Client = {
   cancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
   askToCancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
   confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>>;
+  confirmOrderTotal(id: string): Promise<ApiResult<OrderResponse>>;
+  declineOrderTotal(id: string): Promise<ApiResult<OrderResponse>>;
 };
 
 /**
@@ -93,7 +99,18 @@ type Client = {
  * once the status is final (owner's improvement on #52); `seed` is the order placement answered with.
  */
 export function createOrder(client: Client, id: string, seed?: OrderResponse, timers: Timers = phoneTimers, every = pollEvery) {
-  let view: OrderView = { status: seed ? "ready" : "loading", order: seed ?? null, message: null, refreshing: false, cancelling: false, asking: false, confirmingItems: false, notice: null };
+  let view: OrderView = {
+    status: seed ? "ready" : "loading",
+    order: seed ?? null,
+    message: null,
+    refreshing: false,
+    cancelling: false,
+    asking: false,
+    confirmingItems: false,
+    confirmingTotal: false,
+    decliningTotal: false,
+    notice: null,
+  };
   // Each read and Cancel takes a ticket, so an older answer never replaces a newer one.
   const poller = createPoller(() => void read(), every, timers);
   const listeners = new Set<() => void>();
@@ -107,7 +124,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
 
   async function read(pull = false) {
     // Cancel's answer is the newest word on the order; a read waits until it lands.
-    if (view.cancelling || view.asking || view.confirmingItems) return;
+    if (view.cancelling || view.asking || view.confirmingItems || view.confirmingTotal || view.decliningTotal) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
@@ -200,6 +217,48 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
         set({ notice: answer === "offline" ? strings.order.itemsOffline : strings.errors[answer.code] });
         if (answer !== "offline" && answer.code === "ORDER_STATUS_CHANGED") await read();
         else schedule();
+      }
+    },
+
+    /** C10: Customer confirms partial acceptance proposal (ORD-4, #64, #528). */
+    async confirmTotal() {
+      if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
+      poller.ticket();
+      poller.unschedule();
+      set({ confirmingTotal: true, notice: null });
+      const answer = await client.confirmOrderTotal(id).catch(() => "offline" as const);
+      set({ confirmingTotal: false, refreshing: false });
+      if (answer !== "offline" && answer.ok) {
+        set({ status: "ready", order: answer.data, notice: null });
+        schedule();
+      } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
+        // Deadline passed or status changed: show "Time is up, the order was cancelled at no cost" and refetch without retry.
+        set({ notice: strings.order.changedTotal.timeUpBody });
+        await read();
+      } else {
+        // Network or server error: keep screen, show inline error with retry, keep countdown running.
+        set({ notice: answer === "offline" ? strings.order.changedTotal.confirmFailed : strings.errors[answer.code] });
+        schedule();
+      }
+    },
+
+    /** C10: Customer declines partial acceptance proposal; cancels order at no cost with reason declined_total (ORD-4, #64, #528). */
+    async declineTotal() {
+      if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
+      poller.ticket();
+      poller.unschedule();
+      set({ decliningTotal: true, notice: null });
+      const answer = await client.declineOrderTotal(id).catch(() => "offline" as const);
+      set({ decliningTotal: false, refreshing: false });
+      if (answer !== "offline" && answer.ok) {
+        set({ status: "ready", order: answer.data, notice: null });
+        schedule();
+      } else if (answer !== "offline" && (answer.code === "CONFIRMATION_EXPIRED" || answer.code === "ORDER_STATUS_CHANGED")) {
+        set({ notice: strings.order.changedTotal.timeUpBody });
+        await read();
+      } else {
+        set({ notice: answer === "offline" ? strings.order.changedTotal.declineFailed : strings.errors[answer.code] });
+        schedule();
       }
     },
   };
