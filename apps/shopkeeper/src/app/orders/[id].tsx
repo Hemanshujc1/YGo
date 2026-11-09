@@ -1,8 +1,17 @@
-import { RejectReason, type ShopOrderResponse } from "@ygo/contracts";
+import {
+  OrderLineChangeReason,
+  type OrderLine,
+  type PartialAcceptLine,
+  type PartialAcceptPreviewResponse,
+  RejectReason,
+  type ShopDeliverersResponse,
+  type ShopOrderResponse,
+} from "@ygo/contracts";
+import type { ApiResult } from "@ygo/api-client";
 import { formatTime } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -10,6 +19,7 @@ import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { access, api, session } from "../../api";
 import { Countdown, useSecondsLeft } from "../../components/countdown";
+import { Minus, Plus } from "../../components/icons";
 import { ReasonPicker } from "../../components/reason-picker";
 import { money } from "../../lib/money";
 import { createShopOrder, lineLabel, shortLabel, treatments } from "../../lib/shop-orders";
@@ -19,8 +29,31 @@ import { strings } from "../../strings";
 
 const words = strings.orders;
 
-function Detail({ order }: { order: ShopOrderResponse }) {
+function Detail({
+  order,
+  editing = false,
+  lineEdits,
+  onStepDown,
+  onStepUp,
+  onRemoveLine,
+  onUndoLine,
+  onOpenReason,
+  previewTotal,
+}: {
+  order: ShopOrderResponse;
+  editing?: boolean;
+  lineEdits?: Map<string, { count: number; reason: OrderLineChangeReason | null }>;
+  onStepDown?: (listingId: string) => void;
+  onStepUp?: (listingId: string) => void;
+  onRemoveLine?: (listingId: string) => void;
+  onUndoLine?: (listingId: string) => void;
+  onOpenReason?: (listingId: string) => void;
+  previewTotal?: PartialAcceptPreviewResponse | null;
+}) {
   const { address } = order;
+  const proposal = order.proposal;
+  const isAwaiting = order.status === "awaiting_customer_confirm";
+
   return (
     <View className="gap-4">
       <View className="gap-2">
@@ -29,20 +62,154 @@ function Detail({ order }: { order: ShopOrderResponse }) {
         {order.rejectReason && <Text className="text-body text-text">{words.rejectedBecause(words.reasons[order.rejectReason])}</Text>}
       </View>
       <View className="rounded-card border border-border bg-surface px-4">
-        {order.lines.map((line, index) => (
-          <View key={index} className={`flex-row gap-3 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
-            <View className="flex-1">
-              <Text className="text-body font-semibold text-text">{line.name}</Text>
-              <Text className="text-secondary tabular-nums text-muted">{lineLabel(line)}</Text>
+        {editing ? (
+          order.lines.map((line, index) => {
+            const edit = lineEdits?.get(line.listingId);
+            const count = edit !== undefined ? edit.count : line.count;
+            const reason = edit?.reason ?? null;
+            const isReduced = count < line.count;
+            const isPart = line.part !== null;
+
+            return (
+              <View key={line.listingId} className={`gap-2 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
+                <View className="flex-row items-center justify-between gap-3">
+                  <View className="flex-1">
+                    <Text className="text-body font-semibold text-text">{line.name}</Text>
+                    <Text className="text-secondary tabular-nums text-muted">{lineLabel(line)}</Text>
+                  </View>
+                  <View className="items-end">
+                    {isReduced ? (
+                      <Text className="text-secondary line-through text-muted tabular-nums">
+                        {money(line.lineTotal)}
+                      </Text>
+                    ) : (
+                      <Text className="text-label font-semibold tabular-nums text-text">
+                        {money(line.lineTotal)}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                <View className="flex-row items-center justify-between gap-2">
+                  {isPart ? (
+                    <View className="flex-row items-center gap-2">
+                      {count === 1 ? (
+                        <Button label={words.removeLine} variant="text" onPress={() => onRemoveLine?.(line.listingId)} />
+                      ) : (
+                        <Button label={words.undoLine} variant="text" onPress={() => onUndoLine?.(line.listingId)} />
+                      )}
+                    </View>
+                  ) : (
+                    <View className="flex-row items-center gap-2">
+                      <View className="flex-row items-center rounded-button border border-border-strong">
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={words.reduceCount}
+                          disabled={count === 0}
+                          onPress={() => onStepDown?.(line.listingId)}
+                          className="size-10 items-center justify-center rounded-full active:bg-primary-subtle"
+                        >
+                          <Minus size={18} className={count === 0 ? "text-disabled-text" : "text-primary"} />
+                        </Pressable>
+                        <Text className="min-w-8 text-center text-label font-semibold tabular-nums text-text">{count}</Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={words.increaseCount}
+                          disabled={count >= line.count}
+                          onPress={() => onStepUp?.(line.listingId)}
+                          className="size-10 items-center justify-center rounded-full active:bg-primary-subtle"
+                        >
+                          <Plus size={18} className={count >= line.count ? "text-disabled-text" : "text-primary"} />
+                        </Pressable>
+                      </View>
+                      {count > 0 && (
+                        <Button label={words.removeLine} variant="text" onPress={() => onRemoveLine?.(line.listingId)} />
+                      )}
+                      {isReduced && (
+                        <Button label={words.undoLine} variant="text" onPress={() => onUndoLine?.(line.listingId)} />
+                      )}
+                    </View>
+                  )}
+                </View>
+
+                {isReduced && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={reason ? words.lineChangeReasons[reason] : words.reasonSheetTitle}
+                    onPress={() => onOpenReason?.(line.listingId)}
+                    className={`self-start rounded-full px-3 py-1 ${reason ? "border border-border bg-surface" : "border border-warning bg-warning-subtle"}`}
+                  >
+                    <Text className={`text-secondary font-medium ${reason ? "text-text" : "text-warning-text"}`}>
+                      {reason ? words.lineChangeReasons[reason] : words.reasonSheetTitle}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })
+        ) : isAwaiting && proposal ? (
+          proposal.lines.map((line, index) => {
+            const isReduced = line.count < line.originalCount;
+            return (
+              <View key={index} className={`flex-row gap-3 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
+                <View className="flex-1">
+                  <Text className="text-body font-semibold text-text">{line.name}</Text>
+                  <Text className="text-secondary tabular-nums text-muted">{lineLabel(line as unknown as OrderLine)}</Text>
+                  {isReduced && line.changeReason && (
+                    <View className="mt-1 self-start rounded-full border border-border bg-surface px-2.5 py-0.5">
+                      <Text className="text-small-label text-muted">{words.lineChangeReasons[line.changeReason]}</Text>
+                    </View>
+                  )}
+                </View>
+                <View className="items-end">
+                  {isReduced && (
+                    <Text className="text-secondary line-through text-muted tabular-nums">
+                      {money(line.originalLineTotal)}
+                    </Text>
+                  )}
+                  <Text className="text-label font-semibold tabular-nums text-text">{money(line.lineTotal)}</Text>
+                </View>
+              </View>
+            );
+          })
+        ) : (
+          order.lines.map((line, index) => (
+            <View key={index} className={`flex-row gap-3 py-3 ${index > 0 ? "border-t border-border" : ""}`}>
+              <View className="flex-1">
+                <Text className="text-body font-semibold text-text">{line.name}</Text>
+                <Text className="text-secondary tabular-nums text-muted">{lineLabel(line)}</Text>
+              </View>
+              <Text className="text-label font-semibold tabular-nums text-text">{money(line.lineTotal)}</Text>
             </View>
-            <Text className="text-label font-semibold tabular-nums text-text">{money(line.lineTotal)}</Text>
-          </View>
-        ))}
+          ))
+        )}
       </View>
       <View className="rounded-card border border-border bg-surface p-4">
         <View className="flex-row items-center justify-between gap-3">
           <Text className="text-body font-semibold text-text">{words.collect}</Text>
-          <Text className="text-title font-semibold tabular-nums text-text">{money(order.total)}</Text>
+          <View className="flex-row items-center gap-2">
+            {editing && previewTotal ? (
+              <>
+                <Text className="text-secondary line-through text-muted tabular-nums">
+                  {money(previewTotal.originalTotal)}
+                </Text>
+                <Text className="text-title font-semibold tabular-nums text-text">
+                  {money(previewTotal.total)}
+                </Text>
+              </>
+            ) : isAwaiting && proposal ? (
+              <>
+                <Text className="text-secondary line-through text-muted tabular-nums">
+                  {money(proposal.originalTotal)}
+                </Text>
+                <Text className="text-title font-semibold tabular-nums text-text">
+                  {money(proposal.total)}
+                </Text>
+              </>
+            ) : (
+              <Text className="text-title font-semibold tabular-nums text-text">{money(order.total)}</Text>
+            )}
+          </View>
         </View>
         <Text className="mt-2 text-secondary text-muted">{words.collectNote}</Text>
       </View>
@@ -53,6 +220,34 @@ function Detail({ order }: { order: ShopOrderResponse }) {
         </Text>
       </View>
     </View>
+  );
+}
+
+function PartialAcceptReasonSheet({
+  chosen,
+  onChoose,
+  onCancel,
+}: {
+  chosen: OrderLineChangeReason | null;
+  onChoose: (reason: OrderLineChangeReason) => void;
+  onCancel: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal transparent visible animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onCancel}>
+      <View className="flex-1 justify-end bg-scrim">
+        <View accessibilityViewIsModal className="gap-2 rounded-t-sheet bg-raised px-4 pt-4" style={{ paddingBottom: insets.bottom + 12 }}>
+          <Text accessibilityRole="header" className="text-headline font-semibold text-text">{words.reasonSheetTitle}</Text>
+          <ReasonPicker
+            reasons={OrderLineChangeReason.options}
+            chosen={chosen}
+            words={words.lineChangeReasons}
+            onChoose={onChoose}
+          />
+          <Button label={words.reasonCancel} variant="text" onPress={onCancel} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -79,6 +274,8 @@ function RejectSheet({ sheet, chosen, onChoose, onConfirm, onCancel }: {
   );
 }
 
+type DeliverersResult = ApiResult<ShopDeliverersResponse> | null;
+
 export default function OrderScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -90,7 +287,7 @@ export default function OrderScreen() {
   const [agreeing, setAgreeing] = useState(false);
   // Known by now: the orders list that led here is the Owner's or Staff's own shop. Only decides what shows; the server refuses Staff.
   const owner = access.role() === "owner";
-  const [deliverers, setDeliverers] = useState<Awaited<ReturnType<typeof api.shopDeliverers>> | null>(null);
+  const [deliverers, setDeliverers] = useState<DeliverersResult>(null);
   const [delivererId, setDelivererId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [handoverCode, setHandoverCode] = useState("");
@@ -104,14 +301,193 @@ export default function OrderScreen() {
   const [proofReason, setProofReason] = useState<"customer_phone_unavailable" | "customer_phone_not_present" | "someone_else_receiving" | "other" | null>(null);
   const [failureReason, setFailureReason] = useState<"no_one_at_address" | "customer_refused" | "address_not_found" | "other" | null>(null);
   const [showQr, setShowQr] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [lineEdits, setLineEdits] = useState<Map<string, { count: number; reason: OrderLineChangeReason | null }>>(() => new Map());
+  const [reasonTargetListingId, setReasonTargetListingId] = useState<string | null>(null);
+  const [previewTotal, setPreviewTotal] = useState<PartialAcceptPreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const identity = session.get();
   const accountId = "account" in identity ? identity.account.id : null;
   const shown = view.order;
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
+  const confirmSeconds = useSecondsLeft(shown?.status === "awaiting_customer_confirm" ? shown.confirmByAt : null, view.offset);
   const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? null, view.offset);
   const timeUp = view.expired || seconds === 0;
   const done = (answered: boolean) => answered && router.replace("/orders");
+
+  function startEditing() {
+    if (!shown) return;
+    const initial = new Map<string, { count: number; reason: OrderLineChangeReason | null }>();
+    for (const l of shown.lines) {
+      initial.set(l.listingId, { count: l.count, reason: null });
+    }
+    setLineEdits(initial);
+    setPreviewTotal(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setEditing(false);
+    setLineEdits(new Map());
+    setPreviewTotal(null);
+    setReasonTargetListingId(null);
+  }
+
+  function onStepDown(listingId: string) {
+    if (!shown) return;
+    const original = shown.lines.find((l) => l.listingId === listingId);
+    if (!original) return;
+    const edit = lineEdits.get(listingId);
+    const currentCount = edit !== undefined ? edit.count : original.count;
+    if (currentCount <= 0) return;
+    const newCount = currentCount - 1;
+    const existingReason = edit?.reason ?? null;
+    const nextEdits = new Map(lineEdits);
+    nextEdits.set(listingId, { count: newCount, reason: existingReason });
+    setLineEdits(nextEdits);
+    if (newCount < original.count && !existingReason) {
+      setReasonTargetListingId(listingId);
+    }
+  }
+
+  function onStepUp(listingId: string) {
+    if (!shown) return;
+    const original = shown.lines.find((l) => l.listingId === listingId);
+    if (!original) return;
+    const edit = lineEdits.get(listingId);
+    const currentCount = edit !== undefined ? edit.count : original.count;
+    if (currentCount >= original.count) return;
+    const newCount = currentCount + 1;
+    const nextEdits = new Map(lineEdits);
+    nextEdits.set(listingId, { count: newCount, reason: newCount === original.count ? null : (edit?.reason ?? null) });
+    setLineEdits(nextEdits);
+  }
+
+  function onRemoveLine(listingId: string) {
+    if (!shown) return;
+    const original = shown.lines.find((l) => l.listingId === listingId);
+    if (!original) return;
+    const edit = lineEdits.get(listingId);
+    const existingReason = edit?.reason ?? null;
+    const nextEdits = new Map(lineEdits);
+    nextEdits.set(listingId, { count: 0, reason: existingReason });
+    setLineEdits(nextEdits);
+    if (!existingReason) {
+      setReasonTargetListingId(listingId);
+    }
+  }
+
+  function onUndoLine(listingId: string) {
+    if (!shown) return;
+    const original = shown.lines.find((l) => l.listingId === listingId);
+    if (!original) return;
+    const nextEdits = new Map(lineEdits);
+    nextEdits.set(listingId, { count: original.count, reason: null });
+    setLineEdits(nextEdits);
+    if (reasonTargetListingId === listingId) {
+      setReasonTargetListingId(null);
+    }
+  }
+
+  function onSelectReason(reason: OrderLineChangeReason) {
+    if (!reasonTargetListingId) return;
+    const edit = lineEdits.get(reasonTargetListingId);
+    if (edit) {
+      const nextEdits = new Map(lineEdits);
+      nextEdits.set(reasonTargetListingId, { count: edit.count, reason });
+      setLineEdits(nextEdits);
+    }
+    setReasonTargetListingId(null);
+  }
+
+  useEffect(() => {
+    if (!editing || !shown) return;
+    let hasChanged = false;
+    let remaining = 0;
+    const proposed: PartialAcceptLine[] = [];
+    const lines = shown.lines ?? [];
+    for (const l of lines) {
+      const edit = lineEdits.get(l.listingId);
+      const count = edit !== undefined ? edit.count : l.count;
+      if (count < l.count) {
+        hasChanged = true;
+        proposed.push({
+          listingId: l.listingId,
+          count,
+          reason: edit?.reason ?? "out_of_stock",
+        });
+      }
+      if (count > 0) remaining++;
+    }
+    if (!hasChanged || remaining === 0) {
+      setPreviewTotal(null);
+      setPreviewLoading(false);
+      return;
+    }
+    setPreviewLoading(true);
+    const timer = setTimeout(() => {
+      void order.previewPartialAccept(proposed).then((result) => {
+        setPreviewLoading(false);
+        if (result && result.ok) {
+          setPreviewTotal(result.data);
+        } else {
+          setPreviewTotal(null);
+        }
+      }).catch(() => {
+        setPreviewLoading(false);
+        setPreviewTotal(null);
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [editing, lineEdits, shown, order]);
+
+  let hasChanges = false;
+  let remainingCount = 0;
+  let allReducedHaveReasons = true;
+  if (shown) {
+    const lines = shown.lines ?? [];
+    for (const l of lines) {
+      const edit = lineEdits.get(l.listingId);
+      const count = edit !== undefined ? edit.count : l.count;
+      if (count < l.count) {
+        hasChanges = true;
+        if (!edit?.reason) {
+          allReducedHaveReasons = false;
+        }
+      }
+      if (count > 0) remainingCount++;
+    }
+  }
+  const canSend = hasChanges && remainingCount > 0 && allReducedHaveReasons && previewTotal !== null && !previewLoading && !timeUp;
+
+  async function handleSendNewTotal() {
+    if (!shown || !canSend || submitting) return;
+    const proposed: PartialAcceptLine[] = [];
+    const lines = shown.lines ?? [];
+    for (const l of lines) {
+      const edit = lineEdits.get(l.listingId);
+      const count = edit !== undefined ? edit.count : l.count;
+      if (count < l.count) {
+        if (!edit?.reason) return;
+        proposed.push({
+          listingId: l.listingId,
+          count,
+          reason: edit.reason,
+        });
+      }
+    }
+    if (proposed.length === 0) return;
+    setSubmitting(true);
+    const ok = await order.partialAccept(proposed);
+    setSubmitting(false);
+    if (ok) {
+      setEditing(false);
+      setLineEdits(new Map());
+      setPreviewTotal(null);
+    }
+  }
 
   async function saveProofPhoto(orderId: string, uri: string) {
     const blob = await (await fetch(uri)).blob();
@@ -133,6 +509,12 @@ export default function OrderScreen() {
         <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{shown ? words.detailTitle(shown.number) : words.titleLoading}</Text>
         {shown?.customer?.name && <Text className="text-body text-text">{words.customer}: {shown.customer.name}{shown.customer.phone ? ` · ${shown.customer.phone}` : ""}</Text>}
         {isNew && seconds !== null && <Countdown seconds={timeUp ? 0 : seconds} />}
+        {shown?.status === "awaiting_customer_confirm" && (
+          <View className="gap-2 rounded-card border border-warning bg-warning-subtle p-4">
+            <Text className="text-body font-semibold text-warning-text">{words.waitingForConfirm}</Text>
+            {confirmSeconds !== null && <Countdown seconds={confirmSeconds} />}
+          </View>
+        )}
         {view.status === "loading" && (
           <View className="min-h-12 flex-row items-center gap-2">
             <ActivityIndicator className="text-primary" />
@@ -161,11 +543,45 @@ export default function OrderScreen() {
             <Button label={view.answering === "keep" ? words.keeping : words.keepOrder} busy={view.answering === "keep"} disabled={view.answering !== null} onPress={() => void order.keep()} />
           </View>
         )}
-        {shown && <Detail order={shown} />}
-        {shown && ["accepted", "preparing", "ready"].includes(shown.status) && access.role() !== null && (
-          <Button label={view.answering === "cancel" ? words.cancelling : words.cancelOrder} variant="secondary" busy={view.answering === "cancel"} disabled={view.answering !== null} onPress={() => setCancelling({ chosen: null })} />
+        {shown && (
+          <Detail
+            order={shown}
+            editing={editing}
+            lineEdits={lineEdits}
+            onStepDown={onStepDown}
+            onStepUp={onStepUp}
+            onRemoveLine={onRemoveLine}
+            onUndoLine={onUndoLine}
+            onOpenReason={(listingId) => setReasonTargetListingId(listingId)}
+            previewTotal={previewTotal}
+          />
         )}
-        {shown && (["accepted", "preparing"].includes(shown.status) || (shown.status === "ready" && owner)) && <View className="gap-2">
+        {shown && ["accepted", "preparing"].includes(shown.status) && access.role() !== null && !editing && (
+          <View className="flex-row gap-2">
+            <View className="flex-1">
+              <Button label={words.acceptInPart} variant="secondary" onPress={startEditing} />
+            </View>
+            <View className="flex-1">
+              <Button
+                label={view.answering === "cancel" ? words.cancelling : words.cancelOrder}
+                variant="secondary"
+                busy={view.answering === "cancel"}
+                disabled={view.answering !== null}
+                onPress={() => setCancelling({ chosen: null })}
+              />
+            </View>
+          </View>
+        )}
+        {shown && shown.status === "ready" && access.role() !== null && !editing && (
+          <Button
+            label={view.answering === "cancel" ? words.cancelling : words.cancelOrder}
+            variant="secondary"
+            busy={view.answering === "cancel"}
+            disabled={view.answering !== null}
+            onPress={() => setCancelling({ chosen: null })}
+          />
+        )}
+        {shown && !editing && (["accepted", "preparing"].includes(shown.status) || (shown.status === "ready" && owner)) && <View className="gap-2">
           {shown.status === "accepted" && <Button label={words.preparing} busy={working} onPress={() => {
             setWorking(true); void api.advanceShopOrder(shown.id, "preparing").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
           }} />}
@@ -245,15 +661,36 @@ export default function OrderScreen() {
         {shown && deliveryMessage && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{deliveryMessage}</Text>}
       </ScrollView>
 
-      {isNew && (
+      {editing ? (
+        <View className="gap-2.5 border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: insets.bottom + 12 }}>
+          <Button
+            label={submitting ? words.sendingNewTotal : words.sendNewTotal}
+            disabled={!canSend || submitting}
+            busy={submitting}
+            onPress={() => void handleSendNewTotal()}
+          />
+          <Button
+            label={words.cancelChanges}
+            variant="secondary"
+            disabled={submitting}
+            onPress={cancelEditing}
+          />
+        </View>
+      ) : isNew ? (
         <View className="gap-2.5 border-t border-border bg-surface px-4 pt-3" style={{ paddingBottom: insets.bottom + 12 }}>
           <Button
             label={view.answering === "reject" ? words.rejecting : words.reject}
-            variant="secondary"
+            variant="destructive-outline"
             busy={view.answering === "reject"}
             disabled={timeUp || view.answering !== null}
             // After NOT_ENOUGH_STOCK, "Items out of stock" is the likely reason (owner's answer 8 on #431).
             onPress={() => setRejecting({ chosen: view.shortLines.length > 0 ? "out_of_stock" : null })}
+          />
+          <Button
+            label={words.acceptInPart}
+            variant="secondary"
+            disabled={timeUp || view.answering !== null}
+            onPress={startEditing}
           />
           <Button
             label={view.answering === "accept" ? words.accepting : words.accept}
@@ -262,7 +699,7 @@ export default function OrderScreen() {
             onPress={() => void order.accept().then(done)}
           />
         </View>
-      )}
+      ) : null}
       {cancelling && (
         <RejectSheet
           sheet={words.cancelSheet}
@@ -301,6 +738,13 @@ export default function OrderScreen() {
             setRejecting(null);
             void order.reject(reason).then(done);
           }}
+        />
+      )}
+      {reasonTargetListingId && (
+        <PartialAcceptReasonSheet
+          chosen={lineEdits.get(reasonTargetListingId)?.reason ?? null}
+          onChoose={onSelectReason}
+          onCancel={() => setReasonTargetListingId(null)}
         />
       )}
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>

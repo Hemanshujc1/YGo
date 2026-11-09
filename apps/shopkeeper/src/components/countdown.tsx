@@ -32,3 +32,10 @@ export function Countdown({ seconds }: { seconds: number }) {
     </View>
   );
 }
+
+/** Countdown ticking down to `expiresAt` by the server's clock. */
+export function ExpiryCountdown({ expiresAt, offset }: { expiresAt: string | null; offset: number }) {
+  const seconds = useSecondsLeft(expiresAt, offset);
+  if (seconds === null) return null;
+  return <Countdown seconds={seconds} />;
+}

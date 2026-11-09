@@ -13,6 +13,7 @@ vi.mock("react", () => ({
     return [mock.hooks[index], () => undefined];
   },
   useSyncExternalStore: () => mock.view,
+  useEffect: () => undefined,
 }));
 vi.mock("expo-router", () => ({ Link: "Link", router: {}, useLocalSearchParams: () => ({ id: "order-1" }) }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Confirm: "Confirm", StatusChip: "StatusChip", Text: "Text", useInFront: () => undefined }));
@@ -29,9 +30,10 @@ vi.mock("../src/components/countdown", () => ({
   Countdown: "Countdown",
   useSecondsLeft: (expiresAt: string | null, offset: number) => { mock.seconds.push([expiresAt, offset]); return null; },
 }));
+vi.mock("../src/components/icons", () => ({ Minus: "Minus", Plus: "Plus" }));
 vi.mock("../src/components/reason-picker", () => ({ ReasonPicker: "ReasonPicker" }));
 vi.mock("../src/lib/shop-orders", async (importActual) => ({
-  ...(await importActual<typeof import("../src/lib/shop-orders")>()),
+  ...((await importActual()) as Record<string, unknown>),
   createShopOrder: () => ({ subscribe: () => () => undefined, get: () => mock.view }),
 }));
 import OrderScreen from "../src/app/orders/[id]";

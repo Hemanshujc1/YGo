@@ -1,5 +1,5 @@
 import { formatNumber } from "@ygo/format";
-import type { CounterBillVoidReason, ErrorCode, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
+import type { CounterBillVoidReason, ErrorCode, OrderLineChangeReason, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -430,6 +430,25 @@ export const strings = {
     deliverTo: "Deliver to",
     labels: { home: "Home", work: "Work", other: "Other" },
     accept: "Accept", accepting: "Accepting", reject: "Reject", rejecting: "Rejecting",
+    acceptInPart: "Accept in part",
+    sendNewTotal: "Send new total to customer",
+    sendingNewTotal: "Sending new total…",
+    cancelChanges: "Cancel changes",
+    waitingForConfirm: "Waiting for customer to confirm",
+    waitingForConfirmBanner: "Waiting for customer to confirm the updated total.",
+    reasonSheetTitle: "Reason for change",
+    reasonConfirm: "Save reason",
+    reasonCancel: "Cancel",
+    removeLine: "Remove",
+    undoLine: "Undo",
+    reduceCount: "Reduce quantity",
+    increaseCount: "Increase quantity",
+    lineChangeReasons: {
+      out_of_stock: "Out of stock",
+      damaged: "Damaged",
+      near_expiry: "Near expiry",
+      quality_issue: "Quality issue",
+    } satisfies Record<OrderLineChangeReason, string>,
     cancelledByCustomer: "This order was cancelled by the customer.",
     answered: "This order was already answered.",
     shortTitle: "Not enough stock for:",
