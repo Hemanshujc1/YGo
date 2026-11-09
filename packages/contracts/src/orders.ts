@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AddressLabel } from "./addresses";
 import { ProductBaseUnit } from "./catalog";
 import { Amount, LineCount } from "./pricing";
+import { AppliedShopDiscount } from "./shop-discount";
 
 /** Every status an order can be in (#9); the terminal ones end it. */
 export const OrderStatus = z.enum([
@@ -109,6 +110,11 @@ export const OrderResponse = z.strictObject({
   address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }),
   lines: z.array(OrderLine),
   productValue: Amount,
+  /**
+   * The shop-wide discount frozen at placement and the offer of the rule version that gave it; null when none applied. Also null once a revision
+   * is confirmed: the revision's `productValue` and `total` are its own, and the placement discount is not combined with them (#571, until #572 gives a revision its own).
+   */
+  shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
   total: Amount,

@@ -63,7 +63,7 @@ function CallShop({ phone }: { phone: string | null }) {
 
 function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
   const status = shownStatus(order);
-  const quote = { productValue: order.productValue, deliveryFee: order.deliveryFee, smallCartFee: order.smallCartFee, total: order.total };
+  const quote = { productValue: order.productValue, shopDiscount: order.shopDiscount, deliveryFee: order.deliveryFee, smallCartFee: order.smallCartFee, total: order.total };
   return (
     <View className="gap-4">
       {placed && status === "placed" && <PlacedMark />}

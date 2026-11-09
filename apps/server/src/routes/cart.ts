@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody } from "@ygo/contracts";
+import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody, type ShopDiscountOffer } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { partOf, stockOf, visibleListings } from "../listings";
@@ -43,6 +43,22 @@ export async function savedCart(client: Pool | PoolClient, accountId: string, sh
 }
 
 /**
+ * The offer of one exact rule version, as it was saved: versions are never changed or deleted, so this is the offer the quote was priced with
+ * even if the Owner has edited the rule since (#571).
+ */
+export async function frozenOffer(client: Pool, ruleId: string, version: number): Promise<ShopDiscountOffer> {
+  const { rows: [row] } = await client.query<{ offer: ShopDiscountOffer }>(
+    `SELECT ${offerSql("v")} AS offer FROM shop_discount_versions v WHERE v.rule_id = $1 AND v.version = $2`, [ruleId, version]);
+  if (!row) throw new Error("A priced discount lost its rule version");
+  return row.offer;
+}
+
+/** The offer of a `shop_discount_versions` row, as JSON with amounts without trailing zeros. */
+export const offerSql = (v: string) => `CASE ${v}.form
+  WHEN 'percentage' THEN json_build_object('form', 'percentage', 'percentage', trim_scale(${v}.percentage)::text, 'cap', trim_scale(${v}.cap)::text)
+  ELSE json_build_object('form', 'flat', 'amount', trim_scale(${v}.flat_amount)::text, 'minimumOrder', trim_scale(${v}.minimum_order)::text) END`;
+
+/**
  * The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4).
  * Placing an order (#424) also keeps the engine's whole result and each line's pack.
  */
@@ -79,7 +95,10 @@ export async function pricedCart(
     else {
       engine = priced;
       orderable.forEach(({ line }, index) => { line.lineTotal = priced.lines[index]?.lineTotal ?? null; });
-      quote = { productValue: priced.productValue, deliveryFee: priced.deliveryFee.amount, smallCartFee: priced.smallCartFee?.amount ?? null, total: priced.customerTotal };
+      quote = {
+        productValue: priced.productValue, shopDiscount: priced.shopDiscount ? { amount: priced.shopDiscount.amount, offer: await frozenOffer(client, priced.shopDiscount.ruleId, priced.shopDiscount.ruleVersion) } : null,
+        deliveryFee: priced.deliveryFee.amount, smallCartFee: priced.smallCartFee?.amount ?? null, total: priced.customerTotal,
+      };
       // The floor's shortfall is the platform's earnings, which the Customer never sees (owner's clarification 2 on #50).
       for (const reason of priced.reasons) priceReasons.push(reason.code === "BELOW_MINIMUM_CART" ? reason : { code: "BELOW_CONTRIBUTION_FLOOR" });
     }

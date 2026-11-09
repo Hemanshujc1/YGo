@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AddressLabel } from "./addresses";
 import { OrderLine } from "./orders";
 import { Amount } from "./pricing";
+import { AppliedShopDiscount } from "./shop-discount";
 
 /**
  * `GET /v1/orders/:id/receipt` (#61): what the shop's online receipt shows, as the order froze it. The Customer's app
@@ -20,6 +21,8 @@ export const ReceiptResponse = z.strictObject({
   address: z.strictObject({ label: AddressLabel, areaLine: z.string().nullable() }),
   lines: z.array(OrderLine),
   productValue: Amount,
+  /** The discount frozen at placement and its offer; null when none applied (#571). */
+  shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
   total: Amount,

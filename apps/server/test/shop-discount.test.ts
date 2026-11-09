@@ -499,4 +499,154 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
     expect((await database.pool.query("SELECT shop_discount::text AS discount, shop_discount_rule_id AS rule, total::text AS total FROM orders")).rows[0])
       .toEqual({ discount: "0.00", rule: null, total: "230.00" });
   });
+
+  describe("what the Customer sees of it (#571, CRT-5)", () => {
+    const cents = (amount: string) => Math.round(Number(amount) * 100);
+    /** Items less the discount plus the fees is the total, to the paisa, as the Customer reads the rows. */
+    const reconciles = (view: { productValue: string; shopDiscount: { amount: string } | null; deliveryFee?: string; smallCartFee?: string | null; total: string }, delivery = "30.00") =>
+      cents(view.productValue) - cents(view.shopDiscount?.amount ?? "0") + cents(view.deliveryFee ?? delivery) + cents(view.smallCartFee ?? "0") === cents(view.total);
+    const orderOf = async (who: { headers: Record<string, string> }, id: string) => (await app.inject({ method: "GET", url: `/v1/orders/${id}`, headers: who.headers })).json();
+    const receiptOf = async (who: { headers: Record<string, string> }, id: string) => (await app.inject({ method: "GET", url: `/v1/orders/${id}/receipt`, headers: who.headers })).json();
+    const basket = async (owner: { shopId: string }) => [{ listingId: await listing(owner.shopId, "33.33"), count: 1 }, { listingId: await listing(owner.shopId, "33.33"), count: 1 }, { listingId: await listing(owner.shopId, "33.34"), count: 1 }];
+
+    it("shows the discount and its offer on the cart, the order and the receipt, each adding up to its total, and keeps the offer after the rule is edited", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const who = await customer();
+      await put(owner.headers, percentage("5", "50.00"));
+      const { cart, place } = await order(owner.shopId, who, await basket(owner));
+      const offer = { form: "percentage", percentage: "5", cap: "50" };
+      const quote = (cart as unknown as { quote: { productValue: string; shopDiscount: { amount: string; offer: unknown }; deliveryFee: string; smallCartFee: string | null; total: string } }).quote;
+      expect(quote).toMatchObject({ productValue: "100.00", shopDiscount: { amount: "5.00", offer }, total: "125.00" });
+      expect(reconciles({ ...quote, deliveryFee: "30.00" })).toBe(true);
+
+      const id = (await place()).json().id as string;
+      const placed = await orderOf(who, id);
+      expect(placed).toMatchObject({ productValue: "100.00", shopDiscount: { amount: "5.00", offer }, total: "125.00" });
+      expect(reconciles(placed)).toBe(true);
+
+      // The Owner edits the rule twice; the order and the receipt still name the offer that priced them, and the cart names the new one.
+      await put(owner.headers, flat("200", "1000"));
+      await put(owner.headers, percentage("10", "20"));
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
+      expect((await orderOf(who, id)).shopDiscount).toEqual({ amount: "5.00", offer });
+      const receipt = await receiptOf(who, id);
+      expect(receipt).toMatchObject({ productValue: "100.00", shopDiscount: { amount: "5.00", offer }, total: "125.00" });
+      expect(reconciles(receipt)).toBe(true);
+      const later = await order(owner.shopId, who, await basket(owner));
+      expect((later.cart as unknown as { quote: { shopDiscount: { offer: unknown } } }).quote.shopDiscount.offer).toEqual({ form: "percentage", percentage: "10", cap: "20" });
+
+      // A flat offer carries its amount and minimum order, without trailing zeros.
+      await put(owner.headers, flat("200", "1000"));
+      const rich = await order(owner.shopId, who, [{ listingId: await listing(owner.shopId, "999.50"), count: 2 }]);
+      expect(rich.cart.quote).toMatchObject({ shopDiscount: { amount: "200.00", offer: { form: "flat", amount: "200", minimumOrder: "1000" } } });
+    });
+
+    it("returns no discount when none applied: no rule, a rule off, a flat rule under its minimum, or discounts not available", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const who = await customer();
+      const item = await listing(owner.shopId, "200");
+      const lines = [{ listingId: item, count: 1 }];
+      const cartOf = async () => ((await order(owner.shopId, who, lines)).cart as unknown as { quote: { shopDiscount: unknown } }).quote.shopDiscount;
+      const first = await order(owner.shopId, who, lines);
+      expect(first.cart.quote).toMatchObject({ shopDiscount: null, total: "230.00" });
+      const id = (await first.place()).json().id as string;
+      expect((await orderOf(who, id)).shopDiscount).toBeNull();
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
+      expect((await receiptOf(who, id)).shopDiscount).toBeNull();
+
+      await put(owner.headers, percentage("10", null, false));
+      expect(await cartOf()).toBeNull();
+      await put(owner.headers, flat("200", "1000"));
+      expect(await cartOf()).toBeNull();
+
+      // A rule left active, with the gate off: nothing on the cart, the order or the receipt.
+      await put(owner.headers, percentage("10"));
+      expect(await cartOf()).not.toBeNull();
+      const open = app;
+      app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+      try {
+        expect(await cartOf()).toBeNull();
+        const gated = await order(owner.shopId, who, lines);
+        const gatedId = (await gated.place()).json().id as string;
+        expect((await orderOf(who, gatedId)).shopDiscount).toBeNull();
+        await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [gatedId]);
+        expect((await receiptOf(who, gatedId)).shopDiscount).toBeNull();
+      } finally { await app.close(); app = open; }
+    });
+
+    it("keeps an order's frozen discount and offer when the gate is turned off later, while new quotes and orders get none", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const who = await customer();
+      await put(owner.headers, percentage("5", "50.00"));
+      const { cart, place } = await order(owner.shopId, who, await basket(owner));
+      expect((cart as unknown as { quote: { total: string } }).quote.total).toBe("125.00");
+      const id = (await place()).json().id as string;
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
+      const offer = { form: "percentage", percentage: "5", cap: "50" };
+      const before = { order: await orderOf(who, id), receipt: await receiptOf(who, id) };
+      expect(before.order.shopDiscount).toEqual({ amount: "5.00", offer });
+      expect(before.receipt.shopDiscount).toEqual({ amount: "5.00", offer });
+
+      // The gate goes off with the rule still active in the database: the same server code, `shopDiscountsAvailable` left at its default.
+      const open = app;
+      app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret });
+      try {
+        expect((await database.pool.query("SELECT status FROM shop_discounts")).rows[0]).toEqual({ status: "active" });
+        // History is not erased: the order and its receipt are exactly as they were, and each adds up.
+        const order1 = await orderOf(who, id);
+        const receipt1 = await receiptOf(who, id);
+        expect(order1).toEqual(before.order);
+        expect(receipt1).toEqual(before.receipt);
+        expect(order1.shopDiscount).toEqual({ amount: "5.00", offer });
+        expect(receipt1.shopDiscount).toEqual({ amount: "5.00", offer });
+        expect(reconciles(order1)).toBe(true);
+        expect(reconciles(receipt1)).toBe(true);
+        expect([order1.total, receipt1.total]).toEqual(["125.00", "125.00"]);
+
+        // New quotes and new orders get none.
+        const fresh = await order(owner.shopId, who, await basket(owner));
+        const quote = (fresh.cart as unknown as { quote: { productValue: string; shopDiscount: unknown; deliveryFee: string; smallCartFee: string | null; total: string } }).quote;
+        expect(quote).toMatchObject({ productValue: "100.00", shopDiscount: null, total: "130.00" });
+        expect(reconciles({ ...quote, shopDiscount: null })).toBe(true);
+        const freshId = (await fresh.place()).json().id as string;
+        const placed = await orderOf(who, freshId);
+        expect(placed).toMatchObject({ shopDiscount: null, productValue: "100.00", total: "130.00" });
+        expect(reconciles(placed)).toBe(true);
+        expect((await database.pool.query("SELECT shop_discount::text AS discount, shop_discount_rule_id AS rule FROM orders WHERE id = $1", [freshId])).rows[0]).toEqual({ discount: "0.00", rule: null });
+        await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [freshId]);
+        expect((await receiptOf(who, freshId)).shopDiscount).toBeNull();
+        // The historical order is still untouched after the new one.
+        expect(await orderOf(who, id)).toEqual(before.order);
+      } finally { await app.close(); app = open; }
+    });
+
+    it("does not show the placement discount beside a confirmed revision's own figures", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, card);
+      const who = await customer();
+      await put(owner.headers, percentage("10"));
+      const { cart, place } = await order(owner.shopId, who, [{ listingId: await listing(owner.shopId, "200"), count: 1 }]);
+      expect(cart.quote.total).toBe("210.00");
+      const id = (await place()).json().id as string;
+      expect(await orderOf(who, id)).toMatchObject({ shopDiscount: { amount: "20.00" }, productValue: "200.00", total: "210.00" });
+
+      // A confirmed revision brings its own product value and total, and no discount until #572 gives it one.
+      await database.pool.query(
+        `INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission, platform_contribution,
+           quote, below_floor_exception, confirm_by_at, created_at, confirmed_at)
+         VALUES ($1, 1, 'confirmed', 'placed', 'owner', 150, 30, 180, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now(), now())`, [id]);
+      const revised = await orderOf(who, id);
+      expect(revised).toMatchObject({ shopDiscount: null, productValue: "150.00", total: "180.00" });
+      expect(reconciles(revised)).toBe(true);
+
+      // The receipt reads only placement figures, so it keeps the placement discount beside them and still adds up.
+      await database.pool.query("UPDATE orders SET status = 'delivered' WHERE id = $1", [id]);
+      const receipt = await receiptOf(who, id);
+      expect(receipt).toMatchObject({ shopDiscount: { amount: "20.00" }, productValue: "200.00", total: "210.00" });
+      expect(reconciles(receipt)).toBe(true);
+    });
+  });
 });

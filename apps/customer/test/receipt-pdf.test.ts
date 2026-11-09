@@ -12,7 +12,7 @@ const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
     { name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1.000", count: 2, part: null, unitPrice: "150.00", lineTotal: "300.00" },
     { name: "Atta", brand: null, baseUnit: "kg", quantity: "5.000", count: 1, part: "0.500", unitPrice: "30.00", lineTotal: "30.00" },
   ],
-  productValue: "330.00", deliveryFee: "20.00", smallCartFee: "10.50", total: "360.50", payment: "upi", ...over,
+  productValue: "330.00", shopDiscount: null, deliveryFee: "20.00", smallCartFee: "10.50", total: "360.50", payment: "upi", ...over,
 });
 
 describe("receipt PDF (#61)", () => {
@@ -79,5 +79,19 @@ describe("receipt PDF (#61)", () => {
     expect(out).not.toContain("<b>");
     expect(out).toContain("&lt;img src=x onerror=&quot;alert(&#39;1&#39;)&quot;&gt; &amp; Co");
     expect(escapeHtml("a&b")).toBe("a&amp;b");
+  });
+
+  it("shows the shop discount with its offer when one applied, as a minus that makes the rows add up, and nothing when none did (#571)", () => {
+    const none = receiptHtml({ receipt: receipt(), fonts });
+    expect(none).not.toContain("Shop discount");
+    const discounted = receiptHtml({ receipt: receipt({ shopDiscount: { amount: "33.00", offer: { form: "percentage", percentage: "10", cap: "50" } }, total: "327.50" }), fonts });
+    expect(discounted).toContain("Shop discount");
+    expect(discounted).toContain("10% off, up to ₹50");
+    expect(discounted).toContain("\u2212₹33");
+    expect(discounted).not.toMatch(/\.00/);
+    expect(discounted.indexOf("₹330")).toBeLessThan(discounted.indexOf("Shop discount"));
+    expect(discounted.indexOf("Shop discount")).toBeLessThan(discounted.indexOf("Delivery fee"));
+    const flat = receiptHtml({ receipt: receipt({ shopDiscount: { amount: "200.00", offer: { form: "flat", amount: "200", minimumOrder: "1000" } } }), fonts });
+    expect(flat).toContain("₹200 off orders of ₹1,000 or more");
   });
 });

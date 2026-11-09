@@ -3,6 +3,7 @@ import { ProductBaseUnit } from "./catalog";
 import { PartPack } from "./feed";
 import { ShopPrice } from "./fields";
 import { Amount, LineCount } from "./pricing";
+import { AppliedShopDiscount } from "./shop-discount";
 
 /** `GET` and `PUT /v1/carts/:shopId` take the feed's query: where the order would go (#405). */
 export const CartParams = z.strictObject({ shopId: z.uuid() });
@@ -42,7 +43,10 @@ export type CartLine = z.infer<typeof CartLine>;
 
 /** What the Customer pays, every fee named; commission and the shop's and platform's shares never leave the server (FR-CRT-05). */
 export const CartQuote = z.strictObject({
+  /** Before any discount. */
   productValue: Amount,
+  /** The shop-wide discount taken off and its offer; null when none applies (#571). */
+  shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   /** Null when the cart is not below the small-cart threshold. */
   smallCartFee: Amount.nullable(),

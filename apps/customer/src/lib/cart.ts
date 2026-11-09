@@ -1,6 +1,6 @@
 import type { ApiResult } from "@ygo/api-client";
-import type { CartLine, CartReason, CartResponse, FeedQuery, SaveCartBody } from "@ygo/contracts";
-import { formatDayTime } from "@ygo/format";
+import type { CartLine, CartReason, CartResponse, FeedQuery, SaveCartBody, ShopDiscountOffer } from "@ygo/contracts";
+import { formatDayTime, trimDecimal } from "@ygo/format";
 import { strings } from "../strings";
 import { money } from "./money";
 
@@ -46,6 +46,16 @@ export function stockLeft(server: CartResponse | null, listingId: string): numbe
 export function feeText(amount: string): string {
   return Number(amount) === 0 ? strings.cart.free : money(amount);
 }
+
+/** The offer a discount came from in the Customer's words: "10% off, up to ₹50", or "₹200 off orders of ₹1,000 or more" (#571). */
+export function offerText(offer: ShopDiscountOffer): string {
+  const words = strings.cart.offer;
+  if (offer.form === "flat") return words.flat(money(offer.amount), money(offer.minimumOrder));
+  return offer.cap ? words.percentageUpTo(trimDecimal(offer.percentage), money(offer.cap)) : words.percentage(trimDecimal(offer.percentage));
+}
+
+/** The amount a discount takes off, as a minus: "−₹50". */
+export const discountText = (amount: string): string => `\u2212${money(amount)}`;
 
 /** Why the cart can't be ordered, in the Customer's words, each naming its fix (CRT-4). */
 export function reasonText(reason: CartReason, now: number): string {
