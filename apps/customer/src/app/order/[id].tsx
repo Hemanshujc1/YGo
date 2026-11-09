@@ -2,7 +2,7 @@ import type { OrderLine, OrderResponse } from "@ygo/contracts";
 import { formatTime, trimDecimal } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text } from "@ygo/mobile";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -236,12 +236,18 @@ export default function OrderScreen() {
   const phone = shown ? shown.shop.phone : carried || undefined;
   const isAwaiting = shown?.status === "awaiting_customer_confirm";
   const secondsLeft = useSecondsLeft(isAwaiting ? shown.confirmByAt : null);
+  const refreshedExpiryRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isAwaiting && secondsLeft === 0) {
+    refreshedExpiryRef.current = null;
+  }, [id]);
+
+  useEffect(() => {
+    if (isAwaiting && secondsLeft === 0 && shown?.confirmByAt && refreshedExpiryRef.current !== shown.confirmByAt) {
+      refreshedExpiryRef.current = shown.confirmByAt;
       void order.refresh();
     }
-  }, [secondsLeft, isAwaiting, order]);
+  }, [secondsLeft, isAwaiting, shown?.confirmByAt, order]);
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
@@ -327,14 +333,18 @@ export default function OrderScreen() {
               label={view.confirmingTotal ? words.changedTotal.confirming : words.changedTotal.confirm}
               disabled={secondsLeft === 0 || view.confirmingTotal || view.decliningTotal}
               busy={view.confirmingTotal}
-              onPress={() => void order.confirmTotal()}
+              onPress={() => {
+                if (secondsLeft !== 0) void order.confirmTotal();
+              }}
             />
             <Button
               label={view.decliningTotal ? words.changedTotal.cancelling : words.changedTotal.cancelFree}
               variant="secondary"
-              disabled={view.confirmingTotal || view.decliningTotal}
+              disabled={secondsLeft === 0 || view.confirmingTotal || view.decliningTotal}
               busy={view.decliningTotal}
-              onPress={() => void order.declineTotal()}
+              onPress={() => {
+                if (secondsLeft !== 0) void order.declineTotal();
+              }}
             />
             {phone !== undefined && <CallShop phone={phone} />}
           </View>

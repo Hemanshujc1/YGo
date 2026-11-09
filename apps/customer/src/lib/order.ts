@@ -223,6 +223,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     /** C10: Customer confirms partial acceptance proposal (ORD-4, #64, #528). */
     async confirmTotal() {
       if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
+      if (view.order?.confirmByAt && Date.parse(view.order.confirmByAt) <= Date.now()) return;
       poller.ticket();
       poller.unschedule();
       set({ confirmingTotal: true, notice: null });
@@ -245,6 +246,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     /** C10: Customer declines partial acceptance proposal; cancels order at no cost with reason declined_total (ORD-4, #64, #528). */
     async declineTotal() {
       if (view.confirmingTotal || view.decliningTotal || view.order?.status !== "awaiting_customer_confirm") return;
+      if (view.order?.confirmByAt && Date.parse(view.order.confirmByAt) <= Date.now()) return;
       poller.ticket();
       poller.unschedule();
       set({ decliningTotal: true, notice: null });

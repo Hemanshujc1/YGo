@@ -33,6 +33,8 @@ export function createChangedTotalBannerStore(
   let view: ChangedTotalBannerView = { order: null };
   const listeners = new Set<() => void>();
   const poller = createPoller(() => void read(), pollEvery, timers);
+  let unsubs: Array<() => void> = [];
+  let started = false;
 
   const isSignedIn = () => authSession.get().status === "signed-in";
 
@@ -49,38 +51,52 @@ export function createChangedTotalBannerStore(
     }
     const latest = poller.ticket();
     poller.unschedule();
-    const answer = await client.orders().catch(() => null);
-    if (!latest()) return;
-    if (answer && answer.ok) {
-      const earliest = earliestAwaitingOrder(answer.data.active);
-      set({ order: earliest });
+    try {
+      const answer = await client.orders().catch(() => null);
+      if (!latest()) return;
+      if (answer && answer.ok) {
+        const earliest = earliestAwaitingOrder(answer.data.active);
+        set({ order: earliest });
+      }
+    } finally {
+      if (latest() && isSignedIn()) {
+        poller.schedule(true);
+      }
     }
-    poller.schedule(isSignedIn());
   }
 
-  // App foreground listener
-  const appStateSub = AppState.addEventListener("change", (state: AppStateStatus) => {
-    if (state === "active" && isSignedIn()) {
-      void read();
-    }
-  });
+  function attachListeners() {
+    detachListeners();
 
-  // Session listener (signed-in state change)
-  const sessionUnsub = authSession.subscribe(() => {
-    if (isSignedIn()) {
-      void read();
-    } else {
-      set({ order: null });
-      poller.unschedule();
-    }
-  });
+    const appStateSub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state === "active" && isSignedIn()) {
+        void read();
+      }
+    });
+    unsubs.push(() => appStateSub.remove());
 
-  // Push received listener
-  const pushUnsub = onPushReceived?.(() => {
-    if (isSignedIn()) {
-      void read();
-    }
-  });
+    const sessionUnsub = authSession.subscribe(() => {
+      if (isSignedIn()) {
+        void read();
+      } else {
+        set({ order: null });
+        poller.unschedule();
+      }
+    });
+    unsubs.push(sessionUnsub);
+
+    const pushUnsub = onPushReceived?.(() => {
+      if (isSignedIn()) {
+        void read();
+      }
+    });
+    if (pushUnsub) unsubs.push(pushUnsub);
+  }
+
+  function detachListeners() {
+    for (const unsub of unsubs) unsub();
+    unsubs = [];
+  }
 
   return {
     get: () => view,
@@ -90,14 +106,17 @@ export function createChangedTotalBannerStore(
     },
     refresh: () => read(),
     start() {
+      if (!started) {
+        started = true;
+        attachListeners();
+      }
       poller.start();
       void read();
     },
     stop() {
+      started = false;
       poller.stop();
-      appStateSub.remove();
-      sessionUnsub();
-      pushUnsub?.();
+      detachListeners();
     },
   };
 }

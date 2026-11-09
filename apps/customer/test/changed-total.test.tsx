@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
+import type { ApiResult } from "@ygo/api-client";
 import type { OrderProposal, OrderResponse, OrderSummary } from "@ygo/contracts";
+import type { Timers } from "@ygo/mobile/poller";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { AppState } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
@@ -168,6 +171,7 @@ vi.mock("lucide-react-native", () => ({
 }));
 
 import OrderScreen from "../src/app/order/[id]";
+import { api } from "../src/api";
 import { createChangedTotalBannerStore, earliestAwaitingOrder } from "../src/lib/changed-total-banner";
 import { createOrder } from "../src/lib/order";
 import { strings } from "../src/strings";
@@ -311,6 +315,153 @@ describe("createChangedTotalBannerStore lifecycle and polling (#528)", () => {
 
     store.stop();
   });
+
+  it("resumes foreground, session and push triggers after start → stop → start without duplicate listeners", async () => {
+    let appStateListener: ((state: string) => void) | undefined;
+    const appStateSpy = vi.spyOn(AppState, "addEventListener").mockImplementation((_, listener) => {
+      appStateListener = listener as (state: string) => void;
+      return { remove: vi.fn(() => { appStateListener = undefined; }) };
+    });
+
+    let sessionListener: (() => void) | undefined;
+    const sessionMock = {
+      get: () => ({ status: "signed-in" }),
+      subscribe: vi.fn((listener: () => void) => {
+        sessionListener = listener;
+        return vi.fn(() => { sessionListener = undefined; });
+      }),
+    };
+
+    let pushListener: (() => void) | undefined;
+    const pushMock = vi.fn((listener: () => void) => {
+      pushListener = listener;
+      return vi.fn(() => { pushListener = undefined; });
+    });
+
+    const ordersMock = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { active: [awaitingOrder], past: [] },
+    });
+
+    const store = createChangedTotalBannerStore(
+      { orders: ordersMock },
+      sessionMock,
+      pushMock,
+      undefined,
+      10_000,
+    );
+
+    // Initial start
+    store.start();
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+
+    // Stop
+    store.stop();
+    expect(appStateListener).toBeUndefined();
+    expect(sessionListener).toBeUndefined();
+    expect(pushListener).toBeUndefined();
+
+    // Start again (remount)
+    ordersMock.mockClear();
+    store.start();
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+    expect(appStateListener).toBeDefined();
+    expect(sessionListener).toBeDefined();
+    expect(pushListener).toBeDefined();
+
+    // Foreground event refreshes banner
+    ordersMock.mockClear();
+    appStateListener?.("active");
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+
+    // Session event refreshes banner
+    ordersMock.mockClear();
+    sessionListener?.();
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+
+    // Push event refreshes banner
+    ordersMock.mockClear();
+    pushListener?.();
+    await waitFor(() => expect(ordersMock).toHaveBeenCalledTimes(1));
+
+    // Calling start again when already started does not duplicate listeners
+    ordersMock.mockClear();
+    store.start();
+    expect(sessionMock.subscribe).toHaveBeenCalledTimes(2); // exactly once per start() cycle
+
+    store.stop();
+    appStateSpy.mockRestore();
+  });
+
+  it("prevents stale requests from overwriting newer state while preserving polling when newer request fails", async () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    const d1 = deferred<ApiResult<{ active: OrderSummary[]; past: OrderSummary[] }>>();
+    const d2 = deferred<ApiResult<{ active: OrderSummary[]; past: OrderSummary[] }>>();
+    const calls: Array<typeof d1> = [];
+
+    const ordersMock = vi.fn().mockImplementation(() => {
+      const d = calls.length === 0 ? d1 : d2;
+      calls.push(d);
+      return d.promise;
+    });
+
+    const scheduled: Array<() => void> = [];
+    const timers: Timers = {
+      set: (run) => {
+        scheduled.push(run);
+        return 1;
+      },
+      clear: () => {
+        scheduled.length = 0;
+      },
+    };
+
+    const sessionMock = {
+      get: () => ({ status: "signed-in" }),
+      subscribe: vi.fn(() => () => undefined),
+    };
+
+    const store = createChangedTotalBannerStore(
+      { orders: ordersMock },
+      sessionMock,
+      undefined,
+      timers,
+      10_000,
+    );
+
+    // Initial order set
+    store.start(); // calls read() -> calls[0] = d1
+    expect(ordersMock).toHaveBeenCalledTimes(1);
+
+    // Trigger overlapping read before d1 completes
+    store.refresh(); // calls read() -> calls[1] = d2
+    expect(ordersMock).toHaveBeenCalledTimes(2);
+
+    // Case: newer request (d2) fails
+    d2.resolve({ ok: false, status: 500, code: "UNAVAILABLE" });
+    await d2.promise;
+    await waitFor(() => expect(scheduled.length).toBe(1));
+
+    // Older request (d1) resolves with an awaiting order
+    const earlierOrder: OrderSummary = { ...awaitingOrder, id: "stale-order" };
+    d1.resolve({ ok: true, data: { active: [earlierOrder], past: [] } });
+    await d1.promise;
+    await waitFor(() => expect(store.get().order).toBeNull());
+
+    // Polling timer is still preserved
+    expect(scheduled.length).toBe(1);
+
+    store.stop();
+  });
 });
 
 describe("ChangedTotalBanner component (#528)", () => {
@@ -393,6 +544,30 @@ describe("createOrder C10 actions (#528)", () => {
     expect(cancelMock).not.toHaveBeenCalled();
     expect(orderMock).toHaveBeenCalledWith("order-1");
   });
+
+  it("order.confirmTotal and declineTotal do nothing when confirmByAt has expired", async () => {
+    const confirmMock = vi.fn();
+    const declineMock = vi.fn();
+    const client = {
+      order: vi.fn(),
+      cancelOrder: vi.fn(),
+      askToCancelOrder: vi.fn(),
+      confirmOrderItems: vi.fn(),
+      confirmOrderTotal: confirmMock,
+      declineOrderTotal: declineMock,
+    };
+    const expiredOrder: OrderResponse = {
+      ...awaitingOrder,
+      confirmByAt: "2020-01-01T00:00:00.000Z",
+    };
+    const orderHandler = createOrder(client, "order-1", expiredOrder);
+
+    await orderHandler.confirmTotal();
+    await orderHandler.declineTotal();
+
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(declineMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("OrderScreen C10 Changed total screen (#528)", () => {
@@ -432,7 +607,7 @@ describe("OrderScreen C10 Changed total screen (#528)", () => {
     });
   });
 
-  it("when timer reaches 0, disables Confirm button and refetches order without client-side cancel", async () => {
+  it("when timer reaches 0, disables both Confirm and Cancel buttons and refetches order without client-side cancel", async () => {
     // Order whose confirmByAt has already passed
     const expiredAwaitingOrder: OrderResponse = {
       ...awaitingOrder,
@@ -445,11 +620,44 @@ describe("OrderScreen C10 Changed total screen (#528)", () => {
     expect(await findByText(words.changedTotal.heading)).toBeDefined();
     expect(getByText(words.changedTotal.timeUpBody)).toBeDefined();
 
-    // Confirm button is disabled
+    // Both buttons are disabled after expiry
     const confirmBtn = getByRole("button", { name: words.changedTotal.confirm }) as HTMLButtonElement;
+    const cancelBtn = getByRole("button", { name: words.changedTotal.cancelFree }) as HTMLButtonElement;
     expect(confirmBtn.disabled).toBe(true);
+    expect(cancelBtn.disabled).toBe(true);
+
+    // Tapping neither button triggers API mutation
+    fireEvent.click(confirmBtn);
+    fireEvent.click(cancelBtn);
+    expect(api.confirmOrderTotal).not.toHaveBeenCalled();
+    expect(api.declineOrderTotal).not.toHaveBeenCalled();
 
     // CancelOrder was NOT called by client
+    expect(mock.cancelCalls).toBe(0);
+  });
+
+  it("triggers at most one refresh upon reaching expiry even if server still returns awaiting_customer_confirm", async () => {
+    let orderFetchCount = 0;
+    const expiredAwaitingOrder: OrderResponse = {
+      ...awaitingOrder,
+      confirmByAt: "2020-01-01T00:00:00.000Z",
+    };
+
+    mock.orderResult = { ok: true, data: expiredAwaitingOrder };
+    vi.mocked(api.order).mockImplementation(() => {
+      orderFetchCount++;
+      return Promise.resolve({ ok: true, data: expiredAwaitingOrder });
+    });
+
+    const { findByText } = render(<OrderScreen />);
+
+    expect(await findByText(words.changedTotal.heading)).toBeDefined();
+
+    // Give time for any potential refresh loop to happen
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Initial fetch (1) + single automatic expiry refresh (1) = 2 calls total, no loop!
+    expect(orderFetchCount).toBe(2);
     expect(mock.cancelCalls).toBe(0);
   });
 });
