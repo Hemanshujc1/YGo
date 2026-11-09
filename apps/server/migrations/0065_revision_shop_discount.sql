@@ -11,7 +11,7 @@ ALTER TABLE "order_revisions" ADD CONSTRAINT "order_revisions_shop_discount_vali
 ALTER TABLE "order_revisions" ADD CONSTRAINT "order_revisions_total_reconciles" CHECK ("order_revisions"."total" = "order_revisions"."product_value" - "order_revisions"."shop_discount" + "order_revisions"."delivery_fee" + COALESCE("order_revisions"."small_cart_fee", 0));--> statement-breakpoint
 ALTER TABLE "order_revision_lines" ADD CONSTRAINT "order_revision_lines_shop_discount_valid" CHECK ("order_revision_lines"."shop_discount" >= 0 AND "order_revision_lines"."shop_discount" <= "order_revision_lines"."line_total");--> statement-breakpoint
 -- The revision's discount is the sum of its lines' shares. Lines are inserted after the revision, so the check runs when the transaction commits.
--- Both tables are append-only, so a revision that passes here can never drift.
+-- Once inserted, a revision's figures can never change (reject_order_revision_change allows only its status and confirmed_at to move), so one that passes here cannot drift.
 CREATE FUNCTION check_order_revision_discount_sum() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF EXISTS (
