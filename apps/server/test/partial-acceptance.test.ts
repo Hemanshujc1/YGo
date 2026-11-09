@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, inject, it, vi } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
@@ -1209,6 +1209,19 @@ describe("Concurrent stock consumption (#64)", () => {
 });
 
 describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
+  it("preview batches its independent reads: 23 queries before, now at most 20 (#588)", async () => {
+    const { orderId, dal } = await setupShopWithOrder();
+    const query = vi.spyOn(database.pool, "query");
+    const previewRes = await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept/preview`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    const sent = query.mock.calls.length;
+    query.mockRestore();
+    expect(previewRes.statusCode).toBe(200);
+    expect(sent).toBeLessThanOrEqual(20);
+  });
+
   it("preview dry-run: validates, writes nothing, returns same total as real call", async () => {
     const { orderId, dal } = await setupShopWithOrder();
 

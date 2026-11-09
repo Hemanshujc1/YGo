@@ -291,6 +291,12 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     return e.platformContributionPaise < floorPaise ? floorPaise - e.platformContributionPaise : 0n;
   };
 
+  /** Independent reads run together on the pool, but one after another on a transaction's single connection, which cannot take two at once. */
+  const readTogether = <T extends readonly unknown[]>(client: Pool | PoolClient, reads: { [K in keyof T]: () => Promise<T[K]> }): Promise<T> =>
+    "release" in client
+      ? reads.reduce<Promise<unknown[]>>(async (done, read) => [...await done, await read()], Promise.resolve([])) as unknown as Promise<T>
+      : Promise.all(reads.map((read) => read())) as unknown as Promise<T>;
+
   async function evaluatePartialAccept(
     client: Pool | PoolClient,
     orderId: string,
@@ -340,12 +346,14 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       return { ok: false, code: "ORDER_STATUS_CHANGED", status: 409 };
     }
 
-    const { rows: openProposals } = await client.query(
-      "SELECT 1 FROM order_revisions WHERE order_id = $1 AND status = 'proposed'", [orderId]);
-    if (openProposals.length > 0) return { ok: false, code: "PROPOSAL_OPEN", status: 409 };
-
-    const { rows: [confirmedRev] } = await client.query<{ id: string }>(
-      "SELECT id FROM order_revisions WHERE order_id = $1 AND status = 'confirmed' ORDER BY revision DESC LIMIT 1", [orderId]);
+    // One read of the order's revisions answers the open-proposal check, the last confirmed revision and the next revision number.
+    const { rows: [revisions] } = await client.query<{ proposed: boolean; confirmedId: string | null; nextRev: number }>(
+      `SELECT bool_or(status = 'proposed') AS proposed,
+              (array_agg(id ORDER BY revision DESC) FILTER (WHERE status = 'confirmed'))[1] AS "confirmedId",
+              COALESCE(max(revision), 0) + 1 AS "nextRev"
+       FROM order_revisions WHERE order_id = $1`, [orderId]);
+    if (revisions?.proposed) return { ok: false, code: "PROPOSAL_OPEN", status: 409 };
+    const confirmedRev = revisions?.confirmedId ? { id: revisions.confirmedId } : undefined;
 
     type ActiveLine = {
       position: number;
@@ -442,10 +450,12 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       return { ok: false, code: "EMPTY_ORDER", status: 400 };
     }
 
-    const orderCard = await resolveRateCard(client, order.shopId, undefined, order.rateCardVersion);
-
     const categories = [...new Set(activeLines.map((l) => l.categoryId))];
-    const byCategory = new Map(await Promise.all(categories.map(async (catId) => [catId, await resolveRateCard(client, order.shopId, catId, order.rateCardVersion)] as const)));
+    const [orderCard, ...categoryCards] = await readTogether(client, [
+      () => resolveRateCard(client, order.shopId, undefined, order.rateCardVersion),
+      ...categories.map((catId) => () => resolveRateCard(client, order.shopId, catId, order.rateCardVersion)),
+    ]);
+    const byCategory = new Map(categories.map((catId, index) => [catId, categoryCards[index]] as const));
 
     let subtotalPaise = 0n;
     let totalCommissionPaise = 0n;
@@ -493,35 +503,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     // The discount is re-applied from the rule version the order was priced on, never the shop's current rule (#572), by the same function placement uses:
     // a percentage on the revised base under its cap, a flat amount only while the revised pre-discount base still meets its minimum order.
     // Every line stays eligible until #78 passes bargained lines as ineligible (BRG-5).
-    const { rows: [shared] } = await client.query<{ shares: string[] }>(
-      "SELECT pricing_shop_discount_shares($1::jsonb, $2::numeric[], $3::boolean[])::text[] AS shares",
-      [order.discountRule ? JSON.stringify(order.discountRule.rule) : null, preparedLines.map((pl) => pl.lineTotal), preparedLines.map(() => true)]);
-    if (shared?.shares.length !== preparedLines.length) throw new Error("Failed to split the shop discount across the revision lines");
-    let discountPaise = 0n;
-    for (const [index, pl] of preparedLines.entries()) {
-      pl.shopDiscount = shared.shares[index] ?? "0.00";
-      // A share is never negative and never more than its line, before any commission is worked out from it.
-      if (toPaise(pl.shopDiscount) < 0n || toPaise(pl.shopDiscount) > toPaise(pl.lineTotal)) {
-        throw new Error(`The shop discount share ${pl.shopDiscount} for revision line ${index + 1} is outside 0 to its line total ${pl.lineTotal}`);
-      }
-      discountPaise += toPaise(pl.shopDiscount);
-    }
-    const shopDiscountStr = fromPaise(discountPaise);
-
-    for (const [index, pl] of preparedLines.entries()) {
-      if (pl.count === 0) continue;
-      const commissionRule = byCategory.get(activeLines[index]?.categoryId ?? "")?.values.commission?.value;
-      if (!commissionRule) continue;
-      // The commission base is the order's own rate card: before or after the shop-funded discount (revenue spec).
-      const base = (commissionRule as { base?: string }).base === "after_shop_discount" ? fromPaise(toPaise(pl.lineTotal) - toPaise(pl.shopDiscount)) : pl.lineTotal;
-      const { rows: [commRow] } = await client.query<{ comm: string }>(
-        "SELECT pricing_line_commission($1::numeric, $2::jsonb)::text AS comm", [base, JSON.stringify(commissionRule)]);
-      pl.commission = commRow?.comm ?? "0.00";
-      totalCommissionPaise += toPaise(pl.commission);
-    }
-
     const holdsNow = STOCK_HOLDING_ORDER_STATUSES.includes(order.status);
-    const { rows: shortLines } = await client.query<ShortLine>(
+    const stockShortfall = () => client.query<ShortLine>(
       `SELECT p.name, p.brand, p.base_unit AS "baseUnit", trim_scale(p.pack_quantity)::text AS quantity, p.count,
           trim_scale(p.part)::text AS part, trim_scale(GREATEST(stock.left + p.own, 0))::text AS available
         FROM jsonb_to_recordset($1::jsonb) AS p(position int, listing_id uuid, name text, brand text, base_unit text,
@@ -535,7 +518,42 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         pack_quantity: pl.packQuantity, count: pl.count, part: pl.partQuantity, wanted: pl.stockQuantity,
         own: holdsNow ? activeLines[index]?.stockQuantity : "0",
       })))]);
+    const [{ rows: [shared] }, { rows: shortLines }] = await readTogether(client, [
+      () => client.query<{ shares: string[] }>(
+        "SELECT pricing_shop_discount_shares($1::jsonb, $2::numeric[], $3::boolean[])::text[] AS shares",
+        [order.discountRule ? JSON.stringify(order.discountRule.rule) : null, preparedLines.map((pl) => pl.lineTotal), preparedLines.map(() => true)]),
+      stockShortfall,
+    ]);
+    if (shared?.shares.length !== preparedLines.length) throw new Error("Failed to split the shop discount across the revision lines");
+    let discountPaise = 0n;
+    for (const [index, pl] of preparedLines.entries()) {
+      pl.shopDiscount = shared.shares[index] ?? "0.00";
+      // A share is never negative and never more than its line, before any commission is worked out from it.
+      if (toPaise(pl.shopDiscount) < 0n || toPaise(pl.shopDiscount) > toPaise(pl.lineTotal)) {
+        throw new Error(`The shop discount share ${pl.shopDiscount} for revision line ${index + 1} is outside 0 to its line total ${pl.lineTotal}`);
+      }
+      discountPaise += toPaise(pl.shopDiscount);
+    }
+    const shopDiscountStr = fromPaise(discountPaise);
     if (shortLines.length > 0) return { ok: false, code: "NOT_ENOUGH_STOCK", status: 409, shortLines };
+
+    // One query works out every line's commission: the base is the order's own rate card, before or after the shop-funded discount (revenue spec).
+    const commissioned = preparedLines.flatMap((pl, index) => {
+      const commissionRule = pl.count === 0 ? undefined : byCategory.get(activeLines[index]?.categoryId ?? "")?.values.commission?.value;
+      if (!commissionRule) return [];
+      const base = (commissionRule as { base?: string }).base === "after_shop_discount" ? fromPaise(toPaise(pl.lineTotal) - toPaise(pl.shopDiscount)) : pl.lineTotal;
+      return [{ pl, base, rule: JSON.stringify(commissionRule) }];
+    });
+    if (commissioned.length > 0) {
+      const { rows: commissions } = await client.query<{ comm: string }>(
+        `SELECT pricing_line_commission(c.base, c.rule::jsonb)::text AS comm
+         FROM unnest($1::numeric[], $2::text[]) WITH ORDINALITY AS c(base, rule, n) ORDER BY c.n`,
+        [commissioned.map((c) => c.base), commissioned.map((c) => c.rule)]);
+      for (const [index, { pl }] of commissioned.entries()) {
+        pl.commission = commissions[index]?.comm ?? "0.00";
+        totalCommissionPaise += toPaise(pl.commission);
+      }
+    }
 
     const subtotalStr = fromPaise(subtotalPaise);
     const totalCommissionStr = fromPaise(totalCommissionPaise);
@@ -553,9 +571,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const customerTotalStr = fromPaise(customerTotalPaise);
     const platformContributionStr = fromPaise(platformContributionPaise);
 
-    const { rows: [revRow] } = await client.query<{ nextRev: number }>(
-      "SELECT COALESCE(max(revision), 0) + 1 AS \"nextRev\" FROM order_revisions WHERE order_id = $1", [orderId]);
-    const revision = revRow?.nextRev ?? 1;
+    const revision = revisions?.nextRev ?? 1;
 
     const confirmByAt = new Date(now.getTime() + orderTimingConfig.confirmSeconds * 1000);
     const revisionQuote = {
