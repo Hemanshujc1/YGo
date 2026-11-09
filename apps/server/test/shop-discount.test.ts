@@ -774,6 +774,21 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
       expect(await revisions(id)).toMatchObject([{ product: "200.00", discount: "20.00", commission, total: "210.00" }]);
     });
 
+    it("prices a revision's commission from the rate card frozen at placement, ignoring a shop or category override published afterwards", async () => {
+      const owner = await shop();
+      await publish({ type: "global" }, cardWith("after_shop_discount"));
+      await put(owner.headers, percentage("10"));
+      const { who, id, listings } = await accepted(owner, ["200", "100"]);
+      const categoryId = (await database.pool.query<{ id: string }>("SELECT id FROM categories LIMIT 1")).rows[0]?.id ?? "";
+      // After placement: a shop override (different formula, base) and a category override (different percentage).
+      expect((await publish({ type: "shop", id: owner.shopId }, { commission: { formula: "fixed", fixedAmount: "99", percentage: null, minimum: null, maximum: null, base: "before_shop_discount" } })).statusCode).toBe(201);
+      expect((await publish({ type: "category", id: categoryId }, { commission: { formula: "percentage", fixedAmount: null, percentage: "50", minimum: null, maximum: null, base: "before_shop_discount" } })).statusCode).toBe(201);
+      await propose(owner, id, [listings[1] ?? ""]);
+      await confirm(who, id);
+      // Still 10% of the 180 left after the 20 discount, as the order was placed.
+      expect(await revisions(id)).toMatchObject([{ product: "200.00", discount: "20.00", commission: "18.00", total: "210.00" }]);
+    });
+
     it("splits the discount in whole paise across the kept lines and always adds up", async () => {
       const owner = await shop();
       await publish({ type: "global" }, card);

@@ -500,6 +500,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     let discountPaise = 0n;
     for (const [index, pl] of preparedLines.entries()) {
       pl.shopDiscount = shared.shares[index] ?? "0.00";
+      // A share is never negative and never more than its line, before any commission is worked out from it.
+      if (toPaise(pl.shopDiscount) < 0n || toPaise(pl.shopDiscount) > toPaise(pl.lineTotal)) {
+        throw new Error(`The shop discount share ${pl.shopDiscount} for revision line ${index + 1} is outside 0 to its line total ${pl.lineTotal}`);
+      }
       discountPaise += toPaise(pl.shopDiscount);
     }
     const shopDiscountStr = fromPaise(discountPaise);
