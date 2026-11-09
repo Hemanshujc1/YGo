@@ -1049,7 +1049,7 @@ describe("Strengthened revision trigger and lifecycle consistency (#64)", () => 
         `INSERT INTO order_revisions (
            order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission,
            platform_contribution, quote, below_floor_exception, confirm_by_at, created_at
-         ) VALUES ($1, 999, 'proposed', 'placed', 'owner', 100, 30, 130, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now()) RETURNING id`,
+         ) VALUES ($1, 999, 'proposed', 'placed', 'owner', 0, 30, 30, 0, 20, '{}'::jsonb, false, now() + interval '5 min', now()) RETURNING id`,
         [placedOrder.id]
       );
       if (!dummyRev) throw new Error("dummyRev not found");

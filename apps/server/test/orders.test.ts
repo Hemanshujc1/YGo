@@ -1400,7 +1400,7 @@ describe("Customer's order list (#426, ORD-1)", () => {
     await move(confirm.id, "awaiting_customer_confirm");
     await database.pool.query(
       `INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, product_value, delivery_fee, total, commission, platform_contribution, quote, below_floor_exception, confirm_by_at, created_at)
-       VALUES ($1, 1, 'proposed', 'placed', 'owner', 100, 30, 130, 10, 20, '{}'::jsonb, false, now() + interval '5 min', now())`, [confirm.id]);
+       VALUES ($1, 1, 'proposed', 'placed', 'owner', 0, 130, 130, 0, 20, '{}'::jsonb, false, now() + interval '5 min', now())`, [confirm.id]);
     const theirs = (await ordered(shopId, [{ listingId: dal, count: 1 }], await address("other@example.com"), other)).json() as { id: string };
 
     const listed = await list();

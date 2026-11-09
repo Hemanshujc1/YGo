@@ -12,6 +12,7 @@ import { Phone } from "../../components/icons";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
 import { api } from "../../api";
+import { offerText } from "../../lib/cart";
 import { changedTotalBanner } from "../../lib/changed-total-banner";
 import { money } from "../../lib/money";
 import { shownStatus, treatments } from "../../lib/order";
@@ -114,6 +115,9 @@ function ChangedTotalDetail({ order, proposal, secondsLeft }: { order: OrderResp
         <Text className="text-title font-semibold text-warning-text">{words.changedTotal.heading}</Text>
         {secondsLeft !== null && <Countdown seconds={secondsLeft} />}
         <Text className="text-secondary text-text">{words.changedTotal.subtitle}</Text>
+        {proposal.lostShopDiscount && (
+          <Text className="text-secondary font-semibold text-text">{words.changedTotal.lostDiscount(offerText(proposal.lostShopDiscount))}</Text>
+        )}
       </View>
 
       <View className="rounded-card border border-border bg-surface px-4">
@@ -176,7 +180,7 @@ function ChangedTotalDetail({ order, proposal, secondsLeft }: { order: OrderResp
       </View>
 
       <QuoteRows
-        quote={{ productValue: proposal.productValue, shopDiscount: null, deliveryFee: proposal.deliveryFee, smallCartFee: proposal.smallCartFee, total: proposal.total }}
+        quote={{ productValue: proposal.productValue, shopDiscount: proposal.shopDiscount, deliveryFee: proposal.deliveryFee, smallCartFee: proposal.smallCartFee, total: proposal.total }}
         was={{ productValue: proposal.originalProductValue, total: proposal.originalTotal }}
       >
         <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
