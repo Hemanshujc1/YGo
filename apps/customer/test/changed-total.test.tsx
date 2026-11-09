@@ -233,6 +233,7 @@ const awaitingOrder: OrderResponse = {
   address: { label: "home", flat: "402", areaLine: "MG Road", pincode: "560001" },
   lines: [],
   productValue: "135.00",
+  shopDiscount: null,
   deliveryFee: "30.00",
   smallCartFee: "15.00",
   total: "180.00",
