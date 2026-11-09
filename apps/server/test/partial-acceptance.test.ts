@@ -1377,7 +1377,7 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
     const notifs = await database.pool.query<{ accountId: string; kind: string; app: string; loud: boolean; title: string; body: string; email: string }>(
       `SELECT n.account_id AS "accountId", n.kind, n.app, n.loud, n.title, n.body, a.email
        FROM notifications n JOIN accounts a ON a.id = n.account_id
-       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed'`,
+       WHERE n.order_id = $1 AND n.kind = 'order_placed' AND n.title LIKE '% confirmed'`,
       [orderId],
     );
 
@@ -1404,7 +1404,7 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
     // Customer must have 0 order_total_confirmed notifications
     const customerConfirmedNotifs = await database.pool.query(
       `SELECT 1 FROM notifications n JOIN accounts a ON a.id = n.account_id
-       WHERE n.order_id = $1 AND n.kind = 'order_total_confirmed' AND a.email = 'customer@example.com'`,
+       WHERE n.order_id = $1 AND n.title LIKE '% confirmed' AND a.email = 'customer@example.com'`,
       [orderId],
     );
     expect(customerConfirmedNotifs.rows.length).toBe(0);

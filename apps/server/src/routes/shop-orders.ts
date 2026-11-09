@@ -4,11 +4,11 @@ import {
   AssignDelivererBody, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
   ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
+import { fromPaise, toPaise } from "@ygo/pricing";
 import type { Clock } from "../adapters/clock";
 import { InvalidDeliveryPhotoError, type DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { withTransaction } from "../db";
 import { createHandoverCode, HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN, HANDOVER_CODE_COOLDOWN_MS, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, matchesHandoverCode, recordDeliverySale } from "../delivery";
-import { fromPaise, toPaise } from "@ygo/pricing";
 import { stockOf } from "../listings";
 import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder } from "../orders";
@@ -575,7 +575,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       total: evalResult.customerTotalStr,
       originalTotal: evalResult.originalTotal,
       cancelsOrder: evalResult.platformContributionPaise < 0n,
-      belowFloor: floorShortfallPaise(evalResult) > 0n,
+      belowFloor: evalResult.platformContributionPaise >= 0n && floorShortfallPaise(evalResult) > 0n,
     };
   });
 

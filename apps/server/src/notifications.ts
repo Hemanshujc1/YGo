@@ -84,11 +84,6 @@ export const cancelRules = {
     words: ({ number, shopName }) => ({ title: `Order #${number} not cancelled`, body: `${shopName} is keeping your order. You can call the shop.` }) },
   agreed: { kind: "order_cancel_agreed", to: "customer",
     words: ({ number, shopName }) => ({ title: `Order #${number} cancelled`, body: `${shopName} agreed to cancel your order.` }) },
-  // The customer confirmed a changed total (#64). On an order the shop never accepted, it is the new order's real arrival: loud.
-  confirmedPlaced: { kind: "order_total_confirmed", to: "shop", staff: true, loud: true,
-    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total. Accept or reject it." }) },
-  confirmed: { kind: "order_total_confirmed", to: "shop", staff: true,
-    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total." }) },
   byShop: { kind: "order_cancelled_by_shop", to: "customer",
     words: ({ number, shopName, reason }) => ({
       title: `Order #${number} cancelled`,
@@ -96,9 +91,20 @@ export const cancelRules = {
     }) },
 } satisfies Record<string, Rule>;
 
+/**
+ * The customer confirmed a changed total (#64). On an order the shop never accepted it is the new order's real arrival, so it rings
+ * as `order_placed`: the ring, its re-ring and the floor push then stop when the order leaves `placed` or expires. Otherwise it is quiet.
+ */
+export const confirmRules = {
+  placed: { kind: "order_placed", to: "shop", staff: true, loud: true,
+    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total. Accept or reject it." }) },
+  later: { kind: "order_total_confirmed", to: "shop", staff: true,
+    words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total." }) },
+} satisfies Record<string, Rule>;
+
 /** The rule for a move: a cancel after acceptance has its own words; any other move uses its status's rule. */
 function ruleFor(to: OrderStatus, from: OrderStatus | null, reason: string | null): Rule | undefined {
-  if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) return to === "placed" ? cancelRules.confirmedPlaced : cancelRules.confirmed;
+  if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) return to === "placed" ? confirmRules.placed : confirmRules.later;
   if (to === "cancelled_by_customer" && reason === "agreed_cancel") return cancelRules.agreed;
   // Only the shop's own cancel, which always has one of the four reasons; the system's negative-contribution cancel keeps sending nothing.
   if (to === "cancelled_by_shop" && (from === "accepted" || from === "preparing" || from === "ready") && reason !== null && reason in rejectReasons) return cancelRules.byShop;
@@ -184,7 +190,7 @@ const RECEIPT_KEPT_SECONDS = 24 * 60 * 60;
 const CLAIM_SECONDS = 60;
 
 /** The kinds a shop's Staff hear of; the Owner hears every kind (S41). */
-const staffKinds = [...Object.values(rules), ...Object.values(cancelRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind).concat(["product_request_approved", "product_request_rejected"]);
+const staffKinds = [...Object.values(rules), ...Object.values(cancelRules), ...Object.values(confirmRules)].filter((rule) => rule.to === "shop" && rule.staff).map((rule) => rule.kind).concat(["product_request_approved", "product_request_rejected"]);
 
 /**
  * Whether queue row `q` of notification `n` may still go to its token: the token still belongs to a live session of
