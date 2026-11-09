@@ -68,6 +68,11 @@ const rules: Partial<Record<OrderStatus, Rule>> = {
   },
 };
 
+const noConfirmationForCustomer: Rule = {
+  kind: "order_expired", to: "customer",
+  words: ({ number }) => ({ title: `Order #${number} cancelled`, body: "You did not confirm the changed total in time, so the order was cancelled. You were not charged." }),
+};
+
 /**
  * Cancelling after acceptance (ORD-5, #59). None is loud (NOT-3). The shop hears of an ask, its Staff too; the customer
  * hears of each answer. `agreed` and `byShop` ride the status change that cancels the order; the ask and the keep don't change the status.
@@ -127,6 +132,8 @@ export async function notifyOrderStatus(
   const rule = ruleFor(to, from, reason);
   if (!rule) return;
   await queueNotification(client, orderId, rule, at, reason);
+  // The proposal timed out: the customer is told their order was cancelled too (#581).
+  if (to === "cancelled_by_customer" && reason === "no_confirmation") await queueNotification(client, orderId, noConfirmationForCustomer, at, reason);
 }
 
 /** Records one notification of an order, with its pushes queued, in the caller's transaction. */
@@ -202,7 +209,7 @@ const stillDue = `EXISTS (SELECT 1 FROM push_tokens t JOIN sessions s ON s.id = 
     WHERE t.token = q.token AND t.app = n.app AND s.account_id = n.account_id AND s.expires_at > $1)
   AND (n.app = 'customer' OR EXISTS (SELECT 1 FROM shop_members m WHERE m.account_id = n.account_id AND m.shop_id = COALESCE(o.shop_id, n.shop_id)
     AND (m.role = 'owner' OR n.kind = ANY($2::text[]))))
-  AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.placed_at + make_interval(secs => $3) <= $1))
+  AND NOT (n.kind = 'order_placed' AND (o.status <> 'placed' OR o.status_changed_at + make_interval(secs => $3) <= $1))
   AND NOT (q.floor AND EXISTS (SELECT 1 FROM ring_attempts a WHERE a.id = q.ring_attempt_id AND a.acknowledged_at IS NOT NULL))`;
 
 type Claimed = { id: string; app: string; push: Push };

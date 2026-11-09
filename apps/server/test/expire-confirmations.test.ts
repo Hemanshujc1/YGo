@@ -172,6 +172,11 @@ describe("Timed job: expire-confirmations (#64)", () => {
       "SELECT actor_role, reason_code FROM order_status_history WHERE order_id = $1 ORDER BY at DESC LIMIT 1", [orderId]);
     expect(hist.rows[0]).toMatchObject({ actor_role: "system", reason_code: "no_confirmation" });
 
+    // Both sides are told: the shop it timed out, the customer it was cancelled (#581)
+    const told = await database.pool.query<{ app: string }>(
+      "SELECT app FROM notifications WHERE order_id = $1 AND kind IN ('order_cancelled_by_customer', 'order_expired') ORDER BY app", [orderId]);
+    expect(told.rows.map((r) => r.app)).toEqual(["customer", "shopkeeper"]);
+
     // Job run recorded in job_runs
     const runs = await database.pool.query<{ job_name: string; status: string }>(
       "SELECT job_name, status FROM job_runs WHERE job_name = 'expire-confirmations'");

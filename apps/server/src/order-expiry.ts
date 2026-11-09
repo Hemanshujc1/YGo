@@ -10,7 +10,7 @@ export const NO_ANSWER = "no_answer";
 const BATCH = 100;
 
 /**
- * Moves every placed order that is `ORDER_EXPIRE_SECONDS` old to Expired, and returns how many it moved (ORD-2). Each
+ * Moves every order that has been placed for `ORDER_EXPIRE_SECONDS` (counted from `status_changed_at`, which a confirmed changed total restarts) to Expired, and returns how many it moved (ORD-2). Each
  * order is its own transaction: the status, its history row and the customer's notification land together or not at
  * all. The row is locked and re-read as still placed and due, so a rerun, a second job or a shop answering at the
  * same moment can never expire it twice or send its notification twice. Orders that fail do not stop the others; the
@@ -18,13 +18,13 @@ const BATCH = 100;
  */
 export async function expireUnansweredOrders(pool: Pool, clock: Clock): Promise<number> {
   const now = clock.now();
-  const due = `status = 'placed' AND placed_at + make_interval(secs => $1) <= $2::timestamptz`;
+  const due = `status = 'placed' AND status_changed_at + make_interval(secs => $1) <= $2::timestamptz`;
   let expired = 0;
   let failure: unknown;
   let skip: string[] = [];
   for (;;) {
     const { rows } = await pool.query<{ id: string }>(
-      `SELECT id FROM orders WHERE ${due} AND id <> ALL($4::uuid[]) ORDER BY placed_at, id LIMIT $3`,
+      `SELECT id FROM orders WHERE ${due} AND id <> ALL($4::uuid[]) ORDER BY status_changed_at, id LIMIT $3`,
       [orderTiming.expireSeconds, now, BATCH, skip]);
     if (rows.length === 0) break;
     for (const { id } of rows) {

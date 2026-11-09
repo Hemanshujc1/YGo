@@ -6,6 +6,7 @@ import { createLocalMailer } from "../src/adapters/mailer";
 import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
+import { expireUnansweredOrders } from "../src/order-expiry";
 import { setOrderTiming } from "../src/order-timing";
 import { stockOf } from "../src/listings";
 import { createTestDatabase } from "./test-database";
@@ -593,6 +594,31 @@ describe("C10 Customer confirmation and decline (#64)", () => {
     expect(active.find((o) => o.id === orderId)?.total).toBe("330.00");
   });
 
+  it("confirming a proposal on a placed order restarts the shop's answer window; placed_at stays (#581)", async () => {
+    const { orderId, dal } = await setupShopWithOrder();
+    const before = await database.pool.query<{ t: Date }>("SELECT placed_at AS t FROM orders WHERE id = $1", [orderId]);
+    const start = (before.rows[0] as { t: Date }).t.getTime();
+    await app.inject({
+      method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
+      payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }] },
+    });
+    clock.set(new Date(start + 250_000));
+    const confirmed = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/confirm-total`, headers: customer });
+    expect(confirmed.statusCode).toBe(200);
+    const after = await database.pool.query<{ t: Date }>("SELECT placed_at AS t FROM orders WHERE id = $1", [orderId]);
+    expect((after.rows[0] as { t: Date }).t.getTime()).toBe(start);
+
+    // The shop's view counts 600 s from the confirm
+    const view = await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner });
+    expect(new Date((view.json() as { expiresAt: string }).expiresAt).getTime()).toBe(start + 250_000 + 600_000);
+
+    // 700 s after placement is past the original window, but only 450 s after the confirm
+    clock.set(new Date(start + 700_000));
+    expect(await expireUnansweredOrders(database.pool, clock)).toBe(0);
+    const accept = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/accept`, headers: owner });
+    expect(accept.statusCode).toBe(200);
+  });
+
   it("customer declines: order cancelled as cancelled_by_customer (actor customer, reason declined_total)", async () => {
     const { orderId, dal } = await setupShopWithOrder();
 
@@ -867,14 +893,14 @@ describe("Partial quantity handling (#64, #377)", () => {
 });
 
 describe("Validation and duplicate listing IDs (#64)", () => {
-  it("rejects duplicate listing IDs in partial-accept body with 409 INVALID_PARTIAL_ACCEPT", async () => {
+  it("rejects duplicate listing IDs in partial-accept body with 400 INVALID_PARTIAL_ACCEPT", async () => {
     const { orderId, dal } = await setupShopWithOrder();
 
     const res = await app.inject({
       method: "POST", url: `/v1/me/shop-orders/${orderId}/partial-accept`, headers: owner,
       payload: { lines: [{ listingId: dal, count: 1, reason: "out_of_stock" }, { listingId: dal, count: 0, reason: "out_of_stock" }] },
     });
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
   });
 });
@@ -1271,7 +1297,7 @@ describe("S05 Accept in part: preview dry-run and shop lines (#527)", () => {
         ],
       },
     });
-    expect(dupRes.statusCode).toBe(409);
+    expect(dupRes.statusCode).toBe(400);
     expect(dupRes.json()).toMatchObject({ error: { code: "INVALID_PARTIAL_ACCEPT" } });
   });
 
