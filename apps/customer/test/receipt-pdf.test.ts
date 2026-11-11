@@ -12,7 +12,7 @@ const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
     { name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1.000", count: 2, part: null, unitPrice: "150.00", lineTotal: "300.00" },
     { name: "Atta", brand: null, baseUnit: "kg", quantity: "5.000", count: 1, part: "0.500", unitPrice: "30.00", lineTotal: "30.00" },
   ],
-  productValue: "330.00", shopDiscount: null, deliveryFee: "20.00", smallCartFee: "10.50", total: "360.50", payment: "upi", ...over,
+  productValue: "330.00", shopDiscount: null, deliveryFee: "20.00", smallCartFee: "10.50", pickupFee: null, total: "360.50", payment: "upi", ...over,
 });
 
 describe("receipt PDF (#61)", () => {

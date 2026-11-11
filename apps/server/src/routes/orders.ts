@@ -19,8 +19,9 @@ import { latestRateCardVersion } from "./price-simulator";
  * The columns C19 and S05 both show of order `o`, as it was frozen: address, lines, amounts, and the shop's
  * reason when it rejected the order (owner's answer 3 on #425).
  */
-export const frozenOrder = (o: string, includeListingId = false) => `json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
-          'areaLine', ${o}.address_area_line, 'pincode', ${o}.address_pincode) AS address,
+export const frozenOrder = (o: string, includeListingId = false) => `${o}.fulfilment,
+        CASE WHEN ${o}.fulfilment = 'delivery' THEN json_build_object('label', ${o}.address_label, 'flat', ${o}.address_flat,
+          'areaLine', ${o}.address_area_line, 'pincode', ${o}.address_pincode) END AS address,
         COALESCE(
           (SELECT json_agg(json_build_object(${includeListingId ? "'listingId', rl.listing_id, " : ""}'name', rl.name, 'brand', rl.brand, 'baseUnit', rl.base_unit,
               'quantity', trim_scale(rl.pack_quantity)::text, 'count', rl.count, 'part', trim_scale(rl.part_quantity)::text,
@@ -39,6 +40,7 @@ export const frozenOrder = (o: string, includeListingId = false) => `json_build_
         ) AS "productValue",
         ${o}.delivery_fee::text AS "deliveryFee",
         ${o}.small_cart_fee::text AS "smallCartFee",
+        ${o}.pickup_fee::text AS "pickupFee",
         COALESCE(
           (SELECT r.total::text FROM order_revisions r WHERE r.order_id = ${o}.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
           ${o}.total::text
@@ -85,6 +87,7 @@ export const frozenOrder = (o: string, includeListingId = false) => `json_build_
               THEN (SELECT ${offerSql("v")} FROM shop_discount_versions v WHERE v.rule_id = p.shop_discount_rule_id AND v.version = p.shop_discount_rule_version) END,
             'deliveryFee', ${o}.delivery_fee::text,
             'smallCartFee', ${o}.small_cart_fee::text,
+            'pickupFee', ${o}.pickup_fee::text,
             'total', p.total::text,
             'originalProductValue', COALESCE(
               (SELECT prev.product_value::text FROM order_revisions prev
@@ -154,7 +157,9 @@ async function orderView(client: Pool | PoolClient, orderId: string, accountId: 
       row.handoverCodeCiphertext = current?.ciphertext ?? null;
     }
   }
-  const mayReveal = row.status === "arrived" && (row.itemsCheckedAt !== null || now.getTime() >= row.statusChangedAt.getTime() + ITEMS_CHECK_SECONDS * 1000);
+  // A pickup has no door check: the code is shown from Ready, for the Customer to give at the counter (FUL-7).
+  const mayReveal = (row.status === "arrived" && (row.itemsCheckedAt !== null || now.getTime() >= row.statusChangedAt.getTime() + ITEMS_CHECK_SECONDS * 1000))
+    || (row.fulfilment === "pickup" && row.status === "ready");
   const { statusChangedAt, handoverCodeCiphertext, ...response } = row;
   void statusChangedAt;
   return {
@@ -175,13 +180,17 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { shopId } = request.params as CartParams;
-    const { revision, total, addressId } = request.body as PlaceOrderBody;
+    const body = request.body as PlaceOrderBody;
+    const { revision, total } = body;
+    // A pickup names no address, only the place it is ordered from (FUL-7); a delivery names a saved address.
+    const pickup = "fulfilment" in body ? body : undefined;
+    const addressId = "addressId" in body ? body.addressId : undefined;
     type Address = { pincode: string; latitude: number; longitude: number };
     const addressSql = `SELECT pincode, ST_Y(point::geometry) AS latitude, ST_X(point::geometry) AS longitude
       FROM saved_addresses WHERE id = $1 AND account_id = $2 AND point IS NOT NULL`;
     // The address and the cart as they are now, or undefined when either is gone.
     const current = async () => {
-      const { rows: [address] } = await pool.query<Address>(addressSql, [addressId, who.accountId]);
+      const { rows: [address] } = pickup ? { rows: [{ pincode: pickup.pincode, latitude: pickup.latitude, longitude: pickup.longitude }] } : await pool.query<Address>(addressSql, [addressId, who.accountId]);
       const cart = address && await savedCart(pool, who.accountId, shopId, false);
       return address && cart && { address, cart };
     };
@@ -195,7 +204,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     const first = await current();
     if (!first) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     const { address, cart: read } = first;
-    const { version, view, priced, packs } = await quote(first);
+    const { version, view, priced, packs, pickupDetail } = await quote(first);
     if (view.reasons.some((reason) => reason.code === "OWN_SHOP")) return reply.code(403).send({ error: { code: "OWN_SHOP" } });
     // Something changed while placement waited on the locks: read the address and the cart again and answer with the cart as it is now.
     const changed = async () => {
@@ -203,14 +212,16 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
       if (!now) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
       return reply.code(409).send({ error: { code: "CART_CHANGED", cart: (await quote(now)).view } });
     };
-    if (read.revision !== revision || !view.placeable || !priced || view.quote?.total !== total) {
+    // A pickup is placeable on its own quote and can be priced while delivery is switched off.
+    const ordering = pickup ? view.pickup?.placeable === true && view.pickup.total === total : view.placeable && view.quote?.total === total;
+    if (read.revision !== revision || !priced || !ordering) {
       return reply.code(409).send({ error: { code: "CART_CHANGED", cart: view } });
     }
 
     const placed = await withTransaction(pool, async (client) => {
       // Under these locks nothing priced above can change until the order is in: the address, the cart, and each
       // listing's price and stock (a price edit waits on FOR SHARE). Each is read again, one query at a time.
-      const { rows: [locked] } = await client.query<Address>(`${addressSql} FOR SHARE`, [addressId, who.accountId]);
+      const { rows: [locked] } = pickup ? { rows: [address] } : await client.query<Address>(`${addressSql} FOR SHARE`, [addressId, who.accountId]);
       const cart = await savedCart(client, who.accountId, shopId, true);
       await client.query("SELECT 1 FROM shop_listings WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE", [read.lines.map((line) => line.listingId)]);
       if (JSON.stringify(locked) !== JSON.stringify(address) || cart?.revision !== read.revision
@@ -224,16 +235,24 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
       // Read after the locks, so a wait on them doesn't stamp an earlier time.
       const now = clock.now();
 
-      const { rows: [order] } = await client.query<{ id: string }>(
-        `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
-           address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote,
-           shop_discount, shop_discount_rule_id, shop_discount_rule_version)
-         SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin,
-           a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10, $11, $12, $13
-         FROM saved_addresses a, shops shop WHERE a.id = $4 AND shop.id = $2 RETURNING id`,
-        [who.accountId, shopId, now, addressId, priced.productValue, priced.deliveryFee.amount, priced.smallCartFee?.amount ?? null,
-          priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced),
-          priced.shopDiscount?.amount ?? "0", priced.shopDiscount?.ruleId ?? null, priced.shopDiscount?.ruleVersion ?? null]);
+      const discount = [priced.shopDiscount?.amount ?? "0", priced.shopDiscount?.ruleId ?? null, priced.shopDiscount?.ruleVersion ?? null];
+      const { rows: [order] } = pickup && pickupDetail
+        // A pickup: no address, no delivery fee, no commission (MNY-2). Its quote keeps the booking fees and the contribution they make (MNY-4).
+        ? await client.query<{ id: string }>(
+          `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
+             fulfilment, product_value, delivery_fee, small_cart_fee, pickup_fee, total, rate_card_version, quote, shop_discount, shop_discount_rule_id, shop_discount_rule_version)
+           SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin, 'pickup', $4, 0, NULL, $5, $6, $7, $8, $9, $10, $11
+           FROM shops shop WHERE shop.id = $2 RETURNING id`,
+          [who.accountId, shopId, now, priced.productValue, pickupDetail.pickupFee, pickupDetail.total, priced.rateCardVersion, JSON.stringify(pickupDetail.quote), ...discount])
+        : await client.query<{ id: string }>(
+          `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
+             address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote,
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version)
+           SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin,
+             a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10, $11, $12, $13
+           FROM saved_addresses a, shops shop WHERE a.id = $4 AND shop.id = $2 RETURNING id`,
+          [who.accountId, shopId, now, addressId, priced.productValue, priced.deliveryFee.amount, priced.smallCartFee?.amount ?? null,
+            priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced), ...discount]);
       if (!order) throw new Error("A locked address disappeared");
       // Each line takes from stock in the listing's own unit: count × pack size, or the part bought (#377).
       await client.query(
@@ -297,7 +316,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     if (!who) return reply;
     const { rows: [row] } = await pool.query<Omit<ReceiptResponse, "placedAt" | "status"> & { placedAt: Date; status: OrderStatus }>(
       `SELECT o.number, o.status, o.placed_at AS "placedAt", json_build_object('name', o.shop_name, 'address', o.shop_address, 'pincode', o.shop_pincode, 'gstin', o.shop_gstin) AS shop,
-          json_build_object('label', o.address_label, 'areaLine', o.address_area_line) AS address,
+          CASE WHEN o.fulfilment = 'delivery' THEN json_build_object('label', o.address_label, 'areaLine', o.address_area_line) END AS address,
           COALESCE(
             (SELECT json_agg(json_build_object('name', l.name, 'brand', l.brand, 'baseUnit', l.base_unit, 'quantity', trim_scale(l.pack_quantity)::text,
                 'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
@@ -306,7 +325,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
                 'count', l.count, 'part', trim_scale(l.part_quantity)::text, 'unitPrice', l.unit_price::text, 'lineTotal', l.line_total::text) ORDER BY l.position)
               FROM order_lines l WHERE l.order_id = o.id)) AS lines,
           COALESCE(rev.product_value, o.product_value)::text AS "productValue", ${currentDiscount("o")} AS "shopDiscount", o.delivery_fee::text AS "deliveryFee",
-          o.small_cart_fee::text AS "smallCartFee", COALESCE(rev.total, o.total)::text AS total, o.delivery_payment AS payment
+          o.small_cart_fee::text AS "smallCartFee", o.pickup_fee::text AS "pickupFee", COALESCE(rev.total, o.total)::text AS total, o.delivery_payment AS payment
         FROM orders o
         LEFT JOIN LATERAL (SELECT r.id, r.product_value, r.total FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1) rev ON true
         WHERE o.id = $1 AND o.account_id = $2`, [(request.params as OrderParams).id, who.accountId]);

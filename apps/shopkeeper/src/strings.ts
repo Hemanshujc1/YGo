@@ -836,6 +836,7 @@ export const strings = {
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
     SHOP_NOT_READY: "Your shop isn't ready to go Live yet.",
     SHOP_NOT_LIVE: "The open/closed switch works once your shop is Live.",
+    PICKUP_NOT_CONFIGURED: "Ask YGo to set up pickup on your rate card before you switch it on.",
     HOLIDAY_OVERLAP: "These dates overlap another holiday. Change that one instead.",
     TOO_MANY_HOLIDAYS: "You can have up to 20 holidays coming up. Remove one to add another.",
     SEARCH_TERM_IN_USE: "This search term already exists.",

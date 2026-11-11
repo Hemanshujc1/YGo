@@ -11,14 +11,14 @@ const addressId = "0b6f3f1e-8f2a-4d6e-9a51-5c1d2e3f4a5b";
 const order = (status: OrderStatus = "placed"): OrderResponse => ({
   id, number: 1001, status, placedAt: "2030-01-01T00:00:00.000Z",
   shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
-  address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
+  fulfilment: "delivery", address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null, answerExpired: false,
+  productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, pickupFee: null, total: "300.00", rejectReason: null, answerExpired: false,
   handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
 });
 const cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> } = {
   shop: { id: shopId, name: "Sai General Stores" }, revision: 2, lines: [],
-  quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
+  quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [], pickup: null,
 };
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
 const refused = (code: "CANCEL_REQUEST_CLOSED" | "ORDER_STATUS_CHANGED" | "ORDER_EXPIRED" | "NOT_FOUND" | "CART_CHANGED" | "OWN_SHOP", status: number, more = {}) =>

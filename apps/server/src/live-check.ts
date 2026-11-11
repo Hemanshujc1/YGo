@@ -35,8 +35,9 @@ export async function liveCheck(client: Pool | PoolClient, shopId: string, now: 
   );
   const found = row.rows[0];
   if (!found) throw new Error("Shop vanished while checking it for Live");
-  // Pickup and Bargain count only as the card itself asks (answer 9 on #46); #65 and #78 pass the shop's switches.
-  const card = await resolveRateCard(client, shopId);
+  // Pickup and Bargain count only as the card itself asks (answer 9 on #46), or when the shop's own pickup switch is on (#65); #78 passes the Bargain switch.
+  const { rows: [pickup] } = await client.query<{ shopOn: boolean }>("SELECT shop_on AS \"shopOn\" FROM shop_fulfilment_modes WHERE shop_id = $1 AND mode = 'pickup'", [shopId]);
+  const card = await resolveRateCard(client, shopId, undefined, undefined, { usesPickup: pickup?.shopOn === true, usesBargain: false });
   const rateCardMissing = card?.missing ?? [];
   const blockers = LiveBlocker.options.filter((blocker) => blocker === "rate_card" ? !card?.complete : found[blocker]);
   return { blockers, rateCardMissing };

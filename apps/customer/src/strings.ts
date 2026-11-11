@@ -491,6 +491,7 @@ export const strings = {
     RATE_CARD_CHANGED: "The rate card has changed. Read the new one, then accept it.",
     SHOP_NOT_READY: "This shop isn't ready to go Live yet.",
     SHOP_NOT_LIVE: "This works once the shop is Live.",
+    PICKUP_NOT_CONFIGURED: "This shop is not set up for pickup yet.",
     HOLIDAY_OVERLAP: "These dates overlap another holiday.",
     TOO_MANY_HOLIDAYS: "There are too many holidays coming up.",
     SEARCH_TERM_IN_USE: "This search term already exists.",

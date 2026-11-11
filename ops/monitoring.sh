@@ -103,4 +103,10 @@ alarm ap-south-1 "$mumbai_topic" job-expire-confirmations --namespace YGo --metr
   --evaluation-periods 2 --threshold 1 --comparison-operator LessThanThreshold \
   --treat-missing-data breaching
 
+# expire-pickups is checked every 5 minutes (ygo-job-check-expire-pickups.timer), on the same two-point rule as the two jobs above.
+alarm ap-south-1 "$mumbai_topic" job-expire-pickups --namespace YGo --metric-name JobHealthy \
+  --dimensions "Name=JobName,Value=expire-pickups" --statistic Minimum --period 300 \
+  --evaluation-periods 2 --threshold 1 --comparison-operator LessThanThreshold \
+  --treat-missing-data breaching
+
 echo "Monitoring definitions created. Confirm both SNS email subscriptions before relying on alarms."

@@ -287,12 +287,14 @@ function Detail({
           <Text className="mt-2 text-secondary font-medium text-warning-text">{words.cancelsOrderWarning}</Text>
         ) : null}
       </View>
-      <View>
-        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text selectable className="text-body text-text">
-          {`${words.labels[address.label]} · ${[address.flat, address.areaLine, address.pincode].filter(Boolean).join(", ")}`}
-        </Text>
-      </View>
+      {address && (
+        <View>
+          <Text className="text-secondary text-muted">{words.deliverTo}</Text>
+          <Text selectable className="text-body text-text">
+            {`${words.labels[address.label]} · ${[address.flat, address.areaLine, address.pincode].filter(Boolean).join(", ")}`}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }

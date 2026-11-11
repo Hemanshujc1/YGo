@@ -1,14 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  AssignDelivererBody, type ShopDiscountOffer, CancelOrderBody, CompleteDeliveryBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
+  AssignDelivererBody, type ShopDiscountOffer, CancelOrderBody, CompleteDeliveryBody, CompletePickupBody, DeliveryPhotoUpload, DeliveryPhotoUploadBody, ErrorEnvelope, FailDeliveryBody, OrderParams, type OrderStatus, PartialAcceptOrderBody, PartialAcceptPreviewResponse, ProofExceptionBody, RejectOrderBody, ShopOrderResponse, type ShopOrderSummary, SetStaffCanDeliverBody, SetStaffCanDeliverResponse,
   ShopDeliverersResponse, ShopOrdersResponse, ShopStaffResponse, type ShortLine, STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import { fromPaise, toPaise } from "@ygo/pricing";
 import type { Clock } from "../adapters/clock";
 import { InvalidDeliveryPhotoError, type DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { withTransaction } from "../db";
-import { createHandoverCode, HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN, HANDOVER_CODE_COOLDOWN_MS, HANDOVER_CODE_MAX_ATTEMPTS, ITEMS_CHECK_SECONDS, matchesHandoverCode, recordDeliverySale } from "../delivery";
+import { checkHandoverCode, createHandoverCode, type HandoverCodeState, ITEMS_CHECK_SECONDS, recordDeliverySale } from "../delivery";
 import { stockOf } from "../listings";
 import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder } from "../orders";
@@ -78,7 +78,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
             ELSE
               (SELECT count(*)::int FROM order_lines l WHERE l.order_id = o.id)
             END AS "itemCount",
-            json_build_object('flat', o.address_flat, 'areaLine', o.address_area_line) AS address,
+            o.fulfilment,
+            CASE WHEN o.fulfilment = 'delivery' THEN json_build_object('flat', o.address_flat, 'areaLine', o.address_area_line) END AS address,
             CASE WHEN o.status = 'awaiting_customer_confirm' THEN (
               SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
               FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
@@ -250,7 +251,9 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           quote: {
             deliveryFee: { amount: string; platformShare: string; shopShare: string };
             smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+            pickup?: { customerFee: string; shopFee: string; contributionFloor: string };
           };
+          pickupFee: string | null;
           originalTotal: string;
           discountRule: FrozenDiscountRule;
         };
@@ -273,6 +276,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         shopDiscountStr: string;
         deliveryFee: { amount: string; platformShare: string; shopShare: string };
         smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+        /** A pickup's booking fee, which stands as quoted (ORD-4); null on a delivery. */
+        pickupFee: string | null;
+        /** The pickup floor the order is tested against, in place of the delivered one; null on a delivery. */
+        pickupFloor: string | null;
         customerTotalStr: string;
         totalCommissionStr: string;
         platformContributionPaise: bigint;
@@ -285,8 +292,9 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       };
 
   /** The shortfall below the contribution floor in paise, 0 when the order meets it (D-5: a recorded exception, not a cancel). */
-  const floorShortfallPaise = (e: { orderCard?: { values: { deliveredContributionFloor?: { value?: unknown } } } | null; platformContributionPaise: bigint }): bigint => {
-    const floorValue = e.orderCard?.values.deliveredContributionFloor?.value;
+  const floorShortfallPaise = (e: { orderCard?: { values: { deliveredContributionFloor?: { value?: unknown } } } | null; pickupFloor: string | null; platformContributionPaise: bigint }): bigint => {
+    // A pickup is tested against the pickup floor alone, never the delivered one (MNY-4).
+    const floorValue = e.pickupFloor ?? e.orderCard?.values.deliveredContributionFloor?.value;
     const floorPaise = typeof floorValue === "string" ? toPaise(floorValue) : 0n;
     return e.platformContributionPaise < floorPaise ? floorPaise - e.platformContributionPaise : 0n;
   };
@@ -316,12 +324,14 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       quote: {
         deliveryFee: { amount: string; platformShare: string; shopShare: string };
         smallCartFee: { amount: string; platformShare: string; shopShare: string } | null;
+        pickup?: { customerFee: string; shopFee: string; contributionFloor: string };
       };
+      pickupFee: string | null;
       originalTotal: string;
       discountRule: FrozenDiscountRule;
     }>(
       `SELECT o.id, o.shop_id AS "shopId", o.status, o.status_changed_at AS "answerFrom", m.role,
-              o.rate_card_version AS "rateCardVersion", o.quote,
+              o.rate_card_version AS "rateCardVersion", o.quote, o.pickup_fee::text AS "pickupFee",
               COALESCE(
                 (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
                 o.total::text
@@ -539,7 +549,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
 
     // One query works out every line's commission: the base is the order's own rate card, before or after the shop-funded discount (revenue spec).
     const commissioned = preparedLines.flatMap((pl, index) => {
-      const commissionRule = pl.count === 0 ? undefined : byCategory.get(activeLines[index]?.categoryId ?? "")?.values.commission?.value;
+      // A pickup earns no product commission (MNY-2).
+      const commissionRule = pl.count === 0 || order.pickupFee !== null ? undefined : byCategory.get(activeLines[index]?.categoryId ?? "")?.values.commission?.value;
       if (!commissionRule) return [];
       const base = (commissionRule as { base?: string }).base === "after_shop_discount" ? fromPaise(toPaise(pl.lineTotal) - toPaise(pl.shopDiscount)) : pl.lineTotal;
       return [{ pl, base, rule: JSON.stringify(commissionRule) }];
@@ -565,8 +576,12 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const deliveryFeeAmountPaise = toPaise(deliveryFee.amount);
     const smallCartFeeAmountPaise = smallCartFee ? toPaise(smallCartFee.amount) : 0n;
 
-    const customerTotalPaise = subtotalPaise - discountPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise;
-    const platformContributionPaise = totalCommissionPaise + deliveryPlatformSharePaise + smallCartPlatformSharePaise;
+    // Fees stand as quoted on a requote (ORD-4): a pickup keeps its booking fees, which are its whole contribution.
+    const pickupFeePaise = order.pickupFee !== null ? toPaise(order.pickupFee) : 0n;
+    const customerTotalPaise = subtotalPaise - discountPaise + deliveryFeeAmountPaise + smallCartFeeAmountPaise + pickupFeePaise;
+    const platformContributionPaise = order.pickupFee !== null
+      ? pickupFeePaise + (order.quote.pickup ? toPaise(order.quote.pickup.shopFee) : 0n)
+      : totalCommissionPaise + deliveryPlatformSharePaise + smallCartPlatformSharePaise;
 
     const customerTotalStr = fromPaise(customerTotalPaise);
     const platformContributionStr = fromPaise(platformContributionPaise);
@@ -592,6 +607,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       shopDiscountStr,
       deliveryFee,
       smallCartFee,
+      pickupFee: order.pickupFee,
+      pickupFloor: order.pickupFee !== null ? order.quote.pickup?.contributionFloor ?? null : null,
       customerTotalStr,
       totalCommissionStr,
       platformContributionPaise,
@@ -623,6 +640,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       shopDiscount: toPaise(evalResult.shopDiscountStr) > 0n && evalResult.order.discountRule ? { amount: evalResult.shopDiscountStr, offer: evalResult.order.discountRule.offer } : null,
       deliveryFee: evalResult.deliveryFee.amount,
       smallCartFee: evalResult.smallCartFee?.amount ?? null,
+      pickupFee: evalResult.pickupFee,
       total: evalResult.customerTotalStr,
       originalTotal: evalResult.originalTotal,
       cancelsOrder: evalResult.platformContributionPaise < 0n,
@@ -651,11 +669,11 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
           `INSERT INTO order_revisions (
              order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
              commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at,
-             shop_discount, shop_discount_rule_id, shop_discount_rule_version
-           ) VALUES ($1, $2, 'cancelled_negative_contribution', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version, pickup_fee
+           ) VALUES ($1, $2, 'cancelled_negative_contribution', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id`,
           [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
            evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), true, fromPaise(-evalResult.platformContributionPaise),
-           evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null]);
+           evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null, evalResult.pickupFee]);
         if (!insertedRev) throw new Error("Failed to insert order revision");
         for (const pl of evalResult.preparedLines) {
           await client.query(
@@ -679,11 +697,11 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         `INSERT INTO order_revisions (
            order_id, revision, status, source_status, actor_id, actor_role, product_value, delivery_fee, small_cart_fee, total,
            commission, platform_contribution, quote, below_floor_exception, below_floor_shortfall, confirm_by_at, created_at,
-             shop_discount, shop_discount_rule_id, shop_discount_rule_version
-         ) VALUES ($1, $2, 'proposed', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version, pickup_fee
+         ) VALUES ($1, $2, 'proposed', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id`,
         [id, evalResult.revision, evalResult.order.status, who.accountId, evalResult.order.role, evalResult.subtotalStr, evalResult.deliveryFee.amount, evalResult.smallCartFee?.amount ?? null, evalResult.customerTotalStr,
          evalResult.totalCommissionStr, evalResult.platformContributionStr, JSON.stringify(evalResult.revisionQuote), belowFloorException, belowFloorShortfall,
-         evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null]);
+         evalResult.confirmByAt, now, evalResult.shopDiscountStr, evalResult.order.discountRule?.ruleId ?? null, evalResult.order.discountRule?.version ?? null, evalResult.pickupFee]);
 
       if (!insertedRev) throw new Error("Failed to insert order revision");
 
@@ -746,10 +764,12 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const { id } = request.params as OrderParams;
     const { accountId } = request.body as AssignDelivererBody;
     const result = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ id: string; shopId: string; status: OrderStatus; role: "owner" | "staff" }>(
-        `SELECT o.id, o.shop_id AS "shopId", o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+      const { rows: [order] } = await client.query<{ id: string; shopId: string; status: OrderStatus; role: "owner" | "staff"; fulfilment: string }>(
+        `SELECT o.id, o.shop_id AS "shopId", o.status, m.role, o.fulfilment FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
          WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
+      // A pickup has no deliverer: it is made ready with Ready for pickup (FUL-7).
+      if (order.fulfilment === "pickup") return "ORDER_STATUS_CHANGED" as const;
       const { rows: [deliverer] } = await client.query<{ role: "owner" | "staff"; canDeliver: boolean }>(
         `SELECT role, can_deliver AS "canDeliver" FROM shop_members WHERE shop_id = $1 AND account_id = $2 FOR SHARE`, [order.shopId, accountId]);
       if (!deliverer || (deliverer.role !== "owner" && !deliverer.canDeliver)) return "DELIVERER_NOT_ELIGIBLE" as const;
@@ -765,6 +785,53 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
     if (result === "DELIVERER_NOT_ELIGIBLE") return reply.code(409).send({ error: { code: result } });
     if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
+  });
+
+  // A pickup is made ready with no deliverer to name; the Customer then sees its code (FUL-7).
+  app.post("/v1/me/shop-orders/:id/ready-for-pickup", { schema: { params: OrderParams, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; fulfilment: string }>(
+        `SELECT o.id, o.status, m.role, o.fulfilment FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+         WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      const now = clock.now();
+      if (order.fulfilment !== "pickup" || !await moveOrder(client, order, "ready", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query("COMMIT");
+      return now;
+    });
+    if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
+    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
+  });
+
+  // Completes a pickup at the counter: the Customer gives the same 4-digit code, there is no photo, and the shop records cash or UPI (FUL-7, MNY-1).
+  app.post("/v1/me/shop-orders/:id/picked-up", { schema: { params: OrderParams, body: CompletePickupBody, response: { 200: ShopOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const { handoverCode, payment } = request.body as CompletePickupBody;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; status: OrderStatus; role: "owner" | "staff"; fulfilment: string } & Omit<HandoverCodeState, "id">>(
+        `SELECT o.id, o.status, m.role, o.fulfilment, o.handover_code_hash AS "handoverCodeHash", o.handover_code_salt AS "handoverCodeSalt",
+            o.handover_code_attempts AS "handoverCodeAttempts", o.handover_code_blocked_until AS "handoverCodeBlockedUntil"
+         FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id AND m.account_id = $2
+         WHERE o.id = $1 FOR UPDATE OF o`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND" as const;
+      if (order.fulfilment !== "pickup" || order.status !== "ready") return "ORDER_STATUS_CHANGED" as const;
+      const now = clock.now();
+      const refusal = await checkHandoverCode(client, order, handoverCode, now, secret);
+      if (refusal) return refusal;
+      if (!await moveOrder(client, order, "picked_up", { id: who.accountId, role: order.role }, now)) return "ORDER_STATUS_CHANGED" as const;
+      await client.query("UPDATE orders SET delivery_payment = $2, handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1", [id, payment]);
+      await recordDeliverySale(client, id, who.accountId, now);
+      await client.query("COMMIT");
+      return now;
+    });
+    if (typeof result === "string") return sendRefusal(reply, result);
     return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
   });
 
@@ -872,24 +939,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         // A deliverer who cannot get the code must have tried to reach the Customer first (no wait, unlike a failed delivery).
         if (!order.callAttemptAt) return "PROOF_EXCEPTION_CALL_REQUIRED" as const;
       } else {
-        if (order.handoverCodeBlockedUntil && order.handoverCodeBlockedUntil > now) return "HANDOVER_CODE_LOCKED" as const;
-        if (order.handoverCodeAttempts >= HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
-        if (!order.handoverCodeHash || !order.handoverCodeSalt) {
-          // An order accepted before the code existed: make one now, so the Customer can read it, and count nothing against the deliverer.
-          const generated = createHandoverCode(secret);
-          await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4
-            WHERE id = $1 AND handover_code_hash IS NULL`, [id, generated.hash, generated.salt, generated.ciphertext]);
-          await client.query("COMMIT");
-          return "HANDOVER_CODE_WRONG" as const;
-        }
-        const { handoverCode } = body as CompleteDeliveryBody;
-        if (!matchesHandoverCode(handoverCode, order.handoverCodeSalt, order.handoverCodeHash)) {
-          const attempts = order.handoverCodeAttempts + 1;
-          const blockedUntil = attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN ? new Date(now.getTime() + HANDOVER_CODE_COOLDOWN_MS) : order.handoverCodeBlockedUntil;
-          await client.query("UPDATE orders SET handover_code_attempts = $2, handover_code_blocked_until = $3 WHERE id = $1", [id, attempts, blockedUntil]);
-          await client.query("COMMIT");
-          return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" as const : "HANDOVER_CODE_WRONG" as const;
-        }
+        const refusal = await checkHandoverCode(client, { ...order, id }, (body as CompleteDeliveryBody).handoverCode, now, secret);
+        if (refusal) return refusal;
       }
       if (!await leaseUpload(client, body.photoUploadId, now)) return "DELIVERY_PHOTO_INVALID" as const;
       await client.query("COMMIT");

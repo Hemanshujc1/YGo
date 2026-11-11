@@ -281,3 +281,66 @@ export const COUNTER_BILL_EXAMPLES: CounterBillExample[] = [
   { name: "A discount of one paisa more than the sum is refused", lines: [{ unitPrice: "40", count: 2 }], discount: "80.01", total: null },
   { name: "A discount in paise on a large sum stays exact", lines: [{ unitPrice: "9999999999.99", count: 9999 }], discount: "0.01", total: "99989999999900.00" },
 ];
+
+export type PickupExample = {
+  name: string;
+  rule: { enabled: boolean; customerFee: string; shopFee: string | null; cap: string | null; contributionFloor: string };
+  productValue: string;
+  shopDiscount: string;
+  expected: { pickupFee: string; shopFee: string; total: string; contribution: string; shortfall: string | null };
+};
+
+/**
+ * The revenue specification's self-pickup scenario (FUL-7, MNY-2, MNY-4): no delivery fee, no commission, booking fees only where switched on,
+ * tested against the pickup floor. The delivered examples price the delivered route; these price the pickup route, in `pickupPrice`.
+ */
+export const PICKUP_EXAMPLES: PickupExample[] = [
+  {
+    name: "Fees off: the customer pays the product value and the platform earns nothing",
+    rule: { enabled: false, customerFee: "5", shopFee: "3", cap: null, contributionFloor: "0" },
+    productValue: "250.00", shopDiscount: "0.00",
+    expected: { pickupFee: "0.00", shopFee: "0.00", total: "250.00", contribution: "0.00", shortfall: null },
+  },
+  {
+    name: "A customer booking fee is a named line on top of the goods and is the platform's only earning",
+    rule: { enabled: true, customerFee: "5", shopFee: null, cap: null, contributionFloor: "5" },
+    productValue: "250.00", shopDiscount: "0.00",
+    expected: { pickupFee: "5.00", shopFee: "0.00", total: "255.00", contribution: "5.00", shortfall: null },
+  },
+  {
+    name: "A shop booking fee adds to the platform's earning but not to the customer's total",
+    rule: { enabled: true, customerFee: "5", shopFee: "2.50", cap: null, contributionFloor: "7.50" },
+    productValue: "250.00", shopDiscount: "0.00",
+    expected: { pickupFee: "5.00", shopFee: "2.50", total: "255.00", contribution: "7.50", shortfall: null },
+  },
+  {
+    name: "The customer's fee is held to the cap",
+    rule: { enabled: true, customerFee: "12", shopFee: null, cap: "10", contributionFloor: "0" },
+    productValue: "100.00", shopDiscount: "0.00",
+    expected: { pickupFee: "10.00", shopFee: "0.00", total: "110.00", contribution: "10.00", shortfall: null },
+  },
+  {
+    name: "A shop-wide discount comes off the goods and the booking fee is added after it",
+    rule: { enabled: true, customerFee: "5", shopFee: null, cap: null, contributionFloor: "0" },
+    productValue: "200.00", shopDiscount: "20.00",
+    expected: { pickupFee: "5.00", shopFee: "0.00", total: "185.00", contribution: "5.00", shortfall: null },
+  },
+  {
+    name: "Below the pickup floor is not placeable and names the shortfall",
+    rule: { enabled: true, customerFee: "5", shopFee: null, cap: null, contributionFloor: "8" },
+    productValue: "250.00", shopDiscount: "0.00",
+    expected: { pickupFee: "5.00", shopFee: "0.00", total: "255.00", contribution: "5.00", shortfall: "3.00" },
+  },
+  {
+    name: "Fees off with a floor above zero can never be placed",
+    rule: { enabled: false, customerFee: "5", shopFee: null, cap: null, contributionFloor: "1" },
+    productValue: "250.00", shopDiscount: "0.00",
+    expected: { pickupFee: "0.00", shopFee: "0.00", total: "250.00", contribution: "0.00", shortfall: "1.00" },
+  },
+  {
+    name: "Paise stay exact",
+    rule: { enabled: true, customerFee: "4.75", shopFee: "1.25", cap: null, contributionFloor: "6" },
+    productValue: "99.95", shopDiscount: "9.99",
+    expected: { pickupFee: "4.75", shopFee: "1.25", total: "94.71", contribution: "6.00", shortfall: null },
+  },
+];

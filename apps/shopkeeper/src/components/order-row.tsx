@@ -20,7 +20,7 @@ export function OrderRow({ order, chip, children }: { order: ShopOrderSummary; c
           <Text className="text-secondary tabular-nums text-muted">{formatTime(order.placedAt)}</Text>
         </View>
         <Text className="text-body tabular-nums text-text">{words.row(order.itemCount, money(order.total))}</Text>
-        <Text className="text-secondary text-muted">{[order.address.flat, order.address.areaLine].filter(Boolean).join(", ")}</Text>
+        {order.address && <Text className="text-secondary text-muted">{[order.address.flat, order.address.areaLine].filter(Boolean).join(", ")}</Text>}
         {/* Done today mixes delivered, rejected, expired and cancelled orders (owner's answer 3 on #431). */}
         {order.cancelAsked && <Text className="text-secondary font-semibold text-danger">{words.cancelAsked}</Text>}
         {chip && <StatusChip word={words.statuses[order.status]} treatment={treatments[order.status]} />}

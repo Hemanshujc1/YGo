@@ -256,9 +256,9 @@ export {
 } from "./shop-discount";
 export { ReceiptResponse } from "./receipt";
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
-export { CartLine, CartParams, CartQuote, CartReason, CartResponse, SaveCartBody } from "./cart";
+export { CartLine, CartParams, CartQuote, CartReason, CartResponse, PickupQuote, SaveCartBody } from "./cart";
 export {
-  AssignDelivererBody, CancelOrderBody, CancelRequest, CancelRequestStatus, CompleteDeliveryBody, DeliveryFailureReason, DeliveryPhotoUpload, DeliveryPhotoUploadBody, FailDeliveryBody, OrderLine, OrderLineChangeReason, OrderParams, OrderProposal, OrderResponse, OrderRevisionLine, OrderStatus, OrderSummary, OrdersResponse, PartialAcceptLine, PartialAcceptOrderBody, PartialAcceptPreviewResponse, PlaceOrderBody, ProofExceptionBody, RejectOrderBody, RejectReason, SetStaffCanDeliverBody, SetStaffCanDeliverResponse, ShopDeliverer, ShopDeliverersResponse, ShopOrderLine, ShopOrderResponse,
+  AdminFulfilmentModeParams, AssignDelivererBody, CancelOrderBody, CancelRequest, CancelRequestStatus, CompleteDeliveryBody, CompletePickupBody, DeliveryFailureReason, DeliveryPhotoUpload, DeliveryPhotoUploadBody, FailDeliveryBody, ForceFulfilmentModeBody, Fulfilment, FulfilmentMode, FulfilmentModeParams, FulfilmentModesResponse, FulfilmentModeState, OrderLine, OrderLineChangeReason, OrderParams, OrderProposal, OrderResponse, OrderRevisionLine, OrderStatus, OrderSummary, OrdersResponse, PartialAcceptLine, PartialAcceptOrderBody, PartialAcceptPreviewResponse, PlaceOrderBody, ProofExceptionBody, RejectOrderBody, RejectReason, SetFulfilmentModeBody, SetStaffCanDeliverBody, SetStaffCanDeliverResponse, ShopDeliverer, ShopDeliverersResponse, ShopOrderLine, ShopOrderResponse,
   ShopOrderSummary, ShopOrdersResponse, ShopStaff, ShopStaffResponse, ShortLine,
   BelowFloorException, BelowFloorExceptionCounts, BelowFloorExceptionParams, BelowFloorExceptionsQuery, BelowFloorExceptionsResponse,
   STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES, DELIVERY_PHOTO_MAX_BYTES, ORDER_ANSWER_SECONDS,

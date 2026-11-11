@@ -5,11 +5,13 @@ import { z } from "zod";
 const DatabaseUrl = z.url({ protocol: /^postgres(ql)?$/ });
 
 // The order timers of ORD-2 (#57) and ORD-4 (#64): the shop's alarm rings again, an unanswered order expires,
-// and customer has ORDER_CONFIRM_SECONDS to confirm a partial-acceptance proposal.
+// and customer has ORDER_CONFIRM_SECONDS to confirm a partial-acceptance proposal. A Ready pickup is closed as not collected after
+// PICKUP_COLLECT_SECONDS (FUL-7, #65), counted from Ready.
 const OrderTimingShape = {
   ORDER_REALERT_SECONDS: z.coerce.number().int().positive().default(120),
   ORDER_EXPIRE_SECONDS: z.coerce.number().int().positive().default(ORDER_ANSWER_SECONDS),
   ORDER_CONFIRM_SECONDS: z.coerce.number().int().positive().default(300),
+  PICKUP_COLLECT_SECONDS: z.coerce.number().int().positive().default(3 * 60 * 60),
 };
 const realertBeforeExpiry = (env: { ORDER_REALERT_SECONDS: number; ORDER_EXPIRE_SECONDS: number }) =>
   env.ORDER_REALERT_SECONDS < env.ORDER_EXPIRE_SECONDS;
@@ -95,12 +97,14 @@ export function loadOrderTiming(env: NodeJS.ProcessEnv = process.env): {
   reRingSeconds: number;
   expireSeconds: number;
   confirmSeconds: number;
+  collectSeconds: number;
 } {
   const timing = OrderTimingEnv.parse(env);
   return {
     reRingSeconds: timing.ORDER_REALERT_SECONDS,
     expireSeconds: timing.ORDER_EXPIRE_SECONDS,
     confirmSeconds: timing.ORDER_CONFIRM_SECONDS,
+    collectSeconds: timing.PICKUP_COLLECT_SECONDS,
   };
 }
 

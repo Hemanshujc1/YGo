@@ -28,6 +28,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
     { name: "cleanup-sessions", healthy: false },
     { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
+    { name: "expire-pickups", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
 
@@ -40,6 +41,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
     { jobName: "expire-confirmations", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
     // expire-orders runs every minute, so it counts as stale after 15 minutes.
     { jobName: "expire-orders", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
+    { jobName: "expire-pickups", startedAt: tenMinutesAgo, finishedAt: tenMinutesAgo, status: "ok" },
   ]);
   expect(await check()).toBe(true);
   expect(reports.every((report) => report.healthy)).toBe(true);
@@ -60,6 +62,7 @@ it("publishes per-job health from completed runs, age, and the latest failure", 
     { name: "cleanup-sessions", healthy: false },
     { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
+    { name: "expire-pickups", healthy: false },
     { name: "snapshot-weekly", healthy: true },
   ]);
 });
@@ -77,6 +80,7 @@ it("publishes 0 for every job if database reads fail, and rejects failed publish
     { name: "cleanup-sessions", healthy: false },
     { name: "expire-confirmations", healthy: false },
     { name: "expire-orders", healthy: false },
+    { name: "expire-pickups", healthy: false },
     { name: "snapshot-weekly", healthy: false },
   ]);
   await expect(checkJobs(broken, clock, async () => { throw new Error("AWS failed"); }))

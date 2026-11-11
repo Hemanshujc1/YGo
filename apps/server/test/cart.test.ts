@@ -134,7 +134,7 @@ async function stocked() {
 describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
   it("saves the whole cart and answers with the server's quote, every fee named and no commission", async () => {
     const { shopId, dal, atta } = await stocked();
-    expect((await read(shopId)).json()).toEqual({ shop: { id: shopId, name: "Sai General Stores" }, revision: 0, lines: [], quote: null, placeable: false, reasons: [] });
+    expect((await read(shopId)).json()).toEqual({ shop: { id: shopId, name: "Sai General Stores" }, revision: 0, lines: [], quote: null, placeable: false, reasons: [], pickup: null });
 
     const saved = await save(shopId, 0, [{ listingId: dal, count: 2 }, { listingId: atta, count: 1 }]);
     expect(saved.statusCode).toBe(200);
@@ -145,7 +145,7 @@ describe("Server cart and quote (#405, CRT-1, CRT-2, CRT-4, CRT-5)", () => {
         { listingId: atta, name: "Atta", brand: null, baseUnit: "kg", quantity: "5", price: "199.99", count: 1, state: "orderable", part: null, left: null, lineTotal: "199.99" },
       ],
       quote: { productValue: "469.99", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "499.99" },
-      placeable: true, reasons: [],
+      pickup: null, placeable: true, reasons: [],
     });
     expect((await read(shopId)).json()).toEqual(saved.json());
 

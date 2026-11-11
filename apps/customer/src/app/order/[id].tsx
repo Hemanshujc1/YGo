@@ -94,10 +94,12 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
         <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
       </QuoteRows>
 
-      <View>
-        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
-      </View>
+      {order.address && (
+        <View>
+          <Text className="text-secondary text-muted">{words.deliverTo}</Text>
+          <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -186,10 +188,12 @@ function ChangedTotalDetail({ order, proposal, secondsLeft }: { order: OrderResp
         <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
       </QuoteRows>
 
-      <View>
-        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
-      </View>
+      {order.address && (
+        <View>
+          <Text className="text-secondary text-muted">{words.deliverTo}</Text>
+          <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
+        </View>
+      )}
     </View>
   );
 }
