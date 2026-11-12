@@ -85,9 +85,14 @@ export async function adminOrderDetail(db: Db, areaManagerId: string | null, id:
        ${current("small_cart_fee")} AS "smallCartFee", ${current("pickup_fee")} AS "pickupFee", ${current("quote", "jsonb")} AS quote, d.name AS "delivererName"
      ${scope} AND o.id = $4`, [areaManagerId, orderTiming.reRingSeconds, now, id]);
   if (!row) return null;
-  const { rows: lines } = await db.query<AdminOrderDetail["lines"][number]>(
-    `SELECT name, brand, count, trim_scale(part_quantity)::text AS "partQuantity", trim_scale(pack_quantity)::text AS "packQuantity", base_unit AS "baseUnit",
-       unit_price::text AS "unitPrice", line_total::text AS "lineTotal" FROM order_lines WHERE order_id = $1 ORDER BY position`, [id]);
+  // The lines the customer sees: the latest confirmed revision's (a line it removed has count 0), else those frozen at placement.
+  const columns = (t: string) => `name, brand, ${t}.count, trim_scale(${t}.part_quantity)::text AS "partQuantity", trim_scale(${t}.pack_quantity)::text AS "packQuantity", base_unit AS "baseUnit",
+       ${t}.unit_price::text AS "unitPrice", ${t}.line_total::text AS "lineTotal"`;
+  const { rows: revised } = await db.query<AdminOrderDetail["lines"][number]>(
+    `SELECT ${columns("l")} FROM order_revision_lines l
+     WHERE l.revision_id = (SELECT r.id FROM order_revisions r WHERE r.order_id = $1 AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1) AND l.count > 0 ORDER BY l.position`, [id]);
+  const lines = revised.length > 0 ? revised : (await db.query<AdminOrderDetail["lines"][number]>(
+    `SELECT ${columns("l")} FROM order_lines l WHERE l.order_id = $1 ORDER BY l.position`, [id])).rows;
   const { rows: timeline } = await db.query<AdminOrderDetail["timeline"][number]>(
     `SELECT ${iso("h.at")} AS at, h.from_status AS "from", h.to_status AS "to", h.actor_role AS "actorRole", a.name AS "actorName", h.reason_code AS "reasonCode"
      FROM order_status_history h LEFT JOIN accounts a ON a.id = h.actor_id WHERE h.order_id = $1 ORDER BY h.at, h.id`, [id]);

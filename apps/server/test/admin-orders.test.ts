@@ -318,6 +318,22 @@ describe("Admin orders: monitoring and forced transitions (ADM-4, ADM-7, ORD-1, 
     expect(detail.money).toMatchObject({ productValue: "80.00", shopDiscount: "0.00", deliveryFee: "10.00", total: "90.00" });
   });
 
+  it("shows the confirmed revision's lines with its money, not the placement lines", async () => {
+    const customerId = await account("cust@example.com", "Meera");
+    const id = await createOrder({ shopId: await shop("S"), customerId, status: "accepted" });
+    const headers = await signIn(admin.email);
+    const before = (await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail;
+    expect(before.lines.map((l) => [l.count, l.lineTotal])).toEqual([[1, "130.00"]]);
+    await database.pool.query(
+      `WITH r AS (INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, created_at, confirmed_at, confirm_by_at, product_value, delivery_fee, total, commission, platform_contribution, quote)
+         VALUES ($1, 1, 'confirmed', 'placed', 'owner', $2, $2, $2, 80, 20, 100, 8, 12, $3) RETURNING id)
+       INSERT INTO order_revision_lines (revision_id, position, listing_id, name, base_unit, pack_quantity, original_count, count, unit_price, line_total, commission, stock_quantity, change_reason)
+       SELECT r.id, 1, l.listing_id, l.name, l.base_unit, l.pack_quantity, l.count, 1, 80, 80, 8, l.pack_quantity, 'out_of_stock' FROM r, order_lines l WHERE l.order_id = $1`, [id, clock.now(), quote]);
+    const detail = (await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail;
+    expect(detail.lines.map((l) => [l.count, l.unitPrice, l.lineTotal])).toEqual([[1, "80.00", "80.00"]]);
+    expect([detail.money.productValue, detail.money.total]).toEqual(["80.00", "100.00"]);
+  });
+
   it("keeps the Admin's original reason retrievable on the order detail, for Admin only", async () => {
     const customerId = await account("cust@example.com", "Meera");
     const managerId = await manager("rm@example.com");
