@@ -165,7 +165,7 @@ describe("stock reconciliation (#67)", () => {
     expect(await movementCount()).toBe(before + 1);
   });
 
-  it("reports a delivered order revised down, because delivery still deducts the placed quantities (known bug #609)", async () => {
+  it("delivers a revised-down order for what was confirmed, so the check finds no difference (#609)", async () => {
     const { shopId, pack } = await shop();
     const packId = await pack("1", "50");
     const customer = await account("customer@example.com");
@@ -178,10 +178,26 @@ describe("stock reconciliation (#67)", () => {
        SELECT r.id, 1, l.listing_id, 'Rice', 'kg', 1, 4, 2, 10, 20, 2, 2, 'out_of_stock' FROM r, order_lines l WHERE l.order_id = $1`, [revised, clock.now(), quote]);
     const client = await database.pool.connect();
     try { await recordDeliverySale(client, revised, customer.id, clock.now()); } finally { client.release(); }
-    // 2 packs went out, but recordDeliverySale deducted the 4 placed (#609). The job must keep reporting this, never hide it.
-    // When #609 is fixed this expectation flips to "no issue": on-hand 48.
-    expect(await reconcileStock(database.pool, clock)).toBe(1);
-    expect(await issues()).toEqual([{ onHand: "46.000", expected: "48.000", difference: "-2.000", resolved_at: null }]);
+    // 2 packs went out, not the 4 placed. Before #609 delivery deducted 4 (on hand 46) and the check reported -2.
+    expect(await reconcileStock(database.pool, clock)).toBe(0);
+    expect(await issues()).toEqual([]);
+    expect((await database.pool.query("SELECT sum(quantity)::text AS on_hand FROM stock_movements")).rows[0]?.on_hand).toBe("48.000");
+  });
+
+  it("moves no stock for a line the confirmed revision took out (#609)", async () => {
+    const { shopId, pack } = await shop();
+    const packId = await pack("1", "50");
+    const customer = await account("customer@example.com");
+    const gone = await order(shopId, customer.id, packId, 4, "delivered", await rateCard());
+    await database.pool.query(
+      `WITH r AS (INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, created_at, confirmed_at, confirm_by_at, product_value, delivery_fee, total, commission, platform_contribution, quote)
+         VALUES ($1, 1, 'confirmed', 'placed', 'owner', $2, $2, $2, 0, 20, 20, 0, 0, $3) RETURNING id)
+       INSERT INTO order_revision_lines (revision_id, position, listing_id, name, base_unit, pack_quantity, original_count, count, unit_price, line_total, commission, stock_quantity, change_reason)
+       SELECT r.id, 1, l.listing_id, 'Rice', 'kg', 1, 4, 0, 10, 0, 0, 0, 'out_of_stock' FROM r, order_lines l WHERE l.order_id = $1`, [gone, clock.now(), quote]);
+    const client = await database.pool.connect();
+    try { await recordDeliverySale(client, gone, customer.id, clock.now()); } finally { client.release(); }
+    expect((await database.pool.query("SELECT count(*)::int AS n FROM stock_movements WHERE kind = 'sale'")).rows[0]?.n).toBe(0);
+    expect(await reconcileStock(database.pool, clock)).toBe(0);
   });
 
   it("closes an issue when a later run finds the listing right, and keeps one open row per listing", async () => {
