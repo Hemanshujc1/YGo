@@ -110,10 +110,27 @@ export const pickupRules = {
     words: ({ number, shopName }) => ({ title: `Order #${number} not collected`, body: `${shopName} held your order but it was not collected, so it was closed. You were not charged.` }) },
 } satisfies Record<string, Rule>;
 
+/**
+ * Admin closed an order itself (ADM-4, #66). The Customer is told YGo did it, never in the shop's voice, and never the Admin's free-text reason
+ * (it stays in the audit record). "Not charged" is said only where no money was ever due: a closed order before pickup or dispatch.
+ * A delivery that failed gets its own words, since the order had already reached the Customer's door.
+ */
+export const ADMIN_FORCED = "admin_forced";
+const adminClosed = (kind: NotificationKind, title: string, body: string): Rule => ({
+  kind, to: "customer", words: ({ number }) => ({ title: `Order #${number} ${title}`, body }),
+});
+const adminRules: Partial<Record<OrderStatus, Rule>> = {
+  cancelled_by_shop: adminClosed("order_cancelled_by_shop", "cancelled", "YGo cancelled this order. You were not charged."),
+  rejected_by_shop: adminClosed("order_rejected", "closed", "YGo closed this order because it could not be taken. You were not charged."),
+  expired: adminClosed("order_expired", "closed", "YGo closed this order because it was not answered in time. You were not charged."),
+  delivery_failed: adminClosed("order_delivery_failed", "could not be delivered", "YGo closed this order because it could not be delivered. Contact YGo support if you have questions."),
+};
+
 /** The rule for a move: a cancel after acceptance has its own words; any other move uses its status's rule. */
 function ruleFor(to: OrderStatus, from: OrderStatus | null, reason: string | null): Rule | undefined {
   if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) return to === "placed" ? confirmRules.placed : confirmRules.later;
   if (to === "cancelled_by_customer" && reason === "agreed_cancel") return cancelRules.agreed;
+  if (reason === ADMIN_FORCED && adminRules[to]) return adminRules[to];
   // Only the shop's own cancel, which always has one of the four reasons; the system's negative-contribution cancel keeps sending nothing.
   if (to === "cancelled_by_shop" && (from === "accepted" || from === "preparing" || from === "ready") && reason !== null && reason in rejectReasons) return cancelRules.byShop;
   return rules[to];

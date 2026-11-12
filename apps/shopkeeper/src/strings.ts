@@ -872,6 +872,7 @@ export const strings = {
     OWN_SHOP: "You can't order from your own shop.",
     ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
     ORDER_IS_PICKUP: "This order is a pickup. Use Ready for pickup.",
+    ORDER_MOVE_NOT_ALLOWED: "This order can't be moved that way.",
     HANDOVER_CODE_WRONG: "That code doesn’t match. Ask the customer to check it.",
     HANDOVER_CODE_LOCKED: "Too many tries. Wait two minutes, then try again.",
     DELIVERER_NOT_ELIGIBLE: "Choose the Owner or a Staff member who can deliver.",

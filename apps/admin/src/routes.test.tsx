@@ -90,6 +90,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     reviewProofException: vi.fn(),
     listBelowFloorExceptions: vi.fn().mockResolvedValue({ ok: true, data: { exceptions: [], nextCursor: null, counts: { open: 0, total: 0, shops: [], areaManagers: [] } } }),
     reviewBelowFloorException: vi.fn(),
+    listAdminOrders: vi.fn(),
+    getAdminOrder: vi.fn(),
+    forceOrderTransition: vi.fn(),
     listProductRequests: vi.fn().mockResolvedValue({ ok: true, data: { requests: [] } }),
     approveProductRequest: vi.fn(),
     mapProductRequest: vi.fn(),
@@ -1241,7 +1244,7 @@ describe("Area Manager shell (#343)", () => {
     expect(screen.queryByText(strings.title)).toBeNull();
     expect(screen.getByText(strings.areaManagerScope)).toBeTruthy();
     const links = within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([strings.applications, strings.proofExceptions, strings.belowFloorExceptions]);
+    expect(links.map((link) => link.textContent)).toEqual([strings.liveOrders, strings.applications, strings.proofExceptions, strings.belowFloorExceptions]);
     expect(screen.getByRole("group", { name: strings.theme })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.signOut })).toBeTruthy();
     expect(api.listShopApplications).toHaveBeenCalled();
@@ -1285,6 +1288,23 @@ describe("Area Manager shell (#343)", () => {
     expect(api.listBelowFloorExceptions).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["admin", "area_manager"] as const)("opens A14 Live orders for %s from the navigation, and A15 from a row", async (role) => {
+    const orderId = "00000000-0000-4000-8000-000000000001";
+    const row = { id: orderId, number: 1001, shopId: "00000000-0000-4000-8000-000000000a01", shopName: "Sai", customerName: null, fulfilment: "delivery", status: "placed",
+      placedAt: "2030-01-01T10:00:00.000Z", statusChangedAt: "2030-01-01T10:00:00.000Z", total: "150.00", statusAgeSeconds: 5, unanswered: false, cursor: "2030-01-01T10:00:00.000000Z|" + orderId };
+    const { api, router } = setup("/applications", asRole(role));
+    api.listAdminOrders.mockResolvedValue({ ok: true, data: { orders: [row], nextCursor: null, counts: { active: 1, unanswered: 0 }, serverTime: "2030-01-01T10:00:05.000Z", unansweredAfterSeconds: 120 } });
+    api.getAdminOrder.mockResolvedValue({ ok: true, data: {
+      order: row, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" }, breakdown: null,
+      timeline: [], forcedActions: [], people: { customerName: null, delivererName: null }, forcedMoves: role === "admin" ? ["expired"] : [] } });
+    fireEvent.click(await screen.findByRole("link", { name: strings.liveOrders }));
+    fireEvent.click(await screen.findByRole("link", { name: "#1001" }));
+    expect(await screen.findByRole("heading", { name: "Order #1001" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe(`/orders/${orderId}`);
+    expect(api.getAdminOrder).toHaveBeenCalledWith(orderId);
+    expect(Boolean(screen.queryByRole("radio"))).toBe(role === "admin");
+  });
+
   it("draws no role's shell while the role is unknown or after the session ends", async () => {
     setup("/applications", { role: vi.fn().mockResolvedValue({ ok: false, status: 503, code: "UNAVAILABLE" }), currentRole: vi.fn(() => null) });
     expect(await screen.findByRole("link", { name: strings.brand })).toBeTruthy();
@@ -1308,7 +1328,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(12);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(13);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

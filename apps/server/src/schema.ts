@@ -68,6 +68,9 @@ export const adminActions = pgTable(
     targetId: uuid("target_id").notNull(),
     targetType: text("target_type").notNull().default("account"),
     reason: text("reason").notNull(),
+    // The status change of a forced order transition (ADM-4, #66); null for every other action.
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -838,7 +841,7 @@ export const orderStatusHistory = pgTable("order_status_history", {
   clientId: uuid("client_id"),
 }, (table) => [
   index("order_status_history_order_id_idx").on(table.orderId),
-  check("order_status_history_role_valid", sql`${table.actorRole} IN ('customer', 'owner', 'staff', 'system')`),
+  check("order_status_history_role_valid", sql`${table.actorRole} IN ('customer', 'owner', 'staff', 'admin', 'system')`),
   check("order_status_history_actor_valid", sql`(${table.actorRole} = 'system') = (${table.actorId} IS NULL)`),
   check("order_status_history_statuses_valid", sql`${table.toStatus} IN (${orderStatuses}) AND (${table.fromStatus} IS NULL OR ${table.fromStatus} IN (${orderStatuses}))`),
 ]);
@@ -1024,7 +1027,7 @@ export const notifications = pgTable("notifications", {
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   uniqueIndex("notifications_dedupe_key_idx").on(table.accountId, table.dedupeKey).where(sql`${table.dedupeKey} IS NOT NULL`),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'pickup_ready', 'pickup_not_collected')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session

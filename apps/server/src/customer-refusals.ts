@@ -15,6 +15,7 @@ export async function customerFailedDeliveries(db: Pool | PoolClient, accountId:
     `SELECT count(*)::int AS failed, (count(*) FILTER (WHERE failed_delivery_reason = 'customer_refused'))::int AS refused
      FROM orders
      WHERE account_id = $1 AND status = 'delivery_failed'
+       AND NOT EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id = orders.id AND h.to_status = 'delivery_failed' AND h.reason_code = 'admin_forced')
        AND status_changed_at >= $2::timestamptz - make_interval(days => $3) AND status_changed_at <= $2`,
     [accountId, now, REFUSAL_WINDOW_DAYS]);
   return row ?? { failed: 0, refused: 0 };

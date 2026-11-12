@@ -45,6 +45,10 @@ import {
   OnboardingFee,
   BelowFloorException,
   BelowFloorExceptionsResponse,
+  AdminOrderDetail,
+  AdminOrdersResponse,
+  type AdminOrderGroup,
+  type ForceTransitionBody,
   type ForceFulfilmentModeBody,
   type FulfilmentMode,
   FulfilmentModesResponse,
@@ -375,6 +379,23 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `PUT /v1/admin/shops/:id/fulfilment-modes/:mode`: forces a mode off or lifts it; the shop's own switch is not changed (#65). */
     async forceFulfilmentMode(shopId: string, mode: FulfilmentMode, forcedOff: boolean): Promise<ApiResult<FulfilmentModesResponse>> {
       return result(await adminRequest("PUT", `/v1/admin/shops/${encodeURIComponent(shopId)}/fulfilment-modes/${mode}`, { forcedOff }), FulfilmentModesResponse);
+    },
+
+    /** `GET /v1/admin/orders`: A14, one page of orders newest first with counts and the server's clock (ADM-4, ADM-7, #66). An Area Manager gets only their shops. */
+    async listAdminOrders(query: { group?: AdminOrderGroup; shopId?: string; limit?: number; cursor?: string } = {}): Promise<ApiResult<AdminOrdersResponse>> {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+      return result(await adminRequest("GET", `/v1/admin/orders?${params}`), AdminOrdersResponse);
+    },
+
+    /** `GET /v1/admin/orders/:id`: A15, one order with its frozen lines and money, timeline and the moves Admin may force. */
+    async getAdminOrder(id: string): Promise<ApiResult<AdminOrderDetail>> {
+      return result(await adminRequest("GET", `/v1/admin/orders/${encodeURIComponent(id)}`), AdminOrderDetail);
+    },
+
+    /** `POST /v1/admin/orders/:id/force-transition`: Admin only; ORDER_STATUS_CHANGED when the order moved since it was shown (ADM-4, ORD-1). */
+    async forceOrderTransition(id: string, body: ForceTransitionBody): Promise<ApiResult<AdminOrderDetail>> {
+      return result(await adminRequest("POST", `/v1/admin/orders/${encodeURIComponent(id)}/force-transition`, body), AdminOrderDetail);
     },
 
     /** `GET /v1/admin/orders/below-floor-exceptions`: A30, one page of Open or Reviewed below-floor contribution exceptions with shop counts (MNY-4, ADM-7). */

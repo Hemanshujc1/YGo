@@ -264,6 +264,8 @@ export {
   STOCK_HOLDING_ORDER_STATUSES, TERMINAL_ORDER_STATUSES, DELIVERY_PHOTO_MAX_BYTES, ORDER_ANSWER_SECONDS,
 } from "./orders";
 
+export { AdminOrderBreakdown, AdminOrderDetail, AdminOrderGroup, AdminOrderRow, AdminOrdersQuery, AdminOrdersResponse, ForceTransitionBody, ForcedOrderStatus } from "./admin-orders";
+
 export { InviteStaffBody, JOIN_CODE_ALPHABET, JOIN_CODE_LENGTH, JoinShopBody, JoinShopResponse, StaffInvite, StaffInviteResponse, StaffInvitesResponse } from "./staff";
 
 export {

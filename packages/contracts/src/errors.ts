@@ -80,6 +80,8 @@ import { LiveCheck } from "./shops";
  * - OWN_SHOP (403): the account is Owner or Staff of this shop (ACC-9).
  * - ORDER_STATUS_CHANGED (409): the order is no longer in a status this move starts from.
  * - ORDER_IS_PICKUP (409): a delivery route was used on a pickup, which is made ready with Ready for pickup (#601).
+ * Forcing an order (#66):
+ * - ORDER_MOVE_NOT_ALLOWED (409): Admin may not force this order into that status: it is final, or the move is not one Admin can force.
  * Answering an order (#425):
  * - ORDER_EXPIRED (409): ORDER_ANSWER_SECONDS have passed since placement, so it can't be accepted or rejected.
  * - NOT_ENOUGH_STOCK (409): a line no longer fits the stock left; `shortLines` names each one.
@@ -146,6 +148,7 @@ export const ErrorCode = z.enum([
   "OWN_SHOP",
   "ORDER_STATUS_CHANGED",
   "ORDER_IS_PICKUP",
+  "ORDER_MOVE_NOT_ALLOWED",
   "CANCEL_REQUEST_CLOSED",
   "HANDOVER_CODE_WRONG",
   "HANDOVER_CODE_LOCKED",
