@@ -7,6 +7,7 @@ import { buildApp } from "../src/app";
 import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 import { runJob } from "../src/jobs";
+import { expireUncollectedPickups } from "../src/pickup-expiry";
 import { liveCheck } from "../src/live-check";
 import { stockOf } from "../src/listings";
 import { setOrderTiming } from "../src/order-timing";
@@ -384,7 +385,7 @@ describe("A pickup at the counter (FUL-7, MNY-1)", () => {
     const pickup = await pickupOrder(world);
     await shopPost(pickup.id, "accept", world.owner);
     // A pickup has no deliverer, and cannot be completed before Ready.
-    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${pickup.id}/ready`, headers: world.owner, payload: { accountId: randomUUID() } })).statusCode).toBe(409);
+    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${pickup.id}/ready`, headers: world.owner, payload: { accountId: randomUUID() } })).json()).toEqual({ error: { code: "ORDER_IS_PICKUP" } });
     expect((await shopPost(pickup.id, "picked-up", world.owner, { handoverCode: "1234", payment: "cash" })).statusCode).toBe(409);
     expect((await shopPost(pickup.id, "out-for-delivery", world.owner)).statusCode).toBe(403);
 
@@ -457,6 +458,23 @@ describe("An uncollected pickup (FUL-7, expire-pickups)", () => {
     await runJob(database, "expire-pickups", clock);
     expect((await database.pool.query("SELECT count(*) FROM order_status_history WHERE order_id = $1 AND to_status = 'not_collected'", [order.id])).rows[0].count).toBe("1");
     expect((await database.pool.query("SELECT status FROM job_runs WHERE job_name = 'expire-pickups' ORDER BY started_at")).rows.every((run) => run.status === "ok")).toBe(true);
+  });
+
+  it("closes every due pickup across batches, and passes over one another job holds locked without reading it again (#601)", async () => {
+    const world = await stocked();
+    const first = await readyAt(world, 2), second = await readyAt(world, 2), third = await readyAt(world, 3);
+    at("2030-01-01T00:09:00.000Z");
+    // A second connection holds the first order, as a concurrent completion would.
+    const other = await database.pool.connect();
+    try {
+      await other.query("BEGIN");
+      await other.query("SELECT id FROM orders WHERE id = $1 FOR UPDATE", [first.id]);
+      expect(await expireUncollectedPickups(database.pool, clock, 1)).toBe(2);
+      await other.query("ROLLBACK");
+    } finally { other.release(); }
+    expect([(await row(first.id)).status, (await row(second.id)).status, (await row(third.id)).status]).toEqual(["ready", "not_collected", "not_collected"]);
+    expect(await expireUncollectedPickups(database.pool, clock, 1)).toBe(1);
+    expect((await row(first.id)).status).toBe("not_collected");
   });
 
   it("leaves an unready pickup and a completed pickup alone, and refuses completion once closed", async () => {

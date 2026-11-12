@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey,
+  type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey, type RateCardResponse,
   SimulatorListingsParams, SimulatorListingsResponse, type SimulatorListing,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -28,7 +28,7 @@ export async function latestRateCardVersion(pool: Pool | PoolClient): Promise<st
  * every amount comes from `pricing_delivered_quote` in PostgreSQL.
  */
 export async function deliveredQuote(
-  pool: Pool, shopId: string, lines: BasketLine[], shopDiscounts: boolean, version?: string, draft?: RateCardDraft,
+  pool: Pool, shopId: string, lines: BasketLine[], shopDiscounts: boolean, version?: string, draft?: RateCardDraft, orderCard?: RateCardResponse,
 ): Promise<DeliveredQuote> {
   // Order-level values resolve shop → global; resolving without a category ignores category cards (#357).
   const resolve = async (categoryId?: string) => {
@@ -36,7 +36,8 @@ export async function deliveredQuote(
     if (!card) throw new Error("Rate card did not resolve for a checked shop and category");
     return card;
   };
-  const order = await resolve();
+  // A caller that already resolved the order-level card for this version (the cart, when pickup is open) passes it, so it is read once (#601).
+  const order = orderCard ?? await resolve();
   const categories = [...new Set(lines.map((line) => line.categoryId))];
   const byCategory = new Map(await Promise.all(categories.map(async (id) => [id, await resolve(id)] as const)));
   const missing = ORDER_KEYS.filter((key) => order.missing.includes(key));
