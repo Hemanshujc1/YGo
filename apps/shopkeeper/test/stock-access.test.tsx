@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccessView } from "../src/lib/offline-access";
 
 const mock = vi.hoisted(() => ({ view: {} as AccessView, path: "/", cursor: 0, hooks: [] as unknown[], effects: [] as (() => void)[],
-  cleanups: [] as (() => void)[], foreground: (() => {}) as (state: string) => void, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+  cleanups: [] as (() => void)[], foreground: (() => {}) as (state: string) => void, verify: vi.fn(), cleanup: vi.fn(), expire: vi.fn(), allowed: vi.fn(), canDeliver: vi.fn(), start: vi.fn(), stop: vi.fn() }));
 vi.mock("react", () => ({
   useState: (initial: unknown) => {
     const index = mock.cursor++; if (!(index in mock.hooks)) mock.hooks[index] = initial;
@@ -26,7 +26,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 vi.mock("../src/components/sign-out", () => ({ SignOut: "SignOut" }));
 vi.mock("../src/lib/stock-sync", () => ({ stockSync: { start: mock.start, stop: mock.stop } }));
 vi.mock("../src/api", () => ({ supportEmail: "help@example.com", session: { get: () => ({ account: { id: "account" } }) }, access: {
-  get: () => mock.view, subscribe: vi.fn(), verify: mock.verify, cleanup: mock.cleanup, expire: mock.expire, allowed: mock.allowed,
+  get: () => mock.view, subscribe: vi.fn(), verify: mock.verify, cleanup: mock.cleanup, expire: mock.expire, allowed: mock.allowed, canDeliver: mock.canDeliver,
 } }));
 import { StockAccess } from "../src/components/stock-access";
 function render() { mock.cursor = 0; const tree = StockAccess({ children: "protected screen" }); for (const effect of mock.effects.splice(0)) effect(); return tree; }
@@ -42,7 +42,7 @@ describe("offline Stock entry boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks(); vi.useFakeTimers(); mock.hooks = []; mock.effects = []; mock.cleanups = []; mock.path = "/";
     mock.view = { mode: "offline", accountId: "account", shopId: "shop", expiresAt: Date.now() + 1000 };
-    mock.verify.mockResolvedValue(undefined); mock.cleanup.mockResolvedValue(undefined); mock.allowed.mockReturnValue(true);
+    mock.verify.mockResolvedValue(undefined); mock.cleanup.mockResolvedValue(undefined); mock.allowed.mockReturnValue(true); mock.canDeliver.mockReturnValue(false);
   });
   afterEach(() => { for (const cleanup of mock.cleanups) cleanup(); vi.useRealTimers(); });
   it("offers saved Stock, retry and guarded sign-out while blocking online-only routes", async () => {
@@ -61,6 +61,16 @@ describe("offline Stock entry boundary", () => {
     mock.foreground("background"); expect(mock.stop).toHaveBeenCalledOnce();
     mock.start.mockClear(); mock.foreground("active"); expect(mock.verify).toHaveBeenCalledTimes(3);
     await Promise.resolve(); await Promise.resolve(); expect(mock.start).toHaveBeenCalledOnce();
+  });
+  it("lets a deliverer reach saved deliveries and their orders with no internet, and nobody else (#617)", async () => {
+    mock.canDeliver.mockReturnValue(true);
+    expect(elements(await ready()).find((node) => node.props.href === "/deliveries")).toBeDefined();
+    mock.path = "/deliveries"; expect(render()).toBe("protected screen");
+    mock.path = "/orders/abc"; expect(render()).toBe("protected screen");
+    mock.path = "/orders"; expect(render()).not.toBe("protected screen");
+    mock.canDeliver.mockReturnValue(false);
+    mock.path = "/deliveries"; expect(render()).not.toBe("protected screen");
+    mock.path = "/"; expect(elements(render()).find((node) => node.props.href === "/deliveries")).toBeUndefined();
   });
   it("keeps accessible cached Stock visible while background verification is pending", () => {
     mock.path = "/stock";

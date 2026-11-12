@@ -7,6 +7,7 @@ import type {
   PartialAcceptPreviewResponse,
   RejectReason,
   ShopOrderResponse,
+  ShopOrderSummary,
   ShopOrdersResponse,
   ShortLine,
 } from "@ygo/contracts";
@@ -87,6 +88,14 @@ function listeners() {
   };
 }
 
+/** The encrypted copy of My deliveries and its orders (#617), read when the phone cannot reach the server. Each call may fail; the screen then simply has no copy. */
+export type DeliveryCache = {
+  saveList(list: ShopOrderSummary[]): Promise<void>;
+  list(): Promise<ShopOrderSummary[] | null>;
+  saveOrder(order: ShopOrderResponse, offset: number): Promise<void>;
+  order(id: string): Promise<{ order: ShopOrderResponse; offset: number } | null>;
+};
+
 export type ListView = {
   status: "loading" | "ready" | "failed";
   orders: ShopOrdersResponse | null;
@@ -94,11 +103,13 @@ export type ListView = {
   offset: number;
   message: string | null;
   refreshing: boolean;
+  /** My deliveries as last read online, shown while the server can't be reached. */
+  cached: ShopOrderSummary[] | null;
 };
 
 /** S04, and the order pinned on S03 (#507): reads the three groups now and every `every` ms while started. */
-export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery, now = Date.now) {
-  let view: ListView = { status: "loading", orders: null, offset: 0, message: null, refreshing: false };
+export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery, now = Date.now, cache?: Pick<DeliveryCache, "saveList"> & Partial<Pick<DeliveryCache, "list">>) {
+  let view: ListView = { status: "loading", orders: null, offset: 0, message: null, refreshing: false, cached: null };
   const { notify, subscribe } = listeners();
   const set = (next: Partial<ListView>) => {
     view = { ...view, ...next };
@@ -113,8 +124,15 @@ export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopO
     else if (!view.orders) set({ status: "loading", message: null });
     const answer = await client.shopOrders().catch(() => "offline" as const);
     if (!latest()) return;
-    if (answer !== "offline" && answer.ok) set({ status: "ready", orders: answer.data, offset: clockOffset(answer.data.now, now()), message: null, refreshing: false });
-    else set({ status: view.orders ? "ready" : "failed", message: failure(answer), refreshing: false });
+    if (answer !== "offline" && answer.ok) {
+      set({ status: "ready", orders: answer.data, offset: clockOffset(answer.data.now, now()), message: null, refreshing: false, cached: null });
+      if (answer.data.canDeliver) void cache?.saveList(answer.data.myDeliveries).catch(() => undefined);
+    } else {
+      // No answer at all (not a refusal): the shop's own deliveries still show from the encrypted copy.
+      const saved = answer === "offline" ? await cache?.list?.().catch(() => null) ?? null : null;
+      if (!latest()) return;
+      set({ status: view.orders || saved ? "ready" : "failed", message: failure(answer), refreshing: false, cached: saved });
+    }
     poller.schedule();
   }
 
@@ -144,6 +162,10 @@ export type OrderView = {
   shortLines: ShortLine[];
   /** The server said the time is up, whatever the phone's clock shows. */
   expired: boolean;
+  /** The order is the encrypted copy from the last online read, as the server can't be reached (#617). */
+  cached: boolean;
+  /** The latest read got no answer: the phone has no internet now, even though this order was read earlier while online (#617). */
+  offline: boolean;
 };
 
 type OrderClient = {
@@ -157,9 +179,9 @@ type OrderClient = {
 };
 
 /** S05: one order, read every `every` ms while started and still New, accepted or preparing; Accept and Reject answer it. */
-export function createShopOrder(client: OrderClient, id: string, timers: Timers = phoneTimers, every = pollEvery, now = Date.now) {
+export function createShopOrder(client: OrderClient, id: string, timers: Timers = phoneTimers, every = pollEvery, now = Date.now, cache?: DeliveryCache) {
   let view: OrderView = {
-    status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false,
+    status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false, cached: false, offline: false,
   };
   const { notify, subscribe } = listeners();
   const set = (next: Partial<OrderView>) => {
@@ -189,7 +211,9 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
   }
 
   const landed = (order: ShopOrderResponse, also: Partial<OrderView> = {}) => {
-    set({ status: "ready", order, offset: clockOffset(order.now, now()), message: null, refreshing: false, ...also });
+    const offset = clockOffset(order.now, now());
+    set({ status: "ready", order, offset, message: null, refreshing: false, cached: false, offline: false, ...also });
+    void cache?.saveOrder(order, offset).catch(() => undefined);
     arm();
   };
 
@@ -205,7 +229,13 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
     const answer = await client.shopOrder(id).catch(() => "offline" as const);
     if (!latest()) return;
     if (answer !== "offline" && answer.ok) landed(answer.data);
-    else set({ status: view.order ? "ready" : "failed", message: failure(answer), refreshing: false });
+    else {
+      // No answer at all: a delivery of this shop shows from the encrypted copy, its clock as it was when read.
+      const saved = !view.order && answer === "offline" ? await cache?.order(id).catch(() => null) ?? null : null;
+      if (!latest()) return;
+      if (saved) set({ status: "ready", order: saved.order, offset: saved.offset, message: failure(answer), refreshing: false, cached: true, offline: true });
+      else set({ status: view.order ? "ready" : "failed", message: failure(answer), refreshing: false, offline: answer === "offline" });
+    }
     poller.schedule(waiting());
   }
 

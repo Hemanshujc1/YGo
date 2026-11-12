@@ -82,6 +82,7 @@ vi.mock("react-native", () => ({
   View: (props: Record<string, unknown>) => ({ type: "View", props }),
 }));
 
+vi.mock("expo-file-system", () => ({ File: function File() { return undefined; } }));
 vi.mock("expo-camera", () => ({
   CameraView: "CameraView",
   useCameraPermissions: () => [null, () => Promise.resolve({ granted: false })],
@@ -97,6 +98,8 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
+vi.mock("../src/lib/delivery-cache", () => ({ deliveryCache: {}, openDelivery: () => Promise.resolve(null) }));
+vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false, outcome: null }), run: () => Promise.resolve(null) } }));
 vi.mock("../src/api", () => ({
   api: {},
   access: { role: () => "owner", answer: () => ({ state: "live" }) },

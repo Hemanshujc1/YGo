@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({ view: {} as Record<string, unknown> }));
-vi.mock("react", () => ({ useState: (initial: unknown) => [typeof initial === "function" ? (initial as () => unknown)() : initial, () => undefined], useSyncExternalStore: () => mock.view }));
+vi.mock("react", () => ({ useEffect: () => undefined, useState: (initial: unknown) => [typeof initial === "function" ? (initial as () => unknown)() : initial, () => undefined], useSyncExternalStore: () => mock.view }));
 vi.mock("expo-router", () => ({ Link: "Link" }));
 vi.mock("@ygo/mobile", () => ({ Button: "Button", Text: "Text", useInFront: () => undefined }));
 vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
+vi.mock("../src/lib/delivery-cache", () => ({ deliveryCache: {}, openDelivery: () => Promise.resolve(null) }));
+vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false, outcome: null }), run: () => Promise.resolve(null) } }));
 vi.mock("../src/api", () => ({ api: {} }));
 vi.mock("../src/components/order-row", () => ({ OrderRow: "OrderRow" }));
 vi.mock("../src/lib/shop-orders", () => ({ createShopOrders: () => ({ subscribe: () => () => undefined, get: () => mock.view, refresh: vi.fn(), retry: vi.fn() }) }));

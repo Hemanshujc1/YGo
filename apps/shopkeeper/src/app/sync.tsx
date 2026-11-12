@@ -69,6 +69,18 @@ export default function SyncScreen() {
     const bill = row.bill;
     if (bill) return <BillCard key={row.id} bill={bill} syncedAt={section === "synced" ? row.at : null}
       onShare={() => shareBill({ bill, shopName: access.shopName(), shopGstin: access.shopGstin(), label: (packId) => queue.label(row.shopId, packId) })} />;
+    if (row.type === "delivery") {
+      const reason = SyncActionCode.safeParse(row.code);
+      return <View key={row.id} className="gap-1 rounded-card border border-border bg-surface p-4">
+        <Text className="text-headline font-semibold text-text">{words.delivery(row.deliveryType ?? "")}</Text>
+        {section === "synced" && row.at && <Text className="text-secondary text-muted">{words.syncedAt(formatTime(row.at))}</Text>}
+        {section === "attention" && <>
+          <Text className="text-secondary text-danger">{reason.success ? words.reasons[reason.data] : words.reasons.VALIDATION_FAILED}</Text>
+          <Text selectable className="text-secondary text-muted">{words.reference(row.id)}</Text>
+          <Link href={`/orders/${row.packId}`} asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.openOrder}</Text></Pressable></Link>
+        </>}
+      </View>;
+    }
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
     const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "stock_change" ? words.stockChange(strings.stock.reasons[row.reason as keyof typeof strings.stock.reasons] ?? "", amount ?? "") : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");

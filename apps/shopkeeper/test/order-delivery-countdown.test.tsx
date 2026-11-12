@@ -26,10 +26,13 @@ vi.mock("react-native", () => ({
   ActivityIndicator: "Spinner", Image: "Image", Linking: {}, Modal: "Modal", Pressable: "Pressable",
   RefreshControl: "RefreshControl", ScrollView: "ScrollView", TextInput: "TextInput", View: "View",
 }));
+vi.mock("expo-file-system", () => ({ File: function File() { return undefined; } }));
 vi.mock("expo-camera", () => ({ CameraView: "CameraView", useCameraPermissions: () => [null, () => Promise.resolve({ granted: false })] }));
 vi.mock("expo-image-manipulator", () => ({ SaveFormat: { JPEG: "jpeg" }, manipulateAsync: () => Promise.resolve({ uri: "" }) }));
 vi.mock("react-native-qrcode-svg", () => ({ default: "QRCode" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
+vi.mock("../src/lib/delivery-cache", () => ({ deliveryCache: {}, openDelivery: () => Promise.resolve(null) }));
+vi.mock("../src/lib/stock-sync", () => ({ stockSync: { subscribe: () => () => undefined, get: () => ({ running: false, outcome: null }), run: () => Promise.resolve(null) } }));
 vi.mock("../src/api", () => ({ api: {}, access: { role: () => "owner" }, session: { get: () => ({ account: { id: "owner-1" } }) } }));
 vi.mock("../src/components/countdown", () => ({
   Countdown: "Countdown",
