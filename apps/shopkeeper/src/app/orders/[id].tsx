@@ -425,7 +425,7 @@ export default function OrderScreen() {
   const queuedReadyAt = delivery.callAt ? new Date(Date.parse(delivery.callAt) + FAILURE_WAIT_MS).toISOString() : null;
   const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? queuedReadyAt, shown?.deliveryFailureReadyAt ? view.offset : 0);
   const photoReady = photoUploadId !== null || photoBytes !== null;
-  const offlineNow = view.cached;
+  const offlineNow = view.cached || view.offline;
   // A delivery already waiting to send is the one for this order; another would only be refused.
   const sendingLater = delivery.waiting.some((type) => type !== "delivery_call_attempt");
   const timeUp = view.expired || seconds === 0;
@@ -677,6 +677,8 @@ export default function OrderScreen() {
   useEffect(() => {
     if (!orderId) return;
     void openDelivery().then((open) => open && setDelivery(open.queue.deliveries.stateOf(orderId))).catch(() => undefined);
+    // Once a pass has finished, read the order again: the server may have accepted what was queued.
+    if (!sync.running && sync.outcome) void order.refresh();
   }, [orderId, sync.running, sync.outcome]);
 
   /**
@@ -847,6 +849,7 @@ export default function OrderScreen() {
         {shown && shown.delivererId === accountId && shown.status === "out_for_delivery" && <Button label={words.arrived} busy={working} disabled={offlineNow} onPress={() => {
           setWorking(true); void api.advanceShopOrder(shown.id, "arrived").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); }).catch(() => { setWorking(false); setDeliveryMessage(words.needsInternet); });
         }} />}
+        {shown && shown.delivererId === accountId && offlineNow && (shown.status === "ready" || shown.status === "out_for_delivery") && <Text accessibilityLiveRegion="polite" className="text-secondary text-muted">{words.needsInternet}</Text>}
         {shown && shown.delivererId === accountId && shown.status === "arrived" && <View className="gap-2 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{words.code}</Text>
           <TextInput accessibilityLabel={words.code} keyboardType="number-pad" maxLength={4} value={handoverCode} onChangeText={setHandoverCode} editable={photoReady} className="rounded-input border border-border-strong bg-bg px-3 py-3 text-title text-text" />

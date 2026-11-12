@@ -516,4 +516,17 @@ describe("delivery cache (#617)", () => {
     await offline.refresh();
     expect(offline.get()).toMatchObject({ status: "ready", cached: true, order: { status: "arrived" } });
   });
+
+  it("knows the phone is offline after an order opened online loses its connection", async () => {
+    let up = true;
+    const store = createShopOrder({ shopOrder: () => (up ? Promise.resolve(ok(order("ready"))) : Promise.reject(new Error("offline"))) } as never, id, fakeTimers().timers, 15_000, Date.now);
+    await store.refresh();
+    expect(store.get()).toMatchObject({ cached: false, offline: false });
+    up = false;
+    await store.refresh();
+    expect(store.get()).toMatchObject({ cached: false, offline: true, order: { status: "ready" } });
+    up = true;
+    await store.refresh();
+    expect(store.get().offline).toBe(false);
+  });
 });

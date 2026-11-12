@@ -164,6 +164,8 @@ export type OrderView = {
   expired: boolean;
   /** The order is the encrypted copy from the last online read, as the server can't be reached (#617). */
   cached: boolean;
+  /** The latest read got no answer: the phone has no internet now, even though this order was read earlier while online (#617). */
+  offline: boolean;
 };
 
 type OrderClient = {
@@ -179,7 +181,7 @@ type OrderClient = {
 /** S05: one order, read every `every` ms while started and still New, accepted or preparing; Accept and Reject answer it. */
 export function createShopOrder(client: OrderClient, id: string, timers: Timers = phoneTimers, every = pollEvery, now = Date.now, cache?: DeliveryCache) {
   let view: OrderView = {
-    status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false, cached: false,
+    status: "loading", order: null, offset: 0, message: null, refreshing: false, answering: null, notice: null, shortLines: [], expired: false, cached: false, offline: false,
   };
   const { notify, subscribe } = listeners();
   const set = (next: Partial<OrderView>) => {
@@ -210,7 +212,7 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
 
   const landed = (order: ShopOrderResponse, also: Partial<OrderView> = {}) => {
     const offset = clockOffset(order.now, now());
-    set({ status: "ready", order, offset, message: null, refreshing: false, cached: false, ...also });
+    set({ status: "ready", order, offset, message: null, refreshing: false, cached: false, offline: false, ...also });
     void cache?.saveOrder(order, offset).catch(() => undefined);
     arm();
   };
@@ -231,8 +233,8 @@ export function createShopOrder(client: OrderClient, id: string, timers: Timers 
       // No answer at all: a delivery of this shop shows from the encrypted copy, its clock as it was when read.
       const saved = !view.order && answer === "offline" ? await cache?.order(id).catch(() => null) ?? null : null;
       if (!latest()) return;
-      if (saved) set({ status: "ready", order: saved.order, offset: saved.offset, message: failure(answer), refreshing: false, cached: true });
-      else set({ status: view.order ? "ready" : "failed", message: failure(answer), refreshing: false });
+      if (saved) set({ status: "ready", order: saved.order, offset: saved.offset, message: failure(answer), refreshing: false, cached: true, offline: true });
+      else set({ status: view.order ? "ready" : "failed", message: failure(answer), refreshing: false, offline: answer === "offline" });
     }
     poller.schedule(waiting());
   }

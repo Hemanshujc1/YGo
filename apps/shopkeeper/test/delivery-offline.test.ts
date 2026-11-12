@@ -103,6 +103,13 @@ describe("delivery without internet (#617)", () => {
     expect(queue.deliveries.stateOf(orderA)).toMatchObject({ waiting: ["delivery_call_attempt"], callAt: new Date(clock).toISOString() });
   });
 
+  it("keeps the call attempt's time after the server accepts it, so the failed-delivery wait keeps counting", async () => {
+    queue.saveDelivery(shopId, "delivery_call_attempt", { orderId: orderA });
+    const at = new Date(clock).toISOString();
+    await syncOpeningStockBatch(queue, shopId, (body) => Promise.resolve({ ok: true as const, data: { results: body.actions.map((action) => result(action, "applied")) } }), () => true);
+    expect(queue.deliveries.stateOf(orderA)).toMatchObject({ waiting: [], callAt: at });
+  });
+
   it("doubts a clock that reads earlier than before and marks the action", () => {
     queue.saveDelivery(shopId, "delivery_call_attempt", { orderId: orderA });
     clock -= CLOCK_BACK_MS + 1000;

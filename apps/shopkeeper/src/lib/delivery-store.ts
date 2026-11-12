@@ -63,13 +63,14 @@ export function deliveryStore(db: Database, now: () => Date) {
       const row = db.getFirstSync<{ detail: string | null; clock_offset: number | null }>("SELECT detail, clock_offset FROM delivery_orders WHERE order_id = ?", id);
       return row?.detail ? { order: JSON.parse(row.detail) as ShopOrderResponse, offset: row.clock_offset ?? 0 } : null;
     },
-    /** What the phone holds for one order: actions waiting to send, and the latest refusal still open. */
+    /** What the phone holds for one order: actions waiting to send, the latest refusal still open, and when the call was made (kept after the server accepts it, so the failed-delivery wait keeps counting). */
     stateOf(orderId: string): DeliveryState {
       const rows = db.getAllSync<{ type: string; status: string; result: string | null; at: string }>(`SELECT json_extract(action, '$.type') AS type, status, result, json_extract(action, '$.createdAt') AS at FROM opening_stock_actions
         WHERE pack_id = ? AND status IN ('pending', 'rejected') AND json_extract(action, '$.type') IN (${types}) ORDER BY sequence`, orderId);
       const refused = rows.filter((row) => row.status === "rejected").at(-1);
       return { waiting: rows.filter((row) => row.status === "pending").map((row) => row.type as SyncAction["type"]),
-        callAt: rows.filter((row) => row.status === "pending" && row.type === "delivery_call_attempt").at(-1)?.at ?? null,
+        callAt: db.getFirstSync<{ at: string }>(`SELECT json_extract(action, '$.createdAt') AS at FROM opening_stock_actions
+          WHERE pack_id = ? AND status IN ('pending', 'applied') AND json_extract(action, '$.type') = 'delivery_call_attempt' ORDER BY sequence DESC`, orderId)?.at ?? null,
         refused: refused ? { type: refused.type, code: refused.result ? (JSON.parse(refused.result) as SyncActionResult).code : null } : null };
     },
     /** Orders the phone itself holds as refused. */
