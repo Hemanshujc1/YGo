@@ -479,3 +479,41 @@ describe("cancelling after acceptance (ORD-5, #59)", () => {
     expect(store.get().orders?.accepted.map((summary) => summary.cancelAsked)).toEqual([true, false]);
   });
 });
+
+describe("delivery cache (#617)", () => {
+  const mine = { ...list, myDeliveries: [{ id, number: 1001 }] } as unknown as ShopOrdersResponse;
+  const cache = () => {
+    const saved: { list: unknown[] | null; order: { order: ShopOrderResponse; offset: number } | null } = { list: null, order: null };
+    return { saved, cache: {
+      saveList: async (l: unknown[]) => void (saved.list = l), list: async () => (saved.list ?? []) as never,
+      saveOrder: async (o: ShopOrderResponse, offset: number) => void (saved.order = { order: o, offset }), order: async () => saved.order,
+    } };
+  };
+
+  it("saves My deliveries after an online read, and shows them from the copy when the phone has no connection", async () => {
+    const { saved, cache: copy } = cache();
+    await createShopOrders({ shopOrders: async () => ok(mine) }, fakeTimers().timers, 15_000, Date.now, copy).refresh();
+    expect(saved.list).toEqual(mine.myDeliveries);
+    const offline = createShopOrders({ shopOrders: () => Promise.reject(new Error("offline")) }, fakeTimers().timers, 15_000, Date.now, copy);
+    await offline.refresh();
+    expect(offline.get()).toMatchObject({ status: "ready", orders: null, cached: mine.myDeliveries, message: words.offline });
+  });
+
+  it("shows no copy after a refusal, only when the server could not be reached", async () => {
+    const { cache: copy } = cache();
+    await copy.saveList([{ id } as never]);
+    const store = createShopOrders({ shopOrders: async () => refused("INTERNAL") }, fakeTimers().timers, 15_000, Date.now, copy);
+    await store.refresh();
+    expect(store.get().cached).toBeNull();
+  });
+
+  it("keeps an order's last online read, with its clock offset, and shows it with no connection", async () => {
+    const { saved, cache: copy } = cache();
+    const online = createShopOrder({ shopOrder: async () => ok(order("arrived")) } as never, id, fakeTimers().timers, 15_000, () => Date.parse("2030-01-01T00:00:00.000Z"), copy);
+    await online.refresh();
+    expect(saved.order?.offset).toBe(clockOffset("2030-01-01T00:02:18.000Z", Date.parse("2030-01-01T00:00:00.000Z")));
+    const offline = createShopOrder({ shopOrder: () => Promise.reject(new Error("offline")) } as never, id, fakeTimers().timers, 15_000, Date.now, copy);
+    await offline.refresh();
+    expect(offline.get()).toMatchObject({ status: "ready", cached: true, order: { status: "arrived" } });
+  });
+});

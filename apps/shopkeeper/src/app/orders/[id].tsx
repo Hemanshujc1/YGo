@@ -9,6 +9,7 @@ import {
 } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import { formatTime } from "@ygo/format";
+import { SyncActionCode } from "@ygo/contracts";
 import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -21,7 +22,10 @@ import { access, api, session } from "../../api";
 import { Countdown, useSecondsLeft } from "../../components/countdown";
 import { Minus, Plus } from "../../components/icons";
 import { ReasonPicker } from "../../components/reason-picker";
+import { openDelivery, deliveryCache } from "../../lib/delivery-cache";
+import { FAILURE_WAIT_MS, type DeliveryState } from "../../lib/delivery-store";
 import { money } from "../../lib/money";
+import { stockSync } from "../../lib/stock-sync";
 import { createShopOrder, lineLabel, pack, shortLabel, treatments } from "../../lib/shop-orders";
 import { strings } from "../../strings";
 
@@ -371,7 +375,7 @@ type DeliverersResult = ApiResult<ShopDeliverersResponse> | null;
 export default function OrderScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [order] = useState(() => createShopOrder(api, id ?? ""));
+  const [order] = useState(() => createShopOrder(api, id ?? "", undefined, undefined, undefined, deliveryCache));
   const view = useSyncExternalStore(order.subscribe, order.get);
   useInFront(order);
   const [rejecting, setRejecting] = useState<{ chosen: RejectReason | null } | null>(null);
@@ -390,6 +394,10 @@ export default function OrderScreen() {
   const [camera, setCamera] = useState<CameraView | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoUploadId, setPhotoUploadId] = useState<string | null>(null);
+  // The proof photo's bytes, held so a delivery with no internet can be queued with them (#617).
+  const [photoBytes, setPhotoBytes] = useState<Uint8Array | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryState>({ waiting: [], refused: null, callAt: null });
+  const sync = useSyncExternalStore(stockSync.subscribe, stockSync.get);
   const [proofReason, setProofReason] = useState<"customer_phone_unavailable" | "customer_phone_not_present" | "someone_else_receiving" | "other" | null>(null);
   const [failureReason, setFailureReason] = useState<"no_one_at_address" | "customer_refused" | "address_not_found" | "other" | null>(null);
   const [showQr, setShowQr] = useState(false);
@@ -412,7 +420,11 @@ export default function OrderScreen() {
   const isNew = shown?.status === "placed";
   const seconds = useSecondsLeft(isNew ? shown.expiresAt : null, view.offset);
   const confirmSeconds = useSecondsLeft(shown?.status === "awaiting_customer_confirm" ? shown.confirmByAt : null, view.offset);
-  const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? null, view.offset);
+  // A call attempt queued with no internet starts the wait on the phone's own clock; the server rechecks it.
+  const queuedReadyAt = delivery.callAt ? new Date(Date.parse(delivery.callAt) + FAILURE_WAIT_MS).toISOString() : null;
+  const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? queuedReadyAt, shown?.deliveryFailureReadyAt ? view.offset : 0);
+  const photoReady = photoUploadId !== null || photoBytes !== null;
+  const offlineNow = view.cached;
   const timeUp = view.expired || seconds === 0;
   const done = (answered: boolean) => answered && router.replace("/orders");
 
@@ -657,13 +669,47 @@ export default function OrderScreen() {
     }
   }
 
+  const orderId = shown?.id;
+  // What the phone holds for this order changes as the sync runs.
+  useEffect(() => {
+    if (!orderId) return;
+    void openDelivery().then((open) => open && setDelivery(open.queue.deliveries.stateOf(orderId))).catch(() => undefined);
+  }, [orderId, sync.running, sync.outcome]);
+
+  /**
+   * Try the online route; with no internet at all, queue the action with its photo in the encrypted database and send it when back online (#617).
+   * The server accepts it later, so the customer's status does not move until then.
+   */
+  async function deliver<T extends { ok: boolean }>(type: Parameters<NonNullable<Awaited<ReturnType<typeof openDelivery>>>["queue"]["saveDelivery"]>[1], payload: Record<string, unknown>, online: () => Promise<T>): Promise<T | "queued" | "failed"> {
+    const result = await online().catch(() => "offline" as const);
+    if (result !== "offline") return result;
+    try {
+      const open = await openDelivery();
+      if (!open) return "failed";
+      const saved = open.queue.saveDelivery(open.shopId, type, payload, photoBytes ?? undefined);
+      if (typeof saved === "string") { setDeliveryMessage(words[saved]); return "failed"; }
+      setDelivery(open.queue.deliveries.stateOf(payload.orderId as string));
+      setDeliveryMessage(words.waitingToSend);
+      void stockSync.run();
+      return "queued";
+    } catch { setDeliveryMessage(words.needsInternet); return "failed"; }
+  }
+
   async function saveProofPhoto(orderId: string, uri: string) {
     const blob = await (await fetch(uri)).blob();
-    const upload = await api.deliveryPhotoUpload(orderId, { contentType: "image/jpeg", byteLength: blob.size });
-    if (!upload.ok) throw new Error(strings.errors[upload.code]);
-    const sent = await fetch(upload.data.uploadUrl, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: blob });
-    if (!sent.ok) throw new Error(strings.errors.DELIVERY_PHOTO_INVALID);
-    setPhotoUploadId(upload.data.id);
+    setPhotoBytes(new Uint8Array(await blob.arrayBuffer()));
+    // A refusal by the server is shown as before; any call that never got an answer leaves the photo on this phone to go up with the delivery.
+    const refusal = (message: string) => Object.assign(new Error(message), { refused: true });
+    try {
+      const upload = await api.deliveryPhotoUpload(orderId, { contentType: "image/jpeg", byteLength: blob.size });
+      if (!upload.ok) throw refusal(strings.errors[upload.code]);
+      const sent = await fetch(upload.data.uploadUrl, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: blob });
+      if (!sent.ok) throw refusal(strings.errors.DELIVERY_PHOTO_INVALID);
+      setPhotoUploadId(upload.data.id);
+    } catch (error) {
+      if (error instanceof Error && "refused" in error) { setPhotoBytes(null); throw error; }
+      setDeliveryMessage(words.photoOnPhone);
+    }
   }
 
   return (
@@ -696,6 +742,12 @@ export default function OrderScreen() {
             <Button label={words.retry} onPress={() => void order.retry()} variant="text" />
           </View>
         )}
+        {view.cached && <Text accessibilityLiveRegion="polite" className="text-secondary text-muted">{words.cachedOrder}</Text>}
+        {delivery.waiting.length > 0 && <View className="gap-1 rounded-card border border-border bg-surface p-4"><Text accessibilityLiveRegion="polite" className="text-body text-text">{words.waitingToSend}</Text></View>}
+        {(delivery.refused || shown?.offlineDeliveryIssue) && <View accessibilityLiveRegion="polite" className="gap-1 rounded-card border border-danger bg-danger-subtle p-4">
+          <Text className="text-body font-semibold text-danger">{words.needsAttention}</Text>
+          <Text className="text-secondary text-text">{strings.sync.reasons[SyncActionCode.safeParse(delivery.refused?.code ?? shown?.offlineDeliveryIssue?.code).data ?? "VALIDATION_FAILED"]}</Text>
+        </View>}
         {view.notice && (
           <View accessibilityLiveRegion="polite" className="gap-1">
             <Text className="text-body font-semibold text-danger">{view.notice}</Text>
@@ -786,32 +838,36 @@ export default function OrderScreen() {
             setWorking(true); void api.completePickup(shown.id, { handoverCode, payment }).then((result) => { setWorking(false); if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]); });
           }} />
         </View>}
-        {shown && shown.delivererId === accountId && shown.status === "ready" && <Button label={words.outForDelivery} busy={working} onPress={() => {
-          setWorking(true); void api.advanceShopOrder(shown.id, "out-for-delivery").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
+        {shown && shown.delivererId === accountId && shown.status === "ready" && <Button label={words.outForDelivery} busy={working} disabled={offlineNow} onPress={() => {
+          setWorking(true); void api.advanceShopOrder(shown.id, "out-for-delivery").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); }).catch(() => { setWorking(false); setDeliveryMessage(words.needsInternet); });
         }} />}
-        {shown && shown.delivererId === accountId && shown.status === "out_for_delivery" && <Button label={words.arrived} busy={working} onPress={() => {
-          setWorking(true); void api.advanceShopOrder(shown.id, "arrived").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
+        {shown && shown.delivererId === accountId && shown.status === "out_for_delivery" && <Button label={words.arrived} busy={working} disabled={offlineNow} onPress={() => {
+          setWorking(true); void api.advanceShopOrder(shown.id, "arrived").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); }).catch(() => { setWorking(false); setDeliveryMessage(words.needsInternet); });
         }} />}
         {shown && shown.delivererId === accountId && shown.status === "arrived" && <View className="gap-2 rounded-card border border-border bg-surface p-4">
           <Text className="text-body font-semibold text-text">{words.code}</Text>
-          <TextInput accessibilityLabel={words.code} keyboardType="number-pad" maxLength={4} value={handoverCode} onChangeText={setHandoverCode} editable={photoUploadId !== null} className="rounded-input border border-border-strong bg-bg px-3 py-3 text-title text-text" />
+          <TextInput accessibilityLabel={words.code} keyboardType="number-pad" maxLength={4} value={handoverCode} onChangeText={setHandoverCode} editable={photoReady} className="rounded-input border border-border-strong bg-bg px-3 py-3 text-title text-text" />
           <Text className="text-body font-semibold text-text">{words.payment}</Text>
           <View className="flex-row gap-2"><Button label={words.cash} variant={payment === "cash" ? "primary" : "secondary"} onPress={() => setPayment("cash")} /><Button label={words.upi} variant={payment === "upi" ? "primary" : "secondary"} onPress={() => setPayment("upi")} /></View>
           {payment === "upi" && shown.shopUpiId && <Button label={words.showQr} variant="secondary" onPress={() => setShowQr(true)} />}
           <Text className="text-secondary text-muted">{words.photoRequired}</Text>
           {photoUri && <View className="gap-2"><Text className="text-body font-semibold text-text">{words.reviewPhoto}</Text><Image source={{ uri: photoUri }} resizeMode="contain" className="h-64 w-full rounded-card bg-black" /></View>}
-          {photoUri && !photoUploadId
+          {photoUri && !photoReady
             ? <View className="gap-2"><Button label={words.savePhoto} busy={working} onPress={() => {
                 setWorking(true); void saveProofPhoto(shown.id, photoUri).then(() => setDeliveryMessage(null)).catch((error: unknown) => setDeliveryMessage(error instanceof Error ? error.message : strings.errors.DELIVERY_PHOTO_INVALID)).finally(() => setWorking(false));
               }} /><Button label={words.retakePhoto} variant="secondary" disabled={working} onPress={() => setPhotoUri(null)} /></View>
-            : <Button label={photoUploadId ? words.retakePhoto : words.takePhoto} busy={working} onPress={() => {
-                if (photoUploadId) { setPhotoUploadId(null); setPhotoUri(null); return; }
+            : <Button label={photoReady ? words.retakePhoto : words.takePhoto} busy={working} onPress={() => {
+                if (photoReady) { setPhotoUploadId(null); setPhotoBytes(null); setPhotoUri(null); return; }
                 if (cameraPermission?.granted) setCameraOpen(true);
                 else void requestCameraPermission().then((permission) => { if (permission.granted) setCameraOpen(true); });
               }} />}
-          <Button label={words.completeDelivery} disabled={!photoUploadId || handoverCode.length !== 4} busy={working} onPress={() => {
-            if (!photoUploadId) return;
-            setWorking(true); void api.completeDelivery(shown.id, { handoverCode, payment, photoUploadId }).then((result) => { setWorking(false); if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]); });
+          <Button label={words.completeDelivery} disabled={!photoReady || handoverCode.length !== 4} busy={working} onPress={() => {
+            if (!photoReady) return;
+            setWorking(true); void deliver("delivery_complete", { orderId: shown.id, handoverCode, payment }, () => photoUploadId ? api.completeDelivery(shown.id, { handoverCode, payment, photoUploadId }) : Promise.reject(new Error("no upload"))).then((result) => {
+              setWorking(false);
+              if (result === "queued" || result === "failed") return;
+              if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]);
+            });
           }} />
           <Text className="text-secondary font-semibold text-text">{words.proofExceptionReason}</Text>
           {([
@@ -820,31 +876,41 @@ export default function OrderScreen() {
             ["someone_else_receiving", words.proofSomeoneElse],
             ["other", words.proofOther],
           ] as const).map(([reason, label]) => <Pressable key={reason} accessibilityRole="radio" accessibilityState={{ checked: proofReason === reason }} onPress={() => setProofReason(reason)} className={`rounded-button border px-3 py-2 ${proofReason === reason ? "border-primary" : "border-border"}`}><Text className="text-body text-text">{label}</Text></Pressable>)}
-          <Button label={words.proofException} variant="secondary" disabled={!proofReason || !photoUploadId} busy={working} onPress={() => {
-            if (!proofReason || !photoUploadId) return;
-            setWorking(true); void api.completeDeliveryProofException(shown.id, { reason: proofReason, photoUploadId, payment }).then((result) => { setWorking(false); if (result.ok) { setDeliveryMessage(words.proofExceptionRecorded); void order.refresh(); } else setDeliveryMessage(strings.errors[result.code]); });
+          <Button label={words.proofException} variant="secondary" disabled={!proofReason || !photoReady} busy={working} onPress={() => {
+            if (!proofReason || !photoReady) return;
+            setWorking(true); void deliver("delivery_proof_exception", { orderId: shown.id, reason: proofReason, payment }, () => photoUploadId ? api.completeDeliveryProofException(shown.id, { reason: proofReason, photoUploadId, payment }) : Promise.reject(new Error("no upload"))).then((result) => {
+              setWorking(false);
+              if (result === "queued" || result === "failed") return;
+              if (result.ok) { setDeliveryMessage(words.proofExceptionRecorded); void order.refresh(); } else setDeliveryMessage(strings.errors[result.code]);
+            });
           }} />
           {shown.customer?.phone
             ? <Button label={words.callCustomer} variant="secondary" busy={working} onPress={() => {
-              setWorking(true); void api.markDeliveryCallAttempt(shown.id).then(async (result) => {
+              setWorking(true); void deliver("delivery_call_attempt", { orderId: shown.id }, () => api.markDeliveryCallAttempt(shown.id)).then(async (result) => {
                 setWorking(false);
-                if (!result.ok) return setDeliveryMessage(strings.errors[result.code]);
-                void order.refresh();
+                if (result === "failed") return;
+                if (result !== "queued" && !result.ok) return setDeliveryMessage(strings.errors[result.code]);
+                if (result !== "queued") void order.refresh();
                 try { await Linking.openURL(`tel:${shown.customer?.phone}`); } catch { setDeliveryMessage(words.customer); }
               });
             }} />
             // No number to dial (#523): record the attempt on its own so the wait can still start.
             : <Button label={words.markCallAttempt} variant="secondary" busy={working} onPress={() => {
-              setWorking(true); void api.markDeliveryCallAttempt(shown.id).then((result) => {
+              setWorking(true); void deliver("delivery_call_attempt", { orderId: shown.id }, () => api.markDeliveryCallAttempt(shown.id)).then((result) => {
                 setWorking(false);
+                if (result === "queued" || result === "failed") return;
                 if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]);
               });
             }} />}
           {failureSeconds !== null && failureSeconds > 0 && <Countdown seconds={failureSeconds} />}
           {([ ["no_one_at_address", words.failureNoOne], ["customer_refused", words.failureRefused], ["address_not_found", words.failureAddress], ["other", words.failureOther] ] as const).map(([reason, label]) => <Pressable key={reason} accessibilityRole="radio" accessibilityState={{ checked: failureReason === reason }} onPress={() => setFailureReason(reason)} className={`rounded-button border px-3 py-2 ${failureReason === reason ? "border-primary" : "border-border"}`}><Text className="text-body text-text">{label}</Text></Pressable>)}
-          <Button label={words.sendFailure} variant="destructive" disabled={failureSeconds !== 0 || !failureReason || !photoUploadId} busy={working} onPress={() => {
-            if (!failureReason || !photoUploadId) return;
-            setWorking(true); void api.failDelivery(shown.id, { reason: failureReason, photoUploadId }).then((result) => { setWorking(false); if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]); });
+          <Button label={words.sendFailure} variant="destructive" disabled={failureSeconds !== 0 || !failureReason || !photoReady} busy={working} onPress={() => {
+            if (!failureReason || !photoReady) return;
+            setWorking(true); void deliver("delivery_failed", { orderId: shown.id, reason: failureReason }, () => photoUploadId ? api.failDelivery(shown.id, { reason: failureReason, photoUploadId }) : Promise.reject(new Error("no upload"))).then((result) => {
+              setWorking(false);
+              if (result === "queued" || result === "failed") return;
+              if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]);
+            });
           }} />
         </View>}
         {shown && deliveryMessage && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{deliveryMessage}</Text>}

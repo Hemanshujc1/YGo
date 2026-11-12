@@ -11,7 +11,7 @@ import { strings } from "../strings";
 const words = strings.orders;
 
 /** One order's card, opening S05: on S04 (#431), and pinned on Home while S03 shows (#507) with its countdown as `children`. */
-export function OrderRow({ order, chip, children }: { order: ShopOrderSummary; chip: boolean; children?: ReactNode }) {
+export function OrderRow({ order, chip, attention, children }: { order: ShopOrderSummary; chip: boolean; attention?: boolean; children?: ReactNode }) {
   return (
     <Link href={`/orders/${order.id}`} asChild>
       <Pressable accessibilityRole="button" className="gap-1 rounded-card border border-border bg-surface p-4 active:bg-primary-subtle">
@@ -24,6 +24,7 @@ export function OrderRow({ order, chip, children }: { order: ShopOrderSummary; c
         {order.address && <Text className="text-secondary text-muted">{[order.address.flat, order.address.areaLine].filter(Boolean).join(", ")}</Text>}
         {/* Done today mixes delivered, rejected, expired and cancelled orders (owner's answer 3 on #431). */}
         {order.cancelAsked && <Text className="text-secondary font-semibold text-danger">{words.cancelAsked}</Text>}
+        {(attention ?? order.offlineDeliveryIssue) && <Text className="text-secondary font-semibold text-danger">{words.needsAttention}</Text>}
         {chip && <StatusChip word={words.statuses[order.status]} treatment={treatments[order.status]} />}
         {children}
       </Pressable>

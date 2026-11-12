@@ -52,7 +52,7 @@ it("upgrades v4 without changing queued originals", () => {
   queue = openingStockQueue(adapter(db), randomUUID);
   expect(queue.batch(shopId)).toMatchObject({ deviceId: original.deviceId, actions: original.actions });
   expect(queue.cache.cursor(shopId)).toBeUndefined();
-  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
+  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
 });
 it("reads a Stock item saved before #436 without held, then the next pull adds it", () => {
   queue.cache.apply(page(1));

@@ -1,6 +1,7 @@
 import { stockCache } from "./stock-cache";
+import { createDeliveryTables, deliveryStore } from "./delivery-store";
 import { OFFLINE_LIMITS } from "./offline-limits";
-import { counterBillReference, CounterBillPayload, type CounterBillVoidReason, type ShopCounterBill, type CounterBillResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
+import { counterBillReference, CounterBillPayload, DeliveryCallAttemptPayload, DeliveryCompletePayload, DeliveryFailedPayload, DeliveryProofExceptionPayload, DELIVERY_ACTION_TYPES, type CounterBillVoidReason, type ShopCounterBill, type CounterBillResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import type { SQLiteDatabase } from "expo-sqlite";
 
@@ -19,7 +20,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
-  if (version > 7) throw new Error("Opening stock database needs a newer app");
+  if (version > 8) throw new Error("Opening stock database needs a newer app");
   if (version === 0) db.withTransactionSync(() => {
     db.execSync(`CREATE TABLE opening_stock (shop_id TEXT NOT NULL, pack_id TEXT NOT NULL, payload TEXT NOT NULL,
       PRIMARY KEY (shop_id, pack_id));
@@ -64,6 +65,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   if (version < 7) db.withTransactionSync(() => db.execSync(`CREATE TABLE bill_voids (bill_id TEXT PRIMARY KEY, reference TEXT NOT NULL, reason TEXT NOT NULL,
     note TEXT); PRAGMA user_version = 7;`));
 
+  // Delivery without internet (#617): the cached deliveries and proof photos, in the same encrypted database.
+  if (version < 8) db.withTransactionSync(() => { createDeliveryTables(db); db.execSync("PRAGMA user_version = 8;"); });
+
   // A bill on this phone is the server's bill only when its answer's bill id and its reference both match: a reference alone
   // can repeat when two bills clashed (#467).
   const voidedOf = `(SELECT json_object('reason', v.reason, 'note', v.note) FROM bill_voids v WHERE v.bill_id = json_extract(a.result, '$.result.billId')
@@ -94,12 +98,12 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
   }
 
   /** Give a new change the next place in the ordered queue. */
-  function enqueue(shopId: string, packId: string, type: string, payload: unknown): string {
+  function enqueue(shopId: string, packId: string, type: string, payload: unknown, clockSuspect = false): string {
     const id = newId();
     db.withTransactionSync(() => {
       const device = db.getFirstSync<{ sequence: number }>("SELECT sequence FROM sync_device");
       if (!device) throw new Error("Missing sync device");
-      const action: SyncAction = { id, sequence: device.sequence + 1, shopId, type, payload, createdAt: now().toISOString(), clockSuspect: false };
+      const action: SyncAction = { id, sequence: device.sequence + 1, shopId, type, payload, createdAt: now().toISOString(), clockSuspect };
       db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, packId, JSON.stringify(action));
       db.runSync("UPDATE sync_device SET sequence = ?", action.sequence);
     });
@@ -118,8 +122,36 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     return row ? JSON.parse(row.result) as SyncActionResult : null;
   }
 
+  const deliveries = deliveryStore(db, now);
+  const deliveryTypes = DELIVERY_ACTION_TYPES.map((type) => `'${type}'`).join(", ");
+  const deliveryBodies = { delivery_call_attempt: DeliveryCallAttemptPayload, delivery_complete: DeliveryCompletePayload,
+    delivery_proof_exception: DeliveryProofExceptionPayload, delivery_failed: DeliveryFailedPayload } as const;
+
+  /** The server answered a delivery action: its handover code is wiped from the phone now, and an accepted one's photo goes with it. A refused one's photo stays until its order is settled. */
+  function settleDelivery(actionId: string, status: "applied" | "rejected") {
+    const row = db.getFirstSync<{ action: string }>(`SELECT action FROM opening_stock_actions WHERE id = ? AND json_extract(action, '$.type') IN (${deliveryTypes})`, actionId);
+    if (!row) return;
+    const action = JSON.parse(row.action) as SyncAction & { payload: { handoverCode?: string; photoUploadId?: string } };
+    if (action.payload.handoverCode) db.runSync("UPDATE opening_stock_actions SET action = ? WHERE id = ?", JSON.stringify({ ...action, payload: { ...action.payload, handoverCode: "" } }), actionId);
+    if (status === "applied" && action.payload.photoUploadId) deliveries.dropPhoto(action.payload.photoUploadId);
+  }
+
   return {
     cache: stockCache(db),
+    deliveries,
+    /**
+     * Queue one delivery action (#617). It names the order in the pack column. A proof photo is held in this database, and its id
+     * stands in `photoUploadId` until the sync step uploads it. A clock that reads earlier than before marks the action doubted.
+     */
+    saveDelivery(shopId: string, type: typeof DELIVERY_ACTION_TYPES[number], payload: Record<string, unknown>, photo?: Uint8Array): { id: string } | "queueFull" | "queueExpired" {
+      // The photo's own id stands in the action until the sync step swaps in the server's upload id.
+      const body = deliveryBodies[type].parse(photo ? { ...payload, photoUploadId: newId() } : payload) as { orderId: string; photoUploadId?: string };
+      this.batch(shopId);
+      const stop = blocked(this.count(), true);
+      if (stop) return stop;
+      if (photo && body.photoUploadId) deliveries.savePhoto(body.photoUploadId, body.orderId, photo);
+      return { id: enqueue(shopId, body.orderId, type, body, deliveries.clockDoubted()) };
+    },
     /** A pack's name and size as Stock last showed it, kept after it is delisted, so an old bill can still name it (#53). */
     label,
     flag(shopId: string, packId: string): { action: SyncAction; status: string; result: SyncActionResult | null } | null {
@@ -267,6 +299,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
           db.runSync("UPDATE opening_stock_actions SET status = ?, result = ?, acknowledged_at = ? WHERE id = ?", result.status === "retry" ? "pending" : result.status,
             JSON.stringify(result), result.status === "retry" ? null : now().toISOString(), result.actionId);
           if (result.status === "applied") db.runSync("DELETE FROM opening_stock WHERE json_extract(payload, '$.clientId') = ?", result.actionId);
+          if (result.status !== "retry") settleDelivery(result.actionId, result.status);
         }
       });
     },
@@ -368,6 +401,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
         const action = JSON.parse(raw.action) as SyncAction;
         const payload = action.payload as { quantity?: string; total?: string; outOfStock?: boolean; reason?: string };
         const result = raw.result ? JSON.parse(raw.result) as SyncActionResult : null;
+        if (action.type.startsWith("delivery_")) {
+          return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: "delivery", deliveryType: action.type, code: result?.code ?? null, at: raw.at, label: null };
+        }
         if (action.type === "counter_bill") {
           return { id: raw.id, shopId: raw.shop_id, packId: raw.pack_id, type: action.type, code: result?.code ?? null, at: raw.at, label: null,
             bill: billRow(action, result?.status ?? "pending", result, raw.voided) };
@@ -393,7 +429,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     count(): number {
       const row = db.getFirstSync<{ count: number }>(`SELECT (SELECT count(*) FROM opening_stock o WHERE NOT EXISTS (SELECT 1 FROM opening_stock_actions a WHERE a.id = json_extract(o.payload, '$.clientId') AND a.status = 'rejected'))
         + (SELECT count(*) FROM opening_stock_held)
-        + (SELECT count(*) FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN ('stock_flag', 'stock_change', 'opening_stock_correction', 'counter_bill')) AS count`);
+        + (SELECT count(*) FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN ('stock_flag', 'stock_change', 'opening_stock_correction', 'counter_bill', ${deliveryTypes})) AS count`);
       if (!row) throw new Error("Could not count opening stock");
       return row.count;
     },
@@ -406,7 +442,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 }
 
 export type OpeningStockQueue = ReturnType<typeof openingStockQueue>;
-export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "stock_change" | "held" | "counter_bill"; quantity?: string; outOfStock?: boolean; reason?: string;
+export type QueueRow = { id: string; shopId: string; packId: string; type: "opening_stock" | "opening_stock_correction" | "stock_flag" | "stock_change" | "held" | "counter_bill" | "delivery"; deliveryType?: string; quantity?: string; outOfStock?: boolean; reason?: string;
   code: string | null; at: string | null; label: PackName | null; bill?: BillRow };
 export type PackName = { name: string; packQuantity: string; baseUnit: "each" | "kg" | "l" };
 /** A counter bill as the phone knows it: waiting, synced with its number (or held for Admin), or refused with the server's code. */
@@ -472,12 +508,17 @@ const syncing = new WeakMap<OpeningStockQueue, Promise<SyncActionsResponse | nul
 export function syncOpeningStockBatch(queue: OpeningStockQueue, shopId: string,
   send: (body: SyncActionsBody) => Promise<{ ok: true; data: SyncActionsResponse } | { ok: false }>,
   current = () => true,
+  /** Last step before sending: a delivery's proof photo is uploaded first (#617). Null means none could be made ready, so nothing is sent. */
+  prepare: (batch: SyncActionsBody) => Promise<SyncActionsBody | null> = (batch) => Promise.resolve(batch),
 ): Promise<SyncActionsResponse | null> {
   const running = syncing.get(queue);
   if (running) return running;
   const work = (async () => {
-    const batch = queue.batch(shopId);
-    if (!batch.actions.length) return { results: [] };
+    const first = queue.batch(shopId);
+    if (!first.actions.length) return { results: [] };
+    // Only a delivery waits on a photo upload; other work goes straight out.
+    const batch = first.actions.some((action) => (DELIVERY_ACTION_TYPES as readonly string[]).includes(action.type)) ? await prepare(first) : first;
+    if (!batch || !current()) return null;
     queue.attempted(batch);
     const response = await send(batch);
     if (!response.ok || !current()) return null;

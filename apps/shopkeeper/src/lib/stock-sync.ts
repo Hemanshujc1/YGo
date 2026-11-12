@@ -2,6 +2,7 @@ import type { SyncActionsResponse } from "@ygo/contracts";
 import { access, accountEpoch, api, session } from "../api";
 import { isCurrentAccount } from "./account";
 import { legacyOpeningStock, openOpeningStock } from "./opening-stock-database";
+import { prepareDeliveries, uploadPhoto } from "./delivery-upload";
 import { syncOpeningStockBatch } from "./opening-stock-queue";
 import { createSyncLoop, type Outcome } from "./sync-loop";
 
@@ -39,7 +40,7 @@ export async function stockSyncPass(fresh = false): Promise<Outcome<SyncActionsR
     const sent = await api.syncActions(body);
     if (!sent.ok) refused = kindOf(sent.status);
     return sent;
-  }, still);
+  }, still, (batch) => prepareDeliveries(queue.deliveries, batch, (orderId, bytes) => uploadPhoto(api, orderId, bytes)));
   if (!still()) return halt;
   // A thrown or dropped reply leaves the actions queued; the server replays its first answer.
   const sent = !response ? refused ?? "retry" : response.results.some((row) => row.status === "retry") ? "retry" : "done";
