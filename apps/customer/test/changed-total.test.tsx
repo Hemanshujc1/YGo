@@ -19,11 +19,15 @@ const mock = vi.hoisted(() => ({
   declineTotalResult: null as unknown,
   refreshCalls: 0,
   cancelCalls: 0,
+  announceForAccessibility: vi.fn(),
 }));
 
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
   return {
+    AccessibilityInfo: {
+      announceForAccessibility: (...args: unknown[]) => mock.announceForAccessibility(...args),
+    },
     ActivityIndicator: () => createElement("div", { "data-testid": "spinner" }),
     AppState: {
       addEventListener: vi.fn(() => ({ remove: vi.fn() })),
@@ -183,7 +187,7 @@ vi.mock("../src/lib/push", () => ({
 }));
 
 import { ChangedTotalBanner } from "../src/components/changed-total-banner";
-import { BannerCountdown, useSecondsLeft } from "../src/components/countdown";
+import { BannerCountdown, Countdown, useSecondsLeft } from "../src/components/countdown";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 vi.stubGlobal("__DEV__", false);
 
@@ -557,10 +561,46 @@ describe("ChangedTotalBanner component (#528)", () => {
     expect(getByLabelText(words.changedTotal.expiresIn("5:00"))).toBeDefined();
   });
 
+  it("includes expiringSoon in label below 60s for BannerCountdown (#612)", () => {
+    const { getByLabelText } = render(<BannerCountdown seconds={45} />);
+    expect(getByLabelText(words.changedTotal.expiringSoon("0:45"))).toBeDefined();
+  });
+
+  it("includes expiringSoon in label below 60s for Countdown (#612)", () => {
+    const { getByLabelText } = render(<Countdown seconds={45} />);
+    expect(getByLabelText(words.changedTotal.expiringSoon("0:45"))).toBeDefined();
+  });
+
   it("renders Time is up text and accessibility label when countdown reaches 0 (#606)", () => {
     const { getByText, getByLabelText } = render(<BannerCountdown seconds={0} />);
     expect(getByText(words.changedTotal.timeUp)).toBeDefined();
     expect(getByLabelText(words.changedTotal.timeUp)).toBeDefined();
+  });
+
+  it("announces warning once when seconds first drops below 60, not on later ticks (#612)", () => {
+    const { rerender } = render(<BannerCountdown seconds={61} />);
+    expect(mock.announceForAccessibility).not.toHaveBeenCalled();
+
+    rerender(<BannerCountdown seconds={60} />);
+    expect(mock.announceForAccessibility).not.toHaveBeenCalled();
+
+    rerender(<BannerCountdown seconds={59} />);
+    expect(mock.announceForAccessibility).toHaveBeenCalledTimes(1);
+    expect(mock.announceForAccessibility).toHaveBeenCalledWith(words.changedTotal.expiringSoon("0:59"));
+
+    rerender(<BannerCountdown seconds={58} />);
+    expect(mock.announceForAccessibility).toHaveBeenCalledTimes(1);
+
+    rerender(<BannerCountdown seconds={0} />);
+    expect(mock.announceForAccessibility).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not announce on mount if already below 60s (#612)", () => {
+    render(<BannerCountdown seconds={45} />);
+    expect(mock.announceForAccessibility).not.toHaveBeenCalled();
+
+    render(<Countdown seconds={30} />);
+    expect(mock.announceForAccessibility).not.toHaveBeenCalled();
   });
 });
 
