@@ -40,7 +40,7 @@ describe("opening hours on C04 and C05 (#381)", () => {
   const iso = (local: string) => new Date(ist(local)).toISOString();
   const h = (hours: number) => hours * 60;
   const shop = {
-    id: "8a0e4f8e-1c55-4d3c-9b8e-6b6f1f7f2a10", name: "Day Dairy", estimatedMinutes: 15, deliveryFee: "30", minimumOrder: "100", fssaiNumber: "11223344556677",
+    id: "8a0e4f8e-1c55-4d3c-9b8e-6b6f1f7f2a10", name: "Day Dairy", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, minimumOrder: "100", fssaiNumber: "11223344556677",
     open: true, opensAt: null, closesAt: iso("2030-01-01T21:00:00"), today: 2, holiday: false, holidays: [] as number[],
     hours: [{ weekday: 1, opens: h(22), closes: h(2) }, { weekday: 2, opens: h(9), closes: h(13) }, { weekday: 2, opens: h(16), closes: h(21) }, { weekday: 3, opens: 0, closes: 0 }],
   };

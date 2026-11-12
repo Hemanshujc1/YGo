@@ -152,6 +152,8 @@ export const OrderResponse = z.strictObject({
    */
   answerExpired: z.boolean(),
   handoverCode: z.string().regex(/^\d{4}$/).nullable(),
+  /** Six wrong codes have locked the handover; a pickup's Customer asks for a new code, which opens it again (#597). */
+  handoverLocked: z.boolean(),
   itemsCheckedAt: z.iso.datetime().nullable(),
   confirmByAt: z.iso.datetime().nullable(),
   proposal: OrderProposal.nullable(),

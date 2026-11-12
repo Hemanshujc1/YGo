@@ -187,7 +187,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
       productValue: "469.99", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, pickupFee: null, total: "499.99", rejectReason: null, answerExpired: false,
-      handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
+      handoverCode: null, handoverLocked: false, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: other })).statusCode).toBe(404);

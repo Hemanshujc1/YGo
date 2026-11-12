@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { OrderProposal, OrderResponse } from "@ygo/contracts";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -132,6 +132,7 @@ vi.mock("../src/api", () => ({
     confirmOrderTotal: vi.fn(),
     declineOrderTotal: vi.fn(),
     cancelOrder: vi.fn(),
+    recoverHandoverCode: vi.fn(),
   },
   session: {
     get: () => ({ status: "signed-in" }),
@@ -174,7 +175,7 @@ const pickup: OrderResponse = {
   fulfilment: "pickup", address: null,
   lines: [{ name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
   productValue: "270.00", shopDiscount: null, deliveryFee: "0.00", smallCartFee: null, pickupFee: "10.00", total: "280.00",
-  rejectReason: null, answerExpired: false, handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
+  rejectReason: null, answerExpired: false, handoverCode: null, handoverLocked: false, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
 };
 const proposal: OrderProposal = {
   id: "00000000-0000-4000-8000-000000000010", revision: 2, sourceStatus: "placed", createdAt: "2030-01-01T00:01:00.000Z", confirmByAt: "2030-01-01T00:06:00.000Z",
@@ -255,5 +256,29 @@ describe("a pickup order (FUL-7, #65)", () => {
     expect(getByText(words.collectFrom)).toBeDefined();
     expect(getByText(words.payAtCounter)).toBeDefined();
     expect(queryByText(strings.cart.delivery)).toBeNull();
+  });
+
+  it("offers a new code only when the counter has locked this one, and shows the new code after it (#597)", async () => {
+    const open = show({ ...pickup, status: "ready", handoverCode: "4821" });
+    await open.findByText("4821");
+    expect(open.queryByText(words.newCode)).toBeNull();
+    cleanup();
+    const locked = show({ ...pickup, status: "ready", handoverCode: "4821", handoverLocked: true });
+    expect(await locked.findByText(words.codeLocked)).toBeDefined();
+    const { api } = await import("../src/api");
+    vi.mocked(api.recoverHandoverCode).mockResolvedValue({ ok: true, data: { ...pickup, status: "ready", handoverCode: "7305", handoverLocked: false } });
+    fireEvent.click(locked.getByText(words.newCode));
+    expect(await locked.findByText("7305")).toBeDefined();
+    await waitFor(() => expect(locked.queryByText(words.newCode)).toBeNull());
+    expect(api.recoverHandoverCode).toHaveBeenCalledWith(pickup.id);
+  });
+
+  it("says so when the new code could not be had", async () => {
+    const locked = show({ ...pickup, status: "ready", handoverCode: "4821", handoverLocked: true });
+    await locked.findByText(words.codeLocked);
+    const { api } = await import("../src/api");
+    vi.mocked(api.recoverHandoverCode).mockRejectedValue(new Error("offline"));
+    fireEvent.click(locked.getByText(words.newCode));
+    expect(await locked.findByText(words.recoverOffline)).toBeDefined();
   });
 });

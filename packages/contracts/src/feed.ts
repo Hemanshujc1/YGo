@@ -20,6 +20,10 @@ export const FeedShop = z.strictObject({
   estimatedMinutes: z.number().int().positive(),
   /** Rupees as the shop's resolved rate card stores them, such as "30" or "25.5". */
   deliveryFee: ShopPrice,
+  /** Instant delivery is on and not forced off (FUL-1, #597); false for a shop that is pickup only. */
+  delivers: z.boolean(),
+  /** Pickup is open: the shop's switch is on, Admin has not forced it off, and the rate card has a pickup rule (#597). */
+  pickup: z.boolean(),
   /** From the weekly hours and the Owner's switch, in India time (#381); a shop with no hours is open. */
   open: z.boolean(),
   /** When a closed shop opens next; null while open. */

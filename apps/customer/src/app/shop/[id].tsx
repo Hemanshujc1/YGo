@@ -9,7 +9,7 @@ import { ImageIcon } from "../../components/icons";
 import { Stepper } from "../../components/stepper";
 import { TopBar } from "../../components/top-bar";
 import { cartBarLabel, type Cart } from "../../lib/cart";
-import { paramsQuery } from "../../lib/feed";
+import { paramsQuery, termsLine } from "../../lib/feed";
 import { goHome } from "../../lib/go-home";
 import { money } from "../../lib/money";
 import { hoursLine, offLabel, packLabel, partLabel, shopSections, weekRows } from "../../lib/shop-page";
@@ -104,7 +104,7 @@ function Terms({ shop }: { shop: ShopPageResponse["shop"] }) {
   const [week, setWeek] = useState(false);
   return (
     <View className="rounded-card border border-border bg-surface p-4">
-      <Text className="text-body tabular-nums text-text">{strings.feed.card(shop.estimatedMinutes, money(shop.deliveryFee))}</Text>
+      <Text className="text-body tabular-nums text-text">{termsLine(shop)}</Text>
       <Pressable
         accessibilityRole="button"
         accessibilityHint={words.hours.week}

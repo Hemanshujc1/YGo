@@ -102,6 +102,14 @@ export const confirmRules = {
     words: ({ number }) => ({ title: `Order #${number} confirmed`, body: "The customer confirmed the updated order total." }) },
 } satisfies Record<string, Rule>;
 
+/** A pickup is ready to collect, and a ready one nobody collected was closed (FUL-7, #597). A delivery's Ready tells the customer nothing, so these are chosen by the order's fulfilment. */
+export const pickupRules = {
+  ready: { kind: "pickup_ready", to: "customer",
+    words: ({ number, shopName }) => ({ title: `Order #${number} is ready`, body: `Collect it from ${shopName} and show your code at the counter.` }) },
+  notCollected: { kind: "pickup_not_collected", to: "customer",
+    words: ({ number, shopName }) => ({ title: `Order #${number} not collected`, body: `${shopName} held your order but it was not collected, so it was closed. You were not charged.` }) },
+} satisfies Record<string, Rule>;
+
 /** The rule for a move: a cancel after acceptance has its own words; any other move uses its status's rule. */
 function ruleFor(to: OrderStatus, from: OrderStatus | null, reason: string | null): Rule | undefined {
   if (from === "awaiting_customer_confirm" && (to === "accepted" || to === "preparing" || to === "placed")) return to === "placed" ? confirmRules.placed : confirmRules.later;
@@ -121,7 +129,11 @@ export const FLOOR_SECONDS = 15;
 export async function notifyOrderStatus(
   client: PoolClient, orderId: string, to: OrderStatus, at: Date, reason: string | null, from: OrderStatus | null = null,
 ): Promise<void> {
-  const rule = ruleFor(to, from, reason);
+  let rule = ruleFor(to, from, reason);
+  if (to === "ready" || to === "not_collected") {
+    const { rows: [order] } = await client.query<{ fulfilment: string }>("SELECT fulfilment FROM orders WHERE id = $1", [orderId]);
+    if (order?.fulfilment === "pickup") rule = to === "ready" ? pickupRules.ready : pickupRules.notCollected;
+  }
   if (!rule) return;
   await queueNotification(client, orderId, rule, at, reason);
   // The proposal timed out: the customer is told their order was cancelled too (#581).

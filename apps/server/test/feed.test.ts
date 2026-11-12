@@ -99,8 +99,8 @@ describe("Customer feed (#369, DSC-1, DSC-2, ONB-4)", () => {
     await publish({ type: "global" }, card);
     await publish({ type: "shop", id: near }, { deliveryFee: { amount: "25.5", split: { platformPercentage: "20", shopPercentage: "80" } } });
     expect((await feed()).json()).toEqual({ shops: [
-      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5", open: true, opensAt: null, holiday: false },
-      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null, holiday: false },
+      { id: near, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "25.5", delivers: true, pickup: false, open: true, opensAt: null, holiday: false },
+      { id: far, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false },
     ] });
 
     // The shop's own radius decides, up to 5 km; an FSSAI expiring tomorrow still lists.
@@ -201,7 +201,7 @@ describe("Customer shop page (#370, DSC-2, DSC-4)", () => {
     expect(response.json()).toEqual({
       // No hours yet counts as open (owner's answer 8 on #371); 1 Jan 2030 is a Tuesday.
       shop: {
-        id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", open: true, opensAt: null, holiday: false,
+        id, name: "Near Dairy", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false,
         minimumOrder: "150.5", fssaiNumber: "11223344556677", closesAt: null, hours: [], today: 2, holidays: [],
       },
       groups: [
@@ -422,7 +422,7 @@ describe("Customer search (#398, DSC-3)", () => {
     const response = await search("rice");
     expect(response.statusCode).toBe(200);
     const shops = response.json().shops as Array<Record<string, unknown>>;
-    expect(shops[0]).toMatchObject({ id: open, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", open: true, opensAt: null, holiday: false, moreProducts: 2 });
+    expect(shops[0]).toMatchObject({ id: open, name: "Far Kirana", estimatedMinutes: 20, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, moreProducts: 2 });
     expect(await found("rice")).toEqual([
       ["Far Kirana", ["Basmati Rice in", "Brown Rice in", "Jeera Rice in", "Kolam Rice in", "Red Rice in"], 2],
       ["Near Dairy", ["Rice in"], 0],

@@ -249,6 +249,7 @@ const awaitingOrder: OrderResponse = {
   rejectReason: null,
   answerExpired: false,
   handoverCode: null,
+  handoverLocked: false,
   itemsCheckedAt: null,
   confirmByAt: "2030-01-01T00:06:00.000Z",
   proposal: sampleProposal,
@@ -531,6 +532,7 @@ describe("createOrder C10 actions (#528)", () => {
       cancelOrder: vi.fn(),
       askToCancelOrder: vi.fn(),
       confirmOrderItems: vi.fn(),
+      recoverHandoverCode: vi.fn(),
       confirmOrderTotal: confirmMock,
       declineOrderTotal: vi.fn(),
     };
@@ -548,6 +550,7 @@ describe("createOrder C10 actions (#528)", () => {
       cancelOrder: vi.fn(),
       askToCancelOrder: vi.fn(),
       confirmOrderItems: vi.fn(),
+      recoverHandoverCode: vi.fn(),
       confirmOrderTotal: vi.fn(),
       declineOrderTotal: declineMock,
     };
@@ -567,6 +570,7 @@ describe("createOrder C10 actions (#528)", () => {
       cancelOrder: cancelMock,
       askToCancelOrder: vi.fn(),
       confirmOrderItems: vi.fn(),
+      recoverHandoverCode: vi.fn(),
       confirmOrderTotal: confirmMock,
       declineOrderTotal: vi.fn(),
     };
@@ -579,7 +583,7 @@ describe("createOrder C10 actions (#528)", () => {
   });
 
   const client = (over: object) => ({
-    order: vi.fn(), cancelOrder: vi.fn(), askToCancelOrder: vi.fn(), confirmOrderItems: vi.fn(),
+    order: vi.fn(), cancelOrder: vi.fn(), askToCancelOrder: vi.fn(), confirmOrderItems: vi.fn(), recoverHandoverCode: vi.fn(),
     confirmOrderTotal: vi.fn(), declineOrderTotal: vi.fn(), ...over,
   });
   const lateOrder: OrderResponse = { ...awaitingOrder, confirmByAt: "2020-01-01T00:00:00.000Z" };

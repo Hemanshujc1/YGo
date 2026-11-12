@@ -8,6 +8,7 @@ import type { Clock } from "../adapters/clock";
 import type { ProductImageStorage } from "../adapters/product-images";
 import { inStock, partOf, visibleListings } from "../listings";
 import { pointFrom } from "../points";
+import { fulfilmentModes } from "../fulfilment";
 import { holidaysNear, holidaysOf, indiaWeekday, openStatus, overrideOf } from "../shop-open";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
@@ -48,13 +49,17 @@ export async function servingShops(pool: Pool, now: Date, { pincode, latitude, l
     const fee = card?.complete && (card.values.deliveryFee?.value as RateCardValues["deliveryFee"]);
     const minimum = card?.values.minimumCart?.value as RateCardValues["minimumCart"];
     if (!fee || minimum === undefined) return undefined;
+    // FUL-1: delivery shows only while the instant switch is open, and pickup only while its switch is open and the card has its rule (#597).
+    const modes = await fulfilmentModes(pool, row.id);
+    const open = (mode: "instant" | "pickup") => modes.find((candidate) => candidate.mode === mode)?.open ?? false;
+    const pickupCard = open("pickup") ? await resolveRateCard(pool, row.id, undefined, undefined, { usesPickup: true, usesBargain: false }) : undefined;
     const week = hours.filter((range) => range.shopId === row.id).map(({ weekday, opens, closes }) => ({ weekday, opens, closes }));
     const off = holidays.filter((holiday) => holiday.shopId === row.id);
     const status = openStatus(week, off, overrideOf(row), now);
     const near = holidaysNear(off, now);
     return {
       id: row.id, name: row.name, estimatedMinutes: estimatedMinutes(row.metres),
-      deliveryFee: fee.amount, open: status.open, opensAt: status.open ? null : status.until, holiday: !status.open && near.today,
+      deliveryFee: fee.amount, delivers: open("instant"), pickup: Boolean(pickupCard?.complete && !pickupCard.missing.includes("pickup")), open: status.open, opensAt: status.open ? null : status.until, holiday: !status.open && near.today,
       minimumOrder: minimum, fssaiNumber: row.fssaiNumber, closesAt: status.open ? status.until : null,
       hours: week, today: indiaWeekday(now), holidays: near.week,
     };
@@ -63,9 +68,12 @@ export async function servingShops(pool: Pool, now: Date, { pincode, latitude, l
   return shops.filter((shop) => shop !== undefined).sort((a, b) => Number(b.open) - Number(a.open));
 }
 
+/** Whether a serving shop has any way of taking an order now: delivery, or pickup (#597). */
+export const takesOrders = ({ delivers, pickup }: ServingShop) => delivers || pickup;
+
 /** The C04 card's part of a serving shop; C16 search shows the same card (#398). */
-export const feedCard = ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday }: ServingShop): FeedShop =>
-  ({ id, name, estimatedMinutes, deliveryFee, open, opensAt, holiday });
+export const feedCard = ({ id, name, estimatedMinutes, deliveryFee, delivers, pickup, open, opensAt, holiday }: ServingShop): FeedShop =>
+  ({ id, name, estimatedMinutes, deliveryFee, delivers, pickup, open, opensAt, holiday });
 
 type ListingRow = Omit<ShopPageProduct, "packs" | "imageUrl"> & ShopPagePack & { category: string; imageKey: string | null };
 
@@ -77,7 +85,8 @@ export function registerFeedRoutes(app: FastifyInstance, { pool, clock, secret, 
   app.get("/v1/feed", { schema: { querystring: FeedQuery, response: { 200: FeedResponse, ...errors } } }, async (request, reply) => {
     if (!await mobileSignedIn(request, reply, auth)) return reply;
     const shops = await servingShops(pool, clock.now(), request.query as FeedQuery);
-    return { shops: shops.map(feedCard) };
+    // A shop with every way of ordering switched off has nothing to offer here (#597).
+    return { shops: shops.filter(takesOrders).map(feedCard) };
   });
 
   // C05 Shop page (#370): 404 for a shop this place can't order from, as for one that doesn't exist.

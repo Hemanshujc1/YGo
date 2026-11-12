@@ -89,6 +89,8 @@ export type OrderView = {
   /** The ask to cancel is on its way (ORD-5, #59). */
   asking: boolean;
   confirmingItems: boolean;
+  /** A new pickup code is being asked for (#597). */
+  recoveringCode: boolean;
   /** Confirming a partial acceptance proposal is on its way (C10, #64, #528). */
   confirmingTotal: boolean;
   /** Declining a partial acceptance proposal is on its way (C10, #64, #528). */
@@ -102,6 +104,7 @@ type Client = {
   cancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
   askToCancelOrder(id: string): Promise<ApiResult<OrderResponse>>;
   confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>>;
+  recoverHandoverCode(id: string): Promise<ApiResult<OrderResponse>>;
   confirmOrderTotal(id: string): Promise<ApiResult<OrderResponse>>;
   declineOrderTotal(id: string): Promise<ApiResult<OrderResponse>>;
 };
@@ -119,6 +122,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
     cancelling: false,
     asking: false,
     confirmingItems: false,
+    recoveringCode: false,
     confirmingTotal: false,
     decliningTotal: false,
     notice: null,
@@ -136,7 +140,7 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
 
   async function read(pull = false) {
     // Cancel's answer is the newest word on the order; a read waits until it lands.
-    if (view.cancelling || view.asking || view.confirmingItems || view.confirmingTotal || view.decliningTotal) return;
+    if (view.cancelling || view.asking || view.confirmingItems || view.recoveringCode || view.confirmingTotal || view.decliningTotal) return;
     const latest = poller.ticket();
     poller.unschedule();
     if (pull) set({ refreshing: true });
@@ -236,6 +240,24 @@ export function createOrder(client: Client, id: string, seed?: OrderResponse, ti
       } else {
         set({ notice: answer === "offline" ? strings.order.itemsOffline : strings.errors[answer.code] });
         if (answer !== "offline" && answer.code === "ORDER_STATUS_CHANGED") await read();
+        else schedule();
+      }
+    },
+
+    /** A Ready pickup whose code the counter locked (6 wrong tries): asks for a new one (#597). */
+    async recoverCode() {
+      if (view.recoveringCode || view.order?.status !== "ready" || !view.order.handoverLocked) return;
+      poller.ticket();
+      poller.unschedule();
+      set({ recoveringCode: true, notice: null });
+      const answer = await client.recoverHandoverCode(id).catch(() => "offline" as const);
+      set({ recoveringCode: false, refreshing: false });
+      if (answer !== "offline" && answer.ok) {
+        set({ status: "ready", order: answer.data });
+        schedule();
+      } else {
+        set({ notice: answer === "offline" ? strings.order.recoverOffline : strings.errors[answer.code] });
+        if (answer !== "offline" && answer.code === "HANDOVER_CODE_LOCKED") await read();
         else schedule();
       }
     },
