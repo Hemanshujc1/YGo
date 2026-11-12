@@ -314,6 +314,12 @@ export default function OrderScreen() {
           <View className="items-center gap-3 rounded-card border border-primary bg-surface p-5">
             <Text className="text-body font-semibold text-text">{words.pickupCode}</Text>
             <Text selectable accessibilityRole="text" className="text-display font-bold tabular-nums tracking-widest text-primary">{shown.handoverCode}</Text>
+            {shown.handoverLocked && (
+              <>
+                <Text className="text-center text-secondary text-muted">{words.codeLocked}</Text>
+                <Button label={view.recoveringCode ? words.gettingCode : words.newCode} busy={view.recoveringCode} onPress={() => void order.recoverCode()} />
+              </>
+            )}
           </View>
         )}
 

@@ -4,7 +4,7 @@ import { ErrorEnvelope, SearchQuery, SearchResponse, type SearchProduct } from "
 import type { Clock } from "../adapters/clock";
 import { inStock, visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
-import { feedCard, servingShops } from "./feed";
+import { feedCard, servingShops, takesOrders } from "./feed";
 
 /** One typed word's alternatives (`word`) match `text`: at the start of one of its words, or, from 4 letters, as a near spelling (owner's answers 9 on #49 and 1 on #398). */
 const wordIn = (text: string) => `EXISTS (SELECT 1 FROM jsonb_array_elements_text(word) alt
@@ -34,7 +34,7 @@ export function registerSearchRoutes(app: FastifyInstance, { pool, clock, secret
     }
     const wordsJson = JSON.stringify(alternatives);
 
-    const shops = await Promise.all((await servingShops(pool, clock.now(), place)).map(async (shop) => {
+    const shops = await Promise.all((await servingShops(pool, clock.now(), place)).filter(takesOrders).map(async (shop) => {
       // Each word may match the shop's name, the product's name or its brand, and one must match the product itself;
       // up to 5 products, A to Z (owner's answer 2 on #398).
       const { rows } = await pool.query<SearchProduct & { total: number }>(

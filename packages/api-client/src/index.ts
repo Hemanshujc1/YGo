@@ -439,6 +439,11 @@ export function createApiClient({
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/items-ok`), OrderResponse);
     },
 
+    /** `POST /v1/orders/:id/handover-code/recover`: a new code for a locked handover; HANDOVER_CODE_LOCKED when it is not locked (#597). */
+    async recoverHandoverCode(id: string): Promise<ApiResult<OrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/handover-code/recover`), OrderResponse);
+    },
+
     /** `POST /v1/orders/:id/cancel-request`: asks the shop to cancel an accepted or preparing order, once (ORD-5). */
     async askToCancelOrder(id: string): Promise<ApiResult<OrderResponse>> {
       return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/cancel-request`), OrderResponse);

@@ -1,5 +1,5 @@
 import type { FeedQuery, FeedShop } from "@ygo/contracts";
-import { formatDayTime } from "@ygo/format";
+import { formatDayTime, formatMoney } from "@ygo/format";
 import { strings } from "../strings";
 import type { Place } from "./location-flow";
 
@@ -23,3 +23,7 @@ export function closedLine(shop: Pick<FeedShop, "open" | "opensAt" | "holiday">,
   if (shop.open || !shop.opensAt) return null;
   return (shop.holiday ? strings.feed.holiday : strings.feed.closed)(formatDayTime(shop.opensAt, now, strings.feed.tomorrow));
 }
+
+/** The terms line of a shop's card and page: delivery while the shop delivers, else pickup only, else that it takes no orders (FUL-1, #597). */
+export const termsLine = (shop: Pick<FeedShop, "delivers" | "pickup" | "estimatedMinutes" | "deliveryFee">) =>
+  shop.delivers ? strings.feed.card(shop.estimatedMinutes, formatMoney(shop.deliveryFee)) : shop.pickup ? strings.feed.pickupOnly : strings.feed.notTaking;

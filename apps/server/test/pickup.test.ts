@@ -475,3 +475,140 @@ describe("An uncollected pickup (FUL-7, expire-pickups)", () => {
     expect((await shopPost(late.id, "picked-up", world.owner, { handoverCode: "0000", payment: "cash" })).statusCode).toBe(409);
   });
 });
+
+describe("Pickup follow-ups (#597)", () => {
+  const kinds = async (orderId: string) =>
+    (await database.pool.query<{ kind: string; app: string; email: string }>(
+      `SELECT n.kind, n.app, a.email FROM notifications n JOIN accounts a ON a.id = n.account_id WHERE n.order_id = $1 AND n.kind LIKE 'pickup_%' ORDER BY n.created_at, n.kind`, [orderId])).rows;
+  const feedShops = async () => (await app.inject({ method: "GET", url: `/v1/feed?${query}`, headers: customer })).json().shops as Array<{ id: string; delivers: boolean; pickup: boolean }>;
+  const found = async () => (await app.inject({ method: "GET", url: `/v1/search?${query}&q=toor`, headers: customer })).json().shops as Array<{ id: string; delivers: boolean; pickup: boolean }>;
+  const page = (shopId: string) => app.inject({ method: "GET", url: `/v1/shops/${shopId}?${query}`, headers: customer });
+  const addressesFor = async (shopId: string) => (await app.inject({ method: "GET", url: `/v1/me/addresses?shopId=${shopId}`, headers: customer })).json().addresses as unknown[];
+
+  it("tells the Customer when a pickup is ready and when it was not collected, and tells nobody of a delivery being ready", async () => {
+    setOrderTiming({ collectSeconds: 300 });
+    const world = await stocked();
+    const order = await pickupOrder(world);
+    at("2030-01-01T00:01:00.000Z");
+    await shopPost(order.id, "accept", world.owner);
+    expect(await kinds(order.id)).toEqual([]);
+    at("2030-01-01T00:02:00.000Z");
+    expect((await shopPost(order.id, "ready-for-pickup", world.owner)).statusCode).toBe(200);
+    expect(await kinds(order.id)).toEqual([{ kind: "pickup_ready", app: "customer", email: "customer@example.com" }]);
+    const listed = (await app.inject({ method: "GET", url: "/v1/me/notifications", headers: { ...customer, "x-ygo-app-name": "customer", "x-ygo-app-version": "99.0.0" } })).json().notifications as Array<{ kind: string; title: string; body: string; orderId: string }>;
+    expect(listed.find((note) => note.kind === "pickup_ready")).toMatchObject({ orderId: order.id, title: expect.stringContaining("ready"), body: expect.stringContaining("Sai General Stores") });
+    expect((await database.pool.query("SELECT count(*) FROM push_queue p JOIN notifications n ON n.id = p.notification_id WHERE n.kind = 'pickup_ready'")).rows[0].count).toBe("1");
+
+    at("2030-01-01T00:07:00.000Z");
+    await runJob(database, "expire-pickups", clock);
+    expect((await kinds(order.id)).map((note) => note.kind)).toEqual(["pickup_ready", "pickup_not_collected"]);
+    expect((await kinds(order.id)).every((note) => note.email === "customer@example.com")).toBe(true);
+
+    // A delivery that is ready, and one that was never collected, send neither.
+    const cart = await save(world.shopId, [{ listingId: world.atta, count: 1 }]);
+    const delivery = (await placeDelivery(world.shopId, cart.revision, cart.quote?.total ?? "", world.home)).json() as { id: string };
+    await shopPost(delivery.id, "accept", world.owner);
+    await shopPost(delivery.id, "preparing", world.owner);
+    const ownerId = (await database.pool.query<{ id: string }>("SELECT account_id AS id FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [world.shopId])).rows[0]?.id;
+    expect((await app.inject({ method: "PUT", url: `/v1/me/shop-orders/${delivery.id}/ready`, headers: world.owner, payload: { accountId: ownerId } })).statusCode).toBe(200);
+    expect(await row(delivery.id)).toMatchObject({ status: "ready", fulfilment: "delivery" });
+    expect(await kinds(delivery.id)).toEqual([]);
+  });
+
+  it("shows a shop as delivering only while instant is on and not forced off, and as pickup only otherwise", async () => {
+    const world = await stocked();
+    expect(await feedShops()).toMatchObject([{ id: world.shopId, delivers: true, pickup: false }]);
+    await switchMode(world.owner, "pickup", true);
+    expect(await feedShops()).toMatchObject([{ id: world.shopId, delivers: true, pickup: true }]);
+    await switchMode(world.owner, "instant", false);
+    expect(await feedShops()).toMatchObject([{ id: world.shopId, delivers: false, pickup: true }]);
+    expect(await found()).toMatchObject([{ id: world.shopId, delivers: false, pickup: true }]);
+    expect((await page(world.shopId)).json().shop).toMatchObject({ delivers: false, pickup: true });
+    // Its address no longer counts as one it delivers to.
+    expect(await addressesFor(world.shopId)).toEqual([]);
+    await switchMode(world.owner, "instant", true);
+    expect(await addressesFor(world.shopId)).toHaveLength(1);
+    await force(world.shopId, "instant", true);
+    expect(await feedShops()).toMatchObject([{ delivers: false, pickup: true }]);
+    // Admin's force-off of pickup too, with the shop's own switch still on.
+    await force(world.shopId, "pickup", true);
+    expect(await feedShops()).toEqual([]);
+    expect(await found()).toEqual([]);
+    const shut = await page(world.shopId);
+    expect(shut.statusCode).toBe(200);
+    expect(shut.json().shop).toMatchObject({ delivers: false, pickup: false });
+  });
+
+  it("does not offer pickup for a shop whose rate card lost its pickup rule", async () => {
+    const world = await stocked();
+    await switchMode(world.owner, "pickup", true);
+    await publish(card);
+    expect(await feedShops()).toMatchObject([{ id: world.shopId, delivers: true, pickup: false }]);
+  });
+
+  describe("a locked code", () => {
+    const lockedPickup = async (world: Awaited<ReturnType<typeof stocked>>) => {
+      const order = await pickupOrder(world);
+      at("2030-01-01T00:01:00.000Z");
+      await shopPost(order.id, "accept", world.owner);
+      expect((await shopPost(order.id, "ready-for-pickup", world.owner)).statusCode).toBe(200);
+      const read = async () => (await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json() as { handoverCode: string; handoverLocked: boolean };
+      return { order, read, recover: (headers = customer) => app.inject({ method: "POST", url: `/v1/orders/${order.id}/handover-code/recover`, headers }) };
+    };
+
+    it("lets the Customer rotate it, which opens it again, and never the shop", async () => {
+      const world = await stocked();
+      const { order, read, recover } = await lockedPickup(world);
+      const before = await read();
+      expect(before.handoverLocked).toBe(false);
+      // Not locked yet: nothing to recover.
+      expect((await recover()).statusCode).toBe(409);
+      // Six wrong tries, the cooldown waited out after the third.
+      const miss = before.handoverCode === "0000" ? "1111" : "0000";
+      for (let tries = 0; tries < 3; tries += 1) await shopPost(order.id, "picked-up", world.owner, { handoverCode: miss, payment: "cash" });
+      at("2030-01-01T00:04:00.000Z");
+      for (let tries = 0; tries < 3; tries += 1) await shopPost(order.id, "picked-up", world.owner, { handoverCode: miss, payment: "cash" });
+      expect((await read()).handoverLocked).toBe(true);
+      expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: before.handoverCode, payment: "cash" })).statusCode).toBe(429);
+      at("2030-01-01T00:08:00.000Z");
+      expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: before.handoverCode, payment: "cash" })).statusCode).toBe(429);
+
+      // Only the order's own Customer can ask; an Owner, Staff or another Customer is told there is no such order.
+      expect((await recover(world.owner)).statusCode).toBe(404);
+      expect((await recover(world.staff)).statusCode).toBe(404);
+      expect((await recover(await signIn("/v1/auth", "other@example.com"))).statusCode).toBe(404);
+
+      const recovered = await recover();
+      expect(recovered.statusCode).toBe(200);
+      expect(recovered.json()).toMatchObject({ status: "ready", handoverLocked: false });
+      const fresh = await read();
+      expect(fresh.handoverLocked).toBe(false);
+      expect((await database.pool.query("SELECT handover_code_attempts AS attempts, handover_code_blocked_until AS blocked FROM orders WHERE id = $1", [order.id])).rows[0]).toEqual({ attempts: 0, blocked: null });
+      // The old code no longer opens it, the new one does, and the payment is recorded.
+      if (fresh.handoverCode !== before.handoverCode) {
+        expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: before.handoverCode, payment: "cash" })).statusCode).toBe(400);
+      }
+      const done = await shopPost(order.id, "picked-up", world.owner, { handoverCode: fresh.handoverCode, payment: "cash" });
+      expect(done.statusCode).toBe(200);
+      expect(await row(order.id)).toMatchObject({ status: "picked_up", delivery_payment: "cash" });
+      // A pickup that is collected has nothing left to recover.
+      expect((await recover()).statusCode).toBe(409);
+    });
+
+    it("refuses once the pickup is no longer Ready, and for a delivery before its items check", async () => {
+      setOrderTiming({ collectSeconds: 300 });
+      const world = await stocked();
+      const { order, recover } = await lockedPickup(world);
+      await database.pool.query("UPDATE orders SET handover_code_attempts = 6 WHERE id = $1", [order.id]);
+      at("2030-01-01T00:07:00.000Z");
+      await runJob(database, "expire-pickups", clock);
+      expect((await row(order.id)).status).toBe("not_collected");
+      expect((await recover()).statusCode).toBe(409);
+
+      const cart = await save(world.shopId, [{ listingId: world.atta, count: 1 }]);
+      const delivery = (await placeDelivery(world.shopId, cart.revision, cart.quote?.total ?? "", world.home)).json() as { id: string };
+      await database.pool.query("UPDATE orders SET handover_code_attempts = 6 WHERE id = $1", [delivery.id]);
+      expect((await app.inject({ method: "POST", url: `/v1/orders/${delivery.id}/handover-code/recover`, headers: customer })).statusCode).toBe(409);
+    });
+  });
+});

@@ -138,7 +138,7 @@ export const answerExpired = (o: string, now: string) =>
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, secret: string): Promise<OrderResponse | undefined> {
   const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", o.items_checked_at AS "itemsCheckedAt",
-        o.handover_code_ciphertext AS "handoverCodeCiphertext", ${shopOf("s")} AS shop, ${frozenOrder("o")},
+        o.handover_code_ciphertext AS "handoverCodeCiphertext", o.handover_code_attempts >= ${HANDOVER_CODE_MAX_ATTEMPTS} AS "handoverLocked", ${shopOf("s")} AS shop, ${frozenOrder("o")},
         ${currentDiscount("o")} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired"
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
@@ -351,17 +351,18 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     return orderView(pool, id, who.accountId, clock.now(), secret);
   });
 
-  // A Customer who has checked the items may rotate a permanently locked code.
+  // A Customer who has checked the items, or whose pickup is Ready, may rotate a permanently locked code (#597). The shop can't: only the Customer's own new code opens it.
   app.post("/v1/orders/:id/handover-code/recover", { schema: { params: OrderParams, response: { 200: OrderResponse, ...errors } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const { id } = request.params as OrderParams;
     const result = await withTransaction(pool, async (client) => {
-      const { rows: [order] } = await client.query<{ status: OrderStatus; itemsCheckedAt: Date | null; attempts: number }>(
-        `SELECT status, items_checked_at AS "itemsCheckedAt", handover_code_attempts AS attempts
+      const { rows: [order] } = await client.query<{ status: OrderStatus; fulfilment: string; itemsCheckedAt: Date | null; attempts: number }>(
+        `SELECT status, fulfilment, items_checked_at AS "itemsCheckedAt", handover_code_attempts AS attempts
          FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
-      if (order.status !== "arrived" || !order.itemsCheckedAt || order.attempts < HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
+      const recoverable = order.fulfilment === "pickup" ? order.status === "ready" : order.status === "arrived" && order.itemsCheckedAt !== null;
+      if (!recoverable || order.attempts < HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED" as const;
       const generated = createHandoverCode(secret);
       await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4,
         handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1`, [id, generated.hash, generated.salt, generated.ciphertext]);

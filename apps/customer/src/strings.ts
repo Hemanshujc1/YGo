@@ -211,6 +211,9 @@ export const strings = {
     none: "No shop delivers here yet. Shops on YGo each choose how far they deliver.",
     noPin: "Choose your place on the map to see shops that deliver to you.",
     card: (minutes: number, fee: string) => `About ${minutes} min · Delivery ${fee}`,
+    // A shop with delivery switched off or forced off (FUL-1, #597).
+    pickupOnly: "Pickup only · collect from the shop",
+    notTaking: "Not taking orders right now",
     // A closed shop's card (owner's answer 9 on #371).
     closed: (when: string) => `Closed · opens ${when}`,
     // Closed for one of the shop's holidays today (owner's answer 10 on #382).
@@ -355,6 +358,10 @@ export const strings = {
     payAtCounter: "Pay at the shop's counter, in cash or UPI.",
     pickupReady: "Ready to collect",
     pickupCode: "Show this code at the counter",
+    codeLocked: "Too many wrong codes were tried at the counter. Get a new code to collect your order.",
+    newCode: "Get a new code",
+    gettingCode: "Getting a new code",
+    recoverOffline: "Couldn't get a new code. Check your connection and try again.",
     bookingFee: "Booking fee",
     bookingFeeNote: "Charged when you collect",
     itemCheck: "Check your items while the deliverer waits. Your handover code appears after you confirm, or after one minute.",

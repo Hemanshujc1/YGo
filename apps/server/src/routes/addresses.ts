@@ -33,7 +33,7 @@ export function registerAddressRoutes(app: FastifyInstance, { pool, clock, secre
     // C07's Deliver to (#427): the rule placing checks, at each address's own pin (DSC-1). At most 10 addresses.
     const now = clock.now();
     const served = await Promise.all(rows.rows.map(async (address) =>
-      address.point !== null && (await servingShops(pool, now, { pincode: address.pincode, ...address.point }, shopId)).length > 0));
+      address.point !== null && (await servingShops(pool, now, { pincode: address.pincode, ...address.point }, shopId)).some((shop) => shop.delivers)));
     return { addresses: rows.rows.filter((_, index) => served[index]) };
   });
 

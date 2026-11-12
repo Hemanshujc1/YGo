@@ -477,6 +477,13 @@
       "when": 1794396227306,
       "tag": "0067_pickup_fulfilment",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794468172965,
+      "tag": "0068_pickup_notification_kinds",
+      "breakpoints": true
     }
   ]
 }
