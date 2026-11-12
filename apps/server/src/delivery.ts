@@ -59,9 +59,19 @@ export function matchesHandoverCode(input: string, salt: string, expected: strin
   return actual.length === target.length && timingSafeEqual(actual, target);
 }
 
-/** Convert the accepted reservation to one immutable sale movement per order line. */
+/**
+ * Convert the accepted reservation to one immutable sale movement per order line (#609). What was held is what leaves:
+ * the confirmed revision's lines when the order has one, else the lines as placed, the same rule `heldOf` uses.
+ * A line the revision took out has no stock to move.
+ */
 export async function recordDeliverySale(client: PoolClient, orderId: string, accountId: string, at: Date): Promise<void> {
   await client.query(`INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity, created_at)
-    SELECT listing_id, $2, $1, 'sale', -stock_quantity, $3 FROM order_lines WHERE order_id = $1
+    SELECT line.listing_id, $2, $1, 'sale', -line.stock_quantity, $3
+    FROM (SELECT (SELECT r.id FROM order_revisions r WHERE r.order_id = $1 AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1) AS revision_id) rev
+    CROSS JOIN LATERAL (
+      SELECT rl.listing_id, rl.stock_quantity FROM order_revision_lines rl WHERE rev.revision_id IS NOT NULL AND rl.revision_id = rev.revision_id
+      UNION ALL
+      SELECT ol.listing_id, ol.stock_quantity FROM order_lines ol WHERE rev.revision_id IS NULL AND ol.order_id = $1) line
+    WHERE line.stock_quantity > 0
     ON CONFLICT (listing_id, client_id) DO NOTHING`, [orderId, accountId, at]);
 }
