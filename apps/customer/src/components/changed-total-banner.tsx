@@ -43,13 +43,13 @@ function Banner({ order, top }: { order: AwaitingOrder; top: number }) {
         onPress={() => router.navigate({ pathname: "/order/[id]", params: { id: order.id } })}
         className="flex-row items-center justify-between gap-3 px-4 py-2.5 active:opacity-80"
       >
-        <View className="flex-1 gap-0.5">
-          <Text className="text-secondary font-semibold text-warning-text">{words.title}</Text>
+        <View className="flex-1 min-w-0 gap-0.5">
+          <Text numberOfLines={1} className="text-secondary font-semibold text-warning-text">{words.title}</Text>
           <Text className="text-body font-bold tabular-nums text-text">
             {words.totalChangedTo(money(order.proposedTotal))}
           </Text>
         </View>
-        <View className="flex-row items-center gap-2">
+        <View className="shrink-0 flex-row items-center gap-2">
           <ExpiryCountdown confirmByAt={order.confirmByAt} />
           <Text className="text-body font-semibold text-primary">{words.review}</Text>
         </View>

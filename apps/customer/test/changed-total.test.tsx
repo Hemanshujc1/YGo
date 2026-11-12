@@ -54,8 +54,29 @@ vi.mock("react-native", async () => {
       ),
     RefreshControl: () => null,
     ScrollView: ({ children }: { children?: ReactNode }) => createElement("div", null, children),
-    View: ({ children, className }: { children?: ReactNode; className?: string }) =>
-      createElement("div", { className }, children),
+    View: ({
+      children,
+      className,
+      accessible,
+      accessibilityLabel,
+      accessibilityLiveRegion,
+    }: {
+      children?: ReactNode;
+      className?: string;
+      accessible?: boolean;
+      accessibilityLabel?: string;
+      accessibilityLiveRegion?: string;
+    }) =>
+      createElement(
+        "div",
+        {
+          className,
+          "aria-label": accessibilityLabel,
+          "aria-live": accessibilityLiveRegion,
+          "data-accessible": accessible ? "true" : undefined,
+        },
+        children,
+      ),
   };
 });
 
@@ -120,8 +141,15 @@ vi.mock("@ygo/mobile", async () => {
       ),
     Confirm: () => null,
     StatusChip: ({ word }: { word: string }) => createElement("span", null, word),
-    Text: ({ children, className }: { children?: ReactNode; className?: string }) =>
-      createElement("span", { className }, children),
+    Text: ({
+      children,
+      className,
+      numberOfLines,
+    }: {
+      children?: ReactNode;
+      className?: string;
+      numberOfLines?: number;
+    }) => createElement("span", { className, "data-lines": numberOfLines }, children),
     useInFront: ({ start, stop }: { start?: () => void; stop?: () => void }) => {
       useEffect(() => {
         start?.();
@@ -155,7 +183,7 @@ vi.mock("../src/lib/push", () => ({
 }));
 
 import { ChangedTotalBanner } from "../src/components/changed-total-banner";
-import { useSecondsLeft } from "../src/components/countdown";
+import { BannerCountdown, useSecondsLeft } from "../src/components/countdown";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 vi.stubGlobal("__DEV__", false);
 
@@ -521,6 +549,18 @@ describe("ChangedTotalBanner component (#528)", () => {
     mock.segments = ["order", "order-1"];
     const { queryByRole } = render(<ChangedTotalBanner />);
     expect(queryByRole("button")).toBeNull();
+  });
+
+  it("renders compact countdown with clock text and full accessibility label (#606)", () => {
+    const { getByText, getByLabelText } = render(<BannerCountdown seconds={300} />);
+    expect(getByText("5:00")).toBeDefined();
+    expect(getByLabelText(words.changedTotal.expiresIn("5:00"))).toBeDefined();
+  });
+
+  it("renders Time is up text and accessibility label when countdown reaches 0 (#606)", () => {
+    const { getByText, getByLabelText } = render(<BannerCountdown seconds={0} />);
+    expect(getByText(words.changedTotal.timeUp)).toBeDefined();
+    expect(getByLabelText(words.changedTotal.timeUp)).toBeDefined();
   });
 });
 

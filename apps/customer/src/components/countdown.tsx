@@ -45,10 +45,27 @@ export function Countdown({ seconds }: { seconds: number }) {
   );
 }
 
-/** Countdown ticking down to `confirmByAt`. */
+/** Compact countdown pill for the persistent top banner (#606). */
+export function BannerCountdown({ seconds }: { seconds: number }) {
+  const low = seconds < 60;
+  return (
+    <View
+      accessible
+      accessibilityLabel={seconds > 0 ? words.expiresIn(clock(seconds)) : words.timeUp}
+      accessibilityLiveRegion={seconds === 0 ? "polite" : "none"}
+      className={`rounded-full px-2.5 py-0.5 ${low ? "border-2 border-warning" : "border border-border-strong"}`}
+    >
+      <Text className="text-secondary font-semibold tabular-nums text-text">
+        {seconds > 0 ? clock(seconds) : words.timeUp}
+      </Text>
+    </View>
+  );
+}
+
+/** Countdown ticking down to `confirmByAt` for the persistent banner (#606). */
 export function ExpiryCountdown({ confirmByAt }: { confirmByAt: string | null }) {
   const seconds = useSecondsLeft(confirmByAt);
   if (seconds === null) return null;
-  return <Countdown seconds={seconds} />;
+  return <BannerCountdown seconds={seconds} />;
 }
 
