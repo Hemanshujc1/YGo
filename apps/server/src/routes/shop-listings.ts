@@ -38,7 +38,7 @@ function notReady(reply: { code(status: number): { send(body: unknown): unknown 
   return reply.code(409).send({ error: { code: "SHOP_LISTING_NOT_READY" } });
 }
 
-function isWholeBaseUnitQuantity(quantity: string): boolean {
+export function isWholeBaseUnitQuantity(quantity: string): boolean {
   return !/\.\d*[1-9]/.test(quantity);
 }
 

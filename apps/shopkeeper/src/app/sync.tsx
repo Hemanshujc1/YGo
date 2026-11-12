@@ -71,7 +71,7 @@ export default function SyncScreen() {
       onShare={() => shareBill({ bill, shopName: access.shopName(), shopGstin: access.shopGstin(), label: (packId) => queue.label(row.shopId, packId) })} />;
     const label = row.label ?? names[row.packId];
     const amount = row.quantity && `${trimDecimal(row.quantity)}${label ? ` ${label.baseUnit}` : ""}`;
-    const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");
+    const change = row.type === "stock_flag" ? (row.outOfStock ? words.markedOut : words.markedIn) : row.type === "stock_change" ? words.stockChange(strings.stock.reasons[row.reason as keyof typeof strings.stock.reasons] ?? "", amount ?? "") : row.type === "opening_stock_correction" ? words.correction(amount ?? "") : words.opening(amount ?? "");
     const code = SyncActionCode.safeParse(row.code);
     return <View key={row.id} className="gap-1 rounded-card border border-border bg-surface p-4">
       <Text className="text-headline font-semibold text-text">{label ? `${label.name} · ${trimDecimal(label.packQuantity)} ${label.baseUnit}` : words.unknownProduct}</Text>
@@ -81,7 +81,7 @@ export default function SyncScreen() {
         <Text className="text-secondary text-danger">{row.type === "held" ? words.held : code.success ? words.reasons[code.data] : words.reasons.VALIDATION_FAILED}</Text>
         {row.type !== "held" && <Text selectable className="text-secondary text-muted">{words.reference(row.id)}</Text>}
         {/* Offline, Opening stock is closed (#394). */}
-        {row.type === "stock_flag" ? <Link href="/stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.fixStock}</Text></Pressable></Link>
+        {row.type === "stock_flag" || row.type === "stock_change" ? <Link href="/stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.fixStock}</Text></Pressable></Link>
           : view.mode === "offline" ? <Text className="text-secondary text-muted">{words.fixOnline}</Text>
           : <Link href="/opening-stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{words.fixOpening}</Text></Pressable></Link>}
       </>}

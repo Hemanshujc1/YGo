@@ -5,6 +5,7 @@ import { withTransaction, type Database } from "./db";
 import { expireUnansweredOrders } from "./order-expiry";
 import { expireUnconfirmedOrders } from "./order-confirm-expiry";
 import { expireUncollectedPickups } from "./pickup-expiry";
+import { reconcileStock } from "./stock-reconciliation";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
@@ -14,6 +15,7 @@ export const jobMaxAgeHours = {
   "expire-confirmations": 0.25,
   "expire-orders": 0.25,
   "expire-pickups": 0.25,
+  "reconcile-stock": 26,
   "snapshot-weekly": 8 * 24,
 } as const;
 // Run history kept by cleanup-sessions (#520): the every-minute expire-orders job writes ~1,440 rows a day.
@@ -120,6 +122,9 @@ export async function runJob(
       await expireUnconfirmedOrders(database.pool, clock);
     } else if (name === "expire-pickups") {
       await expireUncollectedPickups(database.pool, clock);
+    } else if (name === "reconcile-stock") {
+      // Report only (#67): the differences it found are rows in stock_reconciliation_issues, never a change to stock.
+      await reconcileStock(database.pool, clock);
     } else {
       await database.db.transaction(async (tx) => {
         // ON DELETE CASCADE removes every refresh token of an expired session.

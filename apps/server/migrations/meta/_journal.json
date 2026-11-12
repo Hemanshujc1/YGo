@@ -491,6 +491,13 @@
       "when": 1794476665409,
       "tag": "0069_forced_order_transitions",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794483997048,
+      "tag": "0070_stock_adjustments_reconciliation",
+      "breakpoints": true
     }
   ]
 }

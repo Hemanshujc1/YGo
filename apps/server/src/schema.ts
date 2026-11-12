@@ -390,14 +390,36 @@ export const stockMovements = pgTable("stock_movements", {
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   // The total a correction asked for, so a retry is judged by it and not by timestamps (#452).
   targetQuantity: numeric("target_quantity", { precision: 12, scale: 3 }),
+  // Why a stock change was made, from a fixed list (BIL-7, #67); only an `adjustment` has one.
+  reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction') = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
-  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'sale', 'void', 'transfer_out', 'transfer_in')`),
-  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'sale', 'transfer_out', 'transfer_in')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0)
+  check("stock_movements_target_valid", sql`(${table.kind} = 'opening_correction' OR (${table.kind} = 'adjustment' AND ${table.reason} = 'counted')) = (${table.targetQuantity} IS NOT NULL) AND ${table.targetQuantity} >= 0`),
+  check("stock_movements_kind_valid", sql`${table.kind} IN ('opening', 'opening_correction', 'adjustment', 'sale', 'void', 'transfer_out', 'transfer_in')`),
+  check("stock_movements_reason_valid", sql`(${table.kind} = 'adjustment') = (${table.reason} IS NOT NULL) AND (${table.reason} IS NULL OR ${table.reason} IN ('received', 'counted', 'damaged', 'expired', 'returned', 'correction'))
+    AND (${table.reason} IS NULL OR ${table.reason} NOT IN ('damaged', 'expired') OR ${table.quantity} < 0) AND (${table.reason} IS NULL OR ${table.reason} IN ('counted') OR ${table.quantity} <> 0)`),
+  check("stock_movements_quantity_valid", sql`(${table.quantity} >= 0 OR ${table.kind} IN ('opening_correction', 'adjustment', 'sale', 'transfer_out', 'transfer_in')) AND (${table.kind} <> 'sale' OR ${table.quantity} < 0)
     AND (${table.kind} <> 'void' OR ${table.quantity} > 0) AND ${table.quantity} <> 'NaN'::numeric`),
   uniqueIndex("stock_movements_client_id_idx").on(table.listingId, table.clientId),
   uniqueIndex("stock_movements_one_opening_idx").on(table.listingId).where(sql`${table.kind} = 'opening'`),
+]);
+
+// What the stock reconciliation job found (#67): a listing whose on-hand figure differs from what its documents say it should be.
+// Report only: nothing here changes stock. One open row per listing; it is closed when a later run finds no difference.
+export const stockReconciliationIssues = pgTable("stock_reconciliation_issues", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  listingId: uuid("listing_id").notNull().references(() => shopListings.id),
+  onHand: numeric("on_hand", { precision: 14, scale: 3 }).notNull(),
+  expected: numeric("expected", { precision: 14, scale: 3 }).notNull(),
+  difference: numeric("difference", { precision: 14, scale: 3 }).notNull(),
+  firstFoundAt: timestamp("first_found_at", { withTimezone: true }).notNull(),
+  lastFoundAt: timestamp("last_found_at", { withTimezone: true }).notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("stock_reconciliation_issues_open_idx").on(table.listingId).where(sql`${table.resolvedAt} IS NULL`),
+  index("stock_reconciliation_issues_shop_idx").on(table.shopId, table.resolvedAt),
+  check("stock_reconciliation_issues_difference_valid", sql`${table.difference} <> 0 AND ${table.difference} = ${table.onHand} - ${table.expected}`),
 ]);
 
 // Counter bills (#51, BIL-5, BIL-9). The bill as the phone recorded it, kept even when held. A sale's

@@ -339,6 +339,7 @@ The owner settled these on 14 Oct 2026. They replace the drafts marked "wording 
 |---|---|---|
 | S19 | Goods the shop may not sell (agreement) | As drawn. It matches the excluded list in `CONTEXT.md` word for word, and the legal text (`L-3`) uses the same list |
 | S37 | Why the bill is voided | Wrong item billed · Wrong price or quantity · Billed twice · Customer did not take the goods · Other |
+| S11, S13 | Why stock changed (BIL-7, `CONTEXT.md`; set at #67) | Received · Counted · Damaged · Expired · Returned · Correction. There is no "Other": a count that fits none is a Correction. Damaged and Expired only take stock away; Counted sets the total |
 | S22 | Why the shop rejects a scheduled order, or cancels it after the cutoff | Items not in stock · Cannot deliver in this slot · Shop closed at that time · Other |
 | S29 | Why the code cannot be used | Customer cannot open the app · Customer's phone is not with them · Someone else is receiving the order · Other. There is deliberately no "code does not match" reason: a wrong code never lets the deliverer skip the check (`R-8`) |
 | S30 | Why the delivery failed | No one at the address · Customer refused · Address not found · Other |

@@ -26,7 +26,7 @@ vi.mock("react", () => ({
 vi.mock("expo-router", () => ({ Link: "Link", useFocusEffect: (callback: () => void) => { if (!mock.focused) { mock.focused = true; callback(); } } }));
 vi.mock("@ygo/mobile", () => ({ Text: "Text", Button: "Button", SupportEmail: "SupportEmail" }));
 vi.mock("../src/components/icons", () => ({ Cloud: "Cloud" }));
-vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", View: "View" }));
+vi.mock("react-native", () => ({ ActivityIndicator: "Spinner", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", TextInput: "TextInput", View: "View" }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock("../src/components/toggle", () => ({ Toggle: "Toggle" }));
 vi.mock("../src/api", () => ({ accountEpoch: () => 0, access: { verify: mock.access, answersOrders: () => false, answer: () => null, allowed: mock.permission, expire: vi.fn(), get: () => ({ shopId: "00000000-0000-4000-8000-000000000001", mode: mock.mode }) }, session: { get: mock.get }, api: { syncChanges: mock.stock, syncActions: mock.send }, supportEmail: "help@example.com" }));
@@ -93,6 +93,38 @@ describe("minimal Stock screen", () => {
     press("Rice: Out of stock"); await settle();
     expect(queue.batch(shopId).actions.map((action) => action.payload)).toEqual([{ packId, outOfStock: true }, { packId, outOfStock: false }]);
     expect(texts()).toContain("7 kg left");
+  });
+
+  it("queues a change with its reason offline and shows it waiting to sync (BIL-3, BIL-7, #67)", async () => {
+    render(); await settle(); press("Change stock"); await settle();
+    const form = elements(render()).find((node) => typeof node.props.onSave === "function");
+    expect(form?.props).toMatchObject({ packId, name: "Rice", baseUnit: "kg" });
+    (form?.props.onSave as (change: object) => void)({ packId, reason: "damaged", quantity: "-2" }); await settle();
+    expect(queue.batch(shopId).actions).toMatchObject([{ type: "stock_change", payload: { packId, reason: "damaged", quantity: "-2" } }]);
+    expect(texts()).toContain("Change saved on this phone · waiting to sync");
+    expect(queue.count()).toBe(1);
+    // The server's answer is applied to the change, and a refusal keeps the stock as it was with a support reference.
+    mock.send.mockImplementation(async (body: SyncActionsBody) => ({ ok: true, data: { results: body.actions.map((action) => ({
+      actionId: action.id, sequence: action.sequence, status: "rejected", code: "ACTION_TOO_OLD", result: null, clockSuspect: false })) } }));
+    pull(); await settle();
+    expect(texts().join(" ")).toContain(queue.change(shopId, packId)?.action.id);
+    expect(texts().join(" ")).toContain("Your stock is unchanged");
+  });
+
+  it("says Low or Out in words and can show only low stock (S11, #67)", async () => {
+    const low = { ...item, lowStock: true, quantity: "2" };
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:1`, changes: [{ packId, item: low, deletedAt: null }] } });
+    render(); await settle();
+    expect(texts()).toContain("Low stock");
+    press("Show only low stock"); await settle();
+    expect(texts()).not.toContain("No product is low on stock.");
+    expect(texts()).toContain("Rice · 1 kg");
+    mock.stock.mockResolvedValue({ ok: true, data: { shopId, state: "live", cursor: `${shopId}:2`, changes: [{ packId, item: { ...low, lowStock: false, quantity: "0" }, deletedAt: null }] } });
+    pull(); await settle();
+    expect(texts()).toContain("No product is low on stock.");
+    press("Show all stock"); await settle();
+    // The word beside the count, and the switch's own label.
+    expect(texts().filter((text) => text === "Out of stock")).toHaveLength(2);
   });
 
   it("cold-reopens cached rows with pending overlays when the server is unreachable", async () => {

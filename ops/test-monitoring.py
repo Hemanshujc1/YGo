@@ -67,7 +67,7 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             health = next(call for call in calls if call[:2] == ["route53", "create-health-check"])
             config = health[health.index("--health-check-config") + 1]
             self.assertIn("Regions=us-east-1,eu-west-1,ap-southeast-1", config)
-            for job in ("backup-nightly", "cleanup-sessions", "expire-orders", "expire-confirmations", "expire-pickups", "snapshot-weekly"):
+            for job in ("backup-nightly", "cleanup-sessions", "expire-orders", "expire-confirmations", "expire-pickups", "reconcile-stock", "snapshot-weekly"):
                 alarm = alarms[f"ygo-job-{job}"]
                 self.assertIn(f"Name=JobName,Value={job}", alarm)
                 fast = job in ("expire-orders", "expire-confirmations", "expire-pickups")
