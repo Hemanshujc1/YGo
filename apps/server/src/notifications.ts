@@ -123,6 +123,7 @@ const adminRules: Partial<Record<OrderStatus, Rule>> = {
   cancelled_by_shop: adminClosed("order_cancelled_by_shop", "cancelled", "YGo cancelled this order. You were not charged."),
   rejected_by_shop: adminClosed("order_rejected", "closed", "YGo closed this order because it could not be taken. You were not charged."),
   expired: adminClosed("order_expired", "closed", "YGo closed this order because it was not answered in time. You were not charged."),
+  not_collected: adminClosed("pickup_not_collected", "not collected", "YGo closed this order because it was not collected. You were not charged."),
   delivery_failed: adminClosed("order_delivery_failed", "could not be delivered", "YGo closed this order because it could not be delivered. Contact YGo support if you have questions."),
 };
 
@@ -149,7 +150,8 @@ export async function notifyOrderStatus(
   let rule = ruleFor(to, from, reason);
   if (to === "ready" || to === "not_collected") {
     const { rows: [order] } = await client.query<{ fulfilment: string }>("SELECT fulfilment FROM orders WHERE id = $1", [orderId]);
-    if (order?.fulfilment === "pickup") rule = to === "ready" ? pickupRules.ready : pickupRules.notCollected;
+    // An Admin-forced close keeps YGo's own words: the pickup wording names the shop and speaks for it.
+    if (order?.fulfilment === "pickup" && !(reason === ADMIN_FORCED && adminRules[to])) rule = to === "ready" ? pickupRules.ready : pickupRules.notCollected;
   }
   if (!rule) return;
   await queueNotification(client, orderId, rule, at, reason);

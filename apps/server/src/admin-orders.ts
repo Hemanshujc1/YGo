@@ -68,13 +68,21 @@ export function forcedMovesFor(status: OrderStatus, fulfilment: string): ForcedO
   return forcedMoves(status).filter((to) => to !== "not_collected" || fulfilment === "pickup") as ForcedOrderStatus[];
 }
 
+/**
+ * One money column as the customer sees it: the latest confirmed revision's own value (a fee or discount it dropped is null or 0, never the
+ * placement one), else the one frozen at placement (#572).
+ */
+const current = (column: string, cast = "text") => `CASE WHEN EXISTS (SELECT 1 FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed')
+  THEN (SELECT r.${column}${cast === "text" ? "::text" : ""} FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1)
+  ELSE o.${column}${cast === "text" ? "::text" : ""} END`;
+
 type DetailRow = AdminOrderDetail["order"] & AdminOrderDetail["money"] & { quote: unknown; delivererName: string | null };
 
 /** One order for A15, or null when it does not exist or is outside the caller's scope. Only Admin is offered a forced move (ADM-12). */
 export async function adminOrderDetail(db: Db, areaManagerId: string | null, id: string, now: Date): Promise<AdminOrderDetail | null> {
   const { rows: [row] } = await db.query<DetailRow>(
-    `SELECT ${summarySql}, COALESCE((SELECT r.product_value::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1), o.product_value::text) AS "productValue", o.shop_discount::text AS "shopDiscount", o.delivery_fee::text AS "deliveryFee",
-       o.small_cart_fee::text AS "smallCartFee", o.pickup_fee::text AS "pickupFee", o.quote, d.name AS "delivererName"
+    `SELECT ${summarySql}, ${current("product_value")} AS "productValue", ${current("shop_discount")} AS "shopDiscount", ${current("delivery_fee")} AS "deliveryFee",
+       ${current("small_cart_fee")} AS "smallCartFee", ${current("pickup_fee")} AS "pickupFee", ${current("quote", "jsonb")} AS quote, d.name AS "delivererName"
      ${scope} AND o.id = $4`, [areaManagerId, orderTiming.reRingSeconds, now, id]);
   if (!row) return null;
   const { rows: lines } = await db.query<AdminOrderDetail["lines"][number]>(

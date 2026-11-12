@@ -75,17 +75,27 @@ const quote = {
   shopKeeps: "117.00", platformContribution: "23.00", placeable: true, reasons: [],
 };
 
-type Seed = { shopId: string; customerId: string; status?: string; placedAt?: string; changedAt?: string; fulfilment?: "delivery" | "pickup" };
+type Seed = { shopId: string; customerId: string; status?: string; placedAt?: string; changedAt?: string; fulfilment?: "delivery" | "pickup"; discount?: string };
 
-async function createOrder({ shopId, customerId, status = "placed", placedAt = "2030-01-01T00:00:00.000Z", changedAt = placedAt, fulfilment = "delivery" }: Seed) {
+/** A shop-wide flat discount rule, version 1, for an order placed under it. */
+async function discountRule(shopId: string) {
+  const { rows: [saved] } = await database.pool.query<{ id: string }>(
+    `INSERT INTO shop_discounts (shop_id, version, form, flat_amount, minimum_order, status, updated_at) VALUES ($1, 1, 'flat', 10, 50, 'active', $2) RETURNING id`, [shopId, clock.now()]);
+  await database.pool.query(
+    `INSERT INTO shop_discount_versions (rule_id, version, form, flat_amount, minimum_order, status, created_at) VALUES ($1, 1, 'flat', 10, 50, 'active', $2)`, [saved?.id, clock.now()]);
+  return saved?.id;
+}
+
+async function createOrder({ shopId, customerId, status = "placed", placedAt = "2030-01-01T00:00:00.000Z", changedAt = placedAt, fulfilment = "delivery", discount }: Seed) {
   const delivery = fulfilment === "delivery";
+  const rule = discount ? await discountRule(shopId) : null;
   const { rows: [row] } = await database.pool.query<{ id: string }>(
     `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, fulfilment,
-        address_label, address_flat, address_pincode, address_point, product_value, delivery_fee, pickup_fee, total, rate_card_version, quote)
+        address_label, address_flat, address_pincode, address_point, product_value, delivery_fee, pickup_fee, total, rate_card_version, quote, shop_discount, shop_discount_rule_id, shop_discount_rule_version)
      VALUES ($1, $2, $3, $4, $5, 'Shop', '12 Lane', '411038', $6, $7, $8, $9, ${delivery ? "ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography" : "NULL"},
-        130, ${delivery ? "20, NULL" : "0, 5"}, 150, $10, $11)
+        130, ${delivery ? "20, NULL" : "0, 5"}, ${discount ? 140 : 150}, $10, $11, ${discount ? "$12, $13, 1" : "0, NULL, NULL"})
      RETURNING id`,
-    [customerId, shopId, status, placedAt, changedAt, fulfilment, delivery ? "home" : null, delivery ? "Flat 1" : null, delivery ? "411038" : null, rateCard, quote],
+    [customerId, shopId, status, placedAt, changedAt, fulfilment, delivery ? "home" : null, delivery ? "Flat 1" : null, delivery ? "411038" : null, rateCard, quote, ...(discount ? [discount, rule] : [])],
   );
   const id = String(row?.id);
   const { rows: [item] } = await database.pool.query<{ id: string }>(
@@ -248,6 +258,17 @@ describe("Admin orders: monitoring and forced transitions (ADM-4, ADM-7, ORD-1, 
     expect((await database.pool.query("SELECT 1 FROM push_queue")).rowCount).toBe(1);
   });
 
+  it("tells the customer of an Admin-forced pickup close in YGo's voice: no shop name, no Admin reason, one push", async () => {
+    const customerId = await account("cust@example.com", "Meera");
+    const id = await createOrder({ shopId: await shop("Fresh Mart"), customerId, status: "ready", fulfilment: "pickup" });
+    expect((await force(await signIn(admin.email), id, { from: "ready", to: "not_collected", reason: "Private note about the shop" })).statusCode).toBe(200);
+    const notes = await database.pool.query("SELECT account_id, app, kind, title, body FROM notifications WHERE order_id = $1", [id]);
+    expect(notes.rows).toEqual([{ account_id: customerId, app: "customer", kind: "pickup_not_collected", title: expect.stringMatching(/^Order #\d+ not collected$/),
+      body: "YGo closed this order because it was not collected. You were not charged." }]);
+    expect(JSON.stringify(notes.rows)).not.toMatch(/Fresh Mart|Private note/);
+    expect((await database.pool.query("SELECT 1 FROM push_queue")).rowCount).toBe(1);
+  });
+
   it("leaves the customer's own order views working after Admin rejects an order, with no shop reason to show", async () => {
     const customerId = await account("cust@example.com", "Meera");
     const id = await createOrder({ shopId: await shop("S"), customerId });
@@ -281,6 +302,20 @@ describe("Admin orders: monitoring and forced transitions (ADM-4, ADM-7, ORD-1, 
     expect([detail.order.total, detail.money.total, detail.money.productValue]).toEqual(["100.00", "100.00", "80.00"]);
     const list = (await orders(headers)).json() as AdminOrdersResponse;
     expect(list.orders[0]?.total).toBe("100.00");
+  });
+
+  it("shows the confirmed revision's own discount and fees, not the placement ones", async () => {
+    const customerId = await account("cust@example.com", "Meera");
+    const id = await createOrder({ shopId: await shop("S"), customerId, status: "accepted", discount: "10" });
+    const headers = await signIn(admin.email);
+    expect(((await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail).money.shopDiscount).toBe("10.00");
+    await database.pool.query(
+      `WITH r AS (INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, created_at, confirmed_at, confirm_by_at, product_value, shop_discount, delivery_fee, total, commission, platform_contribution, quote)
+         VALUES ($1, 1, 'confirmed', 'placed', 'owner', $2, $2, $2, 80, 0, 10, 90, 8, 12, $3) RETURNING id)
+       INSERT INTO order_revision_lines (revision_id, position, listing_id, name, base_unit, pack_quantity, original_count, count, unit_price, line_total, commission, stock_quantity)
+       SELECT r.id, 1, l.listing_id, 'Atta', 'kg', 1, 1, 1, 80, 80, 8, 1 FROM r, order_lines l WHERE l.order_id = $1`, [id, clock.now(), quote]);
+    const detail = (await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail;
+    expect(detail.money).toMatchObject({ productValue: "80.00", shopDiscount: "0.00", deliveryFee: "10.00", total: "90.00" });
   });
 
   it("keeps the Admin's original reason retrievable on the order detail, for Admin only", async () => {
