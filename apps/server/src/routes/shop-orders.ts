@@ -769,7 +769,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
          WHERE o.id = $1 AND m.account_id = $2 FOR UPDATE OF o`, [id, who.accountId]);
       if (!order) return "NOT_FOUND" as const;
       // A pickup has no deliverer: it is made ready with Ready for pickup (FUL-7).
-      if (order.fulfilment === "pickup") return "ORDER_STATUS_CHANGED" as const;
+      if (order.fulfilment === "pickup") return "ORDER_IS_PICKUP" as const;
       const { rows: [deliverer] } = await client.query<{ role: "owner" | "staff"; canDeliver: boolean }>(
         `SELECT role, can_deliver AS "canDeliver" FROM shop_members WHERE shop_id = $1 AND account_id = $2 FOR SHARE`, [order.shopId, accountId]);
       if (!deliverer || (deliverer.role !== "owner" && !deliverer.canDeliver)) return "DELIVERER_NOT_ELIGIBLE" as const;
@@ -783,8 +783,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       return now;
     });
     if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: result } });
-    if (result === "DELIVERER_NOT_ELIGIBLE") return reply.code(409).send({ error: { code: result } });
-    if (result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
+    if (result === "DELIVERER_NOT_ELIGIBLE" || result === "ORDER_IS_PICKUP" || result === "ORDER_STATUS_CHANGED") return reply.code(409).send({ error: { code: result } });
     return shopOrderView(pool, id, who.accountId, result, failureWaitSeconds);
   });
 

@@ -97,6 +97,18 @@ describe("C07 choosing delivery or pickup (FUL-7, #65)", () => {
     expect(queryByText(words.fulfilment.bookingFee)).toBeNull();
   });
 
+  it("starts on delivery again when pickup returns after a poll dropped it (#601)", () => {
+    const { getByRole, rerender } = render(<CartScreen />);
+    fireEvent.click(getByRole("radio", { name: words.fulfilment.pickup }));
+    expect(getByRole("radio", { name: words.fulfilment.pickup }).getAttribute("aria-checked")).toBe("true");
+    mock.server = cartOf({ pickup: null });
+    rerender(<CartScreen />);
+    mock.server = cartOf();
+    rerender(<CartScreen />);
+    expect(getByRole("radio", { name: words.fulfilment.delivery }).getAttribute("aria-checked")).toBe("true");
+    expect(getByRole("radio", { name: words.fulfilment.pickup }).getAttribute("aria-checked")).toBe("false");
+  });
+
   it("offers no choice when the shop has no pickup open for this cart", () => {
     mock.server = cartOf({ pickup: null });
     const { queryByRole, getByText } = render(<CartScreen />);

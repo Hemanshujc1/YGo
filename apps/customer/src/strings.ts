@@ -526,6 +526,7 @@ export const strings = {
     CART_CHANGED: "Your cart was changed. Check it and try again.",
     OWN_SHOP: "You can't order from your own shop.",
     ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
+    ORDER_IS_PICKUP: "This order is a pickup. Use Ready for pickup.",
     HANDOVER_CODE_WRONG: "That code doesn’t match. Ask the deliverer to try again.",
     HANDOVER_CODE_LOCKED: "Too many tries. Wait two minutes, then try again.",
     DELIVERER_NOT_ELIGIBLE: "Choose the Owner or a Staff member who can deliver.",

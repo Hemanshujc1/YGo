@@ -1,7 +1,7 @@
 import type { CartLine, SavedAddress } from "@ygo/contracts";
 import { Button, Text } from "@ygo/mobile";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
@@ -237,6 +237,9 @@ export default function CartScreen() {
   const { cart, view } = useCart(shopId ?? "", query);
   const [picking, setPicking] = useState(false);
   const [wantsPickup, setWantsPickup] = useState(false);
+  // The choice lapses with the pickup: if a poll drops it, a later one that brings it back starts on Delivery again (#601).
+  const hasPickup = Boolean(view.server?.pickup);
+  useEffect(() => { if (!hasPickup) setWantsPickup(false); }, [hasPickup]);
   const [placing, setPlacing] = useState(false);
   /** What stopped the last Place order; `retry` turns the button into Try again (design system, button errors). */
   const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);

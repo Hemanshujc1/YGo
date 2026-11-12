@@ -107,10 +107,14 @@ export async function pricedCart(
   let quote: CartResponse["quote"] = null;
   let engine: Extract<DeliveredQuote, { status: "priced" }> | null = null;
   const priceReasons: CartReason[] = [];
+  let orderCard: Awaited<ReturnType<typeof resolveRateCard>>;
   if (serving && orderable.length) {
+    // The order-level card is read once and shared with the pickup quote below; the delivered quote ignores its pickup rule.
+    const version = await latestRateCardVersion(client);
+    orderCard = modeOpen("pickup") ? await resolveRateCard(client, shopId, undefined, version, { usesPickup: true, usesBargain: false }) : undefined;
     const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
       listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.part?.price ?? line.price, count: line.count,
-    })), shopDiscounts, await latestRateCardVersion(client));
+    })), shopDiscounts, version, undefined, orderCard);
     // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
     if (priced.status === "incomplete") delivering = false;
     else {
@@ -138,8 +142,7 @@ export async function pricedCart(
   let pickup: PickupQuote | null = null;
   let pickupDetail: PickupDetail | null = null;
   if (engine && modeOpen("pickup")) {
-    const card = await resolveRateCard(client, shopId, undefined, engine.rateCardVersion, { usesPickup: true, usesBargain: false });
-    const rule = card?.missing.includes("pickup") ? undefined : card?.values.pickup?.value as { enabled: boolean; customerFee: string; shopFee: string | null; cap: string | null; contributionFloor: string } | undefined;
+    const rule = orderCard?.missing.includes("pickup") ? undefined : orderCard?.values.pickup?.value as { enabled: boolean; customerFee: string; shopFee: string | null; cap: string | null; contributionFloor: string } | undefined;
     if (rule) {
       const price = pickupPrice({ productValue: engine.productValue, shopDiscount: engine.shopDiscount?.amount ?? "0", rule });
       const pickupReasons: CartReason[] = [];

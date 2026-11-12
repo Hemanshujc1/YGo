@@ -754,6 +754,7 @@ export const strings = {
     CART_CHANGED: "This cart changed elsewhere. Reload it and try again.",
     OWN_SHOP: "An account can't order from its own shop.",
     ORDER_STATUS_CHANGED: "This order changed. Reload it and try again.",
+    ORDER_IS_PICKUP: "This order is a pickup. Use Ready for pickup.",
     HANDOVER_CODE_WRONG: "That handover code does not match.",
     HANDOVER_CODE_LOCKED: "The handover code is locked for two minutes.",
     DELIVERER_NOT_ELIGIBLE: "The assigned delivery person is not eligible.",
