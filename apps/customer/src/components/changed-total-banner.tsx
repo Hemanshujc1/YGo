@@ -45,7 +45,7 @@ function Banner({ order, top }: { order: AwaitingOrder; top: number }) {
       >
         <View className="flex-1 min-w-0 gap-0.5">
           <Text numberOfLines={1} className="text-secondary font-semibold text-warning-text">{words.title}</Text>
-          <Text numberOfLines={1} className="text-body font-bold tabular-nums text-text">
+          <Text className="text-body font-bold tabular-nums text-text">
             {words.totalChangedTo(money(order.proposedTotal))}
           </Text>
         </View>
