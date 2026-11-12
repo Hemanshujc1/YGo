@@ -84,7 +84,7 @@ describe("S06 Counter bill (#468)", () => {
     // Saved before #468: no counter price until the next pull.
     db.prepare("INSERT INTO stock_cache_items (shop_id, pack_id, payload) VALUES (?, ?, ?)").run(shopId, dal,
       JSON.stringify({ ...item, listingId: dal, packId: dal, name: "Dal", counterPrice: undefined }));
-    mock.mode = "offline"; mock.get.mockReturnValue({ account: { id: "account-1" } }); mock.open.mockResolvedValue(queue); mock.allowed.mockReturnValue(true);
+    mock.mode = "offline"; mock.get.mockReturnValue({ account: { id: `account-${randomUUID()}` } }); mock.open.mockResolvedValue(queue); mock.allowed.mockReturnValue(true);
   });
   afterEach(() => {
     for (const hook of mock.hooks) {
@@ -419,5 +419,28 @@ describe("S06 Counter bill (#468)", () => {
     expect(draft()).toEqual(["Rope", "15", "2", "5", "Asha"]);
     expect([draft(), texts().filter((t) => t.includes("Rope") || t.includes("Typed item 1"))]).toEqual(before);
     expect(queue.batch(shopId).actions).toHaveLength(0);
+  });
+  it("finds the draft again when the bill remounts after the request screen, and drops it for another sign-in (#599)", async () => {
+    render(); await settle();
+    tap((props) => props.label === "Add a typed item");
+    type("Typed item 1: Item name", "Rope"); type("Typed item 1: Price each (₹)", "15");
+    type("Discount (₹)", "5"); type("Customer name", "Asha");
+    (elements(render()).filter((node) => node.props.accessibilityRole === "radio")[0]?.props.onPress as () => void)();
+    const draft = () => ["Typed item 1: Item name", "Typed item 1: Price each (₹)", "Discount (₹)", "Customer name"]
+      .map((label) => find((props) => props.accessibilityLabel === label)?.value);
+    const remount = async () => { mock.hooks = []; mock.effects = []; mock.focused = false; render(); await settle(); render(); };
+
+    // The Slot swaps the route, so the screen starts over with fresh state.
+    await remount();
+    expect(draft()).toEqual(["Rope", "15", "5", "Asha"]);
+    expect(elements(render()).filter((node) => node.props.accessibilityRole === "radio").map((node) => (node.props.accessibilityState as { checked: boolean }).checked)).toEqual([true, false]);
+    // A new typed item does not reuse the restored item's key.
+    tap((props) => props.label === "Add a typed item");
+    expect(find((props) => props.accessibilityLabel === "Typed item 2: Item name")).toBeDefined();
+
+    // Another sign-in finds it empty.
+    mock.get.mockReturnValue({ account: { id: `account-${randomUUID()}` } });
+    await remount();
+    expect(draft()).toEqual([undefined, undefined, "", ""]);
   });
 });

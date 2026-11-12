@@ -11,7 +11,8 @@ import { SyncStatus } from "../components/sync-status";
 import { isCurrentAccount } from "../lib/account";
 import { startOfToday } from "../lib/bill-status";
 import { refreshBillVoids } from "../lib/bill-voids";
-import { type BillCustomer, draftBill, type TypedLine } from "../lib/bill-draft";
+import { draftBill, type TypedLine } from "../lib/bill-draft";
+import { createBillDraftStore, type DraftFields } from "../lib/bill-draft-store";
 import { money } from "../lib/money";
 import { openOpeningStock } from "../lib/opening-stock-database";
 import { shareBill } from "../lib/share-bill";
@@ -24,6 +25,8 @@ type Item = NonNullable<ReturnType<OpeningStockQueue["cache"]["read"]>>["items"]
 type Loaded = { kind: "loaded"; accountId: string; epoch: number; shopId: string; queue: OpeningStockQueue };
 type Load = { kind: "loading" } | { kind: "failed" } | Loaded;
 type Line = { item: Item & { counterPrice: string }; count: string };
+// Outside the screen, so the draft survives a trip to S38 and back (#599).
+const billDraft = createBillDraftStore<Line>(accountEpoch);
 /** A price or discount as the shopkeeper leaves its field: no trailing zero, and no dot left after the last digit (#451). */
 const leave = (value: string) => trimDecimal(value.trim()).replace(/\.$/, "");
 
@@ -40,11 +43,9 @@ export default function BillScreen() {
   const status = useSyncExternalStore(stockSync.subscribe, stockSync.get);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [search, setSearch] = useState("");
-  const [lines, setLines] = useState<Line[]>([]);
-  const [typed, setTyped] = useState<TypedLine[]>([]);
-  const [discount, setDiscount] = useState("");
-  const [customer, setCustomer] = useState<BillCustomer>({ name: "", phone: "", offers: false });
-  const [payment, setPayment] = useState<"cash" | "upi" | null>(null);
+  const { lines, typed, discount, customer, payment } = useSyncExternalStore(billDraft.subscribe, billDraft.get);
+  const setField = <K extends keyof DraftFields<Line>>(key: K) => (value: Parameters<typeof billDraft.set<K>>[1]) => billDraft.set(key, value);
+  const [setLines, setTyped, setDiscount, setCustomer, setPayment] = [setField("lines"), setField("typed"), setField("discount"), setField("customer"), setField("payment")];
   // Field messages show once Save is tapped, not while the shopkeeper is still typing.
   const [tried, setTried] = useState(false);
   const [find, setFind] = useState("");
@@ -53,7 +54,6 @@ export default function BillScreen() {
     const timer = setTimeout(() => setDebouncedFind(find), 250);
     return () => clearTimeout(timer);
   }, [find]);
-  const typedKey = useRef(0);
   const [message, setMessage] = useState<{ text: string; saved: boolean } | null>(null);
   const visit = useRef(0);
   // The lines last saved: a second tap before the cleared form redraws must not queue the same bill again.
@@ -67,7 +67,10 @@ export default function BillScreen() {
     try {
       if (!shopId || !access.allowed(identity.account.id, shopId)) return setLoad({ kind: "failed" });
       const queue = await openOpeningStock(identity.account.id);
-      if (isCurrentAccount(identity.account.id, epoch) && visit.current === token) setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue });
+      if (isCurrentAccount(identity.account.id, epoch) && visit.current === token) {
+        billDraft.claim(`${identity.account.id}:${epoch}:${shopId}`);
+        setLoad({ kind: "loaded", accountId: identity.account.id, epoch, shopId, queue });
+      }
     } catch {
       if (isCurrentAccount(identity.account.id, epoch) && visit.current === token) setLoad({ kind: "failed" });
     }
@@ -130,7 +133,7 @@ export default function BillScreen() {
 
   function addTyped() {
     if (lines.length + typed.length >= 100) return setMessage({ text: words.tooMany, saved: false });
-    setTyped((current) => [...current, { key: String(++typedKey.current), name: "", price: "", count: "1" }]);
+    setTyped((current) => [...current, { key: billDraft.nextKey(), name: "", price: "", count: "1" }]);
   }
   function editTyped(key: string, change: Partial<TypedLine> | ((current: TypedLine) => Partial<TypedLine>)) {
     setTyped((current) => current.map((line) => {
@@ -162,7 +165,7 @@ export default function BillScreen() {
       const saved = loaded.queue.saveBill(loaded.shopId, draft.payload);
       if (typeof saved === "string") return setMessage({ text: words[saved], saved: false });
       savedLines.current = lines;
-      setLines([]); setTyped([]); setDiscount(""); setCustomer({ name: "", phone: "", offers: false }); setPayment(null); setTried(false);
+      billDraft.clear(); setTried(false);
       setMessage({ text: words.saved(saved.reference), saved: true });
       void stockSync.run();
     } catch { setMessage({ text: words.storageFailed, saved: false }); }
