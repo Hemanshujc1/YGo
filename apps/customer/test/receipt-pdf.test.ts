@@ -39,6 +39,16 @@ describe("receipt PDF (#61)", () => {
     expect(html).not.toMatch(/\.00|1\.000|5\.000/);
   });
 
+  it("names the booking fee of a pickup, and shows none on a delivery or a pickup without one (FUL-7, #65)", () => {
+    const pickup = receiptHtml({ receipt: receipt({ status: "picked_up", address: null, deliveryFee: "0.00", smallCartFee: null, pickupFee: "10.00", total: "340.00" }), fonts });
+    expect(pickup).toContain("Booking fee");
+    expect(pickup).toContain("₹10");
+    expect(pickup).not.toContain("Delivery fee");
+    expect(pickup).not.toContain("Order address");
+    expect(receiptHtml({ receipt: receipt({ status: "picked_up", address: null, deliveryFee: "0.00", pickupFee: "0.00" }), fonts })).not.toContain("Booking fee");
+    expect(html).not.toContain("Booking fee");
+  });
+
   it("words the address by status: Delivered to, or Order address for a pickup", () => {
     const picked = receiptHtml({ receipt: receipt({ status: "picked_up" }), fonts });
     expect(picked).toContain("Order address: Home · Kothrud");

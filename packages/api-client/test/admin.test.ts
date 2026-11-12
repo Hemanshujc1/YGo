@@ -186,6 +186,18 @@ describe("Admin browser API client", () => {
     expect(await malformed.client.setTheme({ theme: "dark" })).toEqual({ ok: false, status: 200, code: "INTERNAL" });
   });
 
+  it("reads a shop's fulfilment modes and forces one off or lifts it (#65)", async () => {
+    const shop = "00000000-0000-4000-8000-000000000501";
+    const modes = { modes: [{ mode: "pickup", shopOn: true, adminForcedOff: true, open: false }] };
+    const { client, calls } = setup(({ path }) => path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : answer(200, modes));
+    expect(await client.shopFulfilmentModes(shop)).toEqual({ ok: true, data: modes });
+    expect(await client.forceFulfilmentMode(shop, "pickup", true)).toEqual({ ok: true, data: modes });
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      [`/v1/admin/shops/${shop}/fulfilment-modes`, "GET", undefined],
+      [`/v1/admin/shops/${shop}/fulfilment-modes/pickup`, "PUT", { forcedOff: true }],
+    ]);
+  });
+
   it("asks for the role once per sign-in and forgets it when the session ends (#343)", async () => {
     const { client, calls } = setup(({ path }) =>
       path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : answer(200, areaManager));

@@ -13,7 +13,7 @@ function elements(node: unknown): El[] {
   if (typeof element.type === "function") return elements((element.type as (props: unknown) => unknown)(element.props));
   return [element, ...elements(element.props.children)];
 }
-const texts = (quote: CartQuote, was?: { productValue: string; total: string }) => elements(QuoteRows({ quote, was })).flatMap(({ props: { children } }) => typeof children === "string" ? [children] : []);
+const texts = (quote: CartQuote, was?: { productValue: string; total: string }, pickup?: { fee: string | null }) => elements(QuoteRows({ quote, was, pickup })).flatMap(({ props: { children } }) => typeof children === "string" ? [children] : []);
 
 describe("the quote rows (#571, CRT-5)", () => {
   const quote: CartQuote = { productValue: "100.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "130.00" };
@@ -37,5 +37,12 @@ describe("the quote rows (#571, CRT-5)", () => {
   it("strikes the replaced items and total only where they differ (#578)", () => {
     expect(texts({ ...quote, productValue: "50.00", total: "80.00" }, { productValue: "100.00", total: "130.00" })).toEqual(["Items", "₹100", "₹50", "Delivery", "₹30", "Total to pay", "₹130", "₹80"]);
     expect(texts(quote, { productValue: "100.00", total: "130.00" })).toEqual(["Items", "₹100", "Delivery", "₹30", "Total to pay", "₹130"]);
+  });
+
+  it("for a pickup shows no delivery or small cart row, and names the booking fee when there is one (FUL-7, #65)", () => {
+    const pickup: CartQuote = { ...quote, deliveryFee: "0.00", total: "110.00" };
+    expect(texts(pickup, undefined, { fee: "10.00" })).toEqual(["Items", "₹100", "Booking fee", "Charged when you collect", "₹10", "Total to pay", "₹110"]);
+    expect(texts({ ...pickup, total: "100.00" }, undefined, { fee: "0.00" })).toEqual(["Items", "₹100", "Total to pay", "₹100"]);
+    expect(texts({ ...pickup, total: "100.00" }, undefined, { fee: null })).toEqual(["Items", "₹100", "Total to pay", "₹100"]);
   });
 });

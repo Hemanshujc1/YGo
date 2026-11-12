@@ -1,7 +1,7 @@
 import type { ApiResult } from "@ygo/api-client";
 import { type CartResponse, OrderStatus, type OrderResponse, RejectReason } from "@ygo/contracts";
 import { describe, expect, it } from "vitest";
-import { createOrder, isFinal, placeOrder, shownStatus, type Timers, treatments } from "../src/lib/order";
+import { createOrder, isFinal, placeOrder, shownStatus, statusWord, type Timers, treatments } from "../src/lib/order";
 import { strings } from "../src/strings";
 
 const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
@@ -84,6 +84,43 @@ describe("placing the cart (#427)", () => {
     expect(await placeOrder(answering(refused("CART_CHANGED", 409, { cart: now })), shopId, cart, addressId)).toEqual({ kind: "changed", cart: now });
     expect(await placeOrder(answering(refused("NOT_FOUND", 404)), shopId, cart, addressId)).toEqual({ kind: "gone" });
     expect(await placeOrder(answering(refused("OWN_SHOP", 403)), shopId, cart, addressId)).toEqual({ kind: "error", code: "OWN_SHOP" });
+  });
+});
+
+describe("placing a pickup (FUL-7, #65)", () => {
+  const place = { pincode: "411038", latitude: 18.5, longitude: 73.8 };
+  const quoted: CartResponse = {
+    ...cart,
+    pickup: { productValue: "270.00", shopDiscount: null, pickupFee: "10.00", total: "280.00", placeable: true, reasons: [] },
+  };
+
+  it("sends the pickup's own total and the place the cart was priced for, with no address", async () => {
+    const sent: unknown[] = [];
+    const client = { placeOrder: async (shop: string, body: unknown) => (sent.push([shop, body]), ok(order())) };
+    expect(await placeOrder(client, shopId, quoted, { pickup: place })).toEqual({ kind: "placed", order: order() });
+    expect(sent).toEqual([[shopId, { revision: 2, total: "280.00", fulfilment: "pickup", ...place }]]);
+  });
+
+  it("when the pickup has gone from the cart (switched off), sends nothing and hands back the cart as it is", async () => {
+    const client = { placeOrder: async () => { throw new Error("must not be called"); } };
+    expect(await placeOrder(client, shopId, cart, { pickup: place })).toEqual({ kind: "changed", cart });
+  });
+
+  it("when delivery has gone from the cart (switched off), a delivery is not sent either", async () => {
+    const client = { placeOrder: async () => { throw new Error("must not be called"); } };
+    expect(await placeOrder(client, shopId, { ...quoted, quote: null }, addressId)).toEqual({ kind: "changed", cart: { ...quoted, quote: null } });
+  });
+
+  it("names the same ways it can go as a delivery does", async () => {
+    const answering = (answer: ApiResult<OrderResponse>) => ({ placeOrder: async () => answer });
+    expect(await placeOrder(answering(refused("CART_CHANGED", 409, { cart: quoted })), shopId, quoted, { pickup: place })).toEqual({ kind: "changed", cart: quoted });
+    expect(await placeOrder(answering(refused("OWN_SHOP", 403)), shopId, quoted, { pickup: place })).toEqual({ kind: "error", code: "OWN_SHOP" });
+  });
+
+  it("words a ready pickup as ready to collect, and every other status as before", () => {
+    expect(statusWord("pickup", "ready")).toBe(strings.order.pickupReady);
+    expect(statusWord("delivery", "ready")).toBe(strings.order.statuses.ready);
+    expect(statusWord("pickup", "not_collected")).toBe(strings.order.statuses.not_collected);
   });
 });
 

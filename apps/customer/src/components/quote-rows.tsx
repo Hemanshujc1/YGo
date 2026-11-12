@@ -25,13 +25,25 @@ function Row({ label, note, value, was, total = false }: { label: string; note?:
  * Items, the shop's discount with its offer when one applied, every fee by name and the total to pay, as C07 and C09/C19 show them (CRT-2, CRT-5).
  * `was` strikes the figures a changed total replaced, each only when it differs (C10, #578).
  */
-export function QuoteRows({ quote, was, children }: { quote: CartQuote; was?: { productValue: string; total: string }; children?: ReactNode }) {
+export function QuoteRows({ quote, was, pickup, children }: {
+  quote: Omit<CartQuote, "deliveryFee" | "smallCartFee"> & Partial<Pick<CartQuote, "deliveryFee" | "smallCartFee">>;
+  was?: { productValue: string; total: string };
+  /** A pickup: no delivery or small cart row, and the booking fee named when there is one, charged on collection (FUL-7, #65). */
+  pickup?: { fee: string | null };
+  children?: ReactNode;
+}) {
   return (
     <View className="rounded-card border border-border bg-surface p-4">
       <Row label={words.items} value={money(quote.productValue)} was={was && was.productValue !== quote.productValue ? money(was.productValue) : undefined} />
       {quote.shopDiscount && <Row label={words.shopDiscount} note={offerText(quote.shopDiscount.offer)} value={discountText(quote.shopDiscount.amount)} />}
-      <Row label={words.delivery} value={feeText(quote.deliveryFee)} />
-      {quote.smallCartFee && Number(quote.smallCartFee) > 0 && <Row label={words.smallCart} value={money(quote.smallCartFee)} />}
+      {pickup ? (
+        pickup.fee !== null && Number(pickup.fee) > 0 && <Row label={words.fulfilment.bookingFee} note={words.fulfilment.bookingFeeNote} value={money(pickup.fee)} />
+      ) : (
+        <>
+          <Row label={words.delivery} value={feeText(quote.deliveryFee ?? "0")} />
+          {quote.smallCartFee && Number(quote.smallCartFee) > 0 && <Row label={words.smallCart} value={money(quote.smallCartFee)} />}
+        </>
+      )}
       <View className="mt-2 border-t border-border pt-2">
         <Row label={words.total} value={money(quote.total)} was={was && was.total !== quote.total ? money(was.total) : undefined} total />
       </View>

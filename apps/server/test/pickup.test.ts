@@ -179,6 +179,18 @@ describe("The fulfilment switches (FUL-1)", () => {
     expect((await app.inject({ method: "PUT", url: `/v1/admin/shops/${world.shopId}/fulfilment-modes/pickup`, headers: world.owner, payload: { forcedOff: true } })).statusCode).toBe(403);
   });
 
+  it("refuses the Admin routes to an Owner, Staff and a Customer, and the Owner routes to Admin and another shop's Customer", async () => {
+    const world = await stocked();
+    for (const headers of [world.owner, world.staff, customer]) {
+      expect([401, 403]).toContain((await app.inject({ method: "GET", url: `/v1/admin/shops/${world.shopId}/fulfilment-modes`, headers })).statusCode);
+      expect([401, 403]).toContain((await app.inject({ method: "PUT", url: `/v1/admin/shops/${world.shopId}/fulfilment-modes/pickup`, headers, payload: { forcedOff: true } })).statusCode);
+    }
+    expect([401, 403, 404]).toContain((await switchMode(admin, "pickup", true)).statusCode);
+    expect([403, 404]).toContain((await switchMode(customer, "pickup", true)).statusCode);
+    expect((await app.inject({ method: "GET", url: `/v1/admin/shops/${randomUUID()}/fulfilment-modes`, headers: admin })).statusCode).toBe(404);
+    expect((await database.pool.query("SELECT count(*)::int AS count FROM shop_fulfilment_modes")).rows[0]).toEqual({ count: 0 });
+  });
+
   it("never switches pickup on for the Owner when Admin forces it off and lifts it", async () => {
     const world = await stocked();
     expect((await force(world.shopId, "pickup", true)).json().modes).toContainEqual({ mode: "pickup", shopOn: false, adminForcedOff: true, open: false });
@@ -337,6 +349,34 @@ describe("A pickup at the counter (FUL-7, MNY-1)", () => {
     expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: code, payment: "cash" })).statusCode).toBe(429);
     at("2030-01-01T00:13:00.000Z");
     expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: code, payment: "cash" })).statusCode).toBe(200);
+  });
+
+  it("keeps the code to its Customer until Ready, and lets only the order's own shop complete it", async () => {
+    const world = await stocked();
+    const order = await pickupOrder(world);
+    const stranger = await signIn("/v1/auth", "stranger@example.com");
+    const view = (headers: { authorization: string }) => app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers });
+    await shopPost(order.id, "accept", world.owner);
+    await shopPost(order.id, "preparing", world.owner);
+    // Not before Ready, and never to anyone but the Customer who placed it.
+    expect((await view(customer)).json().handoverCode).toBeNull();
+    at("2030-01-01T00:10:00.000Z");
+    expect((await shopPost(order.id, "ready-for-pickup", world.owner)).statusCode).toBe(200);
+    const code = (await view(customer)).json().handoverCode as string;
+    expect(code).toMatch(/^\d{4}$/);
+    expect((await view(stranger)).statusCode).toBe(404);
+    // The code is on no shop's own view of the order.
+    expect(JSON.stringify((await app.inject({ method: "GET", url: `/v1/me/shop-orders/${order.id}`, headers: world.owner })).json())).not.toContain(code);
+
+    // Another shop's Owner, and the Customer, cannot complete it or spend its attempts; the payment must be cash or UPI.
+    const other = await stocked();
+    for (const headers of [other.owner, customer, stranger]) {
+      expect((await shopPost(order.id, "picked-up", headers, { handoverCode: code, payment: "cash" })).statusCode).toBe(404);
+      expect((await shopPost(order.id, "ready-for-pickup", headers)).statusCode).toBe(404);
+    }
+    expect((await database.pool.query("SELECT handover_code_attempts AS attempts FROM orders WHERE id = $1", [order.id])).rows[0]).toEqual({ attempts: 0 });
+    expect((await shopPost(order.id, "picked-up", world.owner, { handoverCode: code, payment: "card" })).statusCode).toBe(400);
+    expect((await row(order.id)).status).toBe("ready");
   });
 
   it("keeps the delivery steps and the pickup steps apart", async () => {

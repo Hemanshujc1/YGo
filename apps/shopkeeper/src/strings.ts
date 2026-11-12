@@ -428,6 +428,16 @@ export const strings = {
     collect: "To collect at the door",
     shopDiscount: "Shop discount",
     collectNote: "Cash or UPI when the order is handed over.",
+    // Pickup (FUL-7, #65): no address, no deliverer, paid at the counter.
+    pickupLabel: "Pickup",
+    pickupAt: "The customer collects this at your counter.",
+    collectAtCounter: "To collect at the counter",
+    collectCounterNote: "Cash or UPI when the customer collects it.",
+    bookingFee: "Booking fee",
+    bookingFeeNote: "Included in the total. Charged only when the pickup is completed.",
+    readyForPickup: "Ready for pickup",
+    pickupCode: "Customer's 4-digit code",
+    completePickup: "Complete pickup",
     deliverTo: "Deliver to",
     labels: { home: "Home", work: "Work", other: "Other" },
     accept: "Accept", accepting: "Accepting", reject: "Reject", rejecting: "Rejecting",
@@ -592,6 +602,21 @@ export const strings = {
     pickupShop: (shop: string) => `Your shop pays ${shop}.`,
     pickupFloor: (floor: string) => `YGo earns at least ${floor} on a pickup order.`,
     days: (days: number) => (days === 1 ? "1 day" : `${days} days`),
+  },
+  // S38 Fulfilment switches (FUL-1, #65): the Owner's own switch for each way an order reaches the customer.
+  fulfilment: {
+    open: "Order types", title: "Order types", back: "Back", loading: "Loading order types", retry: "Try again",
+    intro: "Choose which orders customers can place with your shop. An order already placed carries on whichever way you switch.",
+    loadFailed: "Couldn't load your order types. Check your connection and try again.",
+    saveFailed: "Couldn't save that change. Check your connection and try again.",
+    modes: { instant: "Instant delivery", scheduled: "Scheduled delivery", pickup: "Pickup" },
+    notes: {
+      instant: "Delivered soon after the shop accepts.",
+      scheduled: "Delivered in a time slot the customer picks.",
+      pickup: "The customer collects at your counter and pays there. Needs a pickup rule on your rate card.",
+    },
+    forcedOff: "YGo has switched this off for your shop. Your own switch stays as you set it, and takes effect again when YGo lifts this.",
+    staffOnly: "Only the Owner changes order types.",
   },
   // S34 Shop discount (MNY-5, CRT-3, NOT-6, #63).
   shopDiscount: {

@@ -77,6 +77,7 @@ function Detail({
   const { address } = order;
   const proposal = order.proposal;
   const isAwaiting = order.status === "awaiting_customer_confirm";
+  const pickup = order.fulfilment === "pickup";
 
   return (
     <View className="gap-4">
@@ -256,7 +257,7 @@ function Detail({
           </View>
         )}
         <View className="flex-row items-center justify-between gap-3">
-          <Text className="text-body font-semibold text-text">{words.collect}</Text>
+          <Text className="text-body font-semibold text-text">{pickup ? words.collectAtCounter : words.collect}</Text>
           <View className="flex-row items-center gap-2">
             {editing && previewTotal ? (
               <>
@@ -282,11 +283,26 @@ function Detail({
           </View>
         </View>
         {editing && previewFailed && <Text className="mt-2 text-secondary text-danger">{words.previewFailed}</Text>}
-        <Text className="mt-2 text-secondary text-muted">{words.collectNote}</Text>
+        {order.pickupFee && Number(order.pickupFee) > 0 && (
+          <View className="mt-2">
+            <View className="flex-row items-center justify-between gap-3">
+              <Text className="text-body text-muted">{words.bookingFee}</Text>
+              <Text className="text-body tabular-nums text-text">{money(order.pickupFee)}</Text>
+            </View>
+            <Text className="text-secondary text-muted">{words.bookingFeeNote}</Text>
+          </View>
+        )}
+        <Text className="mt-2 text-secondary text-muted">{pickup ? words.collectCounterNote : words.collectNote}</Text>
         {editing && previewTotal?.cancelsOrder ? (
           <Text className="mt-2 text-secondary font-medium text-warning-text">{words.cancelsOrderWarning}</Text>
         ) : null}
       </View>
+      {pickup && (
+        <View>
+          <Text className="text-body font-semibold text-text">{words.pickupLabel}</Text>
+          <Text className="text-secondary text-muted">{words.pickupAt}</Text>
+        </View>
+      )}
       {address && (
         <View>
           <Text className="text-secondary text-muted">{words.deliverTo}</Text>
@@ -743,7 +759,11 @@ export default function OrderScreen() {
           {shown.status === "accepted" && <Button label={words.preparing} busy={working} onPress={() => {
             setWorking(true); void api.advanceShopOrder(shown.id, "preparing").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
           }} />}
-          {(shown.status === "preparing" || shown.status === "ready") && <View className="gap-2 rounded-card border border-border bg-surface p-4">
+          {shown.fulfilment === "pickup" && shown.status === "preparing" && <Button label={words.readyForPickup} busy={working} onPress={() => {
+            if (working) return;
+            setWorking(true); void api.readyForPickup(shown.id).then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
+          }} />}
+          {shown.fulfilment !== "pickup" && (shown.status === "preparing" || shown.status === "ready") && <View className="gap-2 rounded-card border border-border bg-surface p-4">
             <Text className="text-body font-semibold text-text">{words.assign}</Text>
             {deliverers?.ok && deliverers.data.deliverers.map((person) => <Pressable key={person.accountId} accessibilityRole="radio" accessibilityState={{ checked: delivererId === person.accountId }} onPress={() => setDelivererId(person.accountId)} className={`rounded-button border px-3 py-3 ${delivererId === person.accountId ? "border-primary" : "border-border"}`}>
               <Text className="text-body text-text">{person.name ?? words.assignOwner}{person.role === "owner" ? ` · ${words.assignOwner}` : ""}</Text>
@@ -754,6 +774,17 @@ export default function OrderScreen() {
               setWorking(true); void api.readyShopOrder(shown.id, { accountId: delivererId }).then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });
             }} />
           </View>}
+        </View>}
+        {shown && shown.fulfilment === "pickup" && shown.status === "ready" && !editing && <View className="gap-2 rounded-card border border-border bg-surface p-4">
+          <Text className="text-body font-semibold text-text">{words.pickupCode}</Text>
+          <TextInput accessibilityLabel={words.pickupCode} keyboardType="number-pad" maxLength={4} value={handoverCode} onChangeText={setHandoverCode} className="rounded-input border border-border-strong bg-bg px-3 py-3 text-title text-text" />
+          <Text className="text-body font-semibold text-text">{words.payment}</Text>
+          <View className="flex-row gap-2"><Button label={words.cash} variant={payment === "cash" ? "primary" : "secondary"} onPress={() => setPayment("cash")} /><Button label={words.upi} variant={payment === "upi" ? "primary" : "secondary"} onPress={() => setPayment("upi")} /></View>
+          {payment === "upi" && shown.shopUpiId && <Button label={words.showQr} variant="secondary" onPress={() => setShowQr(true)} />}
+          <Button label={words.completePickup} disabled={handoverCode.length !== 4} busy={working} onPress={() => {
+            if (working) return;
+            setWorking(true); void api.completePickup(shown.id, { handoverCode, payment }).then((result) => { setWorking(false); if (result.ok) router.replace("/orders"); else setDeliveryMessage(strings.errors[result.code]); });
+          }} />
         </View>}
         {shown && shown.delivererId === accountId && shown.status === "ready" && <Button label={words.outForDelivery} busy={working} onPress={() => {
           setWorking(true); void api.advanceShopOrder(shown.id, "out-for-delivery").then((result) => { setWorking(false); if (result.ok) void order.refresh(); else setDeliveryMessage(strings.errors[result.code]); });

@@ -535,6 +535,20 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-open", body: { open: false } });
   });
 
+  it("reads and sets the fulfilment switches and runs a pickup at the counter (#65)", async () => {
+    const modes = { modes: [{ mode: "pickup", shopOn: true, adminForcedOff: false, open: true }] };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, modes));
+    await client.verifyCode(signIn);
+    expect(await client.fulfilmentModes()).toEqual({ ok: true, data: modes });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/fulfilment-modes" });
+    expect(await client.setFulfilmentMode("pickup", true)).toEqual({ ok: true, data: modes });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/fulfilment-modes/pickup", body: { on: true } });
+    await client.readyForPickup("a/b");
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-orders/a%2Fb/ready-for-pickup" });
+    await client.completePickup("a/b", { handoverCode: "1234", payment: "cash" });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-orders/a%2Fb/picked-up", body: { handoverCode: "1234", payment: "cash" } });
+  });
+
   it("reads, adds, edits and removes the Owner's holidays (#382)", async () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
     const list = { upcoming: [{ id, starts: "2030-01-05", ends: "2030-01-06" }], past: [] };

@@ -30,6 +30,9 @@ import {
   type RejectOrderBody,
   type AssignDelivererBody,
   type CompleteDeliveryBody,
+  type CompletePickupBody,
+  type FulfilmentMode,
+  FulfilmentModesResponse,
   type DeliveryPhotoUploadBody,
   type ProofExceptionBody,
   type FailDeliveryBody,
@@ -657,6 +660,26 @@ export function createApiClient({
 
     async completeDelivery(id: string, body: CompleteDeliveryBody): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/delivered`, body), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/ready-for-pickup`: a pickup is ready at the counter; the Customer then sees its code (FUL-7, #65). */
+    async readyForPickup(id: string): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/ready-for-pickup`), ShopOrderResponse);
+    },
+
+    /** `POST /v1/me/shop-orders/:id/picked-up`: completes a pickup at the counter with the Customer's code and the payment taken (FUL-7, #65). */
+    async completePickup(id: string, body: CompletePickupBody): Promise<ApiResult<ShopOrderResponse>> {
+      return result(await signedIn("POST", `/v1/me/shop-orders/${encodeURIComponent(id)}/picked-up`, body), ShopOrderResponse);
+    },
+
+    /** `GET /v1/me/fulfilment-modes`: the shop's instant, scheduled and pickup switches, and whether each is open (FUL-1, #65). */
+    async fulfilmentModes(): Promise<ApiResult<FulfilmentModesResponse>> {
+      return result(await signedIn("GET", "/v1/me/fulfilment-modes"), FulfilmentModesResponse);
+    },
+
+    /** `PUT /v1/me/fulfilment-modes/:mode`: the Owner switches one mode; PICKUP_NOT_CONFIGURED when pickup has no rule on the rate card (#65). */
+    async setFulfilmentMode(mode: FulfilmentMode, on: boolean): Promise<ApiResult<FulfilmentModesResponse>> {
+      return result(await signedIn("PUT", `/v1/me/fulfilment-modes/${mode}`, { on }), FulfilmentModesResponse);
     },
 
     async completeDeliveryProofException(id: string, body: ProofExceptionBody): Promise<ApiResult<ShopOrderResponse>> {

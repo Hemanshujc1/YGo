@@ -17,6 +17,7 @@ import { Areas } from "./areas";
 import { Categories } from "./categories";
 import { CatalogImport } from "./catalog-import";
 import { CounterBills } from "./counter-bills";
+import { FulfilmentModes } from "./fulfilment-modes";
 import { SearchTerms } from "./search-terms";
 import { PriceSimulator } from "./price-simulator";
 import { ProductRequests } from "./product-requests";
@@ -476,6 +477,14 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: counterBillsLoader,
       element: <Page protectedArea api={api}><CounterBills api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.counterBillsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    // One shop's fulfilment modes and Admin's force-off; Admin only, as the server is (#65).
+    guarded({
+      path: "/applications/:id/fulfilment",
+      loader: applicationLoader,
+      element: <Page protectedArea api={api}><FulfilmentModes api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.fulfilmentLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

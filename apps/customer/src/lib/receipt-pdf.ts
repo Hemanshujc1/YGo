@@ -63,6 +63,7 @@ ${sum(words.items, receipt.productValue)}
 ${discount ? row(`${words.shopDiscount}<br><span class="muted">${escapeHtml(offerText(discount.offer))}</span>`, discountText(discount.amount)) : ""}
 ${some(receipt.deliveryFee) ? sum(words.deliveryFee, receipt.deliveryFee) : ""}
 ${receipt.smallCartFee && some(receipt.smallCartFee) ? sum(words.smallCartFee, receipt.smallCartFee) : ""}
+${receipt.pickupFee && some(receipt.pickupFee) ? sum(words.bookingFee, receipt.pickupFee) : ""}
 <p class="total"><span>${words.total}</span><span>${money(receipt.total)}</span></p>
 </div>
 ${receipt.payment ? `<p class="paid">${words.paidBy(words.payments[receipt.payment])}</p>` : ""}

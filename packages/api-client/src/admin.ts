@@ -45,6 +45,9 @@ import {
   OnboardingFee,
   BelowFloorException,
   BelowFloorExceptionsResponse,
+  type ForceFulfilmentModeBody,
+  type FulfilmentMode,
+  FulfilmentModesResponse,
   VisitPhotoUpload,
   VisitPhotoAccess,
   type CreateVisitPhotoUploadBody,
@@ -127,7 +130,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | ForceFulfilmentModeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -362,6 +365,16 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/product-requests/:id/reject`: with a reason; `excludedGood` also takes the product off the shop's counter list (D-9). */
     async rejectProductRequest(id: string, body: RejectProductRequestBody): Promise<ApiResult<AdminProductRequest>> {
       return result(await adminRequest("POST", `/v1/admin/product-requests/${encodeURIComponent(id)}/reject`, body), AdminProductRequest);
+    },
+
+    /** `GET /v1/admin/shops/:id/fulfilment-modes`: one shop's modes with its own switch and Admin's force-off (FUL-1, #65). */
+    async shopFulfilmentModes(shopId: string): Promise<ApiResult<FulfilmentModesResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/shops/${encodeURIComponent(shopId)}/fulfilment-modes`), FulfilmentModesResponse);
+    },
+
+    /** `PUT /v1/admin/shops/:id/fulfilment-modes/:mode`: forces a mode off or lifts it; the shop's own switch is not changed (#65). */
+    async forceFulfilmentMode(shopId: string, mode: FulfilmentMode, forcedOff: boolean): Promise<ApiResult<FulfilmentModesResponse>> {
+      return result(await adminRequest("PUT", `/v1/admin/shops/${encodeURIComponent(shopId)}/fulfilment-modes/${mode}`, { forcedOff }), FulfilmentModesResponse);
     },
 
     /** `GET /v1/admin/orders/below-floor-exceptions`: A30, one page of Open or Reviewed below-floor contribution exceptions with shop counts (MNY-4, ADM-7). */
