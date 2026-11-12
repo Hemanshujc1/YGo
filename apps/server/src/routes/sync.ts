@@ -2,7 +2,10 @@ import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesRespons
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
+import type { DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { applyCounterBill } from "../counter-bills";
+import { deliveryActions } from "../delivery-actions";
+import { applyOfflineDelivery, preparePhotos } from "../offline-delivery";
 import { withTransaction } from "../db";
 import { applyStockChange } from "../stock-changes";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -10,10 +13,11 @@ import { applyOpeningStock, applyOpeningStockCorrection, counterCatalogSql } fro
 
 const openingTypes = new Set(["opening_stock", "opening_stock_correction"]);
 
-type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number };
+type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number };
 
-export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds }: Options) {
+export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: Options) {
   const auth = { pool, clock, keys: deriveKeys(secret) };
+  const deliveries = deliveryActions({ secret, photos, failureWaitSeconds, photoSaveTimeoutMs });
   app.get("/v1/sync/access", { schema: { response: { 200: SyncAccessResponse, 401: ErrorEnvelope } } }, async (request, reply) => {
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
@@ -76,6 +80,8 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const body = request.body as SyncActionsBody;
+    // Proof photos are saved first, outside the transaction, so slow storage cannot hold the locks taken below (#616).
+    const prepared = photos ? await preparePhotos(pool, deliveries, body.actions.filter((a) => a.type.startsWith("delivery_")), { accountId: who.accountId, now: clock.now(), maxAgeSeconds }) : new Map();
     return withTransaction(pool, async (client) => {
       // Also serializes reused action IDs arriving on different devices of this account.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [who.accountId]);
@@ -85,6 +91,8 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       const now = clock.now();
       await client.query("DELETE FROM sync_actions WHERE account_id = $1 AND created_at < $2", [who.accountId, new Date(now.getTime() - 30 * 86400_000)]);
       const results: SyncActionResult[] = [];
+      // Delivery photos used by this batch are removed once it has committed, not while their rows are locked.
+      const cleanup: { orderId: string; uploadId: string }[] = [];
       for (const action of body.actions) {
         // Access is checked even for replays; neither an ID nor a device grants shop access.
         const shop = await client.query<{ state: string; role: string }>(`SELECT s.state, m.role FROM shops s JOIN shop_members m ON m.shop_id = s.id
@@ -142,6 +150,14 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
             if ("code" in bill) result.code = bill.code;
             else { result.status = "applied"; result.result = bill.result; }
           }
+        } else if (action.type.startsWith("delivery_")) {
+          // The assigned deliverer's offline delivery (#616, DLV-3), rechecked here with the online rules.
+          const outcome = await applyOfflineDelivery(client, deliveries, action, { accountId: who.accountId, now, maxAgeSeconds, clockSuspect, prepared, cleanup });
+          result.status = outcome.status;
+          result.clockSuspect = outcome.clockSuspect;
+          if (outcome.status === "applied") result.result = outcome.result; else result.code = outcome.code;
+          // Not answered yet (storage was busy): not recorded, so the phone sends it again.
+          if (outcome.status === "retry") { results.push(result); continue; }
         } else if (shop.rows[0].role !== "owner") result.code = "NOT_FOUND";
         else if (!openingTypes.has(action.type) || !payload.success) result.code = "VALIDATION_FAILED";
         else if (shop.rows[0].state !== "approved" && shop.rows[0].state !== "live") result.code = "SHOP_LISTING_NOT_READY";
@@ -161,12 +177,13 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
           }
         }
         await client.query(`INSERT INTO sync_actions (account_id, action_id, device_id, sequence, action, result, clock_suspect, created_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [who.accountId, action.id, body.deviceId, action.sequence, JSON.stringify(action), JSON.stringify(result), clockSuspect, now]);
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [who.accountId, action.id, body.deviceId, action.sequence, JSON.stringify(action), JSON.stringify(result), result.clockSuspect, now]);
         sequence = action.sequence;
         results.push(result);
       }
       await client.query("UPDATE sync_devices SET sequence = $3 WHERE account_id = $1 AND device_id = $2", [who.accountId, body.deviceId, sequence]);
       await client.query("COMMIT");
+      for (const used of cleanup) await deliveries.removeUpload(pool, used.orderId, who.accountId, used.uploadId);
       return reply.send({ results });
     });
   });

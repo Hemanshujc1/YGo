@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ShopState } from "./shops";
 import { BillAmount, CounterBillName, PackQuantity, Phone, ShopPrice } from "./fields";
 import { BaseUnitQuantity, SignedBaseUnitQuantity, OpeningStockResponse } from "./shop-listings";
+import { CompleteDeliveryBody, FailDeliveryBody, OrderStatus, ProofExceptionBody } from "./orders";
 
 /**
  * Explicit access result: only an authenticated absence/closure ends cached access.
@@ -95,6 +96,20 @@ export function counterBillReference(actionId: string): string {
   return `${hex.slice(0, 4)}-${hex.slice(4, 8)}`;
 }
 
+/**
+ * The deliverer's offline actions (#616, DLV-3). Each names the order and carries its online body; the photo is uploaded first and named by `photoUploadId`.
+ * The server runs the same rules as the online routes when the phone reconnects, so a code is checked then, not on the phone.
+ */
+const DeliveryOrder = { orderId: z.uuid() };
+export const DELIVERY_ACTION_TYPES = ["delivery_call_attempt", "delivery_complete", "delivery_proof_exception", "delivery_failed"] as const;
+export const DeliveryCallAttemptPayload = z.strictObject(DeliveryOrder);
+export const DeliveryCompletePayload = z.strictObject({ ...DeliveryOrder, ...CompleteDeliveryBody.shape });
+export const DeliveryProofExceptionPayload = z.strictObject({ ...DeliveryOrder, ...ProofExceptionBody.shape });
+export const DeliveryFailedPayload = z.strictObject({ ...DeliveryOrder, ...FailDeliveryBody.shape });
+/** What a delivery action did: the order and where it now stands. */
+export const DeliveryActionResponse = z.strictObject({ orderId: z.uuid(), status: OrderStatus });
+export type DeliveryActionResponse = z.infer<typeof DeliveryActionResponse>;
+
 export const SyncAction = z.strictObject({
   id: z.uuid(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), shopId: z.uuid(),
   type: z.string().min(1).max(80), payload: z.unknown(), createdAt: z.iso.datetime(), clockSuspect: z.boolean(),
@@ -105,11 +120,14 @@ export const SyncActionsBody = z.strictObject({
 export const SyncActionCode = z.enum([
   "VALIDATION_FAILED", "NOT_FOUND", "SHOP_LISTING_NOT_READY", "OPENING_STOCK_ALREADY_RECORDED",
   "OPENING_STOCK_NOT_RECORDED", "ACTION_TOO_OLD", "SEQUENCE_MISSING", "ACTION_CONFLICT", "SHOP_NOT_BILLING",
+  // Delivery actions (#616): a refusal leaves the order where it was and is shown to the shop and Admin.
+  "ORDER_STATUS_CHANGED", "HANDOVER_CODE_WRONG", "HANDOVER_CODE_LOCKED", "DELIVERY_PHOTO_INVALID", "ITEM_CHECK_WAIT",
+  "PROOF_EXCEPTION_CALL_REQUIRED", "DELIVERY_FAILURE_CALL_REQUIRED", "DELIVERY_FAILURE_WAIT", "DELIVERY_CLOCK_SUSPECT", "UNAVAILABLE",
 ]);
 export type SyncActionCode = z.infer<typeof SyncActionCode>;
 export const SyncActionResult = z.strictObject({
   actionId: z.uuid(), sequence: z.number().int().positive(), status: z.enum(["applied", "rejected", "retry"]),
-  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse, StockChangeResponse, CounterBillResponse]).nullable(), clockSuspect: z.boolean(),
+  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse, StockChangeResponse, CounterBillResponse, DeliveryActionResponse]).nullable(), clockSuspect: z.boolean(),
 }).refine((row) => row.status === "applied" ? row.code === null && row.result !== null : row.code !== null && row.result === null);
 export const SyncActionsResponse = z.strictObject({ results: z.array(SyncActionResult) });
 export type SyncAction = z.infer<typeof SyncAction>;

@@ -100,6 +100,9 @@ export async function adminOrderDetail(db: Db, areaManagerId: string | null, id:
     `SELECT ${iso("x.created_at")} AS at, a.name AS "adminName", x.from_status AS "from", x.to_status AS "to", x.reason
      FROM admin_actions x LEFT JOIN accounts a ON a.id = x.actor_id
      WHERE x.target_type = 'order' AND x.target_id = $1 AND x.action = 'order.force_transition' ORDER BY x.created_at, x.id`, [id]);
+  // Offline deliveries the server refused or held: Admin settles them with a forced move (#616).
+  const { rows: issues } = await db.query<{ action: string; code: string; at: Date; clockSuspect: boolean }>(
+    'SELECT action, code, created_at AS at, clock_suspect AS "clockSuspect" FROM offline_delivery_issues WHERE order_id = $1 ORDER BY created_at, action_id', [id]);
   const { quote, delivererName, productValue, shopDiscount, deliveryFee, smallCartFee, pickupFee, ...order } = row;
   const breakdown = AdminOrderBreakdown.safeParse(quote);
   return {
@@ -108,6 +111,7 @@ export async function adminOrderDetail(db: Db, areaManagerId: string | null, id:
     money: { productValue, shopDiscount, deliveryFee, smallCartFee, pickupFee, total: order.total },
     breakdown: breakdown.success ? breakdown.data : null,
     timeline,
+    offlineDeliveryIssues: issues.map((issue) => ({ ...issue, at: issue.at.toISOString() })),
     forcedActions: areaManagerId === null ? forcedActions : [],
     people: { customerName: order.customerName, delivererName },
     forcedMoves: forcedMovesFor(order.status, order.fulfilment),

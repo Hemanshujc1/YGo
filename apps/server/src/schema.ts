@@ -1017,6 +1017,19 @@ export const syncActions = pgTable("sync_actions", {
 }, (table) => [uniqueIndex("sync_actions_identity_idx").on(table.accountId, table.actionId),
   uniqueIndex("sync_actions_sequence_idx").on(table.accountId, table.deviceId, table.sequence)]);
 
+// A delivery made offline that the server refused or held (#616). The order's screen shows the latest while it is still Arrived,
+// and Admin's A15 lists them; nothing is discarded, and Admin settles one with a forced transition.
+export const offlineDeliveryIssues = pgTable("offline_delivery_issues", {
+  actionId: uuid("action_id").notNull(),
+  // No foreign key: orders are never deleted, and the order's append-only guard must stay the only thing a TRUNCATE meets.
+  orderId: uuid("order_id").notNull(),
+  accountId: uuid("account_id").notNull(),
+  action: text("action").notNull(),
+  code: text("code").notNull(),
+  clockSuspect: boolean("clock_suspect").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [primaryKey({ columns: [table.accountId, table.actionId] }), index("offline_delivery_issues_order_idx").on(table.orderId, table.createdAt)]);
+
 // Cursor revisions are allocated under the shop row lock, never from a sequence.
 export const stockSyncShops = pgTable("stock_sync_shops", {
   shopId: uuid("shop_id").primaryKey().references(() => shops.id),

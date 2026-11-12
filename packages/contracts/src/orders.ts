@@ -238,6 +238,8 @@ export const ShopOrderSummary = z.strictObject({
   confirmByAt: z.iso.datetime().nullable(),
   /** The Customer has asked to cancel and the shop has not answered. */
   cancelAsked: z.boolean(),
+  /** An offline delivery of this Arrived order was refused or held and still needs the shop's attention (#616). Optional so older fixtures and servers still parse. */
+  offlineDeliveryIssue: z.boolean().optional(),
   itemCount: z.number().int().positive(),
   total: Amount,
   fulfilment: Fulfilment,
@@ -257,6 +259,8 @@ export type ShopOrderSummary = z.infer<typeof ShopOrderSummary>;
 export const ShopOrdersResponse = z.strictObject({
   now: z.iso.datetime(),
   canDeliver: z.boolean(),
+  /** How many of the shop's orders have `offlineDeliveryIssue`, for the attention count (#616). */
+  offlineDeliveryIssueCount: z.number().int().nonnegative().optional(),
   new: z.array(ShopOrderSummary),
   accepted: z.array(ShopOrderSummary),
   doneToday: z.array(ShopOrderSummary),
@@ -265,6 +269,10 @@ export const ShopOrdersResponse = z.strictObject({
 export type ShopOrdersResponse = z.infer<typeof ShopOrdersResponse>;
 
 /** S05: one of the shop's orders, as it was frozen. The Customer's name for the shop and the deliverer; the phone only for the assigned deliverer (DLV-7). */
+/** An offline delivery action the server refused or held (#616). `action` and `code` are the sync action type and its refusal; they stay on the order until it is settled. */
+export const OfflineDeliveryIssue = z.strictObject({ action: z.string(), code: z.string(), at: z.iso.datetime(), clockSuspect: z.boolean() });
+export type OfflineDeliveryIssue = z.infer<typeof OfflineDeliveryIssue>;
+
 export const ShopOrderResponse = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
@@ -291,6 +299,8 @@ export const ShopOrderResponse = z.strictObject({
   confirmByAt: z.iso.datetime().nullable(),
   proposal: OrderProposal.nullable(),
   cancelRequest: CancelRequest.nullable(),
+  /** The latest offline delivery the server did not accept, while the order is still Arrived (#616). */
+  offlineDeliveryIssue: OfflineDeliveryIssue.nullable().optional(),
 });
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
 

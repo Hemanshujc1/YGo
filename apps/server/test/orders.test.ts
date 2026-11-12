@@ -13,6 +13,7 @@ import { createLocalPushSender, type PushResult, type PushSender, type ReceiptRe
 import { checkPushReceipts, sendDuePushes } from "../src/notifications";
 import { cleanupDeliveryProofs, cleanupDeliveryUploads, runJob } from "../src/jobs";
 import { setOrderTiming } from "../src/order-timing";
+import { adminOrderDetail } from "../src/admin-orders";
 import { canMove } from "../src/orders";
 import { createTestDatabase } from "./test-database";
 
@@ -31,7 +32,7 @@ let other: { authorization: string };
 const codeFor = (email: string) => mailer.sent.findLast((sent) => sent.to === email)?.text.match(/code is (\d{6})/)?.[1];
 const deliveryPhotos = {
   createUpload: async () => ({ id: randomUUID(), uploadUrl: "https://upload.example.test/photo" }),
-  save: async (orderId: string, _accountId: string, id: string) => { savedProofs.push(id); return `delivery-proofs/${orderId}/${id}.jpg`; },
+  save: async (orderId: string, _accountId: string, id: string) => { await duringSave?.(); savedProofs.push(id); return `delivery-proofs/${orderId}/${id}.jpg`; },
   deleteUpload: async (_orderId: string, _accountId: string, id: string) => { deletedUploads.push(id); },
   deleteProof: async () => {},
   deleteStagedProof: async () => {},
@@ -39,6 +40,8 @@ const deliveryPhotos = {
 } as DeliveryPhotoStorage;
 const deletedUploads: string[] = [];
 const savedProofs: string[] = [];
+/** Runs inside the photo save, to see what the server holds at that moment (#616). */
+let duringSave: (() => Promise<void>) | undefined;
 
 async function signIn(path: string, email: string) {
   await app.inject({ method: "POST", url: `${path}/code`, payload: { email } });
@@ -55,6 +58,7 @@ beforeEach(async () => {
   mailer.sent.length = 0;
   deletedUploads.length = 0;
   savedProofs.length = 0;
+  duringSave = undefined;
   app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, deliveryPhotos, deliveryPhotoSaveTimeoutMs: 300 });
   admin = await signIn("/v1/admin/auth", adminEmail);
   customer = await signIn("/v1/auth", "customer@example.com");
@@ -643,7 +647,7 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
     expect(listed.new).toEqual([{
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:11:00.000Z", expiresAt: "2030-01-01T00:21:00.000Z",
       itemCount: 1, total: "435.00", fulfilment: "delivery", address: { flat: "Flat 4B", areaLine: "Kothrud" },
-      delivererId: null, confirmByAt: null, cancelAsked: false,
+      delivererId: null, confirmByAt: null, cancelAsked: false, offlineDeliveryIssue: false,
     }]);
     expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
     expect(listed.doneToday?.map((row) => row.id)).toEqual([rejected.id, cancelled.id]);
@@ -1030,6 +1034,201 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       .find((pack) => pack.listingId === dal)?.outOfStock).toBe(false);
     expect((await database.pool.query("SELECT 1 FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rowCount).toBe(0);
     expect(await left(dal)).toBe("10");
+  });
+
+  describe("offline delivery in sync (#616, DLV-3)", () => {
+    type Queued = { type: string; payload: unknown; createdAt?: string; clockSuspect?: boolean; id?: string; sequence?: number };
+    function syncer(owner: Record<string, string>, shopId: string) {
+      const deviceId = randomUUID();
+      let sequence = 0;
+      return async (...actions: Queued[]) => {
+        const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: owner, payload: { deviceId, sentAt: clock.now().toISOString(),
+          actions: actions.map((a) => ({ id: a.id ?? randomUUID(), sequence: a.sequence ?? ++sequence, shopId, type: a.type, payload: a.payload,
+            createdAt: a.createdAt ?? clock.now().toISOString(), clockSuspect: a.clockSuspect ?? false })) } });
+        expect(response.statusCode).toBe(200);
+        return response.json().results as Array<{ status: string; code: string | null; result: { status?: string } | null }>;
+      };
+    }
+    const status = async (orderId: string) => (await database.pool.query<{ status: string }>("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status;
+    const issues = async (orderId: string) => (await database.pool.query<{ action: string; code: string; clock_suspect: boolean }>(
+      "SELECT action, code, clock_suspect FROM offline_delivery_issues WHERE order_id = $1 ORDER BY created_at", [orderId])).rows;
+
+    it("completes a delivery on reconnect, replays it unchanged, and leaves the customer's order unchanged until then", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      expect(await status(orderId)).toBe("arrived");
+      const send = syncer(owner, shopId);
+      const action = { id: randomUUID(), type: "delivery_complete", payload: { orderId, handoverCode: code, payment: "upi", photoUploadId: upload.id } };
+      const [first] = await send(action);
+      expect(first).toMatchObject({ status: "applied", code: null, result: { orderId, status: "delivered" } });
+      expect(await status(orderId)).toBe("delivered");
+      expect(deletedUploads).toContain(upload.id);
+      expect((await database.pool.query("SELECT quantity FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rows).toEqual([{ quantity: "-1.000" }]);
+      const [again] = await send({ ...action, sequence: 1 });
+      expect(again).toEqual(first);
+      expect(await issues(orderId)).toEqual([]);
+    });
+
+    it("refuses a wrong code on reconnect, leaves the order Arrived, counts the try, and shows the shop and Admin", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+      const upload = await photo(orderId, owner);
+      const [wrong] = await syncer(owner, shopId)({ type: "delivery_complete", payload: { orderId, handoverCode: "0000", payment: "cash", photoUploadId: upload.id } });
+      expect(wrong).toMatchObject({ status: "rejected", code: expect.stringMatching(/^HANDOVER_CODE_(WRONG|LOCKED)$/) });
+      expect(await status(orderId)).toBe("arrived");
+      expect((await database.pool.query("SELECT handover_code_attempts FROM orders WHERE id = $1", [orderId])).rows[0]?.handover_code_attempts).toBe(1);
+      expect(await issues(orderId)).toEqual([{ action: "delivery_complete", code: wrong?.code, clock_suspect: false }]);
+      const view = (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner })).json();
+      expect(view).toMatchObject({ status: "arrived", offlineDeliveryIssue: { action: "delivery_complete", code: wrong?.code } });
+      const detail = await adminOrderDetail(database.pool, null, orderId, clock.now());
+      expect(detail?.offlineDeliveryIssues).toMatchObject([{ action: "delivery_complete", code: wrong?.code }]);
+      // The list shows which orders need attention, and how many (#616).
+      const list = (await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: owner })).json();
+      expect(list.offlineDeliveryIssueCount).toBe(1);
+      expect(list.accepted.map((o: { id: string; offlineDeliveryIssue: boolean }) => [o.id, o.offlineDeliveryIssue])).toEqual([[orderId, true]]);
+    });
+
+    it("keeps a delivery older than the server's bound, shows it, and lets the order be settled by Admin", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const upload = await photo(orderId, owner);
+      const [old] = await syncer(owner, shopId)({ type: "delivery_proof_exception", createdAt: "2029-12-20T00:00:00.000Z",
+        payload: { orderId, reason: "other", payment: "cash", photoUploadId: upload.id } });
+      expect(old).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD" });
+      expect(await status(orderId)).toBe("arrived");
+      expect(await issues(orderId)).toMatchObject([{ action: "delivery_proof_exception", code: "ACTION_TOO_OLD" }]);
+      const forced = await app.inject({ method: "POST", url: `/v1/admin/orders/${orderId}/force-transition`, headers: admin, payload: { from: "arrived", to: "delivery_failed", reason: "Deliverer confirmed the handover failed" } });
+      expect(forced.statusCode).toBe(200);
+      const view = (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner })).json();
+      expect(view).toMatchObject({ status: "delivery_failed", offlineDeliveryIssue: null });
+      const list = (await app.inject({ method: "GET", url: "/v1/me/shop-orders", headers: owner })).json();
+      expect(list.offlineDeliveryIssueCount).toBe(0);
+      expect(list.doneToday.map((o: { offlineDeliveryIssue: boolean }) => o.offlineDeliveryIssue)).toEqual([false]);
+    });
+
+    it("measures an action's age on the server's clock, so a phone with its clock set back cannot get past the bound", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      // The phone's clock is set back: sentAt and createdAt agree with each other, but the server's clock is current.
+      const back = "2029-12-01T00:00:00.000Z";
+      const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: owner, payload: { deviceId: randomUUID(), sentAt: back,
+        actions: [{ id: randomUUID(), sequence: 1, shopId, type: "delivery_complete", createdAt: back, clockSuspect: false,
+          payload: { orderId, handoverCode: code, payment: "upi", photoUploadId: upload.id } }] } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD", clockSuspect: true });
+      expect(await status(orderId)).toBe("arrived");
+      expect(savedProofs).toEqual([]);
+      expect((await database.pool.query("SELECT 1 FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rowCount).toBe(0);
+      expect(await issues(orderId)).toMatchObject([{ action: "delivery_complete", code: "ACTION_TOO_OLD", clock_suspect: true }]);
+    });
+
+    it("applies a proof exception after a call attempt, and refuses it without one", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+      const send = syncer(owner, shopId);
+      const body = async () => ({ orderId, reason: "customer_phone_unavailable", payment: "cash", photoUploadId: (await photo(orderId, owner)).id });
+      expect((await send({ type: "delivery_proof_exception", payload: await body() }))[0]).toMatchObject({ status: "rejected", code: "PROOF_EXCEPTION_CALL_REQUIRED" });
+      const [called, done] = await send({ type: "delivery_call_attempt", payload: { orderId } }, { type: "delivery_proof_exception", payload: await body() });
+      expect(called).toMatchObject({ status: "applied", result: { status: "arrived" } });
+      expect(done).toMatchObject({ status: "applied", result: { status: "delivered" } });
+      expect((await database.pool.query("SELECT proof_exception FROM orders WHERE id = $1", [orderId])).rows[0]?.proof_exception).toBe(true);
+    });
+
+    it("closes a failed delivery only when the phone's own times show the wait, and holds a doubted clock for review", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const send = syncer(owner, shopId);
+      const failure = async (createdAt: string, clockSuspect = false) => ({ type: "delivery_failed", createdAt, clockSuspect,
+        payload: { orderId, reason: "no_one_at_address", photoUploadId: (await photo(orderId, owner)).id } });
+      at("2030-01-01T00:10:00.000Z");
+      const [called, early] = await send({ type: "delivery_call_attempt", createdAt: "2030-01-01T00:00:00.000Z", payload: { orderId } }, await failure("2030-01-01T00:01:00.000Z"));
+      expect(called).toMatchObject({ status: "applied" });
+      expect(early).toMatchObject({ status: "rejected", code: "DELIVERY_FAILURE_WAIT" });
+      const [held] = await send(await failure("2030-01-01T00:05:00.000Z", true));
+      expect(held).toMatchObject({ status: "rejected", code: "DELIVERY_CLOCK_SUSPECT" });
+      expect(await status(orderId)).toBe("arrived");
+      expect(await issues(orderId)).toMatchObject([{ code: "DELIVERY_FAILURE_WAIT" }, { code: "DELIVERY_CLOCK_SUSPECT", clock_suspect: true }]);
+      const [failed] = await send(await failure("2030-01-01T00:05:00.000Z"));
+      expect(failed).toMatchObject({ status: "applied", result: { status: "delivery_failed" } });
+      expect((await database.pool.query("SELECT 1 FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rowCount).toBe(0);
+    });
+
+    it("holds a failed delivery whose call attempt came from a doubted clock", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const send = syncer(owner, shopId);
+      at("2030-01-01T00:10:00.000Z");
+      const [called, held] = await send({ type: "delivery_call_attempt", createdAt: "2029-12-31T23:00:00.000Z", clockSuspect: true, payload: { orderId } },
+        { type: "delivery_failed", createdAt: "2030-01-01T00:09:00.000Z", payload: { orderId, reason: "customer_refused", photoUploadId: (await photo(orderId, owner)).id } });
+      expect(called).toMatchObject({ status: "applied", clockSuspect: true });
+      expect(held).toMatchObject({ status: "rejected", code: "DELIVERY_CLOCK_SUSPECT" });
+      expect(await status(orderId)).toBe("arrived");
+      // The failure's own clock was fine; the doubt came from its call attempt, and that is what is stored and shown.
+      expect(held).toMatchObject({ clockSuspect: true });
+      expect(await issues(orderId)).toMatchObject([{ code: "DELIVERY_CLOCK_SUSPECT", clock_suspect: true }]);
+      const view = (await app.inject({ method: "GET", url: `/v1/me/shop-orders/${orderId}`, headers: owner })).json();
+      expect(view.offlineDeliveryIssue).toMatchObject({ code: "DELIVERY_CLOCK_SUSPECT", clockSuspect: true });
+      expect((await database.pool.query("SELECT clock_suspect FROM sync_actions WHERE action_id = $1", [(await database.pool.query("SELECT action_id FROM sync_actions ORDER BY sequence DESC LIMIT 1")).rows[0].action_id])).rows).toEqual([{ clock_suspect: true }]);
+    });
+
+    it("saves the proof photo before the batch's transaction, so slow storage holds no account, shop or order lock", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
+      const upload = await photo(orderId, owner);
+      const accountId = (await database.pool.query<{ account_id: string }>("SELECT account_id FROM shop_members WHERE shop_id = $1 AND role = 'owner'", [shopId])).rows[0]?.account_id;
+      const held: string[] = [];
+      duringSave = async () => {
+        const client = await database.pool.connect();
+        try {
+          await client.query("BEGIN");
+          for (const [name, query] of [["shop", "SELECT 1 FROM shops WHERE id = $1 FOR UPDATE NOWAIT"], ["order", "SELECT 1 FROM orders WHERE id = $1 FOR UPDATE NOWAIT"]] as const) {
+            try { await client.query(query, [name === "shop" ? shopId : orderId]); } catch { held.push(name); }
+          }
+          const { rows: [lock] } = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS free", [accountId]);
+          if (!lock.free) held.push("account");
+        } finally { await client.query("ROLLBACK"); client.release(); }
+      };
+      const [done] = await syncer(owner, shopId)({ type: "delivery_complete", payload: { orderId, handoverCode: "0000", payment: "cash", photoUploadId: upload.id } });
+      expect(savedProofs).toContain(upload.id);
+      expect(held).toEqual([]);
+      expect(done).toMatchObject({ status: "rejected" });
+    });
+
+    it("asks the phone to send a delivery again when storage fails, recording nothing and keeping the sequence", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      const send = syncer(owner, shopId);
+      const action = { id: randomUUID(), sequence: 1, type: "delivery_complete", payload: { orderId, handoverCode: code, payment: "upi", photoUploadId: upload.id } };
+      duringSave = async () => { throw new Error("storage down"); };
+      expect((await send(action))[0]).toMatchObject({ status: "retry", code: "UNAVAILABLE" });
+      expect(await status(orderId)).toBe("arrived");
+      expect((await database.pool.query("SELECT 1 FROM sync_actions WHERE action_id = $1", [action.id])).rowCount).toBe(0);
+      duringSave = undefined;
+      expect((await send(action))[0]).toMatchObject({ status: "applied", result: { status: "delivered" } });
+      expect((await send(action))[0]).toMatchObject({ status: "applied", result: { status: "delivered" } });
+      expect(savedProofs.filter((id) => id === upload.id)).toHaveLength(1);
+    });
+
+    it("refuses another member's order and a delivery the order has moved past", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const staff = await staffOf(shopId);
+      const upload = await photo(orderId, owner);
+      const payload = { orderId, handoverCode: "1234", payment: "cash", photoUploadId: upload.id };
+      expect((await syncer(staff, shopId)({ type: "delivery_complete", payload }))[0]).toMatchObject({ status: "rejected", code: "NOT_FOUND" });
+      await database.pool.query("UPDATE orders SET status = 'out_for_delivery' WHERE id = $1", [orderId]);
+      expect((await syncer(owner, shopId)({ type: "delivery_call_attempt", payload: { orderId } }))[0]).toMatchObject({ status: "rejected", code: "ORDER_STATUS_CHANGED" });
+      expect((await syncer(owner, shopId)({ type: "delivery_other", payload: {} }))[0]).toMatchObject({ status: "rejected", code: "VALIDATION_FAILED" });
+    });
   });
 
   it("closes a failed delivery for a Customer with no phone number once the attempt is recorded without a call (#523)", async () => {
