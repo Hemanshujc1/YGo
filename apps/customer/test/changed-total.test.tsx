@@ -141,8 +141,15 @@ vi.mock("@ygo/mobile", async () => {
       ),
     Confirm: () => null,
     StatusChip: ({ word }: { word: string }) => createElement("span", null, word),
-    Text: ({ children, className }: { children?: ReactNode; className?: string }) =>
-      createElement("span", { className }, children),
+    Text: ({
+      children,
+      className,
+      numberOfLines,
+    }: {
+      children?: ReactNode;
+      className?: string;
+      numberOfLines?: number;
+    }) => createElement("span", { className, "data-lines": numberOfLines }, children),
     useInFront: ({ start, stop }: { start?: () => void; stop?: () => void }) => {
       useEffect(() => {
         start?.();
