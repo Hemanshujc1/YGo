@@ -50,6 +50,7 @@ export function BannerCountdown({ seconds }: { seconds: number }) {
   const low = seconds < 60;
   return (
     <View
+      accessible
       accessibilityLabel={seconds > 0 ? words.expiresIn(clock(seconds)) : words.timeUp}
       accessibilityLiveRegion={seconds === 0 ? "polite" : "none"}
       className={`rounded-full px-2.5 py-0.5 ${low ? "border-2 border-warning" : "border border-border-strong"}`}

@@ -57,11 +57,13 @@ vi.mock("react-native", async () => {
     View: ({
       children,
       className,
+      accessible,
       accessibilityLabel,
       accessibilityLiveRegion,
     }: {
       children?: ReactNode;
       className?: string;
+      accessible?: boolean;
       accessibilityLabel?: string;
       accessibilityLiveRegion?: string;
     }) =>
@@ -71,6 +73,7 @@ vi.mock("react-native", async () => {
           className,
           "aria-label": accessibilityLabel,
           "aria-live": accessibilityLiveRegion,
+          "data-accessible": accessible ? "true" : undefined,
         },
         children,
       ),
