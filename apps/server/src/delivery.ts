@@ -27,6 +27,32 @@ export function revealHandoverCode(secret: string, encrypted: string): string {
   return Buffer.concat([decipher.update(Buffer.from(bodyText, "base64url")), decipher.final()]).toString("utf8");
 }
 
+/** An order's saved code and what has been tried against it. */
+export type HandoverCodeState = { id: string; handoverCodeHash: string | null; handoverCodeSalt: string | null; handoverCodeAttempts: number; handoverCodeBlockedUntil: Date | null };
+
+/**
+ * Checks the Customer's 4-digit code against the order's, counting each miss (DLV-2: 3 tries, then a cooldown, then 6 in all). Returns undefined when it matches, else the refusal.
+ * A refusal has already written its count and committed it, so it stays when the caller's transaction ends; the caller returns the code at once.
+ * An order accepted before codes existed gets one made now and counts nothing against the shop.
+ */
+export async function checkHandoverCode(client: PoolClient, order: HandoverCodeState, code: string, now: Date, secret: string): Promise<"HANDOVER_CODE_WRONG" | "HANDOVER_CODE_LOCKED" | undefined> {
+  if (order.handoverCodeBlockedUntil && order.handoverCodeBlockedUntil > now) return "HANDOVER_CODE_LOCKED";
+  if (order.handoverCodeAttempts >= HANDOVER_CODE_MAX_ATTEMPTS) return "HANDOVER_CODE_LOCKED";
+  if (!order.handoverCodeHash || !order.handoverCodeSalt) {
+    const generated = createHandoverCode(secret);
+    await client.query(`UPDATE orders SET handover_code_hash = $2, handover_code_salt = $3, handover_code_ciphertext = $4
+      WHERE id = $1 AND handover_code_hash IS NULL`, [order.id, generated.hash, generated.salt, generated.ciphertext]);
+    await client.query("COMMIT");
+    return "HANDOVER_CODE_WRONG";
+  }
+  if (matchesHandoverCode(code, order.handoverCodeSalt, order.handoverCodeHash)) return undefined;
+  const attempts = order.handoverCodeAttempts + 1;
+  const blockedUntil = attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN ? new Date(now.getTime() + HANDOVER_CODE_COOLDOWN_MS) : order.handoverCodeBlockedUntil;
+  await client.query("UPDATE orders SET handover_code_attempts = $2, handover_code_blocked_until = $3 WHERE id = $1", [order.id, attempts, blockedUntil]);
+  await client.query("COMMIT");
+  return attempts === HANDOVER_CODE_ATTEMPTS_BEFORE_COOLDOWN || attempts >= HANDOVER_CODE_MAX_ATTEMPTS ? "HANDOVER_CODE_LOCKED" : "HANDOVER_CODE_WRONG";
+}
+
 export function matchesHandoverCode(input: string, salt: string, expected: string): boolean {
   const actual = scryptSync(input, salt, 32);
   const target = Buffer.from(expected, "base64url");

@@ -669,7 +669,7 @@ describe("Placing an order under a shop-wide discount (#63, MNY-6, MNY-7)", () =
 
       // The S05 preview shows the discount the proposal will carry, before it is sent.
       const preview = await app.inject({ method: "POST", url: `/v1/me/shop-orders/${id}/partial-accept/preview`, headers: owner.headers, payload: remove([[line, 1]]) });
-      expect(preview.json()).toEqual({ productValue: "300.00", shopDiscount: { amount: "25.00", offer }, deliveryFee: "30.00", smallCartFee: null, total: "305.00", originalTotal: "405.00", cancelsOrder: false, belowFloor: false });
+      expect(preview.json()).toEqual({ productValue: "300.00", shopDiscount: { amount: "25.00", offer }, deliveryFee: "30.00", smallCartFee: null, pickupFee: null, total: "305.00", originalTotal: "405.00", cancelsOrder: false, belowFloor: false });
 
       // First revision: 300 under the 10% is 30, held by the 25 cap.
       const sent = await propose(owner, id, [[line, 1]]);

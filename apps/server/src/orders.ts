@@ -31,7 +31,8 @@ const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArr
     cancelled_by_shop: ["owner", "staff", "system"],
     awaiting_customer_confirm: ["owner", "staff"],
   },
-  ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"] },
+  // A pickup nobody collected is closed by the timed job at its cutoff (FUL-7, #65): `system` is never the role of a signed-in request.
+  ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"], not_collected: ["system"] },
   out_for_delivery: { arrived: ["owner", "staff"] },
   arrived: { delivered: ["owner", "staff"], delivery_failed: ["owner", "staff"] },
   awaiting_customer_confirm: {

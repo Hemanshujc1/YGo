@@ -66,6 +66,22 @@ export const CartReason = z.discriminatedUnion("code", [
 ]);
 export type CartReason = z.infer<typeof CartReason>;
 
+/**
+ * What a pickup would cost (FUL-7, #65): the product value less any discount, plus the booking fee where the rate card has one on (named, never a delivery fee).
+ * Null in `CartResponse.pickup` when the shop's pickup is not open to this cart; the reasons it can't be placed are in `reasons` below it.
+ */
+export const PickupQuote = z.strictObject({
+  productValue: Amount,
+  shopDiscount: AppliedShopDiscount,
+  /** The booking fee in `total`, "0.00" when none. Charged only when the pickup is completed. */
+  pickupFee: Amount,
+  total: Amount,
+  /** True only with no reason. */
+  placeable: z.boolean(),
+  reasons: z.array(CartReason),
+});
+export type PickupQuote = z.infer<typeof PickupQuote>;
+
 export const CartResponse = z.strictObject({
   shop: z.strictObject({ id: z.uuid(), name: z.string() }),
   /** 0 before the first save. */
@@ -76,5 +92,7 @@ export const CartResponse = z.strictObject({
   /** True only with a quote and no reason. */
   placeable: z.boolean(),
   reasons: z.array(CartReason),
+  /** The pickup route's quote; null when the shop does not offer pickup to this cart (switched off, forced off, or no pickup rule on its rate card). */
+  pickup: PickupQuote.nullable(),
 });
 export type CartResponse = z.infer<typeof CartResponse>;

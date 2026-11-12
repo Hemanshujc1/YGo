@@ -12,7 +12,7 @@ const receipt = (over: Partial<ReceiptResponse> = {}): ReceiptResponse => ({
     { name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1.000", count: 2, part: null, unitPrice: "150.00", lineTotal: "300.00" },
     { name: "Atta", brand: null, baseUnit: "kg", quantity: "5.000", count: 1, part: "0.500", unitPrice: "30.00", lineTotal: "30.00" },
   ],
-  productValue: "330.00", shopDiscount: null, deliveryFee: "20.00", smallCartFee: "10.50", total: "360.50", payment: "upi", ...over,
+  productValue: "330.00", shopDiscount: null, deliveryFee: "20.00", smallCartFee: "10.50", pickupFee: null, total: "360.50", payment: "upi", ...over,
 });
 
 describe("receipt PDF (#61)", () => {
@@ -37,6 +37,16 @@ describe("receipt PDF (#61)", () => {
     expect(html).toContain("500 g of a 5 kg pack");
     for (const text of ["₹150", "₹300", "₹330", "₹20", "₹10.50", "₹360.50", "Paid by UPI"]) expect(html).toContain(text);
     expect(html).not.toMatch(/\.00|1\.000|5\.000/);
+  });
+
+  it("names the booking fee of a pickup, and shows none on a delivery or a pickup without one (FUL-7, #65)", () => {
+    const pickup = receiptHtml({ receipt: receipt({ status: "picked_up", address: null, deliveryFee: "0.00", smallCartFee: null, pickupFee: "10.00", total: "340.00" }), fonts });
+    expect(pickup).toContain("Booking fee");
+    expect(pickup).toContain("₹10");
+    expect(pickup).not.toContain("Delivery fee");
+    expect(pickup).not.toContain("Order address");
+    expect(receiptHtml({ receipt: receipt({ status: "picked_up", address: null, deliveryFee: "0.00", pickupFee: "0.00" }), fonts })).not.toContain("Booking fee");
+    expect(html).not.toContain("Booking fee");
   });
 
   it("words the address by status: Delivered to, or Order address for a pickup", () => {

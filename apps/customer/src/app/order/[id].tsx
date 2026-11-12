@@ -15,7 +15,7 @@ import { api } from "../../api";
 import { offerText } from "../../lib/cart";
 import { changedTotalBanner } from "../../lib/changed-total-banner";
 import { money } from "../../lib/money";
-import { shownStatus, treatments } from "../../lib/order";
+import { shownStatus, statusWord, treatments } from "../../lib/order";
 import { hasReceipt, makeReceipt } from "../../lib/receipt";
 import { addressLine } from "../../lib/saved-addresses";
 import { packLabel } from "../../lib/shop-page";
@@ -67,11 +67,12 @@ function CallShop({ phone }: { phone: string | null }) {
 function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
   const status = shownStatus(order);
   const quote = { productValue: order.productValue, shopDiscount: order.shopDiscount, deliveryFee: order.deliveryFee, smallCartFee: order.smallCartFee, total: order.total };
+  const pickup = order.fulfilment === "pickup";
   return (
     <View className="gap-4">
       {placed && status === "placed" && <PlacedMark />}
       <View className="gap-2">
-        <StatusChip word={words.statuses[status]} treatment={treatments[status]} />
+        <StatusChip word={statusWord(order.fulfilment, status)} treatment={treatments[status]} />
         <Text className="text-secondary tabular-nums text-muted">{`${order.shop.name} · ${formatTime(order.placedAt)}`}</Text>
         {status === "placed" && <Text className="text-body text-text">{words.waiting}</Text>}
         {status === "expired" && <Text className="text-body text-text">{words.expired}</Text>}
@@ -90,14 +91,30 @@ function Detail({ order, placed }: { order: OrderResponse; placed: boolean }) {
         ))}
       </View>
 
-      <QuoteRows quote={quote}>
-        <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
+      <QuoteRows quote={quote} pickup={pickup ? { fee: order.pickupFee } : undefined}>
+        <Text className="mt-2 text-secondary text-muted">{pickup ? words.payAtCounter : words.pay}</Text>
       </QuoteRows>
 
+      <Destination order={order} />
+    </View>
+  );
+}
+
+/** Where the order goes: the address it is delivered to, or the shop to collect a pickup from. */
+function Destination({ order }: { order: OrderResponse }) {
+  if (order.fulfilment === "pickup") {
+    return (
       <View>
-        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
+        <Text className="text-secondary text-muted">{words.collectFrom}</Text>
+        <Text className="text-body text-text">{order.shop.name}</Text>
       </View>
+    );
+  }
+  if (!order.address) return null;
+  return (
+    <View>
+      <Text className="text-secondary text-muted">{words.deliverTo}</Text>
+      <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
     </View>
   );
 }
@@ -182,14 +199,12 @@ function ChangedTotalDetail({ order, proposal, secondsLeft }: { order: OrderResp
       <QuoteRows
         quote={{ productValue: proposal.productValue, shopDiscount: proposal.shopDiscount, deliveryFee: proposal.deliveryFee, smallCartFee: proposal.smallCartFee, total: proposal.total }}
         was={{ productValue: proposal.originalProductValue, total: proposal.originalTotal }}
+        pickup={order.fulfilment === "pickup" ? { fee: proposal.pickupFee } : undefined}
       >
-        <Text className="mt-2 text-secondary text-muted">{words.pay}</Text>
+        <Text className="mt-2 text-secondary text-muted">{order.fulfilment === "pickup" ? words.payAtCounter : words.pay}</Text>
       </QuoteRows>
 
-      <View>
-        <Text className="text-secondary text-muted">{words.deliverTo}</Text>
-        <Text className="text-body text-text">{`${strings.confirm[order.address.label]} · ${addressLine(order.address)}`}</Text>
-      </View>
+      <Destination order={order} />
     </View>
   );
 }
@@ -292,6 +307,13 @@ export default function OrderScreen() {
                 <Text className="text-secondary text-muted">{words.codeSoon}</Text>
               </>
             )}
+          </View>
+        )}
+
+        {shown?.fulfilment === "pickup" && shown.status === "ready" && shown.handoverCode && (
+          <View className="items-center gap-3 rounded-card border border-primary bg-surface p-5">
+            <Text className="text-body font-semibold text-text">{words.pickupCode}</Text>
+            <Text selectable accessibilityRole="text" className="text-display font-bold tabular-nums tracking-widest text-primary">{shown.handoverCode}</Text>
           </View>
         )}
 

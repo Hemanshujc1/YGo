@@ -237,6 +237,18 @@ export const shopMembers = pgTable("shop_members", {
   index("shop_members_shop_id_idx").on(table.shopId),
 ]);
 
+// One row per fulfilment mode a shop has switched or Admin has forced (FUL-1, #65). No row means Admin has not forced it off and the shop's switch is at its start value:
+// on for the two delivery modes, off for pickup (a shop opts in). A mode is open to new orders only while the shop has it on and Admin has not forced it off. Orders already placed carry on.
+export const shopFulfilmentModes = pgTable("shop_fulfilment_modes", {
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  mode: text("mode").notNull(),
+  shopOn: boolean("shop_on").notNull().default(true),
+  adminForcedOff: boolean("admin_forced_off").notNull().default(false),
+}, (table) => [
+  primaryKey({ columns: [table.shopId, table.mode] }),
+  check("shop_fulfilment_modes_mode_valid", sql`${table.mode} IN ('instant', 'scheduled', 'pickup')`),
+]);
+
 // A Staff invitation and the link's memory (#58). A join code is shown once, stored as a keyed digest, and valid for
 // 24 hours. Deactivating removes the shop_members row, so every shop route stops at once (ACC-11); this row keeps the
 // account, so a re-invite restores the same link and its history (ACC-7). The phone is the invited number, normalised.
@@ -734,15 +746,18 @@ export const orders = pgTable("orders", {
   shopPincode: text("shop_pincode").notNull(),
   shopGstin: text("shop_gstin"),
   statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull(),
-  // The saved address as it was at placement, so a later edit doesn't move the delivery.
-  addressLabel: text("address_label").notNull(),
-  addressFlat: text("address_flat").notNull(),
+  // How the order reaches the Customer (FUL-1, #65): a delivery carries the saved address as it was at placement, so a later edit doesn't move it; a pickup carries none.
+  fulfilment: text("fulfilment").notNull().default("delivery"),
+  addressLabel: text("address_label"),
+  addressFlat: text("address_flat"),
   addressAreaLine: text("address_area_line"),
-  addressPincode: text("address_pincode").notNull(),
-  addressPoint: geographyPoint("address_point").notNull(),
+  addressPincode: text("address_pincode"),
+  addressPoint: geographyPoint("address_point"),
   productValue: numeric("product_value", { precision: 12, scale: 2 }).notNull(),
   deliveryFee: numeric("delivery_fee", { precision: 12, scale: 2 }).notNull(),
   smallCartFee: numeric("small_cart_fee", { precision: 12, scale: 2 }),
+  // The pickup booking fee in the total (FUL-7); null on a delivery. Charged only when the pickup is completed.
+  pickupFee: numeric("pickup_fee", { precision: 12, scale: 2 }),
   total: numeric("total", { precision: 12, scale: 2 }).notNull(),
   rateCardVersion: bigint("rate_card_version", { mode: "bigint" }).notNull().references(() => rateCardVersions.version),
   // The pricing engine's whole result: commission, shares and the floor, which the Customer never sees.
@@ -771,6 +786,11 @@ export const orders = pgTable("orders", {
   index("orders_shop_id_status_idx").on(table.shopId, table.status),
   check("orders_status_valid", sql`${table.status} IN (${orderStatuses})`),
   check("orders_address_label_valid", sql`${table.addressLabel} IN ('home', 'work', 'other')`),
+  check("orders_fulfilment_valid", sql`${table.fulfilment} IN ('delivery', 'pickup')`),
+  check("orders_fulfilment_address", sql`(${table.fulfilment} = 'delivery' AND ${table.addressLabel} IS NOT NULL AND ${table.addressFlat} IS NOT NULL
+    AND ${table.addressPincode} IS NOT NULL AND ${table.addressPoint} IS NOT NULL AND ${table.pickupFee} IS NULL)
+    OR (${table.fulfilment} = 'pickup' AND ${table.addressLabel} IS NULL AND ${table.addressFlat} IS NULL AND ${table.addressAreaLine} IS NULL
+    AND ${table.addressPincode} IS NULL AND ${table.addressPoint} IS NULL AND ${table.pickupFee} IS NOT NULL AND ${table.deliveryFee} = 0 AND ${table.smallCartFee} IS NULL)`),
   check("orders_handover_code_pair", sql`(${table.handoverCodeHash} IS NULL) = (${table.handoverCodeSalt} IS NULL) AND (${table.handoverCodeHash} IS NULL) = (${table.handoverCodeCiphertext} IS NULL)`),
   check("orders_delivery_payment_valid", sql`${table.deliveryPayment} IS NULL OR ${table.deliveryPayment} IN ('cash', 'upi')`),
   foreignKey({ name: "orders_shop_discount_rule_fk", columns: [table.shopDiscountRuleId, table.shopDiscountRuleVersion], foreignColumns: [shopDiscountVersions.ruleId, shopDiscountVersions.version] }),
@@ -869,6 +889,8 @@ export const orderRevisions = pgTable("order_revisions", {
   productValue: numeric("product_value", { precision: 12, scale: 2 }).notNull(),
   deliveryFee: numeric("delivery_fee", { precision: 12, scale: 2 }).notNull(),
   smallCartFee: numeric("small_cart_fee", { precision: 12, scale: 2 }),
+  // A pickup's booking fee stands as quoted through a revision (ORD-4); null on a delivery (#65).
+  pickupFee: numeric("pickup_fee", { precision: 12, scale: 2 }),
   total: numeric("total", { precision: 12, scale: 2 }).notNull(),
   commission: numeric("commission", { precision: 12, scale: 2 }).notNull(),
   platformContribution: numeric("platform_contribution", { precision: 12, scale: 2 }).notNull(),
@@ -885,7 +907,7 @@ export const orderRevisions = pgTable("order_revisions", {
   check("order_revisions_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND ${table.shopDiscount} <= ${table.productValue}
     AND (${table.shopDiscountRuleId} IS NULL) = (${table.shopDiscountRuleVersion} IS NULL)
     AND (${table.shopDiscount} = 0 OR ${table.shopDiscountRuleId} IS NOT NULL)`),
-  check("order_revisions_total_reconciles", sql`${table.total} = ${table.productValue} - ${table.shopDiscount} + ${table.deliveryFee} + COALESCE(${table.smallCartFee}, 0)`),
+  check("order_revisions_total_reconciles", sql`${table.total} = ${table.productValue} - ${table.shopDiscount} + ${table.deliveryFee} + COALESCE(${table.smallCartFee}, 0) + COALESCE(${table.pickupFee}, 0)`),
   uniqueIndex("order_revisions_order_id_revision_idx").on(table.orderId, table.revision),
   uniqueIndex("order_revisions_one_open_proposal_idx").on(table.orderId).where(sql`${table.status} = 'proposed'`),
   index("order_revisions_order_id_status_idx").on(table.orderId, table.status),

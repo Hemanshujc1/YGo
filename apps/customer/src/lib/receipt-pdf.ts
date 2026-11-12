@@ -56,13 +56,14 @@ th.n,td.n{text-align:right;padding-left:16px;white-space:nowrap}
 ${receipt.shop.gstin ? `<p>${escapeHtml(words.gstin(receipt.shop.gstin))}</p>` : ""}
 <p class="head">${words.number(receipt.number)}</p>
 <p class="muted">${formatDateTime(receipt.placedAt)}</p>
-<p>${words.address[receipt.status]}: ${escapeHtml(strings.confirm[receipt.address.label])}${receipt.address.areaLine ? ` · ${escapeHtml(receipt.address.areaLine)}` : ""}</p>
+${receipt.address ? `<p>${words.address[receipt.status]}: ${escapeHtml(strings.confirm[receipt.address.label])}${receipt.address.areaLine ? ` · ${escapeHtml(receipt.address.areaLine)}` : ""}</p>` : ""}
 <table><thead><tr><th>${words.item}</th><th class="n">${words.price}</th><th class="n">${words.amount}</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="sums">
 ${sum(words.items, receipt.productValue)}
 ${discount ? row(`${words.shopDiscount}<br><span class="muted">${escapeHtml(offerText(discount.offer))}</span>`, discountText(discount.amount)) : ""}
 ${some(receipt.deliveryFee) ? sum(words.deliveryFee, receipt.deliveryFee) : ""}
 ${receipt.smallCartFee && some(receipt.smallCartFee) ? sum(words.smallCartFee, receipt.smallCartFee) : ""}
+${receipt.pickupFee && some(receipt.pickupFee) ? sum(words.bookingFee, receipt.pickupFee) : ""}
 <p class="total"><span>${words.total}</span><span>${money(receipt.total)}</span></p>
 </div>
 ${receipt.payment ? `<p class="paid">${words.paidBy(words.payments[receipt.payment])}</p>` : ""}

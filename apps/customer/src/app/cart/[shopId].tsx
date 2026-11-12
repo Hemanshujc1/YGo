@@ -66,7 +66,33 @@ function Line({ line, count, saving, setCount }: { line: CartLine; count: number
   );
 }
 
-function Cart({ view, setCount, retry, backToShop }: { view: CartView; setCount: (listingId: string, count: number) => void; retry: () => void; backToShop: () => void }) {
+/** Delivery or Pickup, when the shop offers both for this cart (FUL-7, #65). */
+function FulfilmentChoice({ pickup, onChange }: { pickup: boolean; onChange: (pickup: boolean) => void }) {
+  const choice = words.fulfilment;
+  return (
+    <View className="mt-4 gap-2">
+      <Text className="text-secondary text-muted">{choice.label}</Text>
+      <View accessibilityRole="radiogroup" className="flex-row gap-2">
+        {[{ label: choice.delivery, value: false }, { label: choice.pickup, value: true }].map(({ label, value }) => {
+          const selected = pickup === value;
+          return (
+            <Pressable
+              key={label}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+              onPress={() => onChange(value)}
+              className={`min-h-12 flex-1 items-center justify-center rounded-input border px-3 ${selected ? "border-primary bg-primary-subtle" : "border-border bg-surface"}`}
+            >
+              <Text className={`text-body font-semibold ${selected ? "text-on-primary-subtle" : "text-text"}`}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function Cart({ view, pickup, setCount, retry, backToShop }: { view: CartView; pickup: boolean; setCount: (listingId: string, count: number) => void; retry: () => void; backToShop: () => void }) {
   const server = view.server;
   if (!server) return null;
   // The counts on screen, each with what the server last said about its pack; a pack still on its first save waits for the reply.
@@ -74,7 +100,8 @@ function Cart({ view, setCount, retry, backToShop }: { view: CartView; setCount:
     const line = server.lines.find((known) => known.listingId === listingId);
     return line ? [{ line, count }] : [];
   });
-  const quote = server.quote;
+  const quote = pickup ? server.pickup : server.quote;
+  const reasons = pickup ? server.pickup?.reasons ?? [] : server.reasons;
   const now = Date.now();
   return (
     <View>
@@ -109,10 +136,10 @@ function Cart({ view, setCount, retry, backToShop }: { view: CartView; setCount:
             <>
               {quote && (
                 <View className="mt-4">
-                  <QuoteRows quote={quote} />
+                  <QuoteRows quote={quote} pickup={pickup && server.pickup ? { fee: server.pickup.pickupFee } : undefined} />
                 </View>
               )}
-              {server.reasons.map((reason) => (
+              {reasons.map((reason) => (
                 <View key={reason.code} className="mt-4 items-start rounded-card bg-sunken px-4 py-3">
                   <Text className="text-body text-text">{reasonText(reason, now)}</Text>
                   {(reason.code === "BELOW_MINIMUM_CART" || reason.code === "BELOW_CONTRIBUTION_FLOOR") && (
@@ -209,6 +236,7 @@ export default function CartScreen() {
   const query = (to.address && addressQuery(to.address)) || home;
   const { cart, view } = useCart(shopId ?? "", query);
   const [picking, setPicking] = useState(false);
+  const [wantsPickup, setWantsPickup] = useState(false);
   const [placing, setPlacing] = useState(false);
   /** What stopped the last Place order; `retry` turns the button into Try again (design system, button errors). */
   const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);
@@ -229,11 +257,16 @@ export default function CartScreen() {
   async function place() {
     const server = view.server;
     const address = to.address;
-    if (working.current || !server?.quote || !server.placeable || !address || !shopId) return;
+    // A pickup is chosen, or the only route the shop has open; it needs no address (FUL-7, #65).
+    const pickup = Boolean(server?.pickup) && (wantsPickup || !server?.quote);
+    const ok = pickup ? server?.pickup?.placeable : server?.placeable;
+    if (working.current || !server || !ok || (!pickup && !address) || !shopId) return;
+    const at = pickup ? view.pricedFor : null;
+    if (pickup && !at) return;
     working.current = true;
     setPlacing(true);
     setProblem(null);
-    const done = await placeOrder(api, shopId, { ...server, quote: server.quote }, address.id);
+    const done = await placeOrder(api, shopId, server, at ? { pickup: at } : address?.id ?? "");
     working.current = false;
     setPlacing(false);
     switch (done.kind) {
@@ -266,7 +299,11 @@ export default function CartScreen() {
   // Off until the cart is priced at the chosen address, so the total on the button is the one sent.
   const priced = view.pricedFor !== null && query !== undefined && view.pricedFor.pincode === query.pincode
     && view.pricedFor.latitude === query.latitude && view.pricedFor.longitude === query.longitude;
-  const placeable = Boolean(server?.placeable && server.quote && to.address && priced && !view.saving && !view.message);
+  // Pickup is offered when the shop has it open for this cart; when delivery is shut it is the only route (FUL-7, #65).
+  const pickup = Boolean(server?.pickup) && (wantsPickup || !server?.quote);
+  const placeable = Boolean(priced && !view.saving && !view.message
+    && (pickup ? server?.pickup?.placeable : server?.placeable && server.quote && to.address));
+  const total = pickup ? server?.pickup?.total : server?.quote?.total;
 
   return (
     <View className="flex-1 bg-bg" style={{ paddingTop: insets.top }}>
@@ -293,14 +330,24 @@ export default function CartScreen() {
             <Button label={strings.shop.home} onPress={() => goHome(navigation)} variant="text" />
           </View>
         )}
-        {view.status === "ready" && query && <Cart view={view} setCount={setCount} retry={cart.retry} backToShop={backToShop} />}
+        {view.status === "ready" && query && <Cart view={view} pickup={pickup} setCount={setCount} retry={cart.retry} backToShop={backToShop} />}
         {view.status === "ready" && query && view.lines.length > 0 && (
           <>
-            <DeliverToRow to={to} onChange={() => setPicking(true)} onAdd={addAddress} retry={() => void deliverTo.load(home)} />
-            {server?.quote && (
+            {server?.pickup && server.quote && (
+              <FulfilmentChoice pickup={pickup} onChange={(next) => { setProblem(null); setWantsPickup(next); }} />
+            )}
+            {pickup ? (
+              <View className="mt-4 gap-1 rounded-card border border-border bg-surface px-4 py-3">
+                <Text className="text-body font-semibold text-text">{words.fulfilment.pickupFrom(server?.shop.name ?? "")}</Text>
+                <Text className="text-secondary text-muted">{words.fulfilment.pickupNote}</Text>
+              </View>
+            ) : (
+              <DeliverToRow to={to} onChange={() => setPicking(true)} onAdd={addAddress} retry={() => void deliverTo.load(home)} />
+            )}
+            {total && (
               <View className="mt-4">
                 <Button
-                  label={placing ? words.placing : problem?.retry ? words.retry : words.place(money(server.quote.total))}
+                  label={placing ? words.placing : problem?.retry ? words.retry : words.place(money(total))}
                   onPress={() => void place()}
                   busy={placing}
                   disabled={!placeable}
@@ -308,7 +355,7 @@ export default function CartScreen() {
                 {problem && <Text accessibilityLiveRegion="polite" className="mt-2 text-secondary text-text">{problem.text}</Text>}
               </View>
             )}
-            <Text className="mt-4 text-secondary text-muted">{words.footer}</Text>
+            <Text className="mt-4 text-secondary text-muted">{pickup ? words.fulfilment.footer : words.footer}</Text>
           </>
         )}
       </ScrollView>

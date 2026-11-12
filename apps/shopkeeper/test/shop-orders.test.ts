@@ -11,9 +11,9 @@ const words = strings.orders;
 const order = (status: ShopOrderResponse["status"] = "placed"): ShopOrderResponse => ({
   id, number: 1001, status, placedAt: "2030-01-01T00:00:00.000Z", expiresAt: status === "placed" ? "2030-01-01T00:10:00.000Z" : null,
   now: "2030-01-01T00:02:18.000Z",
-  address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
+  fulfilment: "delivery", address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
   lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
-  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, total: "300.00", rejectReason: null,
+  productValue: "270.00", deliveryFee: "30.00", smallCartFee: null, pickupFee: null, total: "300.00", rejectReason: null,
   delivererId: null, customer: null, shopUpiId: null, deliveryPhotoAvailable: false, deliveryFailureReadyAt: null,
   confirmByAt: null, proposal: null, cancelRequest: null,
 });
@@ -378,7 +378,7 @@ describe("S05 New order (#431)", () => {
 describe("S03's pinned order (#507)", () => {
   const summary = (number: number, expiresAt: string): ShopOrdersResponse["new"][number] => ({
     id: `${id.slice(0, -4)}${String(number).padStart(4, "0")}`, number, status: "placed", placedAt: "2030-01-01T00:00:00.000Z", expiresAt,
-    itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null, cancelAsked: false,
+    itemCount: 1, total: "300.00", fulfilment: "delivery", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null, cancelAsked: false,
   });
 
   it("pins the oldest New order with time left, and none when there is none", () => {
@@ -471,7 +471,7 @@ describe("cancelling after acceptance (ORD-5, #59)", () => {
   });
 
   it("keeps cancelAsked on the S04 rows it reads", async () => {
-    const row = { id, number: 1001, status: "accepted", placedAt: "2030-01-01T00:00:00.000Z", expiresAt: null, itemCount: 1, total: "300.00", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null } as const;
+    const row = { id, number: 1001, status: "accepted", placedAt: "2030-01-01T00:00:00.000Z", expiresAt: null, itemCount: 1, total: "300.00", fulfilment: "delivery", address: { flat: "Flat 4B", areaLine: null }, delivererId: null, confirmByAt: null } as const;
     const server = { shopOrders: async () => ok({ ...list, accepted: [{ ...row, cancelAsked: true }, { ...row, number: 1002, cancelAsked: false }] }) };
     const store = createShopOrders(server, fakeTimers().timers);
     store.start();

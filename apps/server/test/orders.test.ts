@@ -181,12 +181,12 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     expect(order).toEqual({
       id: expect.any(String), number: 1001, status: "placed", placedAt: "2030-01-01T00:00:00.000Z",
       shop: { id: shopId, name: "Sai General Stores", phone: "+919876500001" },
-      address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
+      fulfilment: "delivery", address: { label: "home", flat: "Flat 4B", areaLine: "Kothrud", pincode: "411038" },
       lines: [
         { name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" },
         { name: "Atta", brand: "Aashirvaad", baseUnit: "kg", quantity: "5", count: 1, part: null, unitPrice: "199.99", lineTotal: "199.99" },
       ],
-      productValue: "469.99", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "499.99", rejectReason: null, answerExpired: false,
+      productValue: "469.99", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, pickupFee: null, total: "499.99", rejectReason: null, answerExpired: false,
       handoverCode: null, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
     });
     expect((await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json()).toEqual(order);
@@ -443,7 +443,7 @@ describe("Order transitions (#9)", () => {
       "preparing → cancelled_by_customer by owner", "preparing → cancelled_by_customer by staff", "preparing → cancelled_by_shop by owner", "preparing → cancelled_by_shop by staff",
       "preparing → cancelled_by_shop by system",
       "ready → out_for_delivery by owner", "ready → out_for_delivery by staff", "ready → picked_up by owner", "ready → picked_up by staff",
-      "ready → cancelled_by_shop by owner", "ready → cancelled_by_shop by staff",
+      "ready → not_collected by system", "ready → cancelled_by_shop by owner", "ready → cancelled_by_shop by staff",
       "out_for_delivery → arrived by owner", "out_for_delivery → arrived by staff",
       "arrived → delivered by owner", "arrived → delivered by staff", "arrived → delivery_failed by owner", "arrived → delivery_failed by staff",
     ]);
@@ -642,7 +642,7 @@ describe("Shop accepts or rejects an order (#425, ORD-2, ORD-7)", () => {
     expect(listed).toMatchObject({ now: "2030-01-01T00:13:00.000Z" });
     expect(listed.new).toEqual([{
       id: waiting.id, number: waiting.number, status: "placed", placedAt: "2030-01-01T00:11:00.000Z", expiresAt: "2030-01-01T00:21:00.000Z",
-      itemCount: 1, total: "435.00", address: { flat: "Flat 4B", areaLine: "Kothrud" },
+      itemCount: 1, total: "435.00", fulfilment: "delivery", address: { flat: "Flat 4B", areaLine: "Kothrud" },
       delivererId: null, confirmByAt: null, cancelAsked: false,
     }]);
     expect(listed.accepted).toMatchObject([{ id: accepted.id, itemCount: 2, expiresAt: null }]);
@@ -717,7 +717,7 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       const frozen = (await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json();
       expect(answer.json()).toEqual({
         number: frozen.number, status: "delivered", placedAt: frozen.placedAt, address: { label: frozen.address.label, areaLine: frozen.address.areaLine }, shop: { name: frozen.shop.name, address: "Paud Road", pincode: "411045", gstin: null },
-        lines: frozen.lines, productValue: frozen.productValue, shopDiscount: null, deliveryFee: frozen.deliveryFee, smallCartFee: frozen.smallCartFee, total: frozen.total, payment: "upi",
+        lines: frozen.lines, productValue: frozen.productValue, shopDiscount: null, deliveryFee: frozen.deliveryFee, smallCartFee: frozen.smallCartFee, pickupFee: null, total: frozen.total, payment: "upi",
       });
     });
 

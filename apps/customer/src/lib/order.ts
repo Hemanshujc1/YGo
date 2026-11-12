@@ -1,5 +1,5 @@
 import type { ApiResult } from "@ygo/api-client";
-import { type CartResponse, type ErrorCode, type OrderResponse, type OrderStatus, TERMINAL_ORDER_STATUSES } from "@ygo/contracts";
+import { type CartResponse, type ErrorCode, type FeedQuery, type OrderResponse, type OrderStatus, type PlaceOrderBody, TERMINAL_ORDER_STATUSES } from "@ygo/contracts";
 import type { Treatment } from "@ygo/mobile";
 import { createPoller, phoneTimers, type Timers } from "@ygo/mobile/poller";
 import { strings } from "../strings";
@@ -35,6 +35,10 @@ export const isFinal = (status: OrderStatus) => TERMINAL_ORDER_STATUSES.includes
  */
 export const shownStatus = (order: Pick<OrderResponse, "status" | "answerExpired">): OrderStatus => (order.answerExpired ? "expired" : order.status);
 
+/** The status word the Customer reads: a pickup that is ready is ready to collect, not "Ready" (FUL-7, #65). */
+export const statusWord = (fulfilment: OrderResponse["fulfilment"], status: OrderStatus): string =>
+  fulfilment === "pickup" && status === "ready" ? strings.order.pickupReady : strings.order.statuses[status];
+
 /** How Place order went: placed, no answer, the cart changed (with the cart as it is now), the address gone, or a refusal. */
 export type Placed =
   | { kind: "placed"; order: OrderResponse }
@@ -43,16 +47,24 @@ export type Placed =
   | { kind: "gone" }
   | { kind: "error"; code: ErrorCode };
 
-/** Places the cart C07 shows, at the revision and total on screen, for the chosen address (#424). */
+/**
+ * Places the cart C07 shows, at the revision and total on screen: for delivery to the chosen address (#424), or as a pickup, which sends the place the
+ * cart was priced for and the pickup's own total (FUL-7, #65).
+ */
 export async function placeOrder(
-  client: { placeOrder(shopId: string, body: { revision: number; total: string; addressId: string }): Promise<ApiResult<OrderResponse>> },
+  client: { placeOrder(shopId: string, body: PlaceOrderBody): Promise<ApiResult<OrderResponse>> },
   shopId: string,
-  cart: CartResponse & { quote: NonNullable<CartResponse["quote"]> },
-  addressId: string,
+  cart: CartResponse,
+  to: string | { pickup: FeedQuery },
 ): Promise<Placed> {
   let answer;
   try {
-    answer = await client.placeOrder(shopId, { revision: cart.revision, total: cart.quote.total, addressId });
+    // The route asked for is not in this cart (a mode switched off since it was read): the cart as it is now is the answer.
+    if (typeof to === "string") {
+      if (!cart.quote) return { kind: "changed", cart };
+      answer = await client.placeOrder(shopId, { revision: cart.revision, total: cart.quote.total, addressId: to });
+    } else if (cart.pickup) answer = await client.placeOrder(shopId, { revision: cart.revision, total: cart.pickup.total, fulfilment: "pickup", ...to.pickup });
+    else return { kind: "changed", cart };
   } catch {
     return { kind: "offline" };
   }

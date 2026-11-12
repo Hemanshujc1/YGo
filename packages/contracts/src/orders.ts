@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { AddressLabel } from "./addresses";
+import { AddressLabel, AddressPoint } from "./addresses";
 import { ProductBaseUnit } from "./catalog";
+import { Pincode } from "./fields";
 import { Amount, LineCount } from "./pricing";
 import { AppliedShopDiscount, ShopDiscountOffer } from "./shop-discount";
 
@@ -20,8 +21,23 @@ export const TERMINAL_ORDER_STATUSES: readonly OrderStatus[] = [
  * `POST /v1/carts/:shopId/order` (#424): places the cart for delivery to a saved address with a pin.
  * `revision` and `total` are what C07 showed; either differing from the server's fresh quote is CART_CHANGED (CRT-2).
  */
-export const PlaceOrderBody = z.strictObject({ revision: z.number().int().min(1), total: Amount, addressId: z.uuid() });
+export const PlaceOrderBody = z.union([
+  z.strictObject({ revision: z.number().int().min(1), total: Amount, addressId: z.uuid() }),
+  /**
+   * A pickup (FUL-7, #65): no address and no delivery fee; paid at the shop's counter when collected. The shop must still serve the place the Customer is
+   * ordering from (DSC-1: no pickup exception for a shop further away), so the same place the cart was priced for is sent.
+   */
+  z.strictObject({ revision: z.number().int().min(1), total: Amount, fulfilment: z.literal("pickup"), pincode: Pincode, latitude: AddressPoint.shape.latitude, longitude: AddressPoint.shape.longitude }),
+]);
 export type PlaceOrderBody = z.infer<typeof PlaceOrderBody>;
+
+/** How an order reaches the Customer. */
+export const Fulfilment = z.enum(["delivery", "pickup"]);
+export type Fulfilment = z.infer<typeof Fulfilment>;
+
+/** The modes a shop switches on or off and Admin can force off (FUL-1); scheduled delivery joins with its own ticket. */
+export const FulfilmentMode = z.enum(["instant", "scheduled", "pickup"]);
+export type FulfilmentMode = z.infer<typeof FulfilmentMode>;
 
 export const OrderParams = z.strictObject({ id: z.uuid() });
 export type OrderParams = z.infer<typeof OrderParams>;
@@ -77,6 +93,8 @@ export const OrderProposal = z.strictObject({
   lostShopDiscount: ShopDiscountOffer.nullable(),
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
+  /** The pickup booking fee, which stands as quoted through a changed total; null on a delivery. */
+  pickupFee: Amount.nullable(),
   total: Amount,
   originalProductValue: Amount,
   originalTotal: Amount,
@@ -111,7 +129,9 @@ export const OrderResponse = z.strictObject({
   placedAt: z.iso.datetime(),
   /** `phone` is the Owner's, for Call the shop (ORD-8); null when the Owner has none. */
   shop: z.strictObject({ id: z.uuid(), name: z.string(), phone: z.string().nullable() }),
-  address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }),
+  fulfilment: Fulfilment,
+  /** Null for a pickup, which has no address. */
+  address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }).nullable(),
   lines: z.array(OrderLine),
   productValue: Amount,
   /**
@@ -121,6 +141,8 @@ export const OrderResponse = z.strictObject({
   shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
+  /** The pickup booking fee inside `total`, charged only when the pickup is completed (FUL-7); "0.00" on a pickup with none, null on a delivery. */
+  pickupFee: Amount.nullable(),
   total: Amount,
   /** Why the shop rejected it, shown on C19 in the Customer's own words (owner's answer 3 on #425); null otherwise. */
   rejectReason: RejectReason.nullable(),
@@ -193,6 +215,8 @@ export const PartialAcceptPreviewResponse = z.strictObject({
   shopDiscount: AppliedShopDiscount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
+  /** The pickup booking fee, which stands as quoted through a changed total; null on a delivery. */
+  pickupFee: Amount.nullable(),
   total: Amount,
   originalTotal: Amount,
   /** Sending this would cancel the order at no cost, because the platform would lose money on it (D-5). */
@@ -214,7 +238,9 @@ export const ShopOrderSummary = z.strictObject({
   cancelAsked: z.boolean(),
   itemCount: z.number().int().positive(),
   total: Amount,
-  address: z.strictObject({ flat: z.string(), areaLine: z.string().nullable() }),
+  fulfilment: Fulfilment,
+  /** Null for a pickup. */
+  address: z.strictObject({ flat: z.string(), areaLine: z.string().nullable() }).nullable(),
   delivererId: z.uuid().nullable(),
 });
 export type ShopOrderSummary = z.infer<typeof ShopOrderSummary>;
@@ -244,12 +270,15 @@ export const ShopOrderResponse = z.strictObject({
   placedAt: z.iso.datetime(),
   expiresAt: z.iso.datetime().nullable(),
   now: z.iso.datetime(),
-  address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }),
+  fulfilment: Fulfilment,
+  /** Null for a pickup. */
+  address: z.strictObject({ label: AddressLabel, flat: z.string(), areaLine: z.string().nullable(), pincode: z.string() }).nullable(),
   lines: z.array(ShopOrderLine),
   productValue: Amount,
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
-  /** To collect at the door (MNY-1). */
+  pickupFee: Amount.nullable(),
+  /** To collect at the door, or at the counter for a pickup (MNY-1). */
   total: Amount,
   rejectReason: RejectReason.nullable(),
   delivererId: z.uuid().nullable(),
@@ -284,6 +313,9 @@ export const DeliveryPhotoUpload = z.strictObject({ id: z.uuid(), uploadUrl: z.u
 export type DeliveryPhotoUpload = z.infer<typeof DeliveryPhotoUpload>;
 export const CompleteDeliveryBody = z.strictObject({ handoverCode: z.string().regex(/^\d{4}$/), payment: z.enum(["cash", "upi"]), photoUploadId: z.uuid() });
 export type CompleteDeliveryBody = z.infer<typeof CompleteDeliveryBody>;
+/** Completes a pickup at the counter with the same code and no photo (FUL-7, MNY-1). */
+export const CompletePickupBody = z.strictObject({ handoverCode: z.string().regex(/^\d{4}$/), payment: z.enum(["cash", "upi"]) });
+export type CompletePickupBody = z.infer<typeof CompletePickupBody>;
 export const ProofExceptionBody = z.strictObject({ reason: z.enum(["customer_phone_unavailable", "customer_phone_not_present", "someone_else_receiving", "other"]), photoUploadId: z.uuid(), payment: z.enum(["cash", "upi"]) });
 export type ProofExceptionBody = z.infer<typeof ProofExceptionBody>;
 export const DeliveryFailureReason = z.enum(["no_one_at_address", "customer_refused", "address_not_found", "other"]);
@@ -363,3 +395,22 @@ export const BelowFloorExceptionsResponse = z.strictObject({
   counts: BelowFloorExceptionCounts,
 });
 export type BelowFloorExceptionsResponse = z.infer<typeof BelowFloorExceptionsResponse>;
+
+/**
+ * One fulfilment mode of a shop (FUL-1, #65). `open` is whether the switches allow new orders: the shop has it on and Admin has not forced it off.
+ * It does not read the rate card: a pickup whose card has lost its pickup rule is still `open` here, and the cart simply offers no pickup quote.
+ */
+export const FulfilmentModeState = z.strictObject({ mode: FulfilmentMode, shopOn: z.boolean(), adminForcedOff: z.boolean(), open: z.boolean() });
+export type FulfilmentModeState = z.infer<typeof FulfilmentModeState>;
+export const FulfilmentModesResponse = z.strictObject({ modes: z.array(FulfilmentModeState) });
+export type FulfilmentModesResponse = z.infer<typeof FulfilmentModesResponse>;
+export const FulfilmentModeParams = z.strictObject({ mode: FulfilmentMode });
+export type FulfilmentModeParams = z.infer<typeof FulfilmentModeParams>;
+/** An Owner switches one of the shop's own modes. */
+export const SetFulfilmentModeBody = z.strictObject({ on: z.boolean() });
+export type SetFulfilmentModeBody = z.infer<typeof SetFulfilmentModeBody>;
+/** Admin forces a mode off for one shop, or lifts it. */
+export const AdminFulfilmentModeParams = z.strictObject({ id: z.uuid(), mode: FulfilmentMode });
+export type AdminFulfilmentModeParams = z.infer<typeof AdminFulfilmentModeParams>;
+export const ForceFulfilmentModeBody = z.strictObject({ forcedOff: z.boolean() });
+export type ForceFulfilmentModeBody = z.infer<typeof ForceFulfilmentModeBody>;

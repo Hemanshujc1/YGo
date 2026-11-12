@@ -13,7 +13,7 @@ const line = (listingId: string, count: number, more: Partial<CartLine> = {}): C
   count, state: "orderable", part: null, left: null, lineTotal: String(60 * count), ...more,
 });
 const cart = (revision: number, lines: CartLine[], more: Partial<CartResponse> = {}): CartResponse => ({
-  shop: { id: shopId, name: "Day Dairy" }, revision, lines,
+  shop: { id: shopId, name: "Day Dairy" }, revision, lines, pickup: null,
   quote: lines.length ? { productValue: "60", shopDiscount: null, deliveryFee: "20", smallCartFee: null, total: "80" } : null,
   placeable: lines.length > 0, reasons: [], ...more,
 });

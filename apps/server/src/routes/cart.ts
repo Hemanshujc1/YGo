@@ -1,12 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, SaveCartBody, type ShopDiscountOffer } from "@ygo/contracts";
+import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, type PickupQuote, SaveCartBody, type ShopDiscountOffer } from "@ygo/contracts";
+import { fromPaise, pickupPrice, toPaise } from "@ygo/pricing";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
+import { fulfilmentModes } from "../fulfilment";
 import { partOf, stockOf, visibleListings } from "../listings";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { servingShops, type ServingShop } from "./feed";
 import { deliveredQuote, latestRateCardVersion } from "./price-simulator";
+import { resolveRateCard } from "./rate-cards";
 
 type Line = { listingId: string; count: number };
 export type Pack = Pick<CartLine, "listingId" | "name" | "brand" | "baseUnit" | "quantity" | "price"> & {
@@ -58,6 +61,23 @@ export const offerSql = (v: string) => `CASE ${v}.form
   WHEN 'percentage' THEN json_build_object('form', 'percentage', 'percentage', trim_scale(${v}.percentage)::text, 'cap', trim_scale(${v}.cap)::text)
   ELSE json_build_object('form', 'flat', 'amount', trim_scale(${v}.flat_amount)::text, 'minimumOrder', trim_scale(${v}.minimum_order)::text) END`;
 
+export type PickupDetail = { pickupFee: string; total: string; quote: Record<string, unknown> };
+
+/**
+ * The engine's result as a pickup order keeps it (MNY-7): the delivered route's fees and commission are zero, what the shop keeps is the goods less its own booking fee,
+ * and the platform's contribution is both booking fees. `pickup` holds each fee and the floor it was tested against.
+ */
+function pickupOrderQuote(engine: Extract<DeliveredQuote, { status: "priced" }>, price: ReturnType<typeof pickupPrice>, floor: string): Record<string, unknown> {
+  const none = { amount: "0.00", platformShare: "0.00", shopShare: "0.00" };
+  return {
+    ...engine, commission: "0.00", deliveryFee: none, smallCartFee: null, customerTotal: price.total,
+    lines: engine.lines.map((line) => ({ ...line, commission: "0.00" })),
+    shopKeeps: fromPaise(toPaise(engine.productValue) - toPaise(engine.shopDiscount?.amount ?? "0") - toPaise(price.shopFee)),
+    platformContribution: price.contribution, placeable: price.shortfall === null, reasons: [],
+    pickup: { customerFee: price.pickupFee, shopFee: price.shopFee, contributionFloor: floor },
+  };
+}
+
 /**
  * The cart as C07 shows it: every figure from the pricing engine, and each reason it can't be ordered (CRT-2, CRT-4).
  * Placing an order (#424) also keeps the engine's whole result and each line's pack.
@@ -65,10 +85,11 @@ export const offerSql = (v: string) => `CASE ${v}.form
 export async function pricedCart(
   client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], shopDiscounts: boolean,
   read?: Array<Pack | undefined>,
-): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined> }> {
+): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined>; pickupDetail: PickupDetail | null }> {
   // ACC-9: an Owner or Staff member can't order from their own shop. Read alongside the packs.
-  const [member, packs] = await Promise.all([
-    client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId]), read ?? packsOf(client, shopId, saved)]);
+  const [member, packs, modes] = await Promise.all([
+    client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId]), read ?? packsOf(client, shopId, saved), fulfilmentModes(client, shopId)]);
+  const modeOpen = (mode: "instant" | "pickup") => modes.find((candidate) => candidate.mode === mode)?.open ?? false;
   const lines: CartLine[] = saved.map((line, index) => {
     const pack = packs[index];
     if (!pack) throw new Error("A saved cart line lost its listing");
@@ -94,6 +115,8 @@ export async function pricedCart(
     if (priced.status === "incomplete") delivering = false;
     else {
       engine = priced;
+      // The shop has switched delivery off, or Admin has (FUL-1): nothing is priced for delivery, but a pickup may still be (#65).
+      if (!modeOpen("instant")) delivering = false;
       orderable.forEach(({ line }, index) => { line.lineTotal = priced.lines[index]?.lineTotal ?? null; });
       quote = {
         productValue: priced.productValue, shopDiscount: priced.shopDiscount ? { amount: priced.shopDiscount.amount, offer: await frozenOffer(client, priced.shopDiscount.ruleId, priced.shopDiscount.ruleVersion) } : null,
@@ -111,8 +134,29 @@ export async function pricedCart(
   if (delivering) reasons.push(...priceReasons);
   else quote = null;
 
+  // The pickup route (FUL-7): priced from the same lines and discount, with no delivery fee and no commission, against the pickup floor alone.
+  let pickup: PickupQuote | null = null;
+  let pickupDetail: PickupDetail | null = null;
+  if (engine && modeOpen("pickup")) {
+    const card = await resolveRateCard(client, shopId, undefined, engine.rateCardVersion, { usesPickup: true, usesBargain: false });
+    const rule = card?.missing.includes("pickup") ? undefined : card?.values.pickup?.value as { enabled: boolean; customerFee: string; shopFee: string | null; cap: string | null; contributionFloor: string } | undefined;
+    if (rule) {
+      const price = pickupPrice({ productValue: engine.productValue, shopDiscount: engine.shopDiscount?.amount ?? "0", rule });
+      const pickupReasons: CartReason[] = [];
+      if (member.rowCount) pickupReasons.push({ code: "OWN_SHOP" });
+      if (serving && !serving.open) pickupReasons.push({ code: "SHOP_CLOSED", opensAt: serving.opensAt });
+      if (orderable.length < lines.length) pickupReasons.push({ code: "LINE_UNAVAILABLE" });
+      if (price.shortfall !== null) pickupReasons.push({ code: "BELOW_CONTRIBUTION_FLOOR" });
+      pickup = {
+        productValue: engine.productValue, shopDiscount: quote?.shopDiscount ?? (engine.shopDiscount ? { amount: engine.shopDiscount.amount, offer: await frozenOffer(client, engine.shopDiscount.ruleId, engine.shopDiscount.ruleVersion) } : null),
+        pickupFee: price.pickupFee, total: price.total, placeable: pickupReasons.length === 0, reasons: pickupReasons,
+      };
+      pickupDetail = { pickupFee: price.pickupFee, total: price.total, quote: pickupOrderQuote(engine, price, rule.contributionFloor) };
+    }
+  }
+
   const name = serving?.name ?? (await client.query<{ name: string }>("SELECT shop_name AS name FROM shops WHERE id = $1", [shopId])).rows[0]?.name ?? "";
-  return { view: { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons }, priced: engine, packs };
+  return { view: { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons, pickup }, priced: engine, packs, pickupDetail };
 }
 
 const cartView = async (...args: Parameters<typeof pricedCart>) => (await pricedCart(...args)).view;

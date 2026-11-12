@@ -67,6 +67,8 @@ import { LiveCheck } from "./shops";
  * - SHOP_STATE_CHANGE_REFUSED (409) also answers Move to Live on anything but Approved.
  * Open/closed switch (#380):
  * - SHOP_NOT_LIVE (409): the switch works only once the shop is Live.
+ * Fulfilment switches (#65):
+ * - PICKUP_NOT_CONFIGURED (409): pickup can be switched on only once the shop's rate card has a pickup rule with its contribution floor.
  * Search terms (#397):
  * - SEARCH_TERM_IN_USE (409): the list already pairs this typed word with this catalog word.
  * Holidays (#382):
@@ -132,6 +134,7 @@ export const ErrorCode = z.enum([
   "RATE_CARD_CHANGED",
   "SHOP_NOT_READY",
   "SHOP_NOT_LIVE",
+  "PICKUP_NOT_CONFIGURED",
   "HOLIDAY_OVERLAP",
   "TOO_MANY_HOLIDAYS",
   "SEARCH_TERM_IN_USE",

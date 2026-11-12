@@ -4,8 +4,8 @@ import { connectDatabase, type Database } from "./db";
 import { checkJobs } from "./job-check";
 import { isJobName, jobMaxAgeHours, type JobName } from "./jobs";
 
-// `check-jobs.js <job>` checks that one job (the every-5-minute expire-orders
-// and expire-confirmations timers). With no argument it checks the daily jobs;
+// `check-jobs.js <job>` checks that one job (the every-5-minute expire-orders,
+// expire-confirmations and expire-pickups timers). With no argument it checks the daily jobs;
 // minutely jobs are left to their own timers.
 const only = process.argv[2];
 if (only !== undefined && !isJobName(only)) {
@@ -13,7 +13,7 @@ if (only !== undefined && !isJobName(only)) {
   process.exit(2);
 }
 const names = only !== undefined ? [only as JobName]
-  : (Object.keys(jobMaxAgeHours) as JobName[]).filter((name) => name !== "expire-orders" && name !== "expire-confirmations");
+  : (Object.keys(jobMaxAgeHours) as JobName[]).filter((name) => name !== "expire-orders" && name !== "expire-confirmations" && name !== "expire-pickups");
 
 let database: Database | undefined;
 try {

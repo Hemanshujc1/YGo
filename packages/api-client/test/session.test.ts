@@ -273,7 +273,7 @@ describe("each call", () => {
   it("places, lists, reads and cancels orders, and carries the cart a CART_CHANGED answers with (#427, #426)", async () => {
     const shopId = "5b0c7f1e-2a4d-4e8f-9b6a-1c3d5e7f9a0b";
     const orderId = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
-    const cart = { shop: { id: shopId, name: "Sai General Stores" }, revision: 3, lines: [], quote: null, placeable: false, reasons: [] };
+    const cart = { shop: { id: shopId, name: "Sai General Stores" }, revision: 3, lines: [], quote: null, placeable: false, reasons: [], pickup: null };
     const { client, calls } = setup((call) => {
       if (call.path === "/v1/auth/verify") return answer(200, pair(1));
       if (call.path.endsWith("/order")) return answer(409, { error: { code: "CART_CHANGED", cart } });
@@ -327,6 +327,7 @@ describe("each call", () => {
       productValue: "200.00",
       deliveryFee: "30.00",
       smallCartFee: null,
+      pickupFee: null,
       total: "230.00",
       originalTotal: "300.00",
       cancelsOrder: false,
@@ -478,7 +479,7 @@ describe("each call", () => {
     const cart = {
       shop: { id, name: "Sai General Stores" }, revision: 1,
       lines: [{ listingId: id, name: "Toor Dal", brand: null, baseUnit: "kg", quantity: "1", price: "135.00", count: 2, state: "orderable", part: null, left: null, lineTotal: "270.00" }],
-      quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [],
+      quote: { productValue: "270.00", shopDiscount: null, deliveryFee: "30.00", smallCartFee: null, total: "300.00" }, placeable: true, reasons: [], pickup: null,
     };
     let changed = false;
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : changed ? answer(409, { error: { code: "CART_CHANGED" } }) : answer(200, cart));
@@ -532,6 +533,20 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/shop-open" });
     expect(await client.setShopOpen({ open: false })).toEqual({ ok: true, data: status });
     expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/shop-open", body: { open: false } });
+  });
+
+  it("reads and sets the fulfilment switches and runs a pickup at the counter (#65)", async () => {
+    const modes = { modes: [{ mode: "pickup", shopOn: true, adminForcedOff: false, open: true }] };
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, modes));
+    await client.verifyCode(signIn);
+    expect(await client.fulfilmentModes()).toEqual({ ok: true, data: modes });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/fulfilment-modes" });
+    expect(await client.setFulfilmentMode("pickup", true)).toEqual({ ok: true, data: modes });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/me/fulfilment-modes/pickup", body: { on: true } });
+    await client.readyForPickup("a/b");
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-orders/a%2Fb/ready-for-pickup" });
+    await client.completePickup("a/b", { handoverCode: "1234", payment: "cash" });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-orders/a%2Fb/picked-up", body: { handoverCode: "1234", payment: "cash" } });
   });
 
   it("reads, adds, edits and removes the Owner's holidays (#382)", async () => {

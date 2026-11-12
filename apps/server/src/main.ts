@@ -17,6 +17,7 @@ setOrderTiming({
   reRingSeconds: config.ORDER_REALERT_SECONDS,
   expireSeconds: config.ORDER_EXPIRE_SECONDS,
   confirmSeconds: config.ORDER_CONFIRM_SECONDS,
+  collectSeconds: config.PICKUP_COLLECT_SECONDS,
 });
 const mailer = config.MAILER === "ses"
   ? createSesMailer(config.MAIL_FROM, config.AWS_REGION)
