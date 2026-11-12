@@ -16,12 +16,32 @@ export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
 export const OpeningStockPayload = z.strictObject({ packId: z.uuid(), quantity: BaseUnitQuantity });
 export const StockFlagPayload = z.strictObject({ packId: z.uuid(), outOfStock: z.boolean() });
 export const StockFlagResponse = z.strictObject({ listingId: z.uuid(), outOfStock: z.boolean(), recordedAt: z.iso.datetime() });
+/** Why stock changed (BIL-7, CONTEXT.md): the fixed list every stock change takes. Damaged and expired only take stock away; counted sets the total. */
+export const STOCK_CHANGE_REASONS = ["received", "counted", "damaged", "expired", "returned", "correction"] as const;
+export const StockChangeReason = z.enum(STOCK_CHANGE_REASONS);
+export type StockChangeReason = z.infer<typeof StockChangeReason>;
+/**
+ * One stock change from the phone, offline or not (#67). `quantity` is a signed change in base units; "counted" carries the total the shop counted
+ * instead, and the server works the difference out against the latest on-hand figure, so two phones counting at once never overwrite each other.
+ */
+export const StockChangePayload = z.discriminatedUnion("reason", [
+  z.strictObject({ packId: z.uuid(), reason: z.literal("counted"), total: BaseUnitQuantity }),
+  z.strictObject({ packId: z.uuid(), reason: z.enum(["received", "returned", "correction"]), quantity: SignedBaseUnitQuantity })
+    .refine((change) => Number(change.quantity) !== 0),
+  z.strictObject({ packId: z.uuid(), reason: z.enum(["damaged", "expired"]), quantity: SignedBaseUnitQuantity })
+    .refine((change) => Number(change.quantity) < 0),
+]);
+export type StockChangePayload = z.infer<typeof StockChangePayload>;
+export const StockChangeResponse = z.strictObject({ listingId: z.uuid(), reason: StockChangeReason, change: SignedBaseUnitQuantity, onHand: SignedBaseUnitQuantity, recordedAt: z.iso.datetime() });
+export type StockChangeResponse = z.infer<typeof StockChangeResponse>;
 export const ShopStockResponse = z.strictObject({
   shopId: z.uuid(), state: z.enum(["live", "suspended"]), items: z.array(z.strictObject({
     listingId: z.uuid(), packId: z.uuid(), name: z.string(), packQuantity: PackQuantity,
     baseUnit: z.enum(["each", "kg", "l"]), quantity: SignedBaseUnitQuantity, held: BaseUnitQuantity, outOfStock: z.boolean(),
     // The price a counter bill charges for one pack, kept on the phone so billing works offline (#468).
     counterPrice: ShopPrice,
+    // Some stock is left to sell but no more than the shop's low-stock level: the Stock list's "Low" word (#67). Out of stock is `outOfStock` or nothing left.
+    lowStock: z.boolean().optional(),
   })),
 });
 export const StockCursor = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,18})$/);
@@ -89,7 +109,7 @@ export const SyncActionCode = z.enum([
 export type SyncActionCode = z.infer<typeof SyncActionCode>;
 export const SyncActionResult = z.strictObject({
   actionId: z.uuid(), sequence: z.number().int().positive(), status: z.enum(["applied", "rejected", "retry"]),
-  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse, CounterBillResponse]).nullable(), clockSuspect: z.boolean(),
+  code: SyncActionCode.nullable(), result: z.union([OpeningStockResponse, StockFlagResponse, StockChangeResponse, CounterBillResponse]).nullable(), clockSuspect: z.boolean(),
 }).refine((row) => row.status === "applied" ? row.code === null && row.result !== null : row.code !== null && row.result === null);
 export const SyncActionsResponse = z.strictObject({ results: z.array(SyncActionResult) });
 export type SyncAction = z.infer<typeof SyncAction>;

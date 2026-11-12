@@ -1,9 +1,10 @@
-import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
 import { applyCounterBill } from "../counter-bills";
 import { withTransaction } from "../db";
+import { applyStockChange } from "../stock-changes";
 import { deriveKeys, mobileSignedIn } from "../tokens";
 import { applyOpeningStock, applyOpeningStockCorrection, counterCatalogSql } from "./shop-listings";
 
@@ -42,7 +43,8 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       if (!saved) throw new Error("Missing Stock revision");
       if (since && (!since.startsWith(`${shop.id}:`) || BigInt(since.split(":")[1] ?? "0") > BigInt(saved.revision))) return reply.code(400).send({ error: { code: "VALIDATION_FAILED" } });
       // One statement snapshot: a writer committing later is picked up by the next pull.
-      const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, held, "outOfStock", "counterPrice"
+      const { rows } = await client.query<ShopStockResponse["items"][number]>(`SELECT "listingId", "packId", name, "packQuantity", "baseUnit", stock AS quantity, held, "outOfStock", "counterPrice",
+          ("lowStockLevel" > 0 AND NOT "outOfStock" AND stock::numeric > 0 AND stock::numeric <= "lowStockLevel") AS "lowStock"
         FROM (${counterCatalogSql} AND sl.id IS NOT NULL) current_stock`, [shop.id]);
       const previous = await client.query<{ packId: string; payload: ShopStockResponse["items"][number] | null }>('SELECT pack_id AS "packId", payload FROM stock_sync_items WHERE shop_id = $1', [shop.id]);
       const current = new Map(rows.map((item) => [item.packId, item]));
@@ -118,6 +120,17 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
               result.status = "applied";
               result.result = { listingId: listing.id, outOfStock: flag.data.outOfStock, recordedAt: now.toISOString() };
             }
+          }
+        } else if (action.type === "stock_change") {
+          // Owner or Staff change stock with a reason (BIL-7); refused before Live and once Closed, kept while Suspended (ONB-4, ONB-7).
+          const change = StockChangePayload.safeParse(action.payload);
+          if (!change.success) result.code = "VALIDATION_FAILED";
+          else if (shop.rows[0].state !== "live" && shop.rows[0].state !== "suspended") result.code = "SHOP_LISTING_NOT_READY";
+          else if (now.getTime() - Date.parse(action.createdAt) > maxAgeSeconds * 1000) result.code = "ACTION_TOO_OLD";
+          else {
+            const applied = await applyStockChange(client, who.accountId, action.shopId, action.id, change.data);
+            if ("code" in applied) result.code = applied.code;
+            else { result.status = "applied"; result.result = applied.result; }
           }
         } else if (action.type === "counter_bill") {
           // Owner or Staff; refused before Live and once Closed, while Suspended still bills (ONB-4, ONB-7, DEL-11).

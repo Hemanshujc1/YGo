@@ -5,6 +5,7 @@ import { withTransaction, type Database } from "./db";
 import { expireUnansweredOrders } from "./order-expiry";
 import { expireUnconfirmedOrders } from "./order-confirm-expiry";
 import { expireUncollectedPickups } from "./pickup-expiry";
+import { reconcileStock } from "./stock-reconciliation";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
 
@@ -14,6 +15,7 @@ export const jobMaxAgeHours = {
   "expire-confirmations": 0.25,
   "expire-orders": 0.25,
   "expire-pickups": 0.25,
+  "reconcile-stock": 26,
   "snapshot-weekly": 8 * 24,
 } as const;
 // Run history kept by cleanup-sessions (#520): the every-minute expire-orders job writes ~1,440 rows a day.
@@ -107,6 +109,7 @@ export async function runJob(
   }).returning({ id: jobRuns.id });
   if (!run) throw new Error("Could not record job start");
 
+  let detail: string | null = null;
   try {
     if (name === "backup-nightly") {
       if (!backupNightly) throw new Error("Backup runner is missing");
@@ -120,6 +123,10 @@ export async function runJob(
       await expireUnconfirmedOrders(database.pool, clock);
     } else if (name === "expire-pickups") {
       await expireUncollectedPickups(database.pool, clock);
+    } else if (name === "reconcile-stock") {
+      // Report only (#67): the differences it found are rows in stock_reconciliation_issues, never a change to stock.
+      const differing = await reconcileStock(database.pool, clock);
+      detail = differing === 0 ? "no differences found" : `${differing} ${differing === 1 ? "listing differs" : "listings differ"}`;
     } else {
       await database.db.transaction(async (tx) => {
         // ON DELETE CASCADE removes every refresh token of an expired session.
@@ -136,14 +143,14 @@ export async function runJob(
       // Its own transaction after the session cleanup, so a failure here cannot undo that work.
       await deleteOldJobRuns(database, now);
     }
-    await database.db.update(jobRuns).set({ status: "ok", finishedAt: clock.now() })
+    await database.db.update(jobRuns).set({ status: "ok", finishedAt: clock.now(), detail })
       .where(eq(jobRuns.id, run.id));
   } catch (error) {
     await database.db.update(jobRuns).set({
       status: "failed",
       finishedAt: clock.now(),
       errorText: name === "backup-nightly" ? "backup failed" : name === "snapshot-weekly" ? "snapshot failed" :
-        name === "expire-orders" ? "expiry failed" : name === "expire-confirmations" ? "confirmation expiry failed" : name === "expire-pickups" ? "pickup expiry failed" : "cleanup failed",
+        name === "expire-orders" ? "expiry failed" : name === "expire-confirmations" ? "confirmation expiry failed" : name === "expire-pickups" ? "pickup expiry failed" : name === "reconcile-stock" ? "reconcile failed" : "cleanup failed",
     }).where(eq(jobRuns.id, run.id));
     throw error;
   }

@@ -275,7 +275,7 @@ export {
 
 export {
   counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillManualLine, CounterBillPayload, CounterBillResponse,
-  ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse,
+  ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, STOCK_CHANGE_REASONS, StockChangePayload, StockChangeReason, StockChangeResponse, OpeningStockPayload, SyncAction, SyncActionCode, SyncActionResult, SyncActionsBody, SyncActionsResponse,
 } from "./sync";
 
 export { Notification, NotificationKind, NotificationParams, NotificationsResponse, PushTokenBody, RingAttemptParams } from "./notifications";

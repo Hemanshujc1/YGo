@@ -1,5 +1,5 @@
 import { formatNumber } from "@ygo/format";
-import type { CounterBillVoidReason, ErrorCode, OrderLineChangeReason, OrderStatus, RejectReason, SyncActionCode } from "@ygo/contracts";
+import type { CounterBillVoidReason, ErrorCode, OrderLineChangeReason, OrderStatus, RejectReason, StockChangeReason, SyncActionCode } from "@ygo/contracts";
 import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
@@ -210,6 +210,16 @@ export const strings = {
     suspended: "Your shop is suspended. Stock tools remain available; customers cannot place orders.",
     queueFull: "Your offline queue is full. Sync your saved changes before changing Stock again.",
     queueExpired: "Your saved changes have reached the offline time limit. Sync them before changing Stock again.",
+    // Low and out of stock carry a word, not only a colour (S11, #67).
+    low: "Low stock", out: "Out of stock", lowOnly: "Show only low stock", showAll: "Show all stock", noLow: "No product is low on stock.",
+    change: "Change stock", cancel: "Cancel", saveChange: "Save change", changeFor: (name: string) => `Change stock of ${name}`,
+    reasonTitle: "Why is the stock changing?",
+    reasons: { received: "Received", counted: "Counted", damaged: "Damaged", expired: "Expired", returned: "Returned", correction: "Correction" } satisfies Record<StockChangeReason, string>,
+    takeAway: "Take away", addTo: "Add",
+    amountLabel: (reason: StockChangeReason, unit: string) => reason === "counted" ? `Total you counted (${unit})` : `Amount (${unit})`,
+    amountWrong: "Type an amount such as 5 or 2.5. Counted packs take whole numbers.",
+    changePending: "Change saved on this phone · waiting to sync",
+    changeFailed: (reference: string) => `This stock change was refused. Your stock is unchanged. Support reference: ${reference}`,
   },
   // S06 Counter bill (#468): whole packs at each pack's counter price, made offline; the server gives the number.
   bill: {
@@ -294,7 +304,7 @@ export const strings = {
     stopped: "Syncing stopped. Changes stay on this phone. Fix what needs attention, then tap Retry sync.",
     sections: { attention: "Needs attention", waiting: "Waiting to sync", synced: "Synced today" },
     none: "None", unknownProduct: "A product in your shop",
-    markedOut: "Marked out of stock", markedIn: "Marked in stock", opening: (amount: string) => `Opening stock ${amount}`, correction: (amount: string) => `Opening stock correction to ${amount}`,
+    markedOut: "Marked out of stock", markedIn: "Marked in stock", stockChange: (reason: string, amount: string) => `Stock change · ${reason} ${amount}`, opening: (amount: string) => `Opening stock ${amount}`, correction: (amount: string) => `Opening stock correction to ${amount}`,
     held: "This saved count conflicts with another one. Choose which to keep in Opening stock.",
     reference: (id: string) => `Support reference: ${id}`, fixStock: "Fix in Stock", fixOpening: "Fix in Opening stock", fixOnline: "Go online to fix this in Opening stock.",
     syncedAt: (time: string) => `Synced at ${time}`,
