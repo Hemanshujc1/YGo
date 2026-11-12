@@ -5,7 +5,7 @@ import type { Clock } from "../adapters/clock";
 import type { DeliveryPhotoStorage } from "../adapters/delivery-photos";
 import { applyCounterBill } from "../counter-bills";
 import { deliveryActions } from "../delivery-actions";
-import { applyOfflineDelivery } from "../offline-delivery";
+import { applyOfflineDelivery, preparePhotos } from "../offline-delivery";
 import { withTransaction } from "../db";
 import { applyStockChange } from "../stock-changes";
 import { deriveKeys, mobileSignedIn } from "../tokens";
@@ -80,6 +80,8 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const body = request.body as SyncActionsBody;
+    // Proof photos are saved first, outside the transaction, so slow storage cannot hold the locks taken below (#616).
+    const prepared = photos ? await preparePhotos(pool, deliveries, body.actions.filter((a) => a.type.startsWith("delivery_")), { accountId: who.accountId, now: clock.now(), sentAt: new Date(body.sentAt), maxAgeSeconds }) : new Map();
     return withTransaction(pool, async (client) => {
       // Also serializes reused action IDs arriving on different devices of this account.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [who.accountId]);
@@ -150,8 +152,9 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
           }
         } else if (action.type.startsWith("delivery_")) {
           // The assigned deliverer's offline delivery (#616, DLV-3), rechecked here with the online rules.
-          const outcome = await applyOfflineDelivery(client, deliveries, action, { accountId: who.accountId, now, sentAt: new Date(body.sentAt), maxAgeSeconds, clockSuspect, photosAvailable: !!photos, cleanup });
+          const outcome = await applyOfflineDelivery(client, deliveries, action, { accountId: who.accountId, now, sentAt: new Date(body.sentAt), maxAgeSeconds, clockSuspect, prepared, cleanup });
           result.status = outcome.status;
+          result.clockSuspect = outcome.clockSuspect;
           if (outcome.status === "applied") result.result = outcome.result; else result.code = outcome.code;
           // Not answered yet (storage was busy): not recorded, so the phone sends it again.
           if (outcome.status === "retry") { results.push(result); continue; }
@@ -174,7 +177,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
           }
         }
         await client.query(`INSERT INTO sync_actions (account_id, action_id, device_id, sequence, action, result, clock_suspect, created_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [who.accountId, action.id, body.deviceId, action.sequence, JSON.stringify(action), JSON.stringify(result), clockSuspect, now]);
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [who.accountId, action.id, body.deviceId, action.sequence, JSON.stringify(action), JSON.stringify(result), result.clockSuspect, now]);
         sequence = action.sequence;
         results.push(result);
       }

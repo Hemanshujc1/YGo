@@ -238,6 +238,8 @@ export const ShopOrderSummary = z.strictObject({
   confirmByAt: z.iso.datetime().nullable(),
   /** The Customer has asked to cancel and the shop has not answered. */
   cancelAsked: z.boolean(),
+  /** An offline delivery of this Arrived order was refused or held and still needs the shop's attention (#616). Optional so older fixtures and servers still parse. */
+  offlineDeliveryIssue: z.boolean().optional(),
   itemCount: z.number().int().positive(),
   total: Amount,
   fulfilment: Fulfilment,
@@ -257,6 +259,8 @@ export type ShopOrderSummary = z.infer<typeof ShopOrderSummary>;
 export const ShopOrdersResponse = z.strictObject({
   now: z.iso.datetime(),
   canDeliver: z.boolean(),
+  /** How many of the shop's orders have `offlineDeliveryIssue`, for the attention count (#616). */
+  offlineDeliveryIssueCount: z.number().int().nonnegative().optional(),
   new: z.array(ShopOrderSummary),
   accepted: z.array(ShopOrderSummary),
   doneToday: z.array(ShopOrderSummary),

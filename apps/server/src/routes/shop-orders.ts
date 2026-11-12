@@ -79,7 +79,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
               SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
               FROM order_revisions p WHERE p.order_id = o.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1
             ) END AS "confirmByAt",
-            EXISTS (SELECT 1 FROM order_cancel_requests c WHERE c.order_id = o.id AND c.status = 'asked') AS "cancelAsked"
+            EXISTS (SELECT 1 FROM order_cancel_requests c WHERE c.order_id = o.id AND c.status = 'asked') AS "cancelAsked",
+            (o.status = 'arrived' AND EXISTS (SELECT 1 FROM offline_delivery_issues i WHERE i.order_id = o.id)) AS "offlineDeliveryIssue"
           FROM orders o
           WHERE o.shop_id = $1 AND (
             (o.status = 'placed' AND NOT ${answerExpired("o", "$2")})
@@ -96,6 +97,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     return {
       now: now.toISOString(),
       canDeliver: member.canDeliver,
+      offlineDeliveryIssueCount: rows.filter((row) => row.offlineDeliveryIssue).length,
       new: rows.filter((row) => row.status === "placed").map(summary),
       accepted: rows.filter((row) => STOCK_HOLDING_ORDER_STATUSES.includes(row.status)).map(summary),
       doneToday: rows.filter((row) => TERMINAL_ORDER_STATUSES.includes(row.status)).map(summary),
