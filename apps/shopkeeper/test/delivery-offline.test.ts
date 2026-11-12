@@ -26,7 +26,7 @@ describe("delivery without internet (#617)", () => {
   it("keeps My deliveries and each order for a phone with no internet", () => {
     queue.deliveries.saveList([summary(orderA), summary(orderB)]);
     queue.deliveries.saveOrder({ id: orderA, number: 7, customer: { name: "Asha", phone: "9000000000" } } as never, 1500);
-    expect(queue.deliveries.list().map((order) => order.id)).toEqual([orderA, orderB]);
+    expect(queue.deliveries.list()?.map((order) => order.id)).toEqual([orderA, orderB]);
     expect(queue.deliveries.order(orderA)).toMatchObject({ offset: 1500, order: { customer: { name: "Asha" } } });
   });
 
@@ -34,7 +34,7 @@ describe("delivery without internet (#617)", () => {
     queue.deliveries.saveList([summary(orderA), summary(orderB)]);
     const saved = complete(orderA) as { id: string };
     queue.deliveries.saveList([]);
-    expect(queue.deliveries.list().map((order) => order.id)).toEqual([orderA]);
+    expect(queue.deliveries.list()?.map((order) => order.id)).toEqual([orderA]);
     expect(db.prepare("SELECT count(*) AS n FROM delivery_photos").get()).toEqual({ n: 1 });
     expect(queue.batch(shopId).actions.map((action) => action.id)).toEqual([saved.id]);
   });
@@ -114,5 +114,16 @@ describe("delivery without internet (#617)", () => {
     expect(attentionCount(1, [orderA], [orderA])).toBe(1);
     expect(attentionCount(1, [orderA], [orderB])).toBe(2);
     expect(attentionCount(0, [], [orderA])).toBe(1);
+  });
+
+  it("queues a call attempt even when a proof photo is held, without the photo", () => {
+    expect(queue.saveDelivery(shopId, "delivery_call_attempt", { orderId: orderA }, bytes)).toMatchObject({ id: expect.any(String) });
+    expect(db.prepare("SELECT count(*) AS n FROM delivery_photos").get()).toEqual({ n: 0 });
+  });
+
+  it("has no list until one is saved, so an empty copy is not mistaken for no deliveries", () => {
+    expect(queue.deliveries.list()).toBeNull();
+    queue.deliveries.saveList([]);
+    expect(queue.deliveries.list()).toEqual([]);
   });
 });

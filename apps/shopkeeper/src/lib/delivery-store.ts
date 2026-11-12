@@ -12,8 +12,8 @@ export const CLOCK_BACK_MS = 60_000;
 export function createDeliveryTables(db: Database) {
   db.execSync(`CREATE TABLE IF NOT EXISTS delivery_orders (order_id TEXT PRIMARY KEY, summary TEXT NOT NULL, detail TEXT, clock_offset INTEGER);
     CREATE TABLE IF NOT EXISTS delivery_photos (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, bytes BLOB NOT NULL, upload_id TEXT, uploaded_at TEXT);
-    CREATE TABLE IF NOT EXISTS delivery_clock (high_water INTEGER NOT NULL);
-    INSERT INTO delivery_clock SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM delivery_clock);`);
+    CREATE TABLE IF NOT EXISTS delivery_clock (high_water INTEGER NOT NULL, listed INTEGER NOT NULL DEFAULT 0);
+    INSERT INTO delivery_clock (high_water) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM delivery_clock);`);
 }
 
 /** The failed-delivery wait, as the server's default; the phone times it on its own clock and the server rechecks (#617). */
@@ -31,10 +31,6 @@ export function attentionCount(serverCount: number, flaggedIds: string[], localR
 }
 
 export function deliveryStore(db: Database, now: () => Date) {
-  /** Orders with a delivery action on the phone that the server has not settled: waiting to send, or refused. */
-  const unresolved = () => new Set(db.getAllSync<{ order_id: string }>(`SELECT DISTINCT pack_id AS order_id FROM opening_stock_actions
-    WHERE status IN ('pending', 'rejected') AND json_extract(action, '$.type') IN (${types})`).map((row) => row.order_id));
-
   return {
     /**
      * Rewrite the cached list from a fresh online read. An order that left the list is settled on the server, so its cache row goes;
@@ -43,6 +39,7 @@ export function deliveryStore(db: Database, now: () => Date) {
     saveList(orders: ShopOrderSummary[]) {
       const ids = new Set(orders.map((order) => order.id));
       db.withTransactionSync(() => {
+        db.runSync("UPDATE delivery_clock SET listed = 1");
         for (const order of orders) db.runSync(`INSERT INTO delivery_orders (order_id, summary) VALUES (?, ?) ON CONFLICT (order_id) DO UPDATE SET summary = excluded.summary`, order.id, JSON.stringify(order));
         const waiting = new Set(db.getAllSync<{ pack_id: string }>(`SELECT DISTINCT pack_id FROM opening_stock_actions WHERE status = 'pending' AND json_extract(action, '$.type') IN (${types})`).map((row) => row.pack_id));
         for (const { order_id } of db.getAllSync<{ order_id: string }>("SELECT order_id FROM delivery_orders")) {
@@ -53,7 +50,9 @@ export function deliveryStore(db: Database, now: () => Date) {
         }
       });
     },
-    list(): ShopOrderSummary[] {
+    /** The last online list, or null when this phone has never saved one. */
+    list(): ShopOrderSummary[] | null {
+      if (!db.getFirstSync<{ listed: number }>("SELECT listed FROM delivery_clock")?.listed) return null;
       return db.getAllSync<{ summary: string }>("SELECT summary FROM delivery_orders ORDER BY rowid").map((row) => JSON.parse(row.summary) as ShopOrderSummary);
     },
     /** The order screen's last online read, with how far the server's clock was ahead then. */
@@ -64,7 +63,6 @@ export function deliveryStore(db: Database, now: () => Date) {
       const row = db.getFirstSync<{ detail: string | null; clock_offset: number | null }>("SELECT detail, clock_offset FROM delivery_orders WHERE order_id = ?", id);
       return row?.detail ? { order: JSON.parse(row.detail) as ShopOrderResponse, offset: row.clock_offset ?? 0 } : null;
     },
-    unresolved,
     /** What the phone holds for one order: actions waiting to send, and the latest refusal still open. */
     stateOf(orderId: string): DeliveryState {
       const rows = db.getAllSync<{ type: string; status: string; result: string | null; at: string }>(`SELECT json_extract(action, '$.type') AS type, status, result, json_extract(action, '$.createdAt') AS at FROM opening_stock_actions

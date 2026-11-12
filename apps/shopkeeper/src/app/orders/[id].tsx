@@ -1,15 +1,16 @@
 import {
+  type DELIVERY_ACTION_TYPES,
   OrderLineChangeReason,
   type PartialAcceptLine,
   type PartialAcceptPreviewResponse,
   RejectReason,
+  SyncActionCode,
   type ShopDeliverersResponse,
   type ShopOrderLine,
   type ShopOrderResponse,
 } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import { formatTime } from "@ygo/format";
-import { SyncActionCode } from "@ygo/contracts";
 import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -425,6 +426,8 @@ export default function OrderScreen() {
   const failureSeconds = useSecondsLeft(shown?.deliveryFailureReadyAt ?? queuedReadyAt, shown?.deliveryFailureReadyAt ? view.offset : 0);
   const photoReady = photoUploadId !== null || photoBytes !== null;
   const offlineNow = view.cached;
+  // A delivery already waiting to send is the one for this order; another would only be refused.
+  const sendingLater = delivery.waiting.some((type) => type !== "delivery_call_attempt");
   const timeUp = view.expired || seconds === 0;
   const done = (answered: boolean) => answered && router.replace("/orders");
 
@@ -680,7 +683,7 @@ export default function OrderScreen() {
    * Try the online route; with no internet at all, queue the action with its photo in the encrypted database and send it when back online (#617).
    * The server accepts it later, so the customer's status does not move until then.
    */
-  async function deliver<T extends { ok: boolean }>(type: Parameters<NonNullable<Awaited<ReturnType<typeof openDelivery>>>["queue"]["saveDelivery"]>[1], payload: Record<string, unknown>, online: () => Promise<T>): Promise<T | "queued" | "failed"> {
+  async function deliver<T extends { ok: boolean }>(type: (typeof DELIVERY_ACTION_TYPES)[number], payload: Record<string, unknown>, online: () => Promise<T>): Promise<T | "queued" | "failed"> {
     const result = await online().catch(() => "offline" as const);
     if (result !== "offline") return result;
     try {
@@ -861,7 +864,7 @@ export default function OrderScreen() {
                 if (cameraPermission?.granted) setCameraOpen(true);
                 else void requestCameraPermission().then((permission) => { if (permission.granted) setCameraOpen(true); });
               }} />}
-          <Button label={words.completeDelivery} disabled={!photoReady || handoverCode.length !== 4} busy={working} onPress={() => {
+          <Button label={words.completeDelivery} disabled={!photoReady || handoverCode.length !== 4 || sendingLater} busy={working} onPress={() => {
             if (!photoReady) return;
             setWorking(true); void deliver("delivery_complete", { orderId: shown.id, handoverCode, payment }, () => photoUploadId ? api.completeDelivery(shown.id, { handoverCode, payment, photoUploadId }) : Promise.reject(new Error("no upload"))).then((result) => {
               setWorking(false);
@@ -876,7 +879,7 @@ export default function OrderScreen() {
             ["someone_else_receiving", words.proofSomeoneElse],
             ["other", words.proofOther],
           ] as const).map(([reason, label]) => <Pressable key={reason} accessibilityRole="radio" accessibilityState={{ checked: proofReason === reason }} onPress={() => setProofReason(reason)} className={`rounded-button border px-3 py-2 ${proofReason === reason ? "border-primary" : "border-border"}`}><Text className="text-body text-text">{label}</Text></Pressable>)}
-          <Button label={words.proofException} variant="secondary" disabled={!proofReason || !photoReady} busy={working} onPress={() => {
+          <Button label={words.proofException} variant="secondary" disabled={!proofReason || !photoReady || sendingLater} busy={working} onPress={() => {
             if (!proofReason || !photoReady) return;
             setWorking(true); void deliver("delivery_proof_exception", { orderId: shown.id, reason: proofReason, payment }, () => photoUploadId ? api.completeDeliveryProofException(shown.id, { reason: proofReason, photoUploadId, payment }) : Promise.reject(new Error("no upload"))).then((result) => {
               setWorking(false);
@@ -904,7 +907,7 @@ export default function OrderScreen() {
             }} />}
           {failureSeconds !== null && failureSeconds > 0 && <Countdown seconds={failureSeconds} />}
           {([ ["no_one_at_address", words.failureNoOne], ["customer_refused", words.failureRefused], ["address_not_found", words.failureAddress], ["other", words.failureOther] ] as const).map(([reason, label]) => <Pressable key={reason} accessibilityRole="radio" accessibilityState={{ checked: failureReason === reason }} onPress={() => setFailureReason(reason)} className={`rounded-button border px-3 py-2 ${failureReason === reason ? "border-primary" : "border-border"}`}><Text className="text-body text-text">{label}</Text></Pressable>)}
-          <Button label={words.sendFailure} variant="destructive" disabled={failureSeconds !== 0 || !failureReason || !photoReady} busy={working} onPress={() => {
+          <Button label={words.sendFailure} variant="destructive" disabled={failureSeconds !== 0 || !failureReason || !photoReady || sendingLater} busy={working} onPress={() => {
             if (!failureReason || !photoReady) return;
             setWorking(true); void deliver("delivery_failed", { orderId: shown.id, reason: failureReason }, () => photoUploadId ? api.failDelivery(shown.id, { reason: failureReason, photoUploadId }) : Promise.reject(new Error("no upload"))).then((result) => {
               setWorking(false);

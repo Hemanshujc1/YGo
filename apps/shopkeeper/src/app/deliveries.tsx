@@ -20,7 +20,11 @@ export default function DeliveriesScreen() {
   // Work waiting or refused on this phone changes as the sync runs.
   const sync = useSyncExternalStore(stockSync.subscribe, stockSync.get);
   const [refused, setRefused] = useState<string[]>([]);
-  useEffect(() => { void openDelivery().then((open) => setRefused(open?.queue.deliveries.refusedIds() ?? [])).catch(() => undefined); }, [sync.running, sync.outcome, view.orders]);
+  useEffect(() => {
+    let gone = false;
+    void openDelivery().then((open) => { if (!gone) setRefused(open?.queue.deliveries.refusedIds() ?? []); }).catch(() => undefined);
+    return () => { gone = true; };
+  }, [sync.running, sync.outcome, view.orders]);
   // The server's flags come from a fresh read; offline, from the encrypted copy.
   const list = shown?.canDeliver ? shown.myDeliveries : view.cached ?? [];
   const attention = attentionCount(shown?.offlineDeliveryIssueCount ?? 0, list.filter((order) => order.offlineDeliveryIssue).map((order) => order.id), refused);

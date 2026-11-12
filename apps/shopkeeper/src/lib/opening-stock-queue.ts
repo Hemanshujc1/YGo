@@ -145,12 +145,18 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
      */
     saveDelivery(shopId: string, type: typeof DELIVERY_ACTION_TYPES[number], payload: Record<string, unknown>, photo?: Uint8Array): { id: string } | "queueFull" | "queueExpired" {
       // The photo's own id stands in the action until the sync step swaps in the server's upload id.
-      const body = deliveryBodies[type].parse(photo ? { ...payload, photoUploadId: newId() } : payload) as { orderId: string; photoUploadId?: string };
+      const withPhoto = photo && type !== "delivery_call_attempt" ? photo : undefined;
+      const body = deliveryBodies[type].parse(withPhoto ? { ...payload, photoUploadId: newId() } : payload) as { orderId: string; photoUploadId?: string };
       this.batch(shopId);
       const stop = blocked(this.count(), true);
       if (stop) return stop;
-      if (photo && body.photoUploadId) deliveries.savePhoto(body.photoUploadId, body.orderId, photo);
-      return { id: enqueue(shopId, body.orderId, type, body, deliveries.clockDoubted()) };
+      if (withPhoto && body.photoUploadId) deliveries.savePhoto(body.photoUploadId, body.orderId, withPhoto);
+      try {
+        return { id: enqueue(shopId, body.orderId, type, body, deliveries.clockDoubted()) };
+      } catch (error) {
+        if (body.photoUploadId) deliveries.dropPhoto(body.photoUploadId);
+        throw error;
+      }
     },
     /** A pack's name and size as Stock last showed it, kept after it is delisted, so an old bill can still name it (#53). */
     label,

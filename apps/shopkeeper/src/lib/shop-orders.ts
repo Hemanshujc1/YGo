@@ -91,7 +91,7 @@ function listeners() {
 /** The encrypted copy of My deliveries and its orders (#617), read when the phone cannot reach the server. Each call may fail; the screen then simply has no copy. */
 export type DeliveryCache = {
   saveList(list: ShopOrderSummary[]): Promise<void>;
-  list(): Promise<ShopOrderSummary[]>;
+  list(): Promise<ShopOrderSummary[] | null>;
   saveOrder(order: ShopOrderResponse, offset: number): Promise<void>;
   order(id: string): Promise<{ order: ShopOrderResponse; offset: number } | null>;
 };

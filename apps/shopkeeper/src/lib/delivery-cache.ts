@@ -14,7 +14,7 @@ export async function openDelivery() {
 /** The encrypted copy of My deliveries (#617). It opens the account's database on each call, which is one open handle. */
 export const deliveryCache: DeliveryCache = {
   saveList: async (list) => (await openDelivery())?.queue.deliveries.saveList(list),
-  list: async () => (await openDelivery())?.queue.deliveries.list() ?? [],
+  list: async () => (await openDelivery())?.queue.deliveries.list() ?? null,
   saveOrder: async (order, offset) => (await openDelivery())?.queue.deliveries.saveOrder(order, offset),
   order: async (id) => (await openDelivery())?.queue.deliveries.order(id) ?? null,
 };

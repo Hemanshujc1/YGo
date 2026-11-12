@@ -485,7 +485,7 @@ describe("delivery cache (#617)", () => {
   const cache = () => {
     const saved: { list: unknown[] | null; order: { order: ShopOrderResponse; offset: number } | null } = { list: null, order: null };
     return { saved, cache: {
-      saveList: async (l: unknown[]) => void (saved.list = l), list: async () => (saved.list ?? []) as never,
+      saveList: async (l: unknown[]) => void (saved.list = l), list: async () => saved.list as never,
       saveOrder: async (o: ShopOrderResponse, offset: number) => void (saved.order = { order: o, offset }), order: async () => saved.order,
     } };
   };
