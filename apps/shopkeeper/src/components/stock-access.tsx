@@ -45,7 +45,9 @@ export function StockAccess({ children }: { children: ReactNode }) {
     return () => { clearTimeout(timer); clearInterval(watchClock); };
   }, [view]);
   if (!checking && !failed && view.mode === "online" && view.accountId === id) return children;
-  if (view.mode === "offline" && (pathname === "/stock" || pathname === "/sync" || pathname === "/bill") && id && view.shopId && access.allowed(id, view.shopId)) return children;
+  // A deliverer's saved deliveries and their orders work with no internet too (#617).
+  const delivering = access.canDeliver() && (pathname === "/deliveries" || pathname.startsWith("/orders/"));
+  if (view.mode === "offline" && (pathname === "/stock" || pathname === "/sync" || pathname === "/bill" || delivering) && id && view.shopId && access.allowed(id, view.shopId)) return children;
   const words = strings.offlineAccess;
   return <ScrollView className="flex-1 bg-bg" contentContainerClassName="grow justify-center gap-4 px-4" contentContainerStyle={{ paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }}>
     <Text accessibilityRole="header" className="text-title-large font-semibold text-text">{words.title}</Text>
@@ -53,6 +55,7 @@ export function StockAccess({ children }: { children: ReactNode }) {
     {!checking && view.mode === "offline" && <>
       <Link href="/bill" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{strings.bill.open}</Text></Pressable></Link>
       <Link href="/stock" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{strings.stock.title}</Text></Pressable></Link>
+      {access.canDeliver() && <Link href="/deliveries" asChild><Pressable accessibilityRole="button" className="py-3"><Text className="text-body text-primary">{strings.tabs.deliveries}</Text></Pressable></Link>}
     </>}
     <Button label={view.mode === "erasing" ? words.cleanup : words.retry} busy={checking || view.mode === "signing-out"} variant="secondary" onPress={() => { if (view.mode === "erasing") void access.cleanup(); else void verify(); }} />
     <SignOut disabled={view.mode === "erasing" || view.mode === "signing-out" || checking} />

@@ -25,6 +25,7 @@ vi.mock("react-native", () => ({
   ActivityIndicator: "Spinner", Image: "Image", Linking: {}, Modal: "Modal", Pressable: "Pressable",
   RefreshControl: "RefreshControl", ScrollView: "ScrollView", TextInput: "TextInput", View: "View",
 }));
+vi.mock("expo-file-system", () => ({ File: function File() { return undefined; } }));
 vi.mock("expo-camera", () => ({ CameraView: "CameraView", useCameraPermissions: () => [null, () => Promise.resolve({ granted: false })] }));
 vi.mock("expo-image-manipulator", () => ({ SaveFormat: { JPEG: "jpeg" }, manipulateAsync: () => Promise.resolve({ uri: "" }) }));
 vi.mock("react-native-qrcode-svg", () => ({ default: "QRCode" }));

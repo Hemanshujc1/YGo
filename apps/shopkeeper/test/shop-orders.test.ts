@@ -499,6 +499,16 @@ describe("delivery cache (#617)", () => {
     expect(offline.get()).toMatchObject({ status: "ready", orders: null, cached: mine.myDeliveries, message: words.offline });
   });
 
+  it("saves the list from a store that only saves, as the Orders tab does, and keeps its offline view unchanged", async () => {
+    const { saved, cache: copy } = cache();
+    const store = createShopOrders({ shopOrders: async () => ok(mine) }, fakeTimers().timers, 15_000, Date.now, { saveList: copy.saveList });
+    await store.refresh();
+    expect(saved.list).toEqual(mine.myDeliveries);
+    const offline = createShopOrders({ shopOrders: () => Promise.reject(new Error("offline")) }, fakeTimers().timers, 15_000, Date.now, { saveList: copy.saveList });
+    await offline.refresh();
+    expect(offline.get()).toMatchObject({ status: "failed", cached: null });
+  });
+
   it("shows no copy after a refusal, only when the server could not be reached", async () => {
     const { cache: copy } = cache();
     await copy.saveList([{ id } as never]);

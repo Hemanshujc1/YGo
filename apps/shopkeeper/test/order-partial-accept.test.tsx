@@ -82,6 +82,7 @@ vi.mock("react-native", () => ({
   View: (props: Record<string, unknown>) => ({ type: "View", props }),
 }));
 
+vi.mock("expo-file-system", () => ({ File: function File() { return undefined; } }));
 vi.mock("expo-camera", () => ({
   CameraView: "CameraView",
   useCameraPermissions: () => [null, () => Promise.resolve({ granted: false })],

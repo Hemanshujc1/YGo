@@ -9,6 +9,7 @@ import { AlertPanel } from "../../components/alert-panel";
 import { ExpiryCountdown } from "../../components/countdown";
 import { OpenSwitch } from "../../components/open-switch";
 import { OrderRow } from "../../components/order-row";
+import { deliveryCache } from "../../lib/delivery-cache";
 import { useAccountRole } from "../../lib/account-role";
 import { inbox } from "../../lib/inbox";
 import { createShopOrders } from "../../lib/shop-orders";
@@ -21,7 +22,7 @@ const groups = ["new", "accepted", "doneToday"] as const satisfies ReadonlyArray
 
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
-  const [orders] = useState(() => createShopOrders(api));
+  const [orders] = useState(() => createShopOrders(api, undefined, undefined, undefined, { saveList: deliveryCache.saveList }));
   const view = useSyncExternalStore(orders.subscribe, orders.get);
   useInFront(orders);
   const shown = view.orders;

@@ -108,7 +108,7 @@ export type ListView = {
 };
 
 /** S04, and the order pinned on S03 (#507): reads the three groups now and every `every` ms while started. */
-export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery, now = Date.now, cache?: DeliveryCache) {
+export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopOrdersResponse>> }, timers: Timers = phoneTimers, every = pollEvery, now = Date.now, cache?: Pick<DeliveryCache, "saveList"> & Partial<Pick<DeliveryCache, "list">>) {
   let view: ListView = { status: "loading", orders: null, offset: 0, message: null, refreshing: false, cached: null };
   const { notify, subscribe } = listeners();
   const set = (next: Partial<ListView>) => {
@@ -129,7 +129,7 @@ export function createShopOrders(client: { shopOrders(): Promise<ApiResult<ShopO
       if (answer.data.canDeliver) void cache?.saveList(answer.data.myDeliveries).catch(() => undefined);
     } else {
       // No answer at all (not a refusal): the shop's own deliveries still show from the encrypted copy.
-      const saved = answer === "offline" ? await cache?.list().catch(() => null) ?? null : null;
+      const saved = answer === "offline" ? await cache?.list?.().catch(() => null) ?? null : null;
       if (!latest()) return;
       set({ status: view.orders || saved ? "ready" : "failed", message: failure(answer), refreshing: false, cached: saved });
     }

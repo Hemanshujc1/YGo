@@ -10,6 +10,7 @@ vi.mock("../src/api", () => ({ api: {}, session: { get: () => ({ account: { id: 
 vi.mock("../src/components/alert-panel", () => ({ AlertPanel: "AlertPanel" }));
 vi.mock("../src/components/open-switch", () => ({ OpenSwitch: "OpenSwitch" }));
 vi.mock("../src/components/order-row", () => ({ OrderRow: "OrderRow" }));
+vi.mock("../src/lib/delivery-cache", () => ({ deliveryCache: { saveList: vi.fn() } }));
 vi.mock("../src/lib/account-role", () => ({ useAccountRole: () => mock.role }));
 vi.mock("../src/lib/inbox", () => ({ inbox: {} }));
 vi.mock("../src/lib/shop-orders", () => ({ createShopOrders: () => ({ subscribe: () => () => undefined, get: () => ({}), refresh: vi.fn(), retry: vi.fn() }) }));

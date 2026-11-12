@@ -10,6 +10,7 @@ import {
   type ShopOrderResponse,
 } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
+import { File } from "expo-file-system";
 import { formatTime } from "@ygo/format";
 import { Button, Confirm, StatusChip, Text, useInFront } from "@ygo/mobile";
 import { Link, router, useLocalSearchParams } from "expo-router";
@@ -676,7 +677,13 @@ export default function OrderScreen() {
   // What the phone holds for this order changes as the sync runs.
   useEffect(() => {
     if (!orderId) return;
-    void openDelivery().then((open) => open && setDelivery(open.queue.deliveries.stateOf(orderId))).catch(() => undefined);
+    void openDelivery().then((open) => {
+      if (!open) return;
+      const held = open.queue.deliveries.stateOf(orderId);
+      setDelivery(held);
+      // Once nothing is left to send, "Saved on this phone" no longer applies.
+      if (held.waiting.length === 0) setDeliveryMessage((message) => (message === words.waitingToSend ? null : message));
+    }).catch(() => undefined);
     // Once a pass has finished, read the order again: the server may have accepted what was queued.
     if (!sync.running && sync.outcome) void order.refresh();
   }, [orderId, sync.running, sync.outcome]);
@@ -702,7 +709,8 @@ export default function OrderScreen() {
 
   async function saveProofPhoto(orderId: string, uri: string) {
     const blob = await (await fetch(uri)).blob();
-    setPhotoBytes(new Uint8Array(await blob.arrayBuffer()));
+    // A React Native Blob has no arrayBuffer(); the file's own bytes are read instead.
+    setPhotoBytes(new Uint8Array(await new File(uri).bytes()));
     // A refusal by the server is shown as before; any call that never got an answer leaves the photo on this phone to go up with the delivery.
     const refusal = (message: string) => Object.assign(new Error(message), { refused: true });
     try {
