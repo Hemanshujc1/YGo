@@ -1109,6 +1109,24 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       expect(list.doneToday.map((o: { offlineDeliveryIssue: boolean }) => o.offlineDeliveryIssue)).toEqual([false]);
     });
 
+    it("measures an action's age on the server's clock, so a phone with its clock set back cannot get past the bound", async () => {
+      const { shopId, dal, owner, home } = await stocked();
+      const orderId = await readyAtDoor(shopId, dal, home, owner);
+      const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+      const upload = await photo(orderId, owner);
+      // The phone's clock is set back: sentAt and createdAt agree with each other, but the server's clock is current.
+      const back = "2029-12-01T00:00:00.000Z";
+      const response = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: owner, payload: { deviceId: randomUUID(), sentAt: back,
+        actions: [{ id: randomUUID(), sequence: 1, shopId, type: "delivery_complete", createdAt: back, clockSuspect: false,
+          payload: { orderId, handoverCode: code, payment: "upi", photoUploadId: upload.id } }] } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().results[0]).toMatchObject({ status: "rejected", code: "ACTION_TOO_OLD", clockSuspect: true });
+      expect(await status(orderId)).toBe("arrived");
+      expect(savedProofs).toEqual([]);
+      expect((await database.pool.query("SELECT 1 FROM stock_movements WHERE client_id = $1 AND kind = 'sale'", [orderId])).rowCount).toBe(0);
+      expect(await issues(orderId)).toMatchObject([{ action: "delivery_complete", code: "ACTION_TOO_OLD", clock_suspect: true }]);
+    });
+
     it("applies a proof exception after a call attempt, and refuses it without one", async () => {
       const { shopId, dal, owner, home } = await stocked();
       const orderId = await readyAtDoor(shopId, dal, home, owner);

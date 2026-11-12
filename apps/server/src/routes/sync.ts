@@ -81,7 +81,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
     if (!who) return reply;
     const body = request.body as SyncActionsBody;
     // Proof photos are saved first, outside the transaction, so slow storage cannot hold the locks taken below (#616).
-    const prepared = photos ? await preparePhotos(pool, deliveries, body.actions.filter((a) => a.type.startsWith("delivery_")), { accountId: who.accountId, now: clock.now(), sentAt: new Date(body.sentAt), maxAgeSeconds }) : new Map();
+    const prepared = photos ? await preparePhotos(pool, deliveries, body.actions.filter((a) => a.type.startsWith("delivery_")), { accountId: who.accountId, now: clock.now(), maxAgeSeconds }) : new Map();
     return withTransaction(pool, async (client) => {
       // Also serializes reused action IDs arriving on different devices of this account.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [who.accountId]);
@@ -152,7 +152,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
           }
         } else if (action.type.startsWith("delivery_")) {
           // The assigned deliverer's offline delivery (#616, DLV-3), rechecked here with the online rules.
-          const outcome = await applyOfflineDelivery(client, deliveries, action, { accountId: who.accountId, now, sentAt: new Date(body.sentAt), maxAgeSeconds, clockSuspect, prepared, cleanup });
+          const outcome = await applyOfflineDelivery(client, deliveries, action, { accountId: who.accountId, now, maxAgeSeconds, clockSuspect, prepared, cleanup });
           result.status = outcome.status;
           result.clockSuspect = outcome.clockSuspect;
           if (outcome.status === "applied") result.result = outcome.result; else result.code = outcome.code;

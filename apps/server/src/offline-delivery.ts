@@ -16,13 +16,13 @@ const PHOTO_SAVE_LEASE_MS = 5 * 60_000;
  * refuses is left as a staged proof, which the expired-upload job removes. When storage fails, the rest of the batch is not tried
  * and those actions come back as `retry`, so the phone sends them again.
  */
-export async function preparePhotos(pool: Pool, actions: DeliveryActions, list: SyncAction[], ctx: { accountId: string; now: Date; sentAt: Date; maxAgeSeconds: number }): Promise<PreparedPhotos> {
+export async function preparePhotos(pool: Pool, actions: DeliveryActions, list: SyncAction[], ctx: { accountId: string; now: Date; maxAgeSeconds: number }): Promise<PreparedPhotos> {
   const prepared: PreparedPhotos = new Map();
   let storageDown = false;
   for (const action of list) {
     const kind = kinds[action.type];
     const body = kind ? bodySchemas[kind].safeParse(action.payload) : null;
-    if (!kind || !body?.success || ctx.sentAt.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) continue;
+    if (!kind || !body?.success || ctx.now.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) continue;
     const seen = await pool.query("SELECT 1 FROM sync_actions WHERE account_id = $1 AND action_id = $2", [ctx.accountId, action.id]);
     if (seen.rowCount) continue;
     if (storageDown) { prepared.set(action.id, "UNAVAILABLE"); continue; }
@@ -43,7 +43,7 @@ export async function preparePhotos(pool: Pool, actions: DeliveryActions, list: 
  * so the shop and Admin can see it: nothing is dropped, and Admin settles an order with a forced move. A photo that is to be removed once the batch commits is pushed to `cleanup`.
  */
 export async function applyOfflineDelivery(client: PoolClient, actions: DeliveryActions, action: SyncAction, ctx: {
-  accountId: string; now: Date; sentAt: Date; maxAgeSeconds: number; clockSuspect: boolean; prepared: PreparedPhotos; cleanup: { orderId: string; uploadId: string }[];
+  accountId: string; now: Date; maxAgeSeconds: number; clockSuspect: boolean; prepared: PreparedPhotos; cleanup: { orderId: string; uploadId: string }[];
 }): Promise<DeliveryOutcome> {
   const { accountId, now, clockSuspect } = ctx;
   const at = new Date(Math.min(Date.parse(action.createdAt), now.getTime()));
@@ -63,7 +63,7 @@ export async function applyOfflineDelivery(client: PoolClient, actions: Delivery
     if (action.type === "delivery_call_attempt") {
       const body = DeliveryCallAttemptPayload.safeParse(action.payload);
       if (!body.success) return rejected("VALIDATION_FAILED");
-      if (ctx.sentAt.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) return rejected("ACTION_TOO_OLD");
+      if (ctx.now.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) return rejected("ACTION_TOO_OLD");
       // A doubted clock cannot back-date the wait: the attempt counts from when the server heard of it.
       const refused = await actions.callAttempt(client, body.data.orderId, accountId, clockSuspect ? now : at);
       return refused ? rejected(refused) : { status: "applied", result: { orderId: body.data.orderId, status: "arrived" }, clockSuspect: suspect };
@@ -71,7 +71,7 @@ export async function applyOfflineDelivery(client: PoolClient, actions: Delivery
     const body = kind ? bodySchemas[kind].safeParse(action.payload) : null;
     if (!kind || !body?.success) return rejected("VALIDATION_FAILED");
     const { orderId, ...rest } = body.data;
-    if (ctx.sentAt.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) return rejected("ACTION_TOO_OLD");
+    if (ctx.now.getTime() - Date.parse(action.createdAt) > ctx.maxAgeSeconds * 1000) return rejected("ACTION_TOO_OLD");
     // The photo was saved before this transaction; storage trouble asks the phone to send the action again, with nothing recorded.
     const photoKey = ctx.prepared.get(action.id) ?? "UNAVAILABLE";
     if (photoKey === "UNAVAILABLE") return rejected("UNAVAILABLE", "retry");
