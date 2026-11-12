@@ -75,7 +75,7 @@ const quote = {
   shopKeeps: "117.00", platformContribution: "23.00", placeable: true, reasons: [],
 };
 
-type Seed = { shopId: string; customerId: string; status?: string; placedAt?: string; changedAt?: string; fulfilment?: "delivery" | "pickup"; discount?: string };
+type Seed = { shopId: string; customerId: string; status?: string; placedAt?: string; changedAt?: string; fulfilment?: "delivery" | "pickup"; discount?: string; lineCount?: number };
 
 /** A shop-wide flat discount rule, version 1, for an order placed under it. */
 async function discountRule(shopId: string) {
@@ -86,7 +86,7 @@ async function discountRule(shopId: string) {
   return saved?.id;
 }
 
-async function createOrder({ shopId, customerId, status = "placed", placedAt = "2030-01-01T00:00:00.000Z", changedAt = placedAt, fulfilment = "delivery", discount }: Seed) {
+async function createOrder({ shopId, customerId, status = "placed", placedAt = "2030-01-01T00:00:00.000Z", changedAt = placedAt, fulfilment = "delivery", discount, lineCount = 1 }: Seed) {
   const delivery = fulfilment === "delivery";
   const rule = discount ? await discountRule(shopId) : null;
   const { rows: [row] } = await database.pool.query<{ id: string }>(
@@ -105,7 +105,7 @@ async function createOrder({ shopId, customerId, status = "placed", placedAt = "
      INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp) SELECT $1, id, 130, 130, 140 FROM k RETURNING id`, [shopId]);
   await database.pool.query(
     `INSERT INTO order_lines (order_id, position, listing_id, name, base_unit, pack_quantity, count, unit_price, line_total, stock_quantity)
-     VALUES ($1, 1, $2, 'Atta', 'kg', 1, 1, 130, 130, 1)`, [id, item?.id]);
+     VALUES ($1, 1, $2, 'Atta', 'kg', 1, $3, 130 / $3, 130, $3)`, [id, item?.id, lineCount]);
   return id;
 }
 
@@ -318,19 +318,24 @@ describe("Admin orders: monitoring and forced transitions (ADM-4, ADM-7, ORD-1, 
     expect(detail.money).toMatchObject({ productValue: "80.00", shopDiscount: "0.00", deliveryFee: "10.00", total: "90.00" });
   });
 
-  it("shows the confirmed revision's lines with its money, not the placement lines", async () => {
+  it("shows the confirmed revision's lines with its own counts and money, leaving out a removed line", async () => {
     const customerId = await account("cust@example.com", "Meera");
-    const id = await createOrder({ shopId: await shop("S"), customerId, status: "accepted" });
+    const id = await createOrder({ shopId: await shop("S"), customerId, status: "accepted", lineCount: 2 });
+    await database.pool.query(
+      `INSERT INTO order_lines (order_id, position, listing_id, name, base_unit, pack_quantity, count, unit_price, line_total, stock_quantity)
+       SELECT order_id, 2, listing_id, 'Dal', base_unit, pack_quantity, 1, 20, 20, pack_quantity FROM order_lines WHERE order_id = $1 AND position = 1`, [id]);
     const headers = await signIn(admin.email);
     const before = (await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail;
-    expect(before.lines.map((l) => [l.count, l.lineTotal])).toEqual([[1, "130.00"]]);
+    expect(before.lines.map((l) => [l.name, l.count, l.unitPrice, l.lineTotal])).toEqual([["Atta", 2, "65.00", "130.00"], ["Dal", 1, "20.00", "20.00"]]);
     await database.pool.query(
       `WITH r AS (INSERT INTO order_revisions (order_id, revision, status, source_status, actor_role, created_at, confirmed_at, confirm_by_at, product_value, delivery_fee, total, commission, platform_contribution, quote)
          VALUES ($1, 1, 'confirmed', 'placed', 'owner', $2, $2, $2, 80, 20, 100, 8, 12, $3) RETURNING id)
        INSERT INTO order_revision_lines (revision_id, position, listing_id, name, base_unit, pack_quantity, original_count, count, unit_price, line_total, commission, stock_quantity, change_reason)
-       SELECT r.id, 1, l.listing_id, l.name, l.base_unit, l.pack_quantity, l.count, 1, 80, 80, 8, l.pack_quantity, 'out_of_stock' FROM r, order_lines l WHERE l.order_id = $1`, [id, clock.now(), quote]);
+       SELECT r.id, l.position, l.listing_id, l.name, l.base_unit, l.pack_quantity, l.count, CASE l.position WHEN 1 THEN 1 ELSE 0 END, CASE l.position WHEN 1 THEN 80 ELSE 20 END,
+         CASE l.position WHEN 1 THEN 80 ELSE 0 END, CASE l.position WHEN 1 THEN 8 ELSE 0 END, CASE l.position WHEN 1 THEN l.pack_quantity ELSE 0 END, 'out_of_stock'
+       FROM r, order_lines l WHERE l.order_id = $1`, [id, clock.now(), quote]);
     const detail = (await get(headers, `/v1/admin/orders/${id}`)).json() as AdminOrderDetail;
-    expect(detail.lines.map((l) => [l.count, l.unitPrice, l.lineTotal])).toEqual([[1, "80.00", "80.00"]]);
+    expect(detail.lines.map((l) => [l.name, l.count, l.unitPrice, l.lineTotal])).toEqual([["Atta", 1, "80.00", "80.00"]]);
     expect([detail.money.productValue, detail.money.total]).toEqual(["80.00", "100.00"]);
   });
 
