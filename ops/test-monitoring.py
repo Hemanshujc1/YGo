@@ -52,7 +52,7 @@ elif args[:2] == ["route53", "create-health-check"]: print("test-check")
             calls = [json.loads(line) for line in (work / "calls").read_text().splitlines()]
             alarms = {call[call.index("--alarm-name") + 1]: call for call in calls
                       if call[:2] == ["cloudwatch", "put-metric-alarm"]}
-            self.assertEqual(len(alarms), 14)
+            self.assertEqual(len(alarms), 15)
             for alarm in alarms.values():
                 self.assertIn("--alarm-actions", alarm)
                 self.assertIn("--ok-actions", alarm)
