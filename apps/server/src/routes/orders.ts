@@ -46,7 +46,8 @@ export const frozenOrder = (o: string, includeListingId = false) => `${o}.fulfil
           ${o}.total::text
         ) AS total,
         CASE WHEN ${o}.status = 'rejected_by_shop' THEN (SELECT h.reason_code FROM order_status_history h
-          WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' ORDER BY h.at DESC LIMIT 1) END AS "rejectReason",
+          WHERE h.order_id = ${o}.id AND h.to_status = 'rejected_by_shop' AND h.reason_code IN ('out_of_stock', 'too_busy', 'closing_soon', 'cannot_deliver')
+          ORDER BY h.at DESC LIMIT 1) END AS "rejectReason",
         CASE WHEN ${o}.status = 'awaiting_customer_confirm' THEN (
           SELECT to_char(p.confirm_by_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
           FROM order_revisions p WHERE p.order_id = ${o}.id AND p.status = 'proposed' ORDER BY p.revision DESC LIMIT 1

@@ -23,6 +23,8 @@ import { PriceSimulator } from "./price-simulator";
 import { ProductRequests } from "./product-requests";
 import { ProofExceptions } from "./proof-exceptions";
 import { BelowFloorExceptions } from "./below-floor-exceptions";
+import { LiveOrders } from "./live-orders";
+import { OrderDetail } from "./order-detail";
 import { Products } from "./products";
 import { RateCards } from "./rate-cards";
 import { ShopApplications, ShopApplicationReview } from "./shop-applications";
@@ -56,6 +58,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
   const role = api?.currentRole() ?? null;
   const nav = role === "admin" ? [
     { path: "/accounts", label: strings.accounts },
+    { path: "/orders", label: strings.liveOrders },
     { path: "/categories", label: strings.categories },
     { path: "/rate-cards", label: strings.rateCards },
     { path: "/price-simulator", label: strings.priceSimulator },
@@ -68,6 +71,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/below-floor-exceptions", label: strings.belowFloorExceptions },
     { path: "/waitlist", label: strings.waitlist },
   ] : role === "area_manager" ? [
+    { path: "/orders", label: strings.liveOrders },
     { path: "/applications", label: strings.applications },
     { path: "/proof-exceptions", label: strings.proofExceptions },
     { path: "/below-floor-exceptions", label: strings.belowFloorExceptions },
@@ -358,6 +362,15 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   const applicationsLoader = listLoader(() => api.listShopApplications(), (data) => data.applications);
   const productRequestsLoader = listLoader(() => api.listProductRequests(), (data) => data);
   const proofExceptionsLoader = listLoader(() => api.listProofExceptions(), (data) => data);
+  const liveOrdersLoader = listLoader(() => api.listAdminOrders(), (data) => data);
+  const orderLoader: LoaderFunction = async ({ params }) => {
+    const id = params.id;
+    if (!id) throw new Error(strings.notFound);
+    const result = await api.getAdminOrder(id);
+    if (result.ok) return result.data;
+    if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(result.code);
+  };
   const belowFloorExceptionsLoader = listLoader(() => api.listBelowFloorExceptions(), (data) => data);
   const applicationLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
@@ -501,6 +514,23 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       areaManager: proofExceptionsLoader,
       element: <Page protectedArea api={api}><ProofExceptions api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.proofExceptionsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    // A14 Live orders and A15 Order detail (ADM-4, ADM-7, #66): an Area Manager looks at their shops' orders.
+    guarded({
+      path: "/orders",
+      loader: liveOrdersLoader,
+      areaManager: liveOrdersLoader,
+      element: <Page protectedArea api={api}><LiveOrders api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.liveOrdersLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/orders/:id",
+      loader: orderLoader,
+      areaManager: orderLoader,
+      element: <Page protectedArea api={api}><OrderDetail api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.orderDetailLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     // Below contribution floor exceptions queue (A30, MNY-4, ADM-7, #529).

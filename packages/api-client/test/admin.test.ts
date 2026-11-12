@@ -186,6 +186,25 @@ describe("Admin browser API client", () => {
     expect(await malformed.client.setTheme({ theme: "dark" })).toEqual({ ok: false, status: 200, code: "INTERNAL" });
   });
 
+  it("lists live orders, reads one and forces a transition with the right requests (#66)", async () => {
+    const id = "00000000-0000-4000-8000-000000000601";
+    const row = { id, number: 1001, shopId: "00000000-0000-4000-8000-000000000501", shopName: "Sai", customerName: null, fulfilment: "delivery", status: "placed",
+      placedAt: "2030-01-01T10:00:00.000Z", statusChangedAt: "2030-01-01T10:00:00.000Z", total: "150.00", statusAgeSeconds: 5, unanswered: false, cursor: `2030-01-01T10:00:00.000000Z|${id}` };
+    const list = { orders: [row], nextCursor: null, counts: { active: 1, unanswered: 0 }, serverTime: "2030-01-01T10:00:05.000Z", unansweredAfterSeconds: 120 };
+    const summary = { ...row, cursor: undefined };
+    const detail = { order: summary, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" },
+      breakdown: null, timeline: [], forcedActions: [], people: { customerName: null, delivererName: null }, forcedMoves: ["expired"] };
+    const { client, calls } = setup(({ path }) => path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : path.endsWith("/orders") || path.includes("/orders?") ? answer(200, list) : answer(200, detail));
+    expect(await client.listAdminOrders({ group: "unanswered", cursor: "c" })).toEqual({ ok: true, data: list });
+    expect((await client.getAdminOrder(id)).ok).toBe(true);
+    expect((await client.forceOrderTransition(id, { from: "placed", to: "expired", reason: "Stuck" })).ok).toBe(true);
+    expect(calls.slice(1).map(({ path, method, body }) => [path, method, body])).toEqual([
+      ["/v1/admin/orders", "GET", undefined],
+      [`/v1/admin/orders/${id}`, "GET", undefined],
+      [`/v1/admin/orders/${id}/force-transition`, "POST", { from: "placed", to: "expired", reason: "Stuck" }],
+    ]);
+  });
+
   it("reads a shop's fulfilment modes and forces one off or lifts it (#65)", async () => {
     const shop = "00000000-0000-4000-8000-000000000501";
     const modes = { modes: [{ mode: "pickup", shopOn: true, adminForcedOff: true, open: false }] };

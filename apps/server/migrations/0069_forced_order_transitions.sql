@@ -1,0 +1,6 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_kind_valid";--> statement-breakpoint
+ALTER TABLE "order_status_history" DROP CONSTRAINT "order_status_history_role_valid";--> statement-breakpoint
+ALTER TABLE "admin_actions" ADD COLUMN "from_status" text;--> statement-breakpoint
+ALTER TABLE "admin_actions" ADD COLUMN "to_status" text;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_kind_valid" CHECK ("notifications"."kind" IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed'));--> statement-breakpoint
+ALTER TABLE "order_status_history" ADD CONSTRAINT "order_status_history_role_valid" CHECK ("order_status_history"."actor_role" IN ('customer', 'owner', 'staff', 'admin', 'system'));

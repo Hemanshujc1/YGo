@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { Account, AdminAccount, AdminAccountsResponse, BelowFloorException, BelowFloorExceptionParams, BelowFloorExceptionsQuery, BelowFloorExceptionsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody, type AdminRole } from "@ygo/contracts";
+import { Account, AdminAccount, AdminOrderDetail, AdminOrdersQuery, AdminOrdersResponse, ForceTransitionBody, OrderParams, AdminAccountsResponse, BelowFloorException, BelowFloorExceptionParams, BelowFloorExceptionsQuery, BelowFloorExceptionsResponse, CreateAdminBody, ErrorEnvelope, SetThemeBody, type AdminRole } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn, withAdminWebTransaction } from "../admin";
+import { ADMIN_WEB_MEMBERS, adminSignedIn, adminWebSignedIn, withAdminTransaction, withAdminWebTransaction } from "../admin";
+import { adminOrderDetail, forceOrderTransition, listAdminOrders } from "../admin-orders";
 import { belowFloorExceptionCounts, listBelowFloorExceptions, reviewBelowFloorException } from "../below-floor-exceptions";
+import { orderTiming } from "../order-timing";
 import { deriveKeys } from "../tokens";
 
 // Where each role's membership lives and the action that records its creation (#343).
@@ -150,6 +152,65 @@ export function registerAdminRoutes(app: FastifyInstance, { pool, clock, secret 
         if (!reviewed) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
         await client.query("COMMIT");
         return reply.code(200).send(reviewed);
+      });
+    },
+  );
+
+  // A14 Live orders (ADM-4, ADM-7, #66). One repeatable-read snapshot for the page and its counts; "now" is the server's clock.
+  app.get(
+    "/v1/admin/orders",
+    { schema: { querystring: AdminOrdersQuery, response: { 200: AdminOrdersResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminWebSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const now = clock.now();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const page = await listAdminOrders(client, who.role === "area_manager" ? who.accountId : null, request.query as AdminOrdersQuery, now);
+        await client.query("COMMIT");
+        return reply.code(200).send({ ...page, serverTime: now.toISOString(), unansweredAfterSeconds: orderTiming.reRingSeconds });
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  // A15 Order detail (ADM-4). An Area Manager sees an order of an assigned shop and is offered no move (ADM-12).
+  app.get(
+    "/v1/admin/orders/:id",
+    { schema: { params: OrderParams, response: { 200: AdminOrderDetail, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminWebSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const detail = await adminOrderDetail(pool, who.role === "area_manager" ? who.accountId : null, (request.params as OrderParams).id, clock.now());
+      if (!detail) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      return reply.code(200).send(who.role === "admin" ? detail : { ...detail, forcedMoves: [] });
+    },
+  );
+
+  // A forced transition (ADM-4, ORD-1). Admin only; the status, history row, audit record and notification commit together.
+  app.post(
+    "/v1/admin/orders/:id/force-transition",
+    { schema: { params: OrderParams, body: ForceTransitionBody, response: { 200: AdminOrderDetail, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 409: ErrorEnvelope } } },
+    async (request, reply) => {
+      const who = await adminSignedIn(request, reply, auth);
+      if (!who) return reply;
+      const { id } = request.params as OrderParams;
+      const now = clock.now();
+      return withAdminTransaction(pool, who.accountId, reply, async (client) => {
+        const result = await forceOrderTransition(client, id, request.body as ForceTransitionBody, who.accountId, now);
+        if (result === "not_found") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+        if (result === "status_changed") return reply.code(409).send({ error: { code: "ORDER_STATUS_CHANGED" } });
+        if (result === "not_allowed") return reply.code(409).send({ error: { code: "ORDER_MOVE_NOT_ALLOWED" } });
+        // Read back on the same client, so a failure here rolls the whole move back instead of failing after it committed.
+        const detail = await adminOrderDetail(client, null, id, now) as AdminOrderDetail;
+        await client.query("COMMIT");
+        request.log.info({ action: "order.force_transition" }, "Admin action recorded");
+        return reply.code(200).send(detail);
       });
     },
   );

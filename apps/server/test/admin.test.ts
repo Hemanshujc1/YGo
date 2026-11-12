@@ -119,7 +119,7 @@ describe("Admin database and bootstrap", () => {
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'admin_actions'",
     );
     expect(columns.rows.map((column) => column.column_name).sort()).toEqual(
-      ["id", "actor_id", "action", "target_id", "target_type", "reason", "created_at"].sort(),
+      ["id", "actor_id", "action", "target_id", "target_type", "reason", "from_status", "to_status", "created_at"].sort(),
     );
   });
 

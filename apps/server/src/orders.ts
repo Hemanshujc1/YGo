@@ -2,19 +2,24 @@ import type { OrderStatus } from "@ygo/contracts";
 import type { PoolClient } from "pg";
 import { notifyOrderStatus } from "./notifications";
 
-export type OrderActor = { id: string; role: "customer" | "owner" | "staff" } | { id: null; role: "system" };
+export type OrderActor = { id: string; role: "customer" | "owner" | "staff" | "admin" } | { id: null; role: "system" };
 
-/** Each move an order may make, and who may make it (#9). Later tickets add theirs here. */
+/**
+ * Each move an order may make, and who may make it (#9). Later tickets add theirs here.
+ * `admin` is the forced-transition allowlist of ADM-4 (#66): it only ever cancels or closes an order. It never moves one
+ * forward (that needs the shop's stock check, a deliverer, the handover code or payment), and it never touches
+ * `awaiting_customer_confirm`, whose way out is the customer's own answer (ORD-3). A final status has no moves at all.
+ */
 const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArray<OrderActor["role"]>>>>> = {
   // Free while the shop hasn't answered (ORD-5); the shop's Owner or Staff answers it (#425).
   // Only the timed job (#57, ORD-2) expires an order: `system` is never the role of a signed-in request.
   placed: {
     cancelled_by_customer: ["customer"],
     accepted: ["owner", "staff"],
-    rejected_by_shop: ["owner", "staff"],
-    expired: ["system"],
+    rejected_by_shop: ["owner", "staff", "admin"],
+    expired: ["system", "admin"],
     awaiting_customer_confirm: ["owner", "staff"],
-    cancelled_by_shop: ["system"],
+    cancelled_by_shop: ["system", "admin"],
   },
   // `cancelled_by_customer` here is only the shop agreeing to the Customer's ask (ORD-5, #59): that route checks an `asked`
   // request first. The Customer never cancels an accepted order directly.
@@ -22,19 +27,19 @@ const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArr
     preparing: ["owner", "staff"],
     ready: ["owner", "staff"],
     cancelled_by_customer: ["owner", "staff"],
-    cancelled_by_shop: ["owner", "staff", "system"],
+    cancelled_by_shop: ["owner", "staff", "system", "admin"],
     awaiting_customer_confirm: ["owner", "staff"],
   },
   preparing: {
     ready: ["owner", "staff"],
     cancelled_by_customer: ["owner", "staff"],
-    cancelled_by_shop: ["owner", "staff", "system"],
+    cancelled_by_shop: ["owner", "staff", "system", "admin"],
     awaiting_customer_confirm: ["owner", "staff"],
   },
   // A pickup nobody collected is closed by the timed job at its cutoff (FUL-7, #65): `system` is never the role of a signed-in request.
-  ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff"], not_collected: ["system"] },
+  ready: { out_for_delivery: ["owner", "staff"], picked_up: ["owner", "staff"], cancelled_by_shop: ["owner", "staff", "admin"], not_collected: ["system", "admin"] },
   out_for_delivery: { arrived: ["owner", "staff"] },
-  arrived: { delivered: ["owner", "staff"], delivery_failed: ["owner", "staff"] },
+  arrived: { delivered: ["owner", "staff"], delivery_failed: ["owner", "staff", "admin"] },
   awaiting_customer_confirm: {
     placed: ["customer"],
     accepted: ["customer"],
@@ -42,6 +47,10 @@ const MOVES: Partial<Record<OrderStatus, Partial<Record<OrderStatus, ReadonlyArr
     cancelled_by_customer: ["customer", "system"],
   },
 };
+
+/** The moves Admin may force from one status (ADM-4, A15): the modal lists exactly these. */
+export const forcedMoves = (from: OrderStatus): OrderStatus[] =>
+  Object.entries(MOVES[from] ?? {}).filter(([, roles]) => roles?.includes("admin")).map(([to]) => to as OrderStatus);
 
 export const canMove = (from: OrderStatus, to: OrderStatus, role: OrderActor["role"]) => MOVES[from]?.[to]?.includes(role) ?? false;
 
