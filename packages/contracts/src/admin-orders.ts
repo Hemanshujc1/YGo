@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AdminActionReason } from "./fields";
-import { Fulfilment, OrderStatus } from "./orders";
+import { Fulfilment, OfflineDeliveryIssue, OrderStatus } from "./orders";
 import { Amount, PricedQuote } from "./pricing";
 
 const cursor = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -88,6 +88,8 @@ export const AdminOrderDetail = z.strictObject({
     reasonCode: z.string().nullable(),
   })),
   /** Each forced transition and the Admin's own reason, from the audit record (ADM-4). Empty for an Area Manager. */
+  /** Offline delivery actions the server refused or held, oldest first: A15 settles them with a forced move (#616). */
+  offlineDeliveryIssues: z.array(OfflineDeliveryIssue).optional(),
   forcedActions: z.array(z.strictObject({
     at: z.iso.datetime(),
     adminName: z.string().nullable(),

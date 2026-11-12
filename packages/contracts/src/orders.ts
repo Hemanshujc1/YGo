@@ -265,6 +265,10 @@ export const ShopOrdersResponse = z.strictObject({
 export type ShopOrdersResponse = z.infer<typeof ShopOrdersResponse>;
 
 /** S05: one of the shop's orders, as it was frozen. The Customer's name for the shop and the deliverer; the phone only for the assigned deliverer (DLV-7). */
+/** An offline delivery action the server refused or held (#616). `action` and `code` are the sync action type and its refusal; they stay on the order until it is settled. */
+export const OfflineDeliveryIssue = z.strictObject({ action: z.string(), code: z.string(), at: z.iso.datetime(), clockSuspect: z.boolean() });
+export type OfflineDeliveryIssue = z.infer<typeof OfflineDeliveryIssue>;
+
 export const ShopOrderResponse = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
@@ -291,6 +295,8 @@ export const ShopOrderResponse = z.strictObject({
   confirmByAt: z.iso.datetime().nullable(),
   proposal: OrderProposal.nullable(),
   cancelRequest: CancelRequest.nullable(),
+  /** The latest offline delivery the server did not accept, while the order is still Arrived (#616). */
+  offlineDeliveryIssue: OfflineDeliveryIssue.nullable().optional(),
 });
 export type ShopOrderResponse = z.infer<typeof ShopOrderResponse>;
 

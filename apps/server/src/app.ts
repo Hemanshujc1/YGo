@@ -162,7 +162,7 @@ export function buildApp({
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds });
+    registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProductRequestRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
