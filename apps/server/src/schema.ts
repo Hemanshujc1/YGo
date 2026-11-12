@@ -674,6 +674,8 @@ export const jobRuns = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     status: text("status", { enum: ["running", "ok", "failed"] }).notNull(),
     errorText: varchar("error_text", { length: 200 }),
+    // What a run found, for a job that reports (reconcile-stock, #67); never an error.
+    detail: varchar("detail", { length: 200 }),
   },
   // The checker (job-check.ts) reads the latest finished run and the latest ok run of a job.
   (table) => [

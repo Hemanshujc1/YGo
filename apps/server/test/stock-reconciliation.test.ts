@@ -214,8 +214,41 @@ describe("stock reconciliation (#67)", () => {
     await database.pool.query("INSERT INTO stock_movements (listing_id, actor_id, client_id, kind, quantity) SELECT id, $2, gen_random_uuid(), 'sale', -1 FROM shop_listings WHERE shop_id = $1", [shopId, who]);
     const before = await movementCount();
     await runJob(database, "reconcile-stock", clock);
-    expect((await database.pool.query("SELECT job_name, status FROM job_runs")).rows).toEqual([{ job_name: "reconcile-stock", status: "ok" }]);
+    expect((await database.pool.query("SELECT job_name, status, detail FROM job_runs")).rows).toEqual([{ job_name: "reconcile-stock", status: "ok", detail: "1 listing differs" }]);
     expect(await issues()).toHaveLength(1);
     expect(await movementCount()).toBe(before);
+    await runJob(database, "reconcile-stock", clock);
+    expect((await database.pool.query("SELECT detail FROM job_runs ORDER BY started_at, id")).rows.map((row) => row.detail)).toEqual(["1 listing differs", "1 listing differs"]);
+  });
+
+  it("records no differences as the run's detail, and its own failure text when the check breaks", async () => {
+    const { pack } = await shop();
+    await pack("1", "10");
+    await runJob(database, "reconcile-stock", clock);
+    expect((await database.pool.query("SELECT status, detail, error_text FROM job_runs")).rows).toEqual([{ status: "ok", detail: "no differences found", error_text: null }]);
+    await database.pool.query("DELETE FROM job_runs");
+    await database.pool.query("ALTER TABLE stock_reconciliation_issues RENAME TO stock_reconciliation_issues_gone");
+    await expect(runJob(database, "reconcile-stock", clock)).rejects.toThrow();
+    expect((await database.pool.query("SELECT status, detail, error_text FROM job_runs")).rows).toEqual([{ status: "failed", detail: null, error_text: "reconcile failed" }]);
+  });
+
+  it("calls a pack Low by what is still available: held stock counts against the low-stock level", async () => {
+    const { owner, shopId, pack } = await shop();
+    const packId = await pack("1", "20");
+    await database.pool.query("UPDATE shop_listings SET low_stock_level = 10 WHERE pack_id = $1", [packId]);
+    const customer = await account("customer@example.com");
+    const state = async () => ((await app.inject({ method: "GET", url: "/v1/sync/changes", headers: owner.headers })).json().changes as Array<{ item: { packId: string; quantity: string; held: string; lowStock: boolean } | null }>)
+      .find((row) => row.item?.packId === packId)?.item;
+    const idle = await state();
+    expect([idle?.quantity, Number(idle?.held), idle?.lowStock]).toEqual(["20.000", 0, false]);
+    // `quantity` on the pull is what is left to sell (on hand less held, CAT-4), so the flag compares that with the level.
+    // 15 of the 20 on hand are held by an accepted order: 5 are left to sell, at or under the level, though on-hand alone is not.
+    const held = await order(shopId, customer.id, packId, 15, "accepted", await rateCard());
+    const holding = await state();
+    expect([holding?.quantity, Number(holding?.held), holding?.lowStock]).toEqual(["5.000", 15, true]);
+    // The hold ends with the order (cancelled by the customer): available is back to 20, and nothing was written to stock.
+    await database.pool.query("UPDATE orders SET status = 'cancelled_by_customer' WHERE id = $1", [held]);
+    const released = await state();
+    expect([released?.quantity, Number(released?.held), released?.lowStock]).toEqual(["20.000", 0, false]);
   });
 });
