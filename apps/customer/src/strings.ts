@@ -392,6 +392,7 @@ export const strings = {
       changedAgain: "The shop changed the total again. Review the new total.",
       noLongerWaiting: "This order is no longer waiting for your answer.",
       expiresIn: (clock: string) => `Confirm within ${clock}`,
+      expiringSoon: (clock: string) => `Less than 1 minute left. Confirm within ${clock}`,
       confirmFailed: "Couldn't confirm the new total. Check your connection and try again.",
       declineFailed: "Couldn't cancel the order. Check your connection and try again.",
     },

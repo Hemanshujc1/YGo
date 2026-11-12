@@ -1,6 +1,6 @@
 import { Text } from "@ygo/mobile";
-import { useEffect, useReducer } from "react";
-import { View } from "react-native";
+import { useEffect, useReducer, useRef } from "react";
+import { AccessibilityInfo, View } from "react-native";
 import { strings } from "../strings";
 
 const words = strings.order.changedTotal;
@@ -30,11 +30,31 @@ export function useSecondsLeft(confirmByAt: string | null): number | null {
   return secondsUntil(confirmByAt);
 }
 
+/** Announces warning once when seconds first drops below 60, not on mount if already below (#612). */
+export function useCountdownWarning(seconds: number) {
+  const prevRef = useRef<number>(seconds);
+  useEffect(() => {
+    if (prevRef.current >= 60 && seconds < 60 && seconds > 0) {
+      AccessibilityInfo.announceForAccessibility(words.expiringSoon(clock(seconds)));
+    }
+    prevRef.current = seconds;
+  }, [seconds]);
+}
+
+function countdownLabel(seconds: number): string {
+  if (seconds === 0) return words.timeUp;
+  if (seconds < 60) return words.expiringSoon(clock(seconds));
+  return words.expiresIn(clock(seconds));
+}
+
 /** 20/28 tabular in a bordered pill; under one minute a 2 px warning border, never flashing (design system section 5). */
 export function Countdown({ seconds }: { seconds: number }) {
   const low = seconds < 60;
+  useCountdownWarning(seconds);
   return (
     <View
+      accessible
+      accessibilityLabel={countdownLabel(seconds)}
       accessibilityLiveRegion={seconds === 0 ? "polite" : "none"}
       className={`self-start rounded-full px-4 py-1 ${low ? "border-2 border-warning" : "border border-border-strong"}`}
     >
@@ -45,13 +65,14 @@ export function Countdown({ seconds }: { seconds: number }) {
   );
 }
 
-/** Compact countdown pill for the persistent top banner (#606). */
+/** Compact countdown pill for the persistent top banner (#606, #612). */
 export function BannerCountdown({ seconds }: { seconds: number }) {
   const low = seconds < 60;
+  useCountdownWarning(seconds);
   return (
     <View
       accessible
-      accessibilityLabel={seconds > 0 ? words.expiresIn(clock(seconds)) : words.timeUp}
+      accessibilityLabel={countdownLabel(seconds)}
       accessibilityLiveRegion={seconds === 0 ? "polite" : "none"}
       className={`rounded-full px-2.5 py-0.5 ${low ? "border-2 border-warning" : "border border-border-strong"}`}
     >
