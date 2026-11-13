@@ -55,7 +55,7 @@ async function lockKey(client: PoolClient, key: string, namespace: number): Prom
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))", [key, namespace]);
 }
 
-function sendError(reply: FastifyReply, status: 400 | 401 | 429 | 503, code: ErrorCode) {
+function sendError(reply: FastifyReply, status: 400 | 401 | 403 | 409 | 429 | 503, code: ErrorCode) {
   return reply.code(status).send({ error: { code } });
 }
 
@@ -135,7 +135,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
   });
 
   app.post("/v1/auth/identity", {
-    schema: { body: VerifyIdentityBody, response: { 200: IdentitySignInResponse, 401: ErrorEnvelope, 503: ErrorEnvelope } },
+    schema: { body: VerifyIdentityBody, response: { 200: IdentitySignInResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 409: ErrorEnvelope, 503: ErrorEnvelope } },
   }, async (request, reply) => {
     if (!identityVerifier) return sendError(reply, 503, "UNAVAILABLE");
     const { provider, identityToken, nonce } = request.body as VerifyIdentityBody;
@@ -156,11 +156,16 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
       await client.query("BEGIN");
       await lockKey(client, email.data, 1);
       const result = await client.query<Account>(
-        `INSERT INTO accounts (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+        `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR (SELECT enabled FROM customer_signup_settings WHERE id = 1)
+         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
          RETURNING id, email, name, phone, theme`, [email.data],
       );
       const account = result.rows[0];
-      if (!account) throw new Error("Account insert returned no row");
+      if (!account) {
+        const blocked = await client.query("SELECT 1 FROM customer_blocks WHERE email_digest = $1", [digest(keys.blockDigest, email.data)]);
+        await client.query("ROLLBACK");
+        return sendError(reply, blocked.rowCount ? 403 : 409, blocked.rowCount ? "CUSTOMER_BLOCKED" : "SIGNUPS_CLOSED");
+      }
       const signed = await issueSession(client, account, clock.now(), false);
       await client.query("COMMIT");
       request.log.info({ provider, outcome: "signed_in" }, "Auth identity");
@@ -360,7 +365,7 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
               [email],
             )
           : await client.query<Account>(
-              `INSERT INTO accounts (email) VALUES ($1)
+              `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR (SELECT enabled FROM customer_signup_settings WHERE id = 1)
                ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
                RETURNING id, email, name, phone, theme`,
               [email],
@@ -370,7 +375,11 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
           await client.query("ROLLBACK");
           return sendError(reply, 401, "UNAUTHENTICATED");
         }
-        if (!account) throw new Error("Account insert returned no row");
+        if (!account) {
+          const blocked = await client.query("SELECT 1 FROM customer_blocks WHERE email_digest = $1", [digest(keys.blockDigest, email)]);
+          await client.query("ROLLBACK");
+          return sendError(reply, blocked.rowCount ? 403 : 409, blocked.rowCount ? "CUSTOMER_BLOCKED" : "SIGNUPS_CLOSED");
+        }
         const signed = await issueSession(client, account, now, browser);
         await client.query("DELETE FROM login_codes WHERE email = $1", [email]);
         await client.query("COMMIT");

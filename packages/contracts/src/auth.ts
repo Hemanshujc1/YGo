@@ -87,6 +87,27 @@ export type AdminAccount = z.infer<typeof AdminAccount>;
 export const AdminAccountsResponse = z.strictObject({ accounts: z.array(AdminAccount) });
 export type AdminAccountsResponse = z.infer<typeof AdminAccountsResponse>;
 
+/** A customer row in the Admin trust screen (#72). */
+export const CustomerTrust = z.strictObject({
+  id: z.uuid(), email: z.string(), name: z.string().nullable(), phone: z.string().nullable(),
+  phoneState: z.enum(["unverified", "visit-confirmed", "sms-verified"]),
+  blocked: z.boolean(), blockReason: z.string().nullable(),
+  failedDeliveries: z.number().int().nonnegative(), refusals: z.number().int().nonnegative(),
+});
+export type CustomerTrust = z.infer<typeof CustomerTrust>;
+export const AdminCustomersResponse = z.strictObject({ customers: z.array(CustomerTrust) });
+export type AdminCustomersResponse = z.infer<typeof AdminCustomersResponse>;
+export const AdminCustomersQuery = z.strictObject({ search: z.string().trim().min(2).max(120) });
+export type AdminCustomersQuery = z.infer<typeof AdminCustomersQuery>;
+export const CustomerBlockBody = z.strictObject({ reason: z.string().trim().min(1).max(500) });
+export type CustomerBlockBody = z.infer<typeof CustomerBlockBody>;
+export const CustomerParams = z.strictObject({ id: z.uuid() });
+export type CustomerParams = z.infer<typeof CustomerParams>;
+export const CustomerSignupSettings = z.strictObject({ enabled: z.boolean() });
+export type CustomerSignupSettings = z.infer<typeof CustomerSignupSettings>;
+export const CustomerSignupSettingBody = z.strictObject({ enabled: z.boolean(), reason: z.string().trim().min(1).max(500) });
+export type CustomerSignupSettingBody = z.infer<typeof CustomerSignupSettingBody>;
+
 /**
  * A signed-in session (#34). The access token is short-lived and kept in
  * memory; the refresh token goes to the phone's secure storage and is

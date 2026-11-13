@@ -116,6 +116,8 @@ export const ErrorCode = z.enum([
   "CODE_LOCKED",
   "TOO_MANY_REQUESTS",
   "PHONE_IN_USE",
+  "CUSTOMER_BLOCKED",
+  "SIGNUPS_CLOSED",
   "EMAIL_IN_USE",
   "FORBIDDEN",
   "CATEGORY_NAME_IN_USE",

@@ -33,6 +33,7 @@ import { adminTheme, ThemePicker } from "./theme";
 import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 import { Waitlist } from "./waitlist";
+import { Customers } from "./customers";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
@@ -59,6 +60,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
   const role = api?.currentRole() ?? null;
   const nav = role === "admin" ? [
     { path: "/accounts", label: strings.accounts },
+    { path: "/customers", label: strings.customers },
     { path: "/orders", label: strings.liveOrders },
     { path: "/categories", label: strings.categories },
     { path: "/rate-cards", label: strings.rateCards },
@@ -420,6 +422,17 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: listLoader(() => api.listAccounts(), (data) => data.accounts),
       element: <Accounts api={api} />,
       hydrateFallbackElement: <Page>{strings.loading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/customers",
+      loader: async () => {
+        const result = await api.listCustomers("aa");
+        if (!result.ok) { if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in"); throw new Error(result.code); }
+        return result.data;
+      },
+      element: <Page protectedArea api={api}><Customers api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.loading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

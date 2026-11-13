@@ -4,7 +4,7 @@ import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "../../api";
+import { api, supportEmail } from "../../api";
 import { Stepper } from "../../components/stepper";
 import { QuoteRows } from "../../components/quote-rows";
 import { TopBar } from "../../components/top-bar";
@@ -294,7 +294,7 @@ export default function CartScreen() {
       case "offline":
         return setProblem({ text: words.placeOffline, retry: true });
       case "error":
-        return setProblem({ text: strings.errors[done.code], retry: false });
+        return setProblem({ text: done.code === "CUSTOMER_BLOCKED" ? `${strings.errors.CUSTOMER_BLOCKED} ${supportEmail}.` : strings.errors[done.code], retry: false });
     }
   }
 

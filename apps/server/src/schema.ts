@@ -53,6 +53,25 @@ export const adminMemberships = pgTable("admin_memberships", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// A keyed marker survives account deletion without retaining readable contact data (#72, D-2).
+export const customerBlocks = pgTable("customer_blocks", {
+  accountId: uuid("account_id").primaryKey(),
+  phoneDigest: text("phone_digest").notNull(),
+  emailDigest: text("email_digest").notNull(),
+  reason: text("reason").notNull(),
+  blockedAt: timestamp("blocked_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("customer_blocks_reason_valid", sql`btrim(${table.reason}) <> '' AND char_length(${table.reason}) <= 500`),
+  index("customer_blocks_phone_digest_idx").on(table.phoneDigest),
+  index("customer_blocks_email_digest_idx").on(table.emailDigest),
+]);
+
+export const customerSignupSettings = pgTable("customer_signup_settings", {
+  id: integer("id").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [check("customer_signup_settings_singleton", sql`${table.id} = 1`)]);
+
 // An Area Manager has no Area: Admin assigns shops to them (#343). Never also an Admin.
 export const areaManagerMemberships = pgTable("area_manager_memberships", {
   accountId: uuid("account_id").primaryKey().references(() => accounts.id, { onDelete: "cascade" }),

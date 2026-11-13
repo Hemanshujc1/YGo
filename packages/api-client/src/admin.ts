@@ -7,6 +7,9 @@ import {
   CatalogImportResponse,
   type CatalogImportFileField,
   AdminAccountsResponse,
+  AdminCustomersResponse,
+  CustomerTrust,
+  CustomerSignupSettings,
   Area,
   AreasResponse,
   BrowserSession,
@@ -81,6 +84,8 @@ import {
   type EditPackBody,
   type RequestCodeBody,
   type SetThemeBody,
+  type CustomerBlockBody,
+  type CustomerSignupSettingBody,
   type VerifyCodeBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
@@ -142,7 +147,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | DenylistWordBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | ForceFulfilmentModeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | DenylistWordBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | CustomerBlockBody | CustomerSignupSettingBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | ForceFulfilmentModeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -242,6 +247,21 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/accounts`: create an Admin or Area Manager with a recorded reason. */
     async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
       return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
+    },
+    async listCustomers(search: string): Promise<ApiResult<AdminCustomersResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/customers?search=${encodeURIComponent(search)}`), AdminCustomersResponse);
+    },
+    async blockCustomer(id: string, body: CustomerBlockBody): Promise<ApiResult<CustomerTrust>> {
+      return result(await adminRequest("POST", `/v1/admin/customers/${encodeURIComponent(id)}/block`, body), CustomerTrust);
+    },
+    async unblockCustomer(id: string, body: CustomerBlockBody): Promise<ApiResult<undefined>> {
+      return empty(await adminRequest("POST", `/v1/admin/customers/${encodeURIComponent(id)}/unblock`, body));
+    },
+    async customerSignupSettings(): Promise<ApiResult<CustomerSignupSettings>> {
+      return result(await adminRequest("GET", "/v1/admin/customer-signups"), CustomerSignupSettings);
+    },
+    async setCustomerSignupSettings(body: CustomerSignupSettingBody): Promise<ApiResult<CustomerSignupSettings>> {
+      return result(await adminRequest("PUT", "/v1/admin/customer-signups", body), CustomerSignupSettings);
     },
 
     /** `GET /v1/admin/categories`: list the global category tree. */

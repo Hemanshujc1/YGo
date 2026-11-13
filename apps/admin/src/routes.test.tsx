@@ -59,6 +59,11 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     requestCode: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     verifyCode: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder] } }),
+    listCustomers: vi.fn().mockResolvedValue({ ok: true, data: { customers: [] } }),
+    blockCustomer: vi.fn(),
+    unblockCustomer: vi.fn(),
+    customerSignupSettings: vi.fn().mockResolvedValue({ ok: true, data: { enabled: true } }),
+    setCustomerSignupSettings: vi.fn(),
     createAccount: vi.fn().mockResolvedValue({ ok: true, data: created }),
     listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [] } }),
     getRateCardScope: vi.fn().mockResolvedValue({ ok: true, data: { version: "0", values: {} } }),
@@ -1372,7 +1377,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(14);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(15);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });

@@ -239,6 +239,10 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
       }
       // Read after the locks, so a wait on them doesn't stamp an earlier time.
       const now = clock.now();
+      if ((await client.query("SELECT 1 FROM customer_blocks WHERE account_id = $1", [who.accountId])).rowCount) {
+        await client.query("ROLLBACK");
+        return "BLOCKED";
+      }
       // A coupon the quote took off still stands (CRT-3). Its row is locked first, so two orders for its last use take turns: the second counts the first's use and
       // is told the cart changed, with the coupon now refused as used up. A coupon that did not apply is never counted, and a retry never counts twice (the order is the key).
       const applied = ordered.coupon?.applied ? ordered.coupon : null;
@@ -285,6 +289,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
       return { id: order.id };
     });
     if (placed === "CHANGED") return changed();
+    if (placed === "BLOCKED") return reply.code(403).send({ error: { code: "CUSTOMER_BLOCKED" } });
     return reply.code(201).send(await orderView(pool, placed.id, who.accountId, clock.now(), secret));
   });
 

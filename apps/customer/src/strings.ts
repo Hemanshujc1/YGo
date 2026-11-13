@@ -525,6 +525,8 @@ export const strings = {
     PRODUCT_IMAGE_REQUIRED: "This product needs its image first.",
     PACK_ALREADY_LISTED: "This shop already lists that pack.",
     CART_CHANGED: "Your cart was changed. Check it and try again.",
+    CUSTOMER_BLOCKED: "You can't place a new order right now. Contact support at",
+    SIGNUPS_CLOSED: "New customer sign-ups are currently closed.",
     OWN_SHOP: "You can't order from your own shop.",
     ORDER_STATUS_CHANGED: "This order has changed. Check it and try again.",
     ORDER_IS_PICKUP: "This order is a pickup. Use Ready for pickup.",

@@ -547,6 +547,13 @@
       "when": 1794562753473,
       "tag": "0077_requote_platform_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794562754000,
+      "tag": "0078_customer_blocks",
+      "breakpoints": true
     }
   ]
 }
