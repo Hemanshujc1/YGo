@@ -7,7 +7,7 @@ import type { SessionState } from "../src/session";
 
 const row = (n: number, read = false, orderId: string | null = null): Notification => ({
   id: `7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c${String(n).padStart(4, "0")}`, kind: "order_accepted", title: `Order #${1000 + n} accepted`,
-  body: "Sai General Stores is getting your order ready.", orderId, createdAt: "2030-01-01T00:00:00.000Z", read,
+  body: "Sai General Stores is getting your order ready.", orderId, statementId: null, createdAt: "2030-01-01T00:00:00.000Z", read,
 });
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, data });
 const done = ok(undefined);

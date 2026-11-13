@@ -86,7 +86,8 @@ export async function applyOfflineDelivery(client: PoolClient, actions: Delivery
     if (typeof checked === "string") return rejected(checked);
     // Refusals about the order and the handover code come first, as online; a photo that could not be saved is refused after them.
     if (photoKey === "DELIVERY_PHOTO_INVALID") return rejected("DELIVERY_PHOTO_INVALID");
-    const done = await actions.apply(client, kind, orderId, accountId, rest, photoKey, now, false);
+    // A doubted clock cannot back-date the delivery, so it can never land in a week already on a statement (#629).
+    const done = await actions.apply(client, kind, orderId, accountId, rest, photoKey, now, false, suspect ? now : at);
     if (typeof done === "string") return rejected(done);
     ctx.cleanup.push({ orderId, uploadId: done.uploadId });
     return { status: "applied", result: { orderId, status: done.status }, clockSuspect: suspect };

@@ -15,6 +15,7 @@ import { cleanupDeliveryProofs, cleanupDeliveryUploads, runJob } from "../src/jo
 import { setOrderTiming } from "../src/order-timing";
 import { adminOrderDetail } from "../src/admin-orders";
 import { canMove } from "../src/orders";
+import { issueStatements } from "../src/statements";
 import { createTestDatabase } from "./test-database";
 
 const rootUrl = inject("databaseUrl");
@@ -421,7 +422,7 @@ describe("Customer places an instant order (#424, CRT-2, MNY-7, ORD-5, ORD-7)", 
     await refused("DELETE FROM order_lines WHERE order_id = $1");
     await refused("UPDATE order_status_history SET reason_code = 'x' WHERE order_id = $1");
     await refused("DELETE FROM order_status_history WHERE order_id = $1");
-    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, coupon_uses, order_lines, order_status_history, order_revision_lines, order_revisions, order_cancel_requests, proof_exception_reviews, proof_photo_views, push_queue, notifications, below_floor_exception_reviews, orders")).rejects.toThrow(/append-only|frozen/);
+    await expect(database.pool.query("TRUNCATE ring_attempts, delivery_photo_uploads, coupon_uses, order_lines, order_status_history, order_revision_lines, order_revisions, order_cancel_requests, proof_exception_reviews, proof_photo_views, push_queue, notifications, below_floor_exception_reviews, statement_lines, orders")).rejects.toThrow(/append-only|frozen/);
     expect((await database.pool.query("UPDATE orders SET status = 'accepted', status_changed_at = now() WHERE id = $1", [id])).rowCount).toBe(1);
   });
 });
@@ -1095,6 +1096,97 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
       expect(list.accepted.map((o: { id: string; offlineDeliveryIssue: boolean }) => [o.id, o.offlineDeliveryIssue])).toEqual([[orderId, true]]);
     });
 
+    describe("records when the delivery happened, which places it in its weekly statement (#629)", () => {
+      /** The order's status time, its delivered history row and its sale movement, which must all agree. */
+      const times = async (orderId: string) => (await database.pool.query<{ status: Date; history: Date; sale: Date }>(
+        `SELECT o.status_changed_at AS status, h.at AS history, m.created_at AS sale FROM orders o
+         JOIN order_status_history h ON h.order_id = o.id AND h.to_status = 'delivered'
+         JOIN stock_movements m ON m.client_id = o.id AND m.kind = 'sale' WHERE o.id = $1`, [orderId])).rows
+        .map((row) => ({ status: row.status.toISOString(), history: row.history.toISOString(), sale: row.sale.toISOString() }));
+      /** An order at the door at 00:00; the server then receives the phone's action at 00:30, with a fresh sign-in. */
+      async function atDoor() {
+        const { shopId, dal, owner, home } = await stocked();
+        const orderId = await readyAtDoor(shopId, dal, home, owner);
+        const code = (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string;
+        at("2030-01-01T00:30:00.000Z");
+        const fresh = await signIn("/v1/auth", "owner@example.com");
+        const payload = { orderId, handoverCode: code, payment: "upi", photoUploadId: (await photo(orderId, fresh)).id };
+        return { send: syncer(fresh, shopId), orderId, payload, owner: fresh };
+      }
+
+      it("keeps the phone's time, not the time the server received it", async () => {
+        const { send, orderId, payload } = await atDoor();
+        expect((await send({ type: "delivery_complete", createdAt: "2030-01-01T00:10:00.000Z", payload }))[0]).toMatchObject({ status: "applied" });
+        const ten = "2030-01-01T00:10:00.000Z";
+        expect(await times(orderId)).toEqual([{ status: ten, history: ten, sale: ten }]);
+      });
+
+      it("never puts it before the order's last status change", async () => {
+        const { send, orderId, payload } = await atDoor();
+        await send({ type: "delivery_complete", createdAt: "2029-12-31T23:50:00.000Z", payload });
+        // Arrived was recorded at 00:00, so the delivery cannot come before it.
+        const arrived = "2030-01-01T00:00:00.000Z";
+        expect(await times(orderId)).toEqual([{ status: arrived, history: arrived, sale: arrived }]);
+      });
+
+      it("never puts it after the server received it, for a phone clock slightly ahead", async () => {
+        const { send, orderId, payload } = await atDoor();
+        // Two minutes ahead is within the allowed skew, so the clock is not doubted; the time is still capped.
+        expect((await send({ type: "delivery_complete", createdAt: "2030-01-01T00:32:00.000Z", payload }))[0]).toMatchObject({ status: "applied", clockSuspect: false });
+        const received = "2030-01-01T00:30:00.000Z";
+        expect(await times(orderId)).toEqual([{ status: received, history: received, sale: received }]);
+      });
+
+      it("uses the server's receipt time when the phone's clock is doubted", async () => {
+        const { send, orderId, payload } = await atDoor();
+        expect((await send({ type: "delivery_complete", createdAt: "2030-01-01T00:10:00.000Z", clockSuspect: true, payload }))[0]).toMatchObject({ status: "applied", clockSuspect: true });
+        const received = "2030-01-01T00:30:00.000Z";
+        expect(await times(orderId)).toEqual([{ status: received, history: received, sale: received }]);
+      });
+
+      it("puts a delivery made on Sunday and synced on Monday in Sunday's statement, or the next one marked late once that is made", async () => {
+        at("2030-01-06T16:00:00.000Z"); // Sunday 21:30 in India
+        admin = await signIn("/v1/admin/auth", adminEmail);
+        customer = await signIn("/v1/auth", "customer@example.com");
+        const { shopId, dal, owner, home } = await stocked();
+        const codes = new Map<string, string>();
+        for (let i = 0; i < 2; i += 1) {
+          const orderId = await readyAtDoor(shopId, dal, home, owner);
+          codes.set(orderId, (await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer })).json().handoverCode as string);
+        }
+        const [before, after] = [...codes.keys()];
+        const deliver = async (orderId: string, createdAt: string) => {
+          const fresh = await signIn("/v1/auth", "owner@example.com");
+          const payload = { orderId, handoverCode: codes.get(orderId), payment: "cash", photoUploadId: (await photo(orderId, fresh)).id };
+          expect((await syncer(fresh, shopId)({ type: "delivery_complete", createdAt, payload }))[0]).toMatchObject({ status: "applied" });
+        };
+        // Both handed over at 22:10 on Sunday. One phone reconnects at 00:30 on Monday, before the 01:00 run; the other at 03:00, after it.
+        at("2030-01-06T19:00:00.000Z");
+        await deliver(String(before), "2030-01-06T16:40:00.000Z");
+        await issueStatements(database.pool, new Date("2030-01-06T19:30:00.000Z"));
+        at("2030-01-06T21:30:00.000Z");
+        await deliver(String(after), "2030-01-06T16:40:00.000Z");
+        await issueStatements(database.pool, new Date("2030-01-13T19:30:00.000Z"));
+        const placed = (await database.pool.query<{ orderId: string; week: string; late: boolean; completedAt: Date }>(
+          `SELECT l.order_id AS "orderId", to_char(s.period_start, 'YYYY-MM-DD') AS week, l.late, l.completed_at AS "completedAt"
+           FROM statement_lines l JOIN statements s ON s.id = l.statement_id ORDER BY s.period_start`)).rows;
+        const sunday = new Date("2030-01-06T16:40:00.000Z");
+        expect(placed).toEqual([
+          { orderId: before, week: "2029-12-31", late: false, completedAt: sunday },
+          { orderId: after, week: "2030-01-07", late: true, completedAt: sunday },
+        ]);
+      });
+
+      it("uses the server's time online", async () => {
+        const { orderId, payload, owner } = await atDoor();
+        const { handoverCode, payment, photoUploadId } = payload;
+        expect((await app.inject({ method: "POST", url: `/v1/me/shop-orders/${orderId}/delivered`, headers: owner,
+          payload: { handoverCode, payment, photoUploadId } })).statusCode).toBe(200);
+        const now = "2030-01-01T00:30:00.000Z";
+        expect(await times(orderId)).toEqual([{ status: now, history: now, sale: now }]);
+      });
+    });
+
     it("keeps a delivery older than the server's bound, shows it, and lets the order be settled by Admin", async () => {
       const { shopId, dal, owner, home } = await stocked();
       const orderId = await readyAtDoor(shopId, dal, home, owner);
@@ -1732,7 +1824,7 @@ describe("Notifications (#505, NOT-1 to NOT-4)", () => {
     const order = (await ordered(shopId, [{ listingId: dal, count: 1 }], home)).json() as { id: string };
 
     const placed = { kind: "order_placed", title: "New order #1001", body: "Accept or reject it within 10 minutes.", orderId: order.id,
-      createdAt: "2030-01-01T00:00:00.000Z", read: false, id: expect.any(String) };
+      statementId: null, createdAt: "2030-01-01T00:00:00.000Z", read: false, id: expect.any(String) };
     expect(await list(owner)).toEqual({ notifications: [placed], unread: true });
     expect(await list(staff)).toEqual({ notifications: [placed], unread: true });
     expect(await list(buyer)).toEqual({ notifications: [], unread: false });

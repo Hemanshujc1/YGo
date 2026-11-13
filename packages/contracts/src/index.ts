@@ -309,6 +309,10 @@ export {
 } from "./sync";
 
 export { Notification, NotificationKind, NotificationParams, NotificationsResponse, PushTokenBody, RingAttemptParams } from "./notifications";
+export {
+  AdminStatementsQuery, AdminStatementsResponse, OwnerStatementsResponse, ShopBalancesResponse, Statement, StatementBalance, StatementLine, StatementParams,
+  StatementsQuery, StatementSummary,
+} from "./statements";
 
 export {
   AdminProductRequest, AdminProductRequestsQuery, AdminProductRequestsResponse, CreateProductRequestBody, MapProductRequestBody, ProductRequest,

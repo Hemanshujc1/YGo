@@ -22,8 +22,8 @@ type Refusal = "NOT_FOUND" | "ORDER_STATUS_CHANGED" | "ITEM_CHECK_WAIT" | "DELIV
 export function deliveryActions({ secret, photos, failureWaitSeconds, photoSaveTimeoutMs }: { secret: string; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs: number }) {
   /** Locks the arrived order of this deliverer and the upload they chose, for the second step. */
   async function lockArrived(client: PoolClient, orderId: string, accountId: string, uploadId: string, now: Date) {
-    const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff" }>(
-      `SELECT o.status, m.role FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
+    const { rows: [order] } = await client.query<{ status: OrderStatus; role: "owner" | "staff"; statusChangedAt: Date }>(
+      `SELECT o.status, m.role, o.status_changed_at AS "statusChangedAt" FROM orders o JOIN shop_members m ON m.shop_id = o.shop_id
        WHERE o.id = $1 AND o.deliverer_id = $2 AND m.account_id = $2 FOR UPDATE OF o`, [orderId, accountId]);
     if (!order) return "NOT_FOUND" as const;
     if (order.status !== "arrived") return "ORDER_STATUS_CHANGED" as const;
@@ -98,21 +98,27 @@ export function deliveryActions({ secret, photos, failureWaitSeconds, photoSaveT
       } finally { clearTimeout(timer); }
     },
 
-    /** Step 2: moves the order and records what was done. */
-    async apply(client: PoolClient, kind: DeliveryKind, id: string, accountId: string, body: Body, photoKey: string, now: Date, commit: boolean): Promise<Refusal | { status: OrderStatus; uploadId: string }> {
+    /**
+     * Step 2: moves the order and records what was done. `doneAt` is when an offline delivery happened on the phone, already no later than
+     * the server's receipt (#616); it is raised to the order's last status change so the timeline stays in order. The status, its history
+     * and the sale all take that one time, which places the order in the right weekly statement (#629). Online, the time is `now`, and so is a
+     * failed delivery's, which no statement charges.
+     */
+    async apply(client: PoolClient, kind: DeliveryKind, id: string, accountId: string, body: Body, photoKey: string, now: Date, commit: boolean, doneAt: Date = now): Promise<Refusal | { status: OrderStatus; uploadId: string }> {
       const order = await lockArrived(client, id, accountId, body.photoUploadId, now);
       if (typeof order === "string") return order;
       const actor = { id: accountId, role: order.role };
       const kept = new Date(now.getTime() + PROOF_KEPT_MS);
+      const at = new Date(Math.min(now.getTime(), Math.max(doneAt.getTime(), order.statusChangedAt.getTime())));
       if (kind === "failed") {
         if (!await moveOrder(client, { id, status: order.status }, "delivery_failed", actor, now, (body as FailDeliveryBody).reason)) return "ORDER_STATUS_CHANGED";
         await client.query("UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, failed_delivery_reason = $4 WHERE id = $1", [id, photoKey, kept, (body as FailDeliveryBody).reason]);
       } else {
-        if (!await moveOrder(client, { id, status: order.status }, "delivered", actor, now)) return "ORDER_STATUS_CHANGED";
+        if (!await moveOrder(client, { id, status: order.status }, "delivered", actor, at)) return "ORDER_STATUS_CHANGED";
         await client.query(`UPDATE orders SET delivery_photo_key = $2, delivery_photo_expires_at = $3, delivery_payment = $4, proof_exception = $5,
           proof_exception_reason = $6, handover_code_attempts = 0, handover_code_blocked_until = NULL WHERE id = $1`,
         [id, photoKey, kept, (body as CompleteDeliveryBody).payment, kind === "proof_exception", kind === "proof_exception" ? (body as ProofExceptionBody).reason : null]);
-        await recordDeliverySale(client, id, accountId, now);
+        await recordDeliverySale(client, id, accountId, at);
       }
       if (commit) await client.query("COMMIT");
       return { status: kind === "failed" ? "delivery_failed" : "delivered", uploadId: body.photoUploadId };
