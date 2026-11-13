@@ -51,6 +51,8 @@ import {
   JoinShopResponse,
   type PartialAcceptOrderBody,
   PartialAcceptPreviewResponse,
+  OwnerStatementsResponse,
+  Statement,
   ShopOrderResponse,
   ShopOrdersResponse,
   ShopCounterBill,
@@ -75,6 +77,7 @@ import {
   type ShopHours,
   type ShopListingCatalogItem,
   type SaveShopListingBody as SaveShopListingInput,
+  type StatementsQuery,
   type OpeningStockBody as OpeningStockInput,
   type AppIdentity,
   type ChangeNameBody,
@@ -576,6 +579,20 @@ export function createApiClient({
     /** `GET /v1/me/shop-orders/:id`: S05, one of the shop's orders. */
     async shopOrder(id: string): Promise<ApiResult<ShopOrderResponse>> {
       return result(await signedIn("GET", `/v1/me/shop-orders/${encodeURIComponent(id)}`), ShopOrderResponse);
+    },
+
+    /** `GET /v1/me/statements`: S15, the Owner's balance and a page of their weekly statements, newest first; `before` is the last number already shown (#630). */
+    async myStatements(query: Partial<Pick<StatementsQuery, "before" | "limit">> = {}): Promise<ApiResult<OwnerStatementsResponse>> {
+      const params = new URLSearchParams();
+      if (query.before !== undefined) params.set("before", String(query.before));
+      if (query.limit !== undefined) params.set("limit", String(query.limit));
+      const text = params.toString();
+      return result(await signedIn("GET", `/v1/me/statements${text ? `?${text}` : ""}`), OwnerStatementsResponse);
+    },
+
+    /** `GET /v1/me/statements/:id`: one whole statement of the Owner's shop (#630). */
+    async myStatement(id: string): Promise<ApiResult<Statement>> {
+      return result(await signedIn("GET", `/v1/me/statements/${encodeURIComponent(id)}`), Statement);
     },
 
     /** `POST /v1/me/shop-orders/:id/accept`: holds the stock (#425); NOT_ENOUGH_STOCK carries the short lines. */

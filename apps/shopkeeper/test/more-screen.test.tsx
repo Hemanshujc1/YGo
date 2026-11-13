@@ -39,12 +39,12 @@ describe("S36 More (#550)", () => {
     }
   });
 
-  it("gives the Owner Staff, Void a bill and the Shop settings screens", () => {
-    expect(links()).toEqual(["/staff", "/void-bill", "/agreement", "/listings", "/hours", "/shop-discount", "/fulfilment", "/opening-stock"]);
+  it("gives the Owner Money (#630), Staff, Void a bill and the Shop settings screens", () => {
+    expect(links()).toEqual(["/money", "/staff", "/void-bill", "/agreement", "/listings", "/hours", "/shop-discount", "/fulfilment", "/opening-stock"]);
     expect(texts()).toContain(strings.more.shopSettings);
   });
 
-  it("hides every Owner-only entry from Staff and when the phone knows no role, and offers no Money or deletion", () => {
+  it("hides every Owner-only entry from Staff and when the phone knows no role, and offers no Money (#630) or deletion", () => {
     for (const role of ["staff", null] as const) {
       mock.role = role;
       expect(links()).toEqual([]);

@@ -1,7 +1,7 @@
 import type { Account } from "@ygo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { listeners } from "../src/listeners";
-import { createPushTaps, type Owner, type PushDevice, registerPush, ringsInFront, type Tap } from "../src/push-flow";
+import { createPushTaps, type Owner, type PushDevice, registerPush, ringsInFront, type Tap, tapFrom } from "../src/push-flow";
 import type { SessionState } from "../src/session";
 
 const token = "ExponentPushToken[abc]";
@@ -123,7 +123,7 @@ function fakeSession(state: SessionState) {
   };
 }
 
-const tap = (key: string, notificationId = "n1", orderId: string | null = "o1"): Tap => ({ key, notificationId, orderId });
+const tap = (key: string, notificationId = "n1", orderId: string | null = "o1"): Tap => ({ key, notificationId, orderId, statementId: null });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function taps(state: SessionState, read: (id: string) => Promise<Owner> = async () => "mine") {
@@ -230,5 +230,22 @@ describe("createPushTaps (#506)", () => {
     answer("mine");
     await settle();
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe("tapFrom (#630)", () => {
+  it("reads the order and the statement a push points at", () => {
+    expect(tapFrom("k", { notificationId: "n", orderId: "o", statementId: "s" })).toEqual({ key: "k", notificationId: "n", orderId: "o", statementId: "s" });
+  });
+
+  it("still opens an older push that carries no statementId, and one with no order", () => {
+    expect(tapFrom("k", { notificationId: "n", orderId: "o" })).toEqual({ key: "k", notificationId: "n", orderId: "o", statementId: null });
+    expect(tapFrom("k", { notificationId: "n", orderId: null, statementId: "s" })).toEqual({ key: "k", notificationId: "n", orderId: null, statementId: "s" });
+  });
+
+  it("ignores a statementId that is not text, and a push that is not YGo's", () => {
+    expect(tapFrom("k", { notificationId: "n", statementId: 5 })?.statementId).toBeNull();
+    expect(tapFrom("k", { orderId: "o" })).toBeNull();
+    expect(tapFrom("k", null)).toBeNull();
   });
 });
