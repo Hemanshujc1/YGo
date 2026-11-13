@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { DELIVERED_EXAMPLES, type ExampleLine, type ExampleShopDiscount } from "@ygo/pricing";
+import { DELIVERED_EXAMPLES, type ExampleCoupon, type ExampleLine, type ExampleShopDiscount } from "@ygo/pricing";
 import { afterEach, beforeEach, describe, expect, inject, it } from "vitest";
 import { createLocalClock } from "../src/adapters/clock";
 import { createLocalMailer } from "../src/adapters/mailer";
@@ -78,6 +78,20 @@ export async function saveRule(shopId: string, rule: ExampleShopDiscount, status
   return String(saved.id);
 }
 
+/** Saves the coupon an example tries, as Admin does, and answers its code (#70). */
+async function saveCoupon(shopId: string, coupon: ExampleCoupon): Promise<string> {
+  const terms = coupon.form === "percentage"
+    ? { form: "percentage", percentage: coupon.percentage, cap: coupon.cap ?? null, minimumOrder: coupon.minimumOrder ?? null }
+    : { form: "flat", amount: coupon.amount, minimumOrder: coupon.minimumOrder ?? null };
+  const response = await app.inject({
+    method: "POST", url: "/v1/admin/coupons", headers,
+    payload: { code: "EXAMPLE", ...terms, funding: coupon.funding, ...(coupon.funding === "shop" ? { shopId } : {}), startsAt: null, expiresAt: "2031-01-01T00:00:00.000Z",
+      usageLimit: null, perCustomerLimit: 1, firstOrderOnly: false, areaIds: [], categoryIds: [], active: true },
+  });
+  expect(response.statusCode).toBe(201);
+  return "EXAMPLE";
+}
+
 function publish(scope: object, values: object) {
   return app.inject({ method: "POST", url: "/v1/admin/rate-cards/publish", headers, payload: { scope, values, reason: "Worked example" } });
 }
@@ -101,18 +115,19 @@ describe("Delivered-route worked examples through the price simulator (#357, Q-6
       expect((await publish(scope, card.values)).statusCode).toBe(201);
     }
     const ruleId = example.shopDiscount && await saveRule(shopId, example.shopDiscount);
+    const couponCode = example.coupon && await saveCoupon(shopId, example.coupon);
     const lines = [];
     for (const line of example.lines) lines.push(await stock(shopId, line));
 
-    const response = await simulate({ shopId, lines });
+    const response = await simulate({ shopId, lines, ...(couponCode ? { couponCode } : {}) });
     expect(response.statusCode).toBe(200);
     const { now, draft } = response.json();
     expect(draft).toBeNull();
-    const { shopDiscount, ...expected } = example.expected;
-    expect(now).toMatchObject({ status: "priced", ...expected });
-    // The order's amount is the sum of its lines' parts, to the paisa (MNY-6).
+    const { shopDiscount, coupon, ...expected } = example.expected;
+    expect(now).toMatchObject({ status: "priced", ...expected, ...(coupon ? { coupon } : {}) });
+    // The lines' parts add up to the shop-funded amount to the paisa, whichever promotion applied (MNY-6). A platform-funded coupon takes no part off any line.
     const parts = now.lines.map((line: { shopDiscount: string }) => Math.round(Number(line.shopDiscount) * 100));
-    expect(parts.reduce((sum: number, part: number) => sum + part, 0)).toBe(Math.round(Number(shopDiscount ?? "0") * 100));
+    expect(parts.reduce((sum: number, part: number) => sum + part, 0)).toBe(Math.round((Number(shopDiscount ?? "0") + Number(coupon?.shopFunded ?? "0")) * 100));
     // The quote names the rule and version it was made under; a rule that took nothing off is not named.
     expect(now.shopDiscount).toEqual(shopDiscount && Number(shopDiscount) > 0 ? { amount: shopDiscount, ruleId, ruleVersion: 1 } : null);
   });

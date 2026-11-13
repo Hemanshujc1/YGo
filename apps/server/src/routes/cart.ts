@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
-import { CartParams, CartResponse, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, type PickupQuote, SaveCartBody, type ShopDiscountOffer } from "@ygo/contracts";
+import { CartCouponBody, CartCouponsResponse, CartParams, CartResponse, type CouponReason, type CartLine, type CartReason, type DeliveredQuote, ErrorEnvelope, FeedQuery, type PartPack, type PickupQuote, SaveCartBody, type ShopDiscountOffer } from "@ygo/contracts";
 import { fromPaise, pickupPrice, toPaise } from "@ygo/pricing";
+import { couponByCode, couponRefusal, couponSql, type CouponRow } from "../coupons";
 import type { Clock } from "../adapters/clock";
 import { withTransaction } from "../db";
 import { fulfilmentModes } from "../fulfilment";
@@ -38,8 +39,8 @@ export async function savedCart(client: Pool | PoolClient, accountId: string, sh
   // A save holds the cart's lock while it writes, so once locked the read below can't land halfway through one.
   if (lock) await client.query("SELECT 1 FROM carts WHERE account_id = $1 AND shop_id = $2 FOR UPDATE", [accountId, shopId]);
   // One statement, so the revision and its lines come from one snapshot even unlocked.
-  const { rows: [cart] } = await client.query<{ id: string; revision: number; lines: Line[] }>(
-    `SELECT id, revision, (SELECT COALESCE(json_agg(json_build_object('listingId', l.listing_id, 'count', l.count) ORDER BY l.position), '[]')
+  const { rows: [cart] } = await client.query<{ id: string; revision: number; couponId: string | null; lines: Line[] }>(
+    `SELECT id, revision, coupon_id AS "couponId", (SELECT COALESCE(json_agg(json_build_object('listingId', l.listing_id, 'count', l.count) ORDER BY l.position), '[]')
        FROM cart_lines l WHERE l.cart_id = c.id) AS lines
      FROM carts c WHERE account_id = $1 AND shop_id = $2`, [accountId, shopId]);
   return cart;
@@ -84,8 +85,11 @@ function pickupOrderQuote(engine: Extract<DeliveredQuote, { status: "priced" }>,
  */
 export async function pricedCart(
   client: Pool, accountId: string, shopId: string, serving: ServingShop | undefined, revision: number, saved: Line[], shopDiscounts: boolean,
-  read?: Array<Pack | undefined>,
-): Promise<{ view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; packs: Array<Pack | undefined>; pickupDetail: PickupDetail | null }> {
+  read?: Array<Pack | undefined>, coupon?: { id: string | null; now: Date },
+): Promise<{
+  view: CartResponse; priced: Extract<DeliveredQuote, { status: "priced" }> | null; pickupPriced: Extract<DeliveredQuote, { status: "priced" }> | null;
+  packs: Array<Pack | undefined>; pickupDetail: PickupDetail | null;
+}> {
   // ACC-9: an Owner or Staff member can't order from their own shop. Read alongside the packs.
   const [member, packs, modes] = await Promise.all([
     client.query("SELECT 1 FROM shop_members WHERE account_id = $1 AND shop_id = $2", [accountId, shopId]), read ?? packsOf(client, shopId, saved), fulfilmentModes(client, shopId)]);
@@ -106,15 +110,25 @@ export async function pricedCart(
   let delivering = Boolean(serving);
   let quote: CartResponse["quote"] = null;
   let engine: Extract<DeliveredQuote, { status: "priced" }> | null = null;
+  // A pickup is priced without the coupon (#70): the delivered route's commission floor is not its own, and the shop-wide discount stays whole beside it.
+  // INTENTIONAL LIMITATION, pending a product decision: pickup orders take no coupon of any funding. The spec is silent on pickup coupons, so none is enabled.
+  let pickupEngine: Extract<DeliveredQuote, { status: "priced" }> | null = null;
   const priceReasons: CartReason[] = [];
   let orderCard: Awaited<ReturnType<typeof resolveRateCard>>;
   if (serving && orderable.length) {
     // The order-level card is read once and shared with the pickup quote below; the delivered quote ignores its pickup rule.
     const version = await latestRateCardVersion(client);
     orderCard = modeOpen("pickup") ? await resolveRateCard(client, shopId, undefined, version, { usesPickup: true, usesBargain: false }) : undefined;
-    const priced = await deliveredQuote(client, shopId, orderable.map(({ line, categoryId }) => ({
+    const basket = orderable.map(({ line, categoryId }) => ({
       listingId: line.listingId, quantityOptionId: null, categoryId, unitPrice: line.part?.price ?? line.price, count: line.count,
-    })), shopDiscounts, version, undefined, orderCard);
+    }));
+    const plain = await deliveredQuote(client, shopId, basket, shopDiscounts, version, undefined, orderCard);
+    // The cart's one coupon is read again on every quote, so one that expired or ran out since it was chosen simply stops applying, with its reason.
+    const chosen = shopDiscounts && coupon?.id ? (await client.query<CouponRow>(`SELECT ${couponSql("c")} FROM coupons c WHERE c.id = $1`, [coupon.id])).rows[0] : undefined;
+    const priced = chosen && coupon && plain.status === "priced"
+      ? await deliveredQuote(client, shopId, basket, shopDiscounts, version, undefined, orderCard, { row: chosen, refusal: await couponRefusal(client, chosen, { accountId, shopId, now: coupon.now, bargained: false }) })
+      : plain;
+    if (plain.status === "priced") pickupEngine = plain;
     // The feed already leaves out a shop whose card is incomplete; this is a card changing in between.
     if (priced.status === "incomplete") delivering = false;
     else {
@@ -124,6 +138,9 @@ export async function pricedCart(
       orderable.forEach(({ line }, index) => { line.lineTotal = priced.lines[index]?.lineTotal ?? null; });
       quote = {
         productValue: priced.productValue, shopDiscount: priced.shopDiscount ? { amount: priced.shopDiscount.amount, offer: await frozenOffer(client, priced.shopDiscount.ruleId, priced.shopDiscount.ruleVersion) } : null,
+        ...priced.coupon ? { coupon: {
+          code: priced.coupon.code, applied: priced.coupon.applied, reason: priced.coupon.reason, amount: fromPaise(toPaise(priced.coupon.shopFunded) + toPaise(priced.coupon.platformFunded)),
+        } } : {},
         deliveryFee: priced.deliveryFee.amount, smallCartFee: priced.smallCartFee?.amount ?? null, total: priced.customerTotal,
       };
       // The floor's shortfall is the platform's earnings, which the Customer never sees (owner's clarification 2 on #50).
@@ -141,7 +158,8 @@ export async function pricedCart(
   // The pickup route (FUL-7): priced from the same lines and discount, with no delivery fee and no commission, against the pickup floor alone.
   let pickup: PickupQuote | null = null;
   let pickupDetail: PickupDetail | null = null;
-  if (engine && modeOpen("pickup")) {
+  if (pickupEngine && modeOpen("pickup")) {
+    const engine = pickupEngine;
     const rule = orderCard?.missing.includes("pickup") ? undefined : orderCard?.values.pickup?.value as { enabled: boolean; customerFee: string; shopFee: string | null; cap: string | null; contributionFloor: string } | undefined;
     if (rule) {
       const price = pickupPrice({ productValue: engine.productValue, shopDiscount: engine.shopDiscount?.amount ?? "0", rule });
@@ -159,7 +177,7 @@ export async function pricedCart(
   }
 
   const name = serving?.name ?? (await client.query<{ name: string }>("SELECT shop_name AS name FROM shops WHERE id = $1", [shopId])).rows[0]?.name ?? "";
-  return { view: { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons, pickup }, priced: engine, packs, pickupDetail };
+  return { view: { shop: { id: shopId, name }, revision, lines, quote, placeable: quote !== null && reasons.length === 0, reasons, pickup }, priced: engine, pickupPriced: pickupEngine, packs, pickupDetail };
 }
 
 const cartView = async (...args: Parameters<typeof pricedCart>) => (await pricedCart(...args)).view;
@@ -176,7 +194,7 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret, 
     const [[serving], cart] = await Promise.all([
       servingShops(pool, clock.now(), request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false)]);
     if (!serving && !cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
-    return cartView(pool, who.accountId, shopId, serving, cart?.revision ?? 0, cart?.lines ?? [], shopDiscounts);
+    return cartView(pool, who.accountId, shopId, serving, cart?.revision ?? 0, cart?.lines ?? [], shopDiscounts, undefined, { id: cart?.couponId ?? null, now: clock.now() });
   });
 
   // Saves the whole cart and answers with its new quote (CRT-2). Saves of one cart run one at a time,
@@ -214,10 +232,73 @@ export function registerCartRoutes(app: FastifyInstance, { pool, clock, secret, 
          FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`, [cart.id, JSON.stringify(held)]);
       await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [cart.id, clock.now()]);
       await client.query("COMMIT");
-      return { held, packs };
+      return { held, packs, couponId: cart.couponId };
     });
     if (typeof saved === "string") return reply.code(saved === "NOT_FOUND" ? 404 : 409).send({ error: { code: saved } });
     // Priced after the commit, from the packs the save checked: the quote reads in parallel, which one transaction's connection can't.
-    return cartView(pool, who.accountId, shopId, serving, revision + 1, saved.held, shopDiscounts, saved.packs);
+    return cartView(pool, who.accountId, shopId, serving, revision + 1, saved.held, shopDiscounts, saved.packs, { id: saved.couponId, now: clock.now() });
+  });
+
+  // CRT-3: the cart's one coupon, by its code. A coupon that cannot apply is refused with the reason, so the Customer is told what to do (CRT-4); one that the shop-wide
+  // discount beats is kept on the cart and reported as not applied, so it is not lost and not counted as used (D-7).
+  app.put("/v1/carts/:shopId/coupon", { schema: { params: CartParams, querystring: FeedQuery, body: CartCouponBody, response: { 200: CartResponse, ...errors, 409: ErrorEnvelope } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { shopId } = request.params as CartParams;
+    const { code } = request.body as CartCouponBody;
+    const now = clock.now();
+    const [[serving], cart, coupon] = await Promise.all([servingShops(pool, now, request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false), couponByCode(pool, code)]);
+    if (!cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const refuse = (couponReason: CouponReason) => reply.code(409).send({ error: { code: "COUPON_NOT_ELIGIBLE", couponReason } });
+    if (!coupon) return refuse("NOT_AVAILABLE");
+    const tried = await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines, shopDiscounts, undefined, { id: coupon.id, now });
+    const result = tried.view.quote?.coupon;
+    if (!result) return refuse("NOT_AVAILABLE");
+    if (!result.applied && result.reason !== "BETTER_OFFER") return refuse(result.reason ?? "NOT_AVAILABLE");
+    const changed = await withTransaction(pool, async (client) => {
+      const locked = await savedCart(client, who.accountId, shopId, true);
+      if (locked?.revision !== cart.revision) return true;
+      await client.query("UPDATE carts SET coupon_id = $2, revision = revision + 1, updated_at = $3 WHERE id = $1", [cart.id, coupon.id, now]);
+      await client.query("COMMIT");
+      return false;
+    });
+    if (changed) return reply.code(409).send({ error: { code: "CART_CHANGED" } });
+    return { ...tried.view, revision: cart.revision + 1 };
+  });
+
+  app.delete("/v1/carts/:shopId/coupon", { schema: { params: CartParams, querystring: FeedQuery, response: { 200: CartResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { shopId } = request.params as CartParams;
+    const [serving] = await servingShops(pool, clock.now(), request.query as FeedQuery, shopId);
+    const revision = await withTransaction(pool, async (client) => {
+      const cart = await savedCart(client, who.accountId, shopId, true);
+      if (!cart) return null;
+      if (cart.couponId) await client.query("UPDATE carts SET coupon_id = NULL, revision = revision + 1, updated_at = $2 WHERE id = $1", [cart.id, clock.now()]);
+      await client.query("COMMIT");
+      return cart.couponId ? cart.revision + 1 : cart.revision;
+    });
+    if (revision === null) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const cart = await savedCart(pool, who.accountId, shopId, false);
+    return cartView(pool, who.accountId, shopId, serving, revision, cart?.lines ?? [], shopDiscounts, undefined, { id: null, now: clock.now() });
+  });
+
+  // FR-CRT-07: only the coupons this cart can take now, each with what it would take off. Never applied for the Customer.
+  app.get("/v1/carts/:shopId/coupons", { schema: { params: CartParams, querystring: FeedQuery, response: { 200: CartCouponsResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { shopId } = request.params as CartParams;
+    const now = clock.now();
+    const [[serving], cart] = await Promise.all([servingShops(pool, now, request.query as FeedQuery, shopId), savedCart(pool, who.accountId, shopId, false)]);
+    if (!cart) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const { rows: candidates } = await pool.query<{ id: string }>(
+      "SELECT id FROM coupons WHERE status = 'active' AND (shop_id IS NULL OR shop_id = $1) AND expires_at > $2 ORDER BY expires_at, code LIMIT 20", [shopId, now]);
+    // One at a time: each is a full pricing pass, and a few Customers opening the list must not take the pool.
+    const offers: Array<{ id: string; code: string; amount: string } | null> = [];
+    for (const { id } of candidates) {
+      const quote = (await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines, shopDiscounts, undefined, { id, now })).view.quote?.coupon;
+      offers.push(quote?.applied ? { id, code: quote.code, amount: quote.amount } : null);
+    }
+    return { coupons: offers.filter((offer) => offer !== null) };
   });
 }

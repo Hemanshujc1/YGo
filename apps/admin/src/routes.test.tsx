@@ -66,6 +66,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     publishRateCard: vi.fn().mockResolvedValue({ ok: true, data: { version: 1 } }),
     listSimulatorListings: vi.fn().mockResolvedValue({ ok: true, data: { listings: [] } }),
     simulatePrice: vi.fn(),
+    listCoupons: vi.fn().mockResolvedValue({ ok: true, data: { coupons: [], maximumPercentage: null } }),
+    createCoupon: vi.fn(),
+    updateCoupon: vi.fn(),
     listMasterProducts: vi.fn().mockResolvedValue({ ok: true, data: { products: [] } }),
     previewCatalogImport: vi.fn(),
     commitCatalogImport: vi.fn(),
@@ -1334,7 +1337,7 @@ describe("Area Manager shell (#343)", () => {
     const { api, router } = setup("/applications", asRole(role));
     api.listAdminOrders.mockResolvedValue({ ok: true, data: { orders: [row], nextCursor: null, counts: { active: 1, unanswered: 0 }, serverTime: "2030-01-01T10:00:05.000Z", unansweredAfterSeconds: 120 } });
     api.getAdminOrder.mockResolvedValue({ ok: true, data: {
-      order: row, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" }, breakdown: null,
+      order: row, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", shopCoupon: "0.00", platformCoupon: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" }, breakdown: null,
       timeline: [], forcedActions: [], people: { customerName: null, delivererName: null }, forcedMoves: role === "admin" ? ["expired"] : [] } });
     fireEvent.click(await screen.findByRole("link", { name: strings.liveOrders }));
     fireEvent.click(await screen.findByRole("link", { name: "#1001" }));
@@ -1367,7 +1370,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(13);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(14);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });
@@ -1655,6 +1658,80 @@ describe("Admin theme (#263)", () => {
   });
 });
 
+describe("Coupons (A04, ADM-5, #70)", () => {
+  const shopOne = { ...application, id: "00000000-0000-4000-8000-000000000501" };
+  const coupon = {
+    id: "00000000-0000-4000-8000-000000000601", version: 1, code: "SAVE10", funding: "platform", shopId: null, form: "percentage", percentage: "10", cap: "50", amount: null, minimumOrder: "200",
+    startsAt: null, expiresAt: "2031-01-01T12:00:00.000Z", usageLimit: 100, perCustomerLimit: 1, firstOrderOnly: false, areaIds: [], categoryIds: [], status: "active", used: 3,
+  };
+  async function open(overrides: Record<string, unknown> = {}) {
+    const result = setup("/coupons", {
+      listCoupons: vi.fn().mockResolvedValue({ ok: true, data: { coupons: [coupon], maximumPercentage: null } }),
+      listCategories: vi.fn().mockResolvedValue({ ok: true, data: { categories: [stationery] } }),
+      listShopApplications: vi.fn().mockResolvedValue({ ok: true, data: { applications: [shopOne] } }),
+      listAreas: vi.fn().mockResolvedValue({ ok: true, data: { areas: [kothrud] } }),
+      ...overrides,
+    });
+    await screen.findByRole("heading", { name: strings.coupons });
+    return result;
+  }
+
+  it("lists each coupon with who pays, its offer, expiry and uses, with no trailing zeros", async () => {
+    await open();
+    expect(screen.getByText("SAVE10")).toBeTruthy();
+    expect(screen.getByText("10% off, up to ₹50, over ₹200")).toBeTruthy();
+    expect(screen.getByText("3 / 100")).toBeTruthy();
+    expect(screen.getByText(strings.coupon.funding.platform)).toBeTruthy();
+  });
+
+  it("checks the form with the server's schema, names each field, then saves a shop-funded coupon for the shop it names", async () => {
+    const { api } = await open({ createCoupon: vi.fn().mockResolvedValue({ ok: true, data: { coupon: { ...coupon, id: "00000000-0000-4000-8000-000000000602", code: "SHOP5", funding: "shop", shopId: shopOne.id, percentage: "5", cap: null, minimumOrder: null } } }) });
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.add }));
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.save }));
+    expect(await screen.findByText(strings.coupon.fields.code)).toBeTruthy();
+    expect(screen.getByText(strings.coupon.fields.percentage)).toBeTruthy();
+    expect(api.createCoupon).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(strings.coupon.code), { target: { value: "SHOP5" } });
+    fireEvent.change(screen.getByLabelText(strings.coupon.fundingLabel), { target: { value: "shop" } });
+    fireEvent.change(screen.getByLabelText(strings.coupon.shop), { target: { value: shopOne.id } });
+    fireEvent.change(screen.getByLabelText(strings.coupon.percentage), { target: { value: "5.50" } });
+    fireEvent.blur(screen.getByLabelText(strings.coupon.percentage));
+    expect(screen.getByLabelText(strings.coupon.percentage)).toHaveProperty("value", "5.5");
+    fireEvent.change(screen.getByLabelText(strings.coupon.expiresOn), { target: { value: "2031-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.save }));
+    await waitFor(() => expect(api.createCoupon).toHaveBeenCalledWith({
+      code: "SHOP5", funding: "shop", shopId: shopOne.id, form: "percentage", percentage: "5.5", cap: null, minimumOrder: null, startsAt: null, expiresAt: "2031-01-01T18:29:59.000Z",
+      usageLimit: null, perCustomerLimit: 1, firstOrderOnly: false, areaIds: [], categoryIds: [], active: true,
+    }));
+    expect(await screen.findByText(strings.coupon.saved)).toBeTruthy();
+    expect(screen.getByText("SHOP5")).toBeTruthy();
+  });
+
+  it("tells the Admin the shop's maximum when a coupon is over it, and a code already taken", async () => {
+    const { api } = await open({ updateCoupon: vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 400, code: "COUPON_ABOVE_MAXIMUM", maximumPercentage: "20" })
+      .mockResolvedValueOnce({ ok: false, status: 409, code: "COUPON_CODE_TAKEN" }) });
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.edit("SAVE10") }));
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.save }));
+    expect(await screen.findByText(strings.coupon.above("20"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.save }));
+    expect(await screen.findByText(strings.errors.COUPON_CODE_TAKEN)).toBeTruthy();
+    expect(api.updateCoupon).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a paused coupon with why, and an empty list", async () => {
+    await open({ listCoupons: vi.fn().mockResolvedValue({ ok: true, data: { coupons: [{ ...coupon, status: "paused" }], maximumPercentage: null } }) });
+    expect(screen.getByText(strings.coupon.paused)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.coupon.edit("SAVE10") }));
+    expect(screen.getByText(strings.coupon.pausedHint)).toBeTruthy();
+  });
+
+  it("says when there are no coupons", async () => {
+    await open({ listCoupons: vi.fn().mockResolvedValue({ ok: true, data: { coupons: [], maximumPercentage: null } }) });
+    expect(screen.getByText(strings.coupon.empty)).toBeTruthy();
+  });
+});
+
 describe("Price simulator (A05, #358)", () => {
   const shop = { ...application, id: "00000000-0000-4000-8000-000000000501" };
   const listingId = "00000000-0000-4000-8000-000000000801";
@@ -1693,6 +1770,21 @@ describe("Price simulator (A05, #358)", () => {
   }
   const count = (label: string, value: string) => fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.countFor(label) }), { target: { value } });
   const calculate = () => fireEvent.click(screen.getByRole("button", { name: strings.simulator.calculate }));
+
+  it("tries a coupon by its code and says whether it applied, who pays, or why not (ADM-5, MNY-10)", async () => {
+    const quote = (coupon: object) => priced({ coupon });
+    const answer = { couponId: "00000000-0000-4000-8000-000000000601", couponVersion: 1, code: "PLAT10", funding: "platform" };
+    const { api } = await open({ simulatePrice: vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { now: quote({ ...answer, applied: true, reason: null, shopFunded: "0.00", platformFunded: "11.00" }), draft: null } })
+      .mockResolvedValueOnce({ ok: true, data: { now: quote({ ...answer, applied: false, reason: "BETTER_OFFER", shopFunded: "0.00", platformFunded: "0.00" }), draft: null } }) });
+    count(riceLabel, "2");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.couponCode }), { target: { value: " PLAT10 " } });
+    calculate();
+    await waitFor(() => expect(api.simulatePrice).toHaveBeenCalledWith({ shopId: shop.id, lines: [{ listingId, count: 2 }], couponCode: "PLAT10" }));
+    expect(await screen.findByText(strings.simulator.couponApplied("PLAT10", "₹0", "₹11"))).toBeTruthy();
+    calculate();
+    expect(await screen.findByText(strings.simulator.couponNot("PLAT10", strings.simulator.couponReasons.BETTER_OFFER))).toBeTruthy();
+  });
 
   it("prices a basket of packs and quantity options, explaining what the shop keeps", async () => {
     const { api } = await open();

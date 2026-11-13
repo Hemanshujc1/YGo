@@ -519,6 +519,27 @@
       "when": 1794507732008,
       "tag": "0073_denylist_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794561429667,
+      "tag": "0074_coupons",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794561430676,
+      "tag": "0075_coupon_revision_pricing",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794561431591,
+      "tag": "0076_revision_quote",
+      "breakpoints": true
     }
   ]
 }

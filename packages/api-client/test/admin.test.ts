@@ -192,7 +192,7 @@ describe("Admin browser API client", () => {
       placedAt: "2030-01-01T10:00:00.000Z", statusChangedAt: "2030-01-01T10:00:00.000Z", total: "150.00", statusAgeSeconds: 5, unanswered: false, cursor: `2030-01-01T10:00:00.000000Z|${id}` };
     const list = { orders: [row], nextCursor: null, counts: { active: 1, unanswered: 0 }, serverTime: "2030-01-01T10:00:05.000Z", unansweredAfterSeconds: 120 };
     const summary = { ...row, cursor: undefined };
-    const detail = { order: summary, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" },
+    const detail = { order: summary, lines: [], money: { productValue: "130.00", shopDiscount: "0.00", shopCoupon: "0.00", platformCoupon: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" },
       breakdown: null, timeline: [], forcedActions: [], people: { customerName: null, delivererName: null }, forcedMoves: ["expired"] };
     const { client, calls } = setup(({ path }) => path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : path.endsWith("/orders") || path.includes("/orders?") ? answer(200, list) : answer(200, detail));
     expect(await client.listAdminOrders({ group: "unanswered", cursor: "c" })).toEqual({ ok: true, data: list });

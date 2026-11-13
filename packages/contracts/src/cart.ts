@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ProductBaseUnit } from "./catalog";
 import { PartPack } from "./feed";
 import { ShopPrice } from "./fields";
-import { Amount, LineCount } from "./pricing";
+import { Amount, AppliedCoupon, LineCount } from "./pricing";
 import { AppliedShopDiscount } from "./shop-discount";
 
 /** `GET` and `PUT /v1/carts/:shopId` take the feed's query: where the order would go (#405). */
@@ -47,6 +47,8 @@ export const CartQuote = z.strictObject({
   productValue: Amount,
   /** The shop-wide discount taken off and its offer; null when none applies (#571). */
   shopDiscount: AppliedShopDiscount,
+  /** The cart's one coupon: what it took off, or why it did not apply; null with none chosen (CRT-3, #70). Never beside a shop-wide discount (D-7). */
+  coupon: AppliedCoupon.nullable().optional(),
   deliveryFee: Amount,
   /** Null when the cart is not below the small-cart threshold. */
   smallCartFee: Amount.nullable(),

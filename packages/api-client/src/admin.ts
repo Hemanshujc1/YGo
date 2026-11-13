@@ -16,6 +16,9 @@ import {
   RateCardResponse,
   PublishedRateCardResponse,
   PriceSimulatorResponse,
+  CouponResponse,
+  CouponsResponse,
+  type AdminCouponBody,
   SimulatorListingsResponse,
   type PriceSimulatorBody,
   CategoriesResponse,
@@ -272,6 +275,19 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `POST /v1/admin/price-simulator`: price a basket now, and under an unsaved draft rule when one is given. */
     async simulatePrice(body: PriceSimulatorBody): Promise<ApiResult<PriceSimulatorResponse>> {
       return result(await adminRequest("POST", "/v1/admin/price-simulator", body), PriceSimulatorResponse);
+    },
+
+    /** `GET /v1/admin/coupons`: every coupon, whoever pays for it, with the orders it is in force on (ADM-5). */
+    async listCoupons(): Promise<ApiResult<CouponsResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/coupons"), CouponsResponse);
+    },
+    /** `POST /v1/admin/coupons`: a platform-funded coupon, or a shop-funded one for a named shop. */
+    async createCoupon(body: AdminCouponBody): Promise<ApiResult<CouponResponse>> {
+      return result(await adminRequest("POST", "/v1/admin/coupons", body), CouponResponse);
+    },
+    /** `PUT /v1/admin/coupons/:id`: change a coupon's terms or turn it on or off; every save keeps a version. */
+    async updateCoupon(id: string, body: AdminCouponBody): Promise<ApiResult<CouponResponse>> {
+      return result(await adminRequest("PUT", `/v1/admin/coupons/${encodeURIComponent(id)}`, body), CouponResponse);
     },
 
     /** `POST /v1/admin/categories`: create a top-level or child category. */

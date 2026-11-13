@@ -11,6 +11,7 @@ import { cancelRules, queueNotification } from "../notifications";
 import { moveOrder, recordStatus } from "../orders";
 import { orderTiming } from "../order-timing";
 import { deriveKeys, mobileSignedIn } from "../tokens";
+import { couponRefusal, couponSql, type CouponRow } from "../coupons";
 import { offerSql, packsOf, pricedCart, savedCart } from "./cart";
 import { servingShops } from "./feed";
 import { latestRateCardVersion } from "./price-simulator";
@@ -200,12 +201,14 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     const quote = async ({ address, cart }: NonNullable<Awaited<ReturnType<typeof current>>>) => {
       const [serving] = await servingShops(pool, clock.now(), { pincode: address.pincode, latitude: address.latitude, longitude: address.longitude }, shopId);
       const version = await latestRateCardVersion(pool);
-      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines, shopDiscounts) };
+      return { version, ...await pricedCart(pool, who.accountId, shopId, serving, cart.revision, cart.lines, shopDiscounts, undefined, { id: cart.couponId, now: clock.now() }) };
     };
     const first = await current();
     if (!first) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
     const { address, cart: read } = first;
-    const { version, view, priced, packs, pickupDetail } = await quote(first);
+    const { version, view, priced: delivered, pickupPriced, packs, pickupDetail } = await quote(first);
+    // A pickup is priced without the coupon, so the order it makes holds the plain quote (#70).
+    const ordered = pickup ? pickupPriced : delivered;
     if (view.reasons.some((reason) => reason.code === "OWN_SHOP")) return reply.code(403).send({ error: { code: "OWN_SHOP" } });
     // Something changed while placement waited on the locks: read the address and the cart again and answer with the cart as it is now.
     const changed = async () => {
@@ -215,7 +218,7 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     };
     // A pickup is placeable on its own quote and can be priced while delivery is switched off.
     const ordering = pickup ? view.pickup?.placeable === true && view.pickup.total === total : view.placeable && view.quote?.total === total;
-    if (read.revision !== revision || !priced || !ordering) {
+    if (read.revision !== revision || !ordered || !ordering) {
       return reply.code(409).send({ error: { code: "CART_CHANGED", cart: view } });
     }
 
@@ -229,31 +232,39 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
         || JSON.stringify(await packsOf(client, shopId, read.lines)) !== JSON.stringify(packs)
         || await latestRateCardVersion(client) !== version) return "CHANGED";
       // A discount the quote took off still stands: the rule is still active at that version, or an Owner's save or a lower maximum came in between (MNY-6).
-      if (priced.shopDiscount) {
-        const { rows: [rule] } = await client.query<{ status: string; version: number }>("SELECT status, version FROM shop_discounts WHERE id = $1 FOR SHARE", [priced.shopDiscount.ruleId]);
-        if (rule?.status !== "active" || rule.version !== priced.shopDiscount.ruleVersion) return "CHANGED";
+      if (ordered.shopDiscount) {
+        const { rows: [rule] } = await client.query<{ status: string; version: number }>("SELECT status, version FROM shop_discounts WHERE id = $1 FOR SHARE", [ordered.shopDiscount.ruleId]);
+        if (rule?.status !== "active" || rule.version !== ordered.shopDiscount.ruleVersion) return "CHANGED";
       }
       // Read after the locks, so a wait on them doesn't stamp an earlier time.
       const now = clock.now();
+      // A coupon the quote took off still stands (CRT-3). Its row is locked first, so two orders for its last use take turns: the second counts the first's use and
+      // is told the cart changed, with the coupon now refused as used up. A coupon that did not apply is never counted, and a retry never counts twice (the order is the key).
+      const applied = ordered.coupon?.applied ? ordered.coupon : null;
+      if (applied) {
+        const { rows: [coupon] } = await client.query<CouponRow>(`SELECT ${couponSql("c")} FROM coupons c WHERE c.id = $1 FOR UPDATE`, [applied.couponId]);
+        if (!coupon || coupon.version !== applied.couponVersion || await couponRefusal(client, coupon, { accountId: who.accountId, shopId, now, bargained: false })) return "CHANGED";
+      }
 
-      const discount = [priced.shopDiscount?.amount ?? "0", priced.shopDiscount?.ruleId ?? null, priced.shopDiscount?.ruleVersion ?? null];
+      const discount = [ordered.shopDiscount?.amount ?? "0", ordered.shopDiscount?.ruleId ?? null, ordered.shopDiscount?.ruleVersion ?? null,
+        applied?.shopFunded ?? "0", applied?.platformFunded ?? "0", applied?.couponId ?? null, applied?.couponVersion ?? null];
       const { rows: [order] } = pickup && pickupDetail
         // A pickup: no address, no delivery fee, no commission (MNY-2). Its quote keeps the booking fees and the contribution they make (MNY-4).
         ? await client.query<{ id: string }>(
           `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
-             fulfilment, product_value, delivery_fee, small_cart_fee, pickup_fee, total, rate_card_version, quote, shop_discount, shop_discount_rule_id, shop_discount_rule_version)
-           SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin, 'pickup', $4, 0, NULL, $5, $6, $7, $8, $9, $10, $11
+             fulfilment, product_value, delivery_fee, small_cart_fee, pickup_fee, total, rate_card_version, quote, shop_discount, shop_discount_rule_id, shop_discount_rule_version, shop_coupon, platform_coupon, coupon_id, coupon_version)
+           SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin, 'pickup', $4, 0, NULL, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
            FROM shops shop WHERE shop.id = $2 RETURNING id`,
-          [who.accountId, shopId, now, priced.productValue, pickupDetail.pickupFee, pickupDetail.total, priced.rateCardVersion, JSON.stringify(pickupDetail.quote), ...discount])
+          [who.accountId, shopId, now, ordered.productValue, pickupDetail.pickupFee, pickupDetail.total, ordered.rateCardVersion, JSON.stringify(pickupDetail.quote), ...discount])
         : await client.query<{ id: string }>(
           `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, shop_gstin,
              address_label, address_flat, address_area_line, address_pincode, address_point, product_value, delivery_fee, small_cart_fee, total, rate_card_version, quote,
-             shop_discount, shop_discount_rule_id, shop_discount_rule_version)
+             shop_discount, shop_discount_rule_id, shop_discount_rule_version, shop_coupon, platform_coupon, coupon_id, coupon_version)
            SELECT $1, $2, 'placed', $3, $3, shop.shop_name, shop.address, shop.pincode, shop.gstin,
-             a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10, $11, $12, $13
+             a.label, a.flat, a.area_line, a.pincode, a.point, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
            FROM saved_addresses a, shops shop WHERE a.id = $4 AND shop.id = $2 RETURNING id`,
-          [who.accountId, shopId, now, addressId, priced.productValue, priced.deliveryFee.amount, priced.smallCartFee?.amount ?? null,
-            priced.customerTotal, priced.rateCardVersion, JSON.stringify(priced), ...discount]);
+          [who.accountId, shopId, now, addressId, ordered.productValue, ordered.deliveryFee.amount, ordered.smallCartFee?.amount ?? null,
+            ordered.customerTotal, ordered.rateCardVersion, JSON.stringify(ordered), ...discount]);
       if (!order) throw new Error("A locked address disappeared");
       // Each line takes from stock in the listing's own unit: count × pack size, or the part bought (#377).
       await client.query(
@@ -262,10 +273,13 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
            (line->>'count')::int, (line->'part'->>'quantity')::numeric, COALESCE(line->'part'->>'price', line->>'price')::numeric, (line->>'lineTotal')::numeric, ($3::numeric[])[entry.position],
            COALESCE((line->'part'->>'quantity')::numeric, (line->>'count')::int * (line->>'quantity')::numeric)
          FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS entry(line, position)`,
-        [order.id, JSON.stringify(view.lines), priced.lines.map((line) => line.shopDiscount)]);
+        [order.id, JSON.stringify(view.lines), ordered.lines.map((line) => line.shopDiscount)]);
+      if (applied) {
+        await client.query("INSERT INTO coupon_uses (order_id, coupon_id, account_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT (order_id) DO NOTHING", [order.id, applied.couponId, who.accountId, now]);
+      }
       await recordStatus(client, order.id, null, "placed", { id: who.accountId, role: "customer" }, now);
       await client.query("DELETE FROM cart_lines WHERE cart_id = $1", [read.id]);
-      await client.query("UPDATE carts SET revision = revision + 1, updated_at = $2 WHERE id = $1", [read.id, now]);
+      await client.query("UPDATE carts SET revision = revision + 1, coupon_id = NULL, updated_at = $2 WHERE id = $1", [read.id, now]);
       await client.query("COMMIT");
       return { id: order.id };
     });

@@ -710,6 +710,8 @@ export const carts = pgTable("carts", {
   accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
   shopId: uuid("shop_id").notNull().references(() => shops.id),
   revision: integer("revision").notNull().default(0),
+  // The cart's one coupon (CRT-3, #70); picking or dropping it raises `revision` like any save. Whether it applies is worked out on every quote.
+  couponId: uuid("coupon_id").references(() => coupons.id),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 }, (table) => [uniqueIndex("carts_account_shop_idx").on(table.accountId, table.shopId)]);
 
@@ -763,6 +765,45 @@ export const shopDiscountVersions = pgTable("shop_discount_versions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => [primaryKey({ columns: [table.ruleId, table.version] }), ...discountShape(table, "shop_discount_versions")]);
 
+// A coupon (CRT-3, #70): platform-funded or shop-funded, one version row per save so an order can name the exact terms it was priced on (MNY-6).
+// `code` is unique whatever its case. Empty `area_ids` / `category_ids` mean no restriction. `paused` is only ever set by YGo, when the maximum was lowered under a shop-funded coupon (D-12).
+const couponTerms = {
+  code: text("code").notNull(),
+  funding: text("funding").notNull(),
+  shopId: uuid("shop_id").references(() => shops.id),
+  ...discountTerms,
+  startsAt: timestamp("starts_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usageLimit: integer("usage_limit"),
+  perCustomerLimit: integer("per_customer_limit").notNull().default(1),
+  firstOrderOnly: boolean("first_order_only").notNull().default(false),
+  areaIds: uuid("area_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  categoryIds: uuid("category_ids").array().notNull().default(sql`'{}'::uuid[]`),
+};
+const couponShape = (table: Parameters<typeof discountShape>[0] & { funding: AnyPgColumn; shopId: AnyPgColumn; usageLimit: AnyPgColumn; perCustomerLimit: AnyPgColumn; code: AnyPgColumn; startsAt: AnyPgColumn; expiresAt: AnyPgColumn }, name: string) => [
+  check(`${name}_form_valid`, sql`(${table.form} = 'percentage' AND ${table.percentage} > 0 AND ${table.percentage} <= 100 AND ${table.flatAmount} IS NULL AND (${table.minimumOrder} IS NULL OR ${table.minimumOrder} > 0) AND (${table.cap} IS NULL OR ${table.cap} > 0))
+    OR (${table.form} = 'flat' AND ${table.flatAmount} > 0 AND ${table.percentage} IS NULL AND ${table.cap} IS NULL AND (${table.minimumOrder} IS NULL OR ${table.minimumOrder} > 0))`),
+  check(`${name}_status_valid`, sql`${table.status} IN ('active', 'off', 'paused')`),
+  check(`${name}_funding_valid`, sql`(${table.funding} = 'platform' AND ${table.shopId} IS NULL) OR (${table.funding} = 'shop' AND ${table.shopId} IS NOT NULL AND (${table.form} = 'percentage' OR ${table.minimumOrder} IS NOT NULL))`),
+  check(`${name}_limits_valid`, sql`(${table.usageLimit} IS NULL OR ${table.usageLimit} > 0) AND ${table.perCustomerLimit} > 0 AND (${table.startsAt} IS NULL OR ${table.startsAt} < ${table.expiresAt})`),
+  check(`${name}_code_valid`, sql`${table.code} ~ '^[A-Za-z0-9]{3,20}$'`),
+];
+export const coupons = pgTable("coupons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  version: integer("version").notNull(),
+  ...couponTerms,
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [uniqueIndex("coupons_code_lower_idx").on(sql`lower(${table.code})`), index("coupons_shop_id_idx").on(table.shopId), ...couponShape(table, "coupons")]);
+
+export const couponVersions = pgTable("coupon_versions", {
+  couponId: uuid("coupon_id").notNull().references(() => coupons.id),
+  version: integer("version").notNull(),
+  ...couponTerms,
+  // Who changed it: an Admin or the Owner's account, or null when YGo paused it.
+  actorId: uuid("actor_id").references(() => accounts.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [primaryKey({ columns: [table.couponId, table.version] }), ...couponShape(table, "coupon_versions")]);
+
 export const orders = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   number: integer("number").notNull().generatedAlwaysAsIdentity({ startWith: 1001 }),
@@ -796,6 +837,11 @@ export const orders = pgTable("orders", {
   shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
   shopDiscountRuleId: uuid("shop_discount_rule_id"),
   shopDiscountRuleVersion: integer("shop_discount_rule_version"),
+  // The coupon the order was priced with and its two funding amounts, never one merged figure (MNY-6, #70). A coupon never sits beside a shop-wide discount (D-7).
+  couponId: uuid("coupon_id"),
+  couponVersion: integer("coupon_version"),
+  shopCoupon: numeric("shop_coupon", { precision: 12, scale: 2 }).notNull().default("0"),
+  platformCoupon: numeric("platform_coupon", { precision: 12, scale: 2 }).notNull().default("0"),
   delivererId: uuid("deliverer_id").references(() => accounts.id),
   handoverCodeHash: text("handover_code_hash"),
   handoverCodeSalt: text("handover_code_salt"),
@@ -826,7 +872,19 @@ export const orders = pgTable("orders", {
   foreignKey({ name: "orders_shop_discount_rule_fk", columns: [table.shopDiscountRuleId, table.shopDiscountRuleVersion], foreignColumns: [shopDiscountVersions.ruleId, shopDiscountVersions.version] }),
   check("orders_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND (${table.shopDiscountRuleId} IS NULL) = (${table.shopDiscountRuleVersion} IS NULL)
     AND (${table.shopDiscount} = 0 OR ${table.shopDiscountRuleId} IS NOT NULL)`),
+  foreignKey({ name: "orders_coupon_fk", columns: [table.couponId, table.couponVersion], foreignColumns: [couponVersions.couponId, couponVersions.version] }),
+  check("orders_coupon_valid", sql`${table.shopCoupon} >= 0 AND ${table.platformCoupon} >= 0 AND (${table.couponId} IS NULL) = (${table.couponVersion} IS NULL)
+    AND (${table.shopCoupon} + ${table.platformCoupon} = 0 OR ${table.couponId} IS NOT NULL) AND (${table.shopDiscount} = 0 OR ${table.shopCoupon} + ${table.platformCoupon} = 0)`),
 ]);
+
+// One row per order that used a coupon: the order's number is the key, so a retried placement can never count twice. A use counts toward the coupon's limits
+// only while its order is still in force: one rejected, expired or cancelled before delivery is released by its status alone (CRT-3, #70).
+export const couponUses = pgTable("coupon_uses", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id),
+  couponId: uuid("coupon_id").notNull().references(() => coupons.id),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [index("coupon_uses_coupon_id_idx").on(table.couponId), index("coupon_uses_account_id_idx").on(table.accountId)]);
 
 // A line as it was priced at placement. `stock_quantity` is what it takes from the listing's stock,
 // in the stock's unit: count × pack size, or the part bought (#377). Never changed or deleted.
@@ -932,12 +990,21 @@ export const orderRevisions = pgTable("order_revisions", {
   shopDiscount: numeric("shop_discount", { precision: 12, scale: 2 }).notNull().default("0"),
   shopDiscountRuleId: uuid("shop_discount_rule_id"),
   shopDiscountRuleVersion: integer("shop_discount_rule_version"),
+  /** The order's coupon re-applied to this revision, 0 with the coupon kept when it no longer applies; the two funding amounts stay apart (MNY-6, #70). */
+  couponId: uuid("coupon_id"),
+  couponVersion: integer("coupon_version"),
+  shopCoupon: numeric("shop_coupon", { precision: 12, scale: 2 }).notNull().default("0"),
+  platformCoupon: numeric("platform_coupon", { precision: 12, scale: 2 }).notNull().default("0"),
 }, (table) => [
   foreignKey({ columns: [table.shopDiscountRuleId, table.shopDiscountRuleVersion], foreignColumns: [shopDiscountVersions.ruleId, shopDiscountVersions.version], name: "order_revisions_shop_discount_rule_fk" }),
+  foreignKey({ columns: [table.couponId, table.couponVersion], foreignColumns: [couponVersions.couponId, couponVersions.version], name: "order_revisions_coupon_fk" }),
+  check("order_revisions_coupon_valid", sql`${table.shopCoupon} >= 0 AND ${table.platformCoupon} >= 0 AND (${table.couponId} IS NULL) = (${table.couponVersion} IS NULL)
+    AND (${table.shopCoupon} + ${table.platformCoupon} = 0 OR ${table.couponId} IS NOT NULL) AND (${table.shopDiscount} = 0 OR ${table.shopCoupon} + ${table.platformCoupon} = 0)
+    AND ${table.shopCoupon} + ${table.platformCoupon} <= ${table.productValue}`),
   check("order_revisions_shop_discount_valid", sql`${table.shopDiscount} >= 0 AND ${table.shopDiscount} <= ${table.productValue}
     AND (${table.shopDiscountRuleId} IS NULL) = (${table.shopDiscountRuleVersion} IS NULL)
     AND (${table.shopDiscount} = 0 OR ${table.shopDiscountRuleId} IS NOT NULL)`),
-  check("order_revisions_total_reconciles", sql`${table.total} = ${table.productValue} - ${table.shopDiscount} + ${table.deliveryFee} + COALESCE(${table.smallCartFee}, 0) + COALESCE(${table.pickupFee}, 0)`),
+  check("order_revisions_total_reconciles", sql`${table.total} = ${table.productValue} - ${table.shopDiscount} - ${table.shopCoupon} - ${table.platformCoupon} + ${table.deliveryFee} + COALESCE(${table.smallCartFee}, 0) + COALESCE(${table.pickupFee}, 0)`),
   uniqueIndex("order_revisions_order_id_revision_idx").on(table.orderId, table.revision),
   uniqueIndex("order_revisions_one_open_proposal_idx").on(table.orderId).where(sql`${table.status} = 'proposed'`),
   index("order_revisions_order_id_status_idx").on(table.orderId, table.status),
@@ -1067,7 +1134,7 @@ export const notifications = pgTable("notifications", {
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   uniqueIndex("notifications_dedupe_key_idx").on(table.accountId, table.dedupeKey).where(sql`${table.dedupeKey} IS NOT NULL`),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'coupon_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed')`),
 ]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session

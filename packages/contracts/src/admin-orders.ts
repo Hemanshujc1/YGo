@@ -72,6 +72,9 @@ export const AdminOrderDetail = z.strictObject({
   money: z.strictObject({
     productValue: Amount,
     shopDiscount: Amount,
+    /** What the shop paid and what the platform paid of the order's coupon, apart (MNY-6, #70). */
+    shopCoupon: Amount,
+    platformCoupon: Amount,
     deliveryFee: Amount,
     smallCartFee: Amount.nullable(),
     pickupFee: Amount.nullable(),
