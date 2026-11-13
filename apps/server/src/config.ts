@@ -27,6 +27,9 @@ const BaseEnv = z.object({
   GOOGLE_CLIENT_IDS: z.string().default(""),
   APPLE_CLIENT_IDS: z.string().default(""),
   SYNC_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(7 * 86400),
+  // BIL-3: how much offline work a phone may queue, and for how long. The phone is told these and the server refuses a batch over them (#642).
+  SYNC_MAX_ACTIONS: z.coerce.number().int().min(1).max(500).default(500),
+  SYNC_MAX_OFFLINE_HOURS: z.coerce.number().int().min(1).max(720).default(72),
   SYNC_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().default(300),
   // How long after the server receives a counter bill the Owner may void it (BIL-6, #54).
   COUNTER_BILL_VOID_SECONDS: z.coerce.number().int().positive().default(86400),
@@ -68,6 +71,9 @@ const Env = z.discriminatedUnion("MAILER", [
   if (!realertBeforeExpiry(env)) context.addIssue({ code: "custom", message: realertMessage });
   if (env.VISIT_PHOTO_BUCKET && env.VISIT_PHOTO_BUCKET === env.PRODUCT_IMAGE_BUCKET) {
     context.addIssue({ code: "custom", message: "VISIT_PHOTO_BUCKET must be separate from public product images" });
+  }
+  if (env.SYNC_MAX_OFFLINE_HOURS * 3600 > env.SYNC_MAX_AGE_SECONDS) {
+    context.addIssue({ code: "custom", path: ["SYNC_MAX_OFFLINE_HOURS"], message: "SYNC_MAX_OFFLINE_HOURS * 3600 must not exceed SYNC_MAX_AGE_SECONDS, or a phone could bill offline longer than the server accepts the actions (#642)" });
   }
   const hasCloudFront = Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN);
   const hasLocalBase = Boolean(env.PRODUCT_IMAGE_LOCAL_BASE_URL);

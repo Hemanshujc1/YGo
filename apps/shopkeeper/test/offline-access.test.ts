@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { offlineLimits } from "../src/lib/offline-limits";
 import { offlineAccess, readSavedAccess, type AccessStorage, type SavedAccess } from "../src/lib/offline-access";
 
 const account = { id: "00000000-0000-4000-8000-000000000001", name: "Asha", phone: "+919812345678", email: "asha@example.com", theme: "system" as const };
@@ -34,6 +35,32 @@ describe("verified offline shop access", () => {
     fetch.mockResolvedValue({ ok: true, data: { shopId, state: "suspended" } });
     await restarted.verify(account);
     expect(restarted.allowed(account.id, shopId)).toBe(true);
+  });
+  it("uses the offline limits the server sent, keeps them across a restart, and falls back to 500 actions and 72 hours without them (#642, BIL-3)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", limits: { maxActions: 200, maxOfflineHours: 24 } } });
+    await offlineAccess(storage, fetch, () => time).verify(account);
+    expect(offlineLimits.get()).toEqual({ maxActions: 200, maxAgeHours: 24 });
+    offlineLimits.set(null);
+    const restarted = offlineAccess(storage, fetch, () => time);
+    await restarted.restore();
+    expect(offlineLimits.get()).toEqual({ maxActions: 200, maxAgeHours: 24 });
+    time += 24 * 3600_000;
+    restarted.expire();
+    expect(restarted.allowed(account.id, shopId)).toBe(false);
+    restarted.reset();
+    expect(offlineLimits.get()).toEqual({ maxActions: 500, maxAgeHours: 72 });
+    record = { ...record as SavedAccess, limits: undefined };
+    await offlineAccess(storage, fetch, () => time).restore();
+    expect(offlineLimits.get()).toEqual({ maxActions: 500, maxAgeHours: 72 });
+  });
+  it("pause() on sign-out resets the offline limits to 500 actions and 72 hours, so the next account never inherits them (#642)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", limits: { maxActions: 200, maxOfflineHours: 24 } } });
+    const access = offlineAccess(storage, fetch, () => time);
+    await access.verify(account);
+    expect(offlineLimits.get()).toEqual({ maxActions: 200, maxAgeHours: 24 });
+    access.pause();
+    expect(access.get().mode).toBe("signing-out");
+    expect(offlineLimits.get()).toEqual({ maxActions: 500, maxAgeHours: 72 });
   });
   it("blocks a clock behind verification and never destroys records on network or token failures", async () => {
     const access = offlineAccess(storage, fetch, () => time);

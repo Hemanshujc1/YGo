@@ -92,3 +92,11 @@ it("takes typed lines, a discount and a customer on a counter bill, and refuses 
   expect(CounterBillPayload.safeParse({ ...base, manualLines: many(99) }).success).toBe(true);
   expect(CounterBillPayload.safeParse({ ...base, manualLines: many(100) }).success).toBe(false);
 });
+
+it("carries the offline limits, reads an older reply as 500 actions and 72 hours, and refuses a limit no batch can hold (#642, BIL-3)", async () => {
+  const { SyncAccessResponse } = await import("../src/sync");
+  const none = { shopId: null, state: null, shopName: null, role: null };
+  expect(SyncAccessResponse.parse(none).limits).toEqual({ maxActions: 500, maxOfflineHours: 72 });
+  expect(SyncAccessResponse.parse({ ...none, limits: { maxActions: 200, maxOfflineHours: 24 } }).limits).toEqual({ maxActions: 200, maxOfflineHours: 24 });
+  for (const limits of [{ maxActions: 501, maxOfflineHours: 72 }, { maxActions: 0, maxOfflineHours: 72 }, { maxActions: 500, maxOfflineHours: 0 }]) expect(SyncAccessResponse.safeParse({ ...none, limits }).success).toBe(false);
+});

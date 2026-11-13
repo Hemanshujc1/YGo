@@ -75,6 +75,8 @@ export interface AppOptions {
   minAppVersions?: Record<AppName, AppVersion>;
   syncMaxAgeSeconds?: number;
   syncClockSkewSeconds?: number;
+  syncMaxActions?: number;
+  syncMaxOfflineHours?: number;
   /** How long after the server receives a counter bill the Owner may void it (BIL-6). */
   counterBillVoidSeconds?: number;
   deliveryFailureWaitSeconds?: number;
@@ -121,6 +123,8 @@ export function buildApp({
   minAppVersions = { customer: "0.0.0", shopkeeper: "0.0.0" },
   syncMaxAgeSeconds = 7 * 86400,
   syncClockSkewSeconds = 300,
+  syncMaxActions = 500,
+  syncMaxOfflineHours = 72,
   counterBillVoidSeconds = 86400,
   deliveryFailureWaitSeconds = 120,
   deliveryPhotoSaveTimeoutMs,
@@ -174,7 +178,7 @@ export function buildApp({
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPlaceRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, places });
     registerShopRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
-    registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
+    registerSyncRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, maxAgeSeconds: syncMaxAgeSeconds, clockSkewSeconds: syncClockSkewSeconds, limits: { maxActions: syncMaxActions, maxOfflineHours: syncMaxOfflineHours}, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
     registerShopListingRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProductRequestRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopAgreementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

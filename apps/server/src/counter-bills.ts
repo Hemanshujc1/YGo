@@ -69,7 +69,8 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
     ON CONFLICT (shop_id, reference) WHERE NOT reference_clash DO NOTHING RETURNING ${billColumns}`,
   [bill.shopId, bill.accountId, bill.actionId, counterBillReference(bill.actionId), clash, number, heldReason,
     data ? null : JSON.stringify(payload ?? null), data?.payment ?? null, data?.total ?? null, data ? sum?.total ?? null : null,
-    bill.clockSuspect, bill.madeAt, bill.receivedAt,
+    // A phone clock set ahead cannot date a sale after the moment the server got it (#642, BIL-5).
+    bill.clockSuspect, bill.clockSuspect && Date.parse(bill.madeAt) > bill.receivedAt.getTime() ? bill.receivedAt.toISOString() : bill.madeAt, bill.receivedAt,
     data?.discount ?? "0", data?.customer?.name ?? null, data?.customer?.phone ?? null, data?.customer?.offers ?? false, number === null ? null : bill.receivedAt,
     flaggedDenylist]);
   // A refused insert rolls its number back too, so the shop's numbers keep no gap (BIL-5).

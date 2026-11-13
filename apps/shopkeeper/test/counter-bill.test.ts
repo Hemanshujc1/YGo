@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { billStatus } from "../src/lib/bill-status";
 import { refreshBillVoids } from "../src/lib/bill-voids";
+import { offlineLimits } from "../src/lib/offline-limits";
 import { openingStockQueue } from "../src/lib/opening-stock-queue";
 import { adapter } from "./stock-database-fixture";
 
@@ -50,6 +51,31 @@ describe("counter bills in the ordered queue (#468)", () => {
     expect(queue.saveBill(shopId, bill)).toBe("queueFull");
     expect(() => queue.saveBill(shopId, { ...bill, lines: [] })).toThrow();
     expect(queue.count()).toBe(3);
+  });
+
+  it("follows the limits the server sent, and the 500 and 72 hour fallback without them (#642, BIL-3)", () => {
+    const live = openingStockQueue(adapter(db), randomUUID, () => clock);
+    try {
+      offlineLimits.set({ maxActions: 2, maxOfflineHours: 1 });
+      expect(live.saveBill(shopId, bill)).toMatchObject({ reference: expect.any(String) });
+      expect(live.saveBill(shopId, bill)).toMatchObject({ reference: expect.any(String) });
+      expect(live.saveBill(shopId, bill)).toBe("queueFull");
+      offlineLimits.set({ maxActions: 5, maxOfflineHours: 1 });
+      clock = new Date(clock.getTime() + 3600_000);
+      expect(live.saveBill(shopId, bill)).toBe("queueExpired");
+      offlineLimits.set(null);
+      expect(live.allowance()).toMatchObject({ max: 500 });
+    } finally { offlineLimits.set(null); }
+  });
+
+  it("sends no more actions in a batch than the server's limit, so a lowered limit never leaves the queue stuck (#642)", () => {
+    const live = openingStockQueue(adapter(db), randomUUID, () => clock);
+    try {
+      offlineLimits.set({ maxActions: 3, maxOfflineHours: 72 });
+      for (let i = 0; i < 3; i++) live.saveBill(shopId, bill);
+      offlineLimits.set({ maxActions: 2, maxOfflineHours: 72 });
+      expect(live.batch(shopId).actions).toHaveLength(2);
+    } finally { offlineLimits.set(null); }
   });
 
   it("keeps a synced bill with its number, and a held one, after the server answers; later days list only bills still waiting or refused", () => {
