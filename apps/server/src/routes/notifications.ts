@@ -61,11 +61,11 @@ export function registerNotificationRoutes(app: FastifyInstance, { pool, clock, 
     if (!who) return reply;
     // One statement, so the bell's flag and the rows can't disagree; an unread row beyond the 50 still lights it.
     const { rows } = await pool.query<Omit<Notification, "createdAt"> & { createdAt: Date; unread: boolean }>(
-      `SELECT id, kind, title, body, order_id AS "orderId", created_at AS "createdAt", read_at IS NOT NULL AS read,
+      `SELECT id, kind, title, body, order_id AS "orderId", statement_id AS "statementId", created_at AS "createdAt", read_at IS NOT NULL AS read,
          EXISTS (SELECT 1 FROM notifications u WHERE u.account_id = $1 AND u.app = $2 AND u.read_at IS NULL) AS unread
        FROM notifications WHERE account_id = $1 AND app = $2 ORDER BY created_at DESC, id LIMIT ${SHOWN}`, [who.accountId, who.app]);
     return {
-      notifications: rows.map(({ id, kind, title, body, orderId, createdAt, read }) => ({ id, kind, title, body, orderId, createdAt: createdAt.toISOString(), read })),
+      notifications: rows.map(({ id, kind, title, body, orderId, statementId, createdAt, read }) => ({ id, kind, title, body, orderId, statementId, createdAt: createdAt.toISOString(), read })),
       unread: rows[0]?.unread ?? false,
     };
   });

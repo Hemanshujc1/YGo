@@ -5,6 +5,7 @@ import { withTransaction, type Database } from "./db";
 import { expireUnansweredOrders } from "./order-expiry";
 import { expireUnconfirmedOrders } from "./order-confirm-expiry";
 import { expireUncollectedPickups } from "./pickup-expiry";
+import { issueStatements } from "./statements";
 import { reconcileStock } from "./stock-reconciliation";
 import { jobRuns, refreshTokens, sessions } from "./schema";
 import { REFRESH_TTL_MS } from "./tokens";
@@ -15,6 +16,8 @@ export const jobMaxAgeHours = {
   "expire-confirmations": 0.25,
   "expire-orders": 0.25,
   "expire-pickups": 0.25,
+  // Weekly on Monday at 01:00 IST (#629): stale when a whole week and a day pass without a successful run.
+  "issue-statements": 8 * 24,
   "reconcile-stock": 26,
   "snapshot-weekly": 8 * 24,
 } as const;
@@ -123,6 +126,9 @@ export async function runJob(
       await expireUnconfirmedOrders(database.pool, clock);
     } else if (name === "expire-pickups") {
       await expireUncollectedPickups(database.pool, clock);
+    } else if (name === "issue-statements") {
+      const made = await issueStatements(database.pool, now);
+      detail = `${made} ${made === 1 ? "statement" : "statements"} made`;
     } else if (name === "reconcile-stock") {
       // Report only (#67): the differences it found are rows in stock_reconciliation_issues, never a change to stock.
       const differing = await reconcileStock(database.pool, clock);
@@ -150,7 +156,7 @@ export async function runJob(
       status: "failed",
       finishedAt: clock.now(),
       errorText: name === "backup-nightly" ? "backup failed" : name === "snapshot-weekly" ? "snapshot failed" :
-        name === "expire-orders" ? "expiry failed" : name === "expire-confirmations" ? "confirmation expiry failed" : name === "expire-pickups" ? "pickup expiry failed" : name === "reconcile-stock" ? "reconcile failed" : "cleanup failed",
+        name === "expire-orders" ? "expiry failed" : name === "expire-confirmations" ? "confirmation expiry failed" : name === "expire-pickups" ? "pickup expiry failed" : name === "issue-statements" ? "statements failed" : name === "reconcile-stock" ? "reconcile failed" : "cleanup failed",
     }).where(eq(jobRuns.id, run.id));
     throw error;
   }

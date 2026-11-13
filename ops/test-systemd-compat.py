@@ -34,7 +34,7 @@ for name in units:
     shutil.copy2(Path('/ops') / name, Path('/etc/systemd/system') / name)
 for name in ('ygo-job@backup-nightly.service.d', 'ygo-job@backup-nightly.timer.d',
              'ygo-job@cleanup-sessions.timer.d', 'ygo-job@expire-confirmations.timer.d',
-             'ygo-job@expire-orders.timer.d', 'ygo-job@expire-pickups.timer.d', 'ygo-job@reconcile-stock.timer.d', 'ygo-job@snapshot-weekly.service.d',
+             'ygo-job@expire-orders.timer.d', 'ygo-job@expire-pickups.timer.d', 'ygo-job@issue-statements.timer.d', 'ygo-job@reconcile-stock.timer.d', 'ygo-job@snapshot-weekly.service.d',
              'ygo-job@snapshot-weekly.timer.d'):
     shutil.copytree(Path('/ops') / name, Path('/etc/systemd/system') / name, dirs_exist_ok=True)
 backup_override = (Path('/ops') / 'ygo-job@backup-nightly.service.d/override.conf').read_text()
@@ -52,6 +52,8 @@ assert 'OnCalendar=*:0/5' in (Path('/etc/systemd/system') / 'ygo-job-check-expir
 assert 'check-jobs.js expire-confirmations' in (Path('/etc/systemd/system') / 'ygo-job-check-expire-confirmations.service').read_text()
 assert 'OnCalendar=*:0/5' in (Path('/etc/systemd/system') / 'ygo-job-check-expire-pickups.timer').read_text()
 assert 'check-jobs.js expire-pickups' in (Path('/etc/systemd/system') / 'ygo-job-check-expire-pickups.service').read_text()
+assert 'OnCalendar=Sun *-*-* 19:30:00 UTC' in (Path('/etc/systemd/system') /
+    'ygo-job@issue-statements.timer.d/override.conf').read_text()
 assert 'OnCalendar=*-*-* 23:00:00 UTC' in (Path('/etc/systemd/system') /
     'ygo-job@reconcile-stock.timer.d/override.conf').read_text()
 assert 'OnCalendar=Mon *-*-* 00:30:00 UTC' in (Path('/etc/systemd/system') /
@@ -64,6 +66,7 @@ subprocess.run([
     'ygo-job@expire-confirmations.service', 'ygo-job@expire-confirmations.timer',
     'ygo-job@expire-orders.service', 'ygo-job@expire-orders.timer',
     'ygo-job@expire-pickups.service', 'ygo-job@expire-pickups.timer',
+    'ygo-job@issue-statements.service', 'ygo-job@issue-statements.timer',
     'ygo-job@reconcile-stock.service', 'ygo-job@reconcile-stock.timer',
     'ygo-job@snapshot-weekly.service', 'ygo-job@snapshot-weekly.timer',
     'ygo-job-check.service', 'ygo-job-check.timer',
@@ -71,4 +74,4 @@ subprocess.run([
     'ygo-job-check-expire-confirmations.service', 'ygo-job-check-expire-confirmations.timer',
     'ygo-job-check-expire-pickups.service', 'ygo-job-check-expire-pickups.timer',
 ], check=True)
-print(f'PASS: {len(calls)} backup/restore invocations and twenty-two job units accepted by {version}')
+print(f'PASS: {len(calls)} backup/restore invocations and twenty-four job units accepted by {version}')

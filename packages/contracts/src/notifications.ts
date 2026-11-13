@@ -12,17 +12,18 @@ export const NotificationKind = z.enum([
   "order_placed", "order_cancelled_by_customer", "order_accepted", "order_rejected", "order_expired", "order_partially_accepted",
   "order_cancel_requested", "order_cancel_agreed", "order_cancel_kept", "order_cancelled_by_shop", "order_total_confirmed",
   "product_request_approved", "product_request_rejected", "shop_discount_paused", "coupon_paused",
-  "pickup_ready", "pickup_not_collected", "order_delivery_failed",
+  "pickup_ready", "pickup_not_collected", "order_delivery_failed", "statement_issued",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 
-/** One row of C22 or S41, in the words its push carried (NOT-1). A tap opens `orderId` when there is one. */
+/** One row of C22 or S41, in the words its push carried (NOT-1). A tap opens `orderId` when there is one, else `statementId` (#629). */
 export const Notification = z.strictObject({
   id: z.uuid(),
   kind: NotificationKind,
   title: z.string(),
   body: z.string(),
   orderId: z.uuid().nullable(),
+  statementId: z.uuid().nullable(),
   createdAt: z.iso.datetime(),
   read: z.boolean(),
 });

@@ -193,18 +193,22 @@ export async function notifyShop(client: PoolClient, shopId: string, kind: "prod
 
 /**
  * Tells a shop's Owner, and only the Owner, something that belongs to no order, with its push queued, in the caller's transaction.
- * `dedupeKey` names the notice, so a retry of the step that sends it never tells the Owner twice (#63, NOT-6).
+ * `dedupeKey` names the notice, so a retry of the step that sends it never tells the Owner twice (#63, NOT-6). A weekly statement's notice
+ * names it in `statementId`, which a tap opens (#629).
  */
-export async function notifyShopOwner(client: PoolClient, shopId: string, kind: "shop_discount_paused" | "coupon_paused", title: string, body: string, at: Date, dedupeKey: string): Promise<void> {
+export async function notifyShopOwner(
+  client: PoolClient, shopId: string, kind: "shop_discount_paused" | "coupon_paused" | "statement_issued", title: string, body: string, at: Date, dedupeKey: string,
+  statementId: string | null = null,
+): Promise<void> {
   await client.query(
     `WITH added AS (
-       INSERT INTO notifications (account_id, app, kind, title, body, shop_id, dedupe_key, loud, created_at)
-       SELECT account_id, 'shopkeeper', $2::text, $3::text, $4::text, $1::uuid, $6::text, false, $5::timestamptz
+       INSERT INTO notifications (account_id, app, kind, title, body, shop_id, dedupe_key, statement_id, loud, created_at)
+       SELECT account_id, 'shopkeeper', $2::text, $3::text, $4::text, $1::uuid, $6::text, $7::uuid, false, $5::timestamptz
        FROM shop_members WHERE shop_id = $1::uuid AND role = 'owner'
        ON CONFLICT (account_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
        RETURNING id)
      INSERT INTO push_queue (notification_id, send_after) SELECT id, $5::timestamptz FROM added`,
-    [shopId, kind, title, body, at, dedupeKey]);
+    [shopId, kind, title, body, at, dedupeKey, statementId]);
 }
 
 /** A phone's push is tried this many times in all, then dropped (NOT-2). */
@@ -297,6 +301,9 @@ async function claimDuePushes(pool: Pool, now: Date, batch: number, claimId: str
            WHEN q.ring_attempt_id IS NOT NULL AND q.floor THEN
              json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud, 'tag', 'order-' || n.order_id::text,
                'data', json_build_object('notificationId', n.id, 'orderId', n.order_id, 'ringAttemptId', q.ring_attempt_id, 'floor', true))
+           WHEN n.statement_id IS NOT NULL THEN
+             json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
+               'data', json_build_object('notificationId', n.id, 'orderId', n.order_id, 'statementId', n.statement_id))
            ELSE
              json_build_object('to', q.token, 'title', n.title, 'body', n.body, 'loud', n.loud,
                'data', json_build_object('notificationId', n.id, 'orderId', n.order_id))

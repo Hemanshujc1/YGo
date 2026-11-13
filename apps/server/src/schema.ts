@@ -1144,6 +1144,8 @@ export const notifications = pgTable("notifications", {
   orderId: uuid("order_id").references(() => orders.id),
   // The shop a shop-level notice belongs to, when no order does (#62); a push is still sent only while the recipient is in it.
   shopId: uuid("shop_id").references(() => shops.id),
+  // The weekly statement a "statement ready" notice opens (#629); null for the rest.
+  statementId: uuid("statement_id").references(() => statements.id),
   // Names a notice that must reach a person once however often it is tried again (#63); null for the rest.
   dedupeKey: text("dedupe_key"),
   loud: boolean("loud").notNull(),
@@ -1153,8 +1155,62 @@ export const notifications = pgTable("notifications", {
   index("notifications_account_id_app_created_at_idx").on(table.accountId, table.app, table.createdAt.desc()),
   uniqueIndex("notifications_dedupe_key_idx").on(table.accountId, table.dedupeKey).where(sql`${table.dedupeKey} IS NOT NULL`),
   check("notifications_app_valid", sql`${table.app} IN ('customer', 'shopkeeper')`),
-  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'coupon_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed')`),
+  check("notifications_kind_valid", sql`${table.kind} IN ('order_placed', 'order_cancelled_by_customer', 'order_accepted', 'order_rejected', 'order_expired', 'order_partially_accepted', 'order_cancel_requested', 'order_cancel_agreed', 'order_cancel_kept', 'order_cancelled_by_shop', 'order_total_confirmed', 'product_request_approved', 'product_request_rejected', 'shop_discount_paused', 'coupon_paused', 'pickup_ready', 'pickup_not_collected', 'order_delivery_failed', 'statement_issued')`),
 ]);
+
+// A shop's weekly statement of what it owes YGo (#629, MNY-8, MNY-12): one Monday–Sunday week in India, made by the issue-statements job and never
+// changed (a trigger refuses it). The shop's name and address are copied as they were at issue. The total equals its lines (a deferred trigger checks it).
+export const statements = pgTable("statements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  number: integer("number").notNull().generatedAlwaysAsIdentity({ startWith: 1001 }),
+  shopId: uuid("shop_id").notNull().references(() => shops.id),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+  graceDays: integer("grace_days").notNull(),
+  dueOn: date("due_on").notNull(),
+  shopName: text("shop_name").notNull(),
+  shopAddress: text("shop_address"),
+  shopPincode: text("shop_pincode"),
+  orderCount: integer("order_count").notNull(),
+  total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+}, (table) => [
+  uniqueIndex("statements_number_idx").on(table.number),
+  uniqueIndex("statements_shop_week_idx").on(table.shopId, table.periodStart),
+  check("statements_period_valid", sql`extract(isodow FROM ${table.periodStart}) = 1 AND ${table.periodEnd} = ${table.periodStart} + 6
+    AND ${table.issuedAt} >= (${table.periodEnd} + 1)::timestamp AT TIME ZONE 'Asia/Kolkata'`),
+  check("statements_due_valid", sql`${table.graceDays} >= 0 AND ${table.dueOn} = (${table.issuedAt} AT TIME ZONE 'Asia/Kolkata')::date + ${table.graceDays}`),
+  check("statements_total_valid", sql`${table.orderCount} > 0`),
+]);
+
+// One completed order on a statement (#629). The order is the key, so it is on one statement only, ever. The money is copied from the order's final price
+// (its latest confirmed revision, else the placement quote) and must add up: what is owed is the platform contribution and equals its parts.
+export const statementLines = pgTable("statement_lines", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id),
+  statementId: uuid("statement_id").notNull().references(() => statements.id),
+  orderNumber: integer("order_number").notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+  late: boolean("late").notNull(),
+  fulfilment: text("fulfilment").notNull(),
+  orderTotal: numeric("order_total", { precision: 12, scale: 2 }).notNull(),
+  commission: numeric("commission", { precision: 12, scale: 2 }).notNull(),
+  feeShare: numeric("fee_share", { precision: 12, scale: 2 }).notNull(),
+  bookingFees: numeric("booking_fees", { precision: 12, scale: 2 }).notNull(),
+  platformCoupon: numeric("platform_coupon", { precision: 12, scale: 2 }).notNull(),
+  owed: numeric("owed", { precision: 12, scale: 2 }).notNull(),
+}, (table) => [
+  index("statement_lines_statement_idx").on(table.statementId, table.completedAt),
+  check("statement_lines_fulfilment_valid", sql`${table.fulfilment} IN ('delivery', 'pickup')`),
+  check("statement_lines_owed_reconciles", sql`${table.owed} = ${table.commission} + ${table.feeShare} + ${table.bookingFees} - ${table.platformCoupon}
+    AND ${table.platformCoupon} >= 0 AND ${table.bookingFees} >= 0`),
+]);
+
+// The weeks the issue-statements job has finished, with or without statements (#629), so a rerun or a missed Monday makes only what is missing.
+export const statementWeeks = pgTable("statement_weeks", {
+  periodStart: date("period_start").primaryKey(),
+  processedAt: timestamp("processed_at", { withTimezone: true }).notNull(),
+  statementCount: integer("statement_count").notNull(),
+}, (table) => [check("statement_weeks_monday", sql`extract(isodow FROM ${table.periodStart}) = 1`)]);
 
 // A phone's Expo push token (#505), owned by the session that sent it, so signing out or the session
 // ending removes it. A token sent again moves to the newest session.

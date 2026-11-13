@@ -51,6 +51,7 @@ import { registerShopStaffRoutes } from "./routes/shop-staff";
 import { registerShopOpenRoutes } from "./routes/shop-open";
 import { registerShopOrderRoutes } from "./routes/shop-orders";
 import { registerNotificationRoutes } from "./routes/notifications";
+import { registerStatementRoutes } from "./routes/statements";
 import { registerSyncRoutes } from "./routes/sync";
 import { registerShopCounterBillRoutes } from "./routes/shop-counter-bills";
 import { registerShopListingRoutes } from "./routes/shop-listings";
@@ -188,6 +189,7 @@ export function buildApp({
     registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
     registerShopOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: deliveryPhotos, failureWaitSeconds: deliveryFailureWaitSeconds, photoSaveTimeoutMs: deliveryPhotoSaveTimeoutMs });
     registerNotificationRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerStatementRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerRateCardRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerPriceSimulatorRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
   }
