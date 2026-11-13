@@ -54,6 +54,7 @@ import { registerNotificationRoutes } from "./routes/notifications";
 import { registerSyncRoutes } from "./routes/sync";
 import { registerShopCounterBillRoutes } from "./routes/shop-counter-bills";
 import { registerShopListingRoutes } from "./routes/shop-listings";
+import { registerCustomerRoutes } from "./routes/customers";
 
 export interface AppOptions {
   /** Resolves when the database answers; rejects otherwise. */
@@ -154,6 +155,7 @@ export function buildApp({
   if (database && mailer && clock && authTokenSecret) {
     registerAuthRoutes(app, { pool: database.pool, mailer, clock, secret: authTokenSecret, adminCookieDomain, identityVerifier });
     registerAdminRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerCustomerRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCategoryRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerMasterProductRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerCatalogImportRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });

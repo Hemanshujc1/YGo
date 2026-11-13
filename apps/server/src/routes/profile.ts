@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { Account, ChangeNameBody, ErrorEnvelope, SetProfileBody, SetThemeBody } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
-import { deriveKeys, mobileSignedIn } from "../tokens";
+import { deriveKeys, digest, mobileSignedIn } from "../tokens";
 
 interface ProfileOptions {
   pool: Pool;
@@ -33,6 +33,9 @@ export function registerProfileRoutes(app: FastifyInstance, { pool, clock, secre
       if (!who) return reply;
       const { name, phone } = request.body as SetProfileBody;
       try {
+        if ((await pool.query("SELECT 1 FROM customer_blocks WHERE phone_digest = $1 OR account_id = $2", [digest(keys.blockDigest, phone), who.accountId])).rowCount) {
+          return reply.code(403).send({ error: { code: "CUSTOMER_BLOCKED" } });
+        }
         const result = await pool.query<Account>(
           `UPDATE accounts SET name = $1, phone = $2
            WHERE id = $3 AND (phone IS NULL OR phone = $2)

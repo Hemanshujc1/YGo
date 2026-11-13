@@ -17,6 +17,7 @@ export interface AuthKeys {
   refreshHash: Buffer;
   successor: Buffer;
   staffCode: Buffer;
+  blockDigest: Buffer;
 }
 
 export function deriveKeys(secret: string): AuthKeys {
@@ -27,6 +28,7 @@ export function deriveKeys(secret: string): AuthKeys {
     refreshHash: derive("ygo refresh-hash v1"),
     successor: derive("ygo refresh-successor v1"),
     staffCode: derive("ygo staff-join-code v1"),
+    blockDigest: derive("ygo customer-block-digest v1"),
   };
 }
 
