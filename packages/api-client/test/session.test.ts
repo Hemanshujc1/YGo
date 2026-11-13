@@ -436,7 +436,7 @@ describe("each call", () => {
   });
 
   it("asks the feed with the pincode and the pin (#369)", async () => {
-    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00", delivers: true, pickup: false, open: false, opensAt: "2030-01-02T03:30:00.000Z", holiday: false };
+    const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30.00", delivers: true, pickup: false, open: false, opensAt: "2030-01-02T03:30:00.000Z", holiday: false, rating: null };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
     await client.verifyCode(signIn);
     expect(await client.feed({ pincode: "411038", latitude: 18.5, longitude: 73.8 })).toEqual({ ok: true, data: { shops: [shop] } });
@@ -447,7 +447,7 @@ describe("each call", () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
     const page = {
       shop: {
-        id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, minimumOrder: "100",
+        id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, rating: null, minimumOrder: "100",
         fssaiNumber: "11223344556677", closesAt: null, hours: [{ weekday: 2, opens: 540, closes: 1260 }], today: 2, holidays: [],
       },
       groups: [{ category: "Groceries", products: [{ id, name: "Toor Dal", brand: null, baseUnit: "kg", imageUrl: null, packs: [
@@ -466,7 +466,7 @@ describe("each call", () => {
 
   it("searches with the pincode, the pin and the typed text (#398)", async () => {
     const id = "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21";
-    const shop = { id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false,
+    const shop = { id, name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, rating: null,
       products: [{ id, name: "Toor Dal", brand: "Tata", inStock: true }], moreProducts: 2 };
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shops: [shop] }));
     await client.verifyCode(signIn);
@@ -567,6 +567,14 @@ describe("each call", () => {
     await client.verifyCode(signIn);
     await client.recoverHandoverCode("a/b");
     expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/orders/a%2Fb/handover-code/recover" });
+  });
+
+  it("rates an order (#82)", async () => {
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { stars: 5 }));
+    await client.verifyCode(signIn);
+    const result = await client.rateOrder("a/b", { stars: 5 });
+    expect(result).toEqual({ ok: true, data: { stars: 5 } });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/orders/a%2Fb/rating", body: { stars: 5 } });
   });
 
   it("reads, adds, edits and removes the Owner's holidays (#382)", async () => {

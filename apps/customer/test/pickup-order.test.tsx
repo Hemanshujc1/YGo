@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   navigate: vi.fn(),
   replace: vi.fn(),
+  push: vi.fn(),
   back: vi.fn(),
   canGoBack: vi.fn(() => true),
   segments: ["index"] as string[],
@@ -83,6 +84,7 @@ vi.mock("expo-router", () => ({
   router: {
     navigate: mock.navigate,
     replace: mock.replace,
+    push: mock.push,
     back: mock.back,
     canGoBack: () => mock.canGoBack(),
   },
@@ -156,6 +158,7 @@ vi.mock("../src/lib/receipt", () => ({
 vi.mock("../src/components/icons", () => ({
   ChevronLeft: () => null,
   Phone: () => null,
+  Star: () => null,
 }));
 
 vi.mock("lucide-react-native", () => ({
@@ -175,7 +178,7 @@ const pickup: OrderResponse = {
   fulfilment: "pickup", address: null,
   lines: [{ name: "Toor Dal", brand: "Tata", baseUnit: "kg", quantity: "1", count: 2, part: null, unitPrice: "135.00", lineTotal: "270.00" }],
   productValue: "270.00", shopDiscount: null, deliveryFee: "0.00", smallCartFee: null, pickupFee: "10.00", total: "280.00",
-  rejectReason: null, answerExpired: false, handoverCode: null, handoverLocked: false, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null,
+  rejectReason: null, answerExpired: false, handoverCode: null, handoverLocked: false, itemsCheckedAt: null, confirmByAt: null, proposal: null, cancelRequest: null, rating: null,
 };
 const proposal: OrderProposal = {
   id: "00000000-0000-4000-8000-000000000010", revision: 2, sourceStatus: "placed", createdAt: "2030-01-01T00:01:00.000Z", confirmByAt: "2030-01-01T00:06:00.000Z",
@@ -280,5 +283,19 @@ describe("a pickup order (FUL-7, #65)", () => {
     vi.mocked(api.recoverHandoverCode).mockRejectedValue(new Error("offline"));
     fireEvent.click(locked.getByText(words.newCode));
     expect(await locked.findByText(words.recoverOffline)).toBeDefined();
+  });
+
+  it("shows rating prompt and Rate shop button on finished order without rating (#82)", async () => {
+    const finished = show({ ...pickup, status: "picked_up", rating: null });
+    expect(await finished.findByText(strings.rating.prompt(pickup.shop.name))).toBeDefined();
+    const rateBtn = finished.getByText(words.rateShop);
+    fireEvent.click(rateBtn);
+    expect(mock.push).toHaveBeenCalledWith({ pathname: "/order/[id]/rate", params: { id: pickup.id } });
+  });
+
+  it("shows rating stars and already rated message on finished order with rating (#82)", async () => {
+    const finished = show({ ...pickup, status: "picked_up", rating: 4 });
+    expect(await finished.findByText(words.alreadyRated(4))).toBeDefined();
+    expect(finished.queryByText(words.rateShop)).toBeNull();
   });
 });

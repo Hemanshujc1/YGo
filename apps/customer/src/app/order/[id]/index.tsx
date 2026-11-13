@@ -7,20 +7,21 @@ import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, View
 import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
-import { Countdown, useSecondsLeft } from "../../components/countdown";
-import { Phone } from "../../components/icons";
-import { QuoteRows } from "../../components/quote-rows";
-import { TopBar } from "../../components/top-bar";
-import { api } from "../../api";
-import { offerText } from "../../lib/cart";
-import { changedTotalBanner } from "../../lib/changed-total-banner";
-import { money } from "../../lib/money";
-import { shownStatus, statusWord, treatments } from "../../lib/order";
-import { hasReceipt, makeReceipt } from "../../lib/receipt";
-import { addressLine } from "../../lib/saved-addresses";
-import { packLabel } from "../../lib/shop-page";
-import { useOrder } from "../../lib/use-order";
-import { strings } from "../../strings";
+import { Countdown, useSecondsLeft } from "../../../components/countdown";
+import { Phone } from "../../../components/icons";
+import { StarRating } from "../../../components/star-rating";
+import { QuoteRows } from "../../../components/quote-rows";
+import { TopBar } from "../../../components/top-bar";
+import { api } from "../../../api";
+import { offerText } from "../../../lib/cart";
+import { changedTotalBanner } from "../../../lib/changed-total-banner";
+import { money } from "../../../lib/money";
+import { shownStatus, statusWord, treatments } from "../../../lib/order";
+import { hasReceipt, makeReceipt } from "../../../lib/receipt";
+import { addressLine } from "../../../lib/saved-addresses";
+import { packLabel } from "../../../lib/shop-page";
+import { useOrder } from "../../../lib/use-order";
+import { strings } from "../../../strings";
 
 // C09 Order waiting for shop and C19 Order detail (#427): one screen, C09 while the order is placed.
 // Call the shop is in every state; Cancel is free until the shop answers (ORD-5, ORD-8).
@@ -330,6 +331,26 @@ export default function OrderScreen() {
               void makeReceipt(api, shown.id).then((done) => setReceipt(done === "shared" ? "idle" : "failed"));
             }} />
             {receipt === "failed" && <Text accessibilityLiveRegion="polite" className="text-secondary text-danger">{words.receipt.failed}</Text>}
+          </View>
+        )}
+
+        {shown && (shown.status === "delivered" || shown.status === "picked_up") && (
+          <View className="gap-3 rounded-card border border-border bg-surface p-4">
+            {shown.rating !== null ? (
+              <View className="flex-row items-center gap-2" accessibilityLabel={words.alreadyRated(shown.rating)}>
+                <StarRating rating={shown.rating} size={18} />
+                <Text className="text-secondary text-muted">{words.alreadyRated(shown.rating)}</Text>
+              </View>
+            ) : (
+              <View className="gap-3">
+                <Text className="text-body font-semibold text-text">{strings.rating.prompt(shown.shop.name)}</Text>
+                <Button
+                  label={words.rateShop}
+                  variant="secondary"
+                  onPress={() => router.push({ pathname: "/order/[id]/rate", params: { id: shown.id } })}
+                />
+              </View>
+            )}
           </View>
         )}
 

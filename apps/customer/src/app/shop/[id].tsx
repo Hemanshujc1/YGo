@@ -1,11 +1,12 @@
 import type { ShopPagePack, ShopPageProduct, ShopPageResponse } from "@ygo/contracts";
+import { formatRating } from "@ygo/format";
 import { Button, Text } from "@ygo/mobile";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { memo, useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, SectionList, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../api";
-import { ImageIcon } from "../../components/icons";
+import { ImageIcon, Star } from "../../components/icons";
 import { Stepper } from "../../components/stepper";
 import { TopBar } from "../../components/top-bar";
 import { cartBarLabel, type Cart } from "../../lib/cart";
@@ -104,7 +105,15 @@ function Terms({ shop }: { shop: ShopPageResponse["shop"] }) {
   const [week, setWeek] = useState(false);
   return (
     <View className="rounded-card border border-border bg-surface p-4">
-      <Text className="text-body tabular-nums text-text">{termsLine(shop)}</Text>
+      <View className="flex-row items-center justify-between gap-2">
+        <Text className="flex-1 text-body tabular-nums text-text">{termsLine(shop)}</Text>
+        {shop.rating !== null && (
+          <View accessibilityLabel={strings.rating.starAriaLabel(shop.rating)} className="flex-row items-center gap-1">
+            <Star size={16} className="text-accent" fill="currentColor" />
+            <Text className="text-body font-semibold tabular-nums text-text">{formatRating(shop.rating)}</Text>
+          </View>
+        )}
+      </View>
       <Pressable
         accessibilityRole="button"
         accessibilityHint={words.hours.week}

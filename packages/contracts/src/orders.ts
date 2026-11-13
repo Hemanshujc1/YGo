@@ -161,6 +161,8 @@ export const OrderResponse = z.strictObject({
   proposal: OrderProposal.nullable(),
   /** The Customer's ask to cancel, once made; null before. The app offers Ask to cancel only while the order is accepted or preparing and this is null. */
   cancelRequest: CancelRequest.nullable(),
+  /** 1 to 5 stars given by the customer after delivery or pickup (TRU-1, #82); null when unrated. */
+  rating: z.number().int().min(1).max(5).nullable(),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;
 

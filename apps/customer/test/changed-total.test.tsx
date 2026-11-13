@@ -286,6 +286,7 @@ const awaitingOrder: OrderResponse = {
   confirmByAt: "2030-01-01T00:06:00.000Z",
   proposal: sampleProposal,
   cancelRequest: null,
+  rating: null,
 };
 
 /** What `/v1/orders` lists: the order's own total stays the original while the proposal's is open (#578). */

@@ -318,3 +318,5 @@ export {
   AdminProductRequest, AdminProductRequestsQuery, AdminProductRequestsResponse, CreateProductRequestBody, MapProductRequestBody, ProductRequest,
   ProductRequestParams, ProductRequestsResponse, RejectProductRequestBody,
 } from "./product-requests";
+
+export { RateOrderBody, RateOrderResponse } from "./ratings";

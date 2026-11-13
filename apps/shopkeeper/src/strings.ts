@@ -962,5 +962,6 @@ export const strings = {
     CUSTOMER_BLOCKED: "This customer's account is blocked.",
     SIGNUPS_CLOSED: "New customer sign-ups are currently closed.",
     DENYLIST_WORD_IN_USE: "This word is already on the excluded goods list.",
+    RATING_ALREADY_GIVEN: "This order has already been rated.",
   } satisfies Record<ErrorCode, string>,
 };
