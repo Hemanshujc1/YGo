@@ -53,6 +53,15 @@ describe("verified offline shop access", () => {
     await offlineAccess(storage, fetch, () => time).restore();
     expect(offlineLimits.get()).toEqual({ maxActions: 500, maxAgeHours: 72 });
   });
+  it("pause() on sign-out resets the offline limits to 500 actions and 72 hours, so the next account never inherits them (#642)", async () => {
+    fetch.mockResolvedValue({ ok: true, data: { shopId, state: "live", limits: { maxActions: 200, maxOfflineHours: 24 } } });
+    const access = offlineAccess(storage, fetch, () => time);
+    await access.verify(account);
+    expect(offlineLimits.get()).toEqual({ maxActions: 200, maxAgeHours: 24 });
+    access.pause();
+    expect(access.get().mode).toBe("signing-out");
+    expect(offlineLimits.get()).toEqual({ maxActions: 500, maxAgeHours: 72 });
+  });
   it("blocks a clock behind verification and never destroys records on network or token failures", async () => {
     const access = offlineAccess(storage, fetch, () => time);
     await access.verify(account); time--;
