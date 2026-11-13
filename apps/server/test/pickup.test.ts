@@ -8,6 +8,7 @@ import { bootstrapAdmin } from "../src/bootstrap";
 import { connectDatabase } from "../src/db";
 import { runJob } from "../src/jobs";
 import { expireUncollectedPickups } from "../src/pickup-expiry";
+import { issueStatements } from "../src/statements";
 import { liveCheck } from "../src/live-check";
 import { stockOf } from "../src/listings";
 import { setOrderTiming } from "../src/order-timing";
@@ -422,6 +423,49 @@ describe("A pickup at the counter (FUL-7, MNY-1)", () => {
     expect(proposal.statusCode).toBe(200);
     const { rows: [revision] } = await database.pool.query("SELECT below_floor_exception, below_floor_shortfall::text FROM order_revisions WHERE order_id = $1", [order.id]);
     expect(revision).toEqual({ below_floor_exception: true, below_floor_shortfall: "4.00" });
+  });
+});
+
+describe("Pickup booking fees, switched off and on (#73, MNY-1, MNY-8)", () => {
+  /** Places a pickup of two Toor Dal, completes it at the counter, issues the statement of that week, and returns the quote, the order and its statement line. */
+  async function collected(values: object) {
+    const world = await stocked(values);
+    const order = await pickupOrder(world);
+    at("2030-01-01T00:01:00.000Z");
+    await shopPost(order.id, "accept", world.owner);
+    await shopPost(order.id, "preparing", world.owner);
+    at("2030-01-01T00:10:00.000Z");
+    await shopPost(order.id, "ready-for-pickup", world.staff);
+    const code = (await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json().handoverCode as string;
+    expect((await shopPost(order.id, "picked-up", world.staff, { handoverCode: code, payment: "cash" })).statusCode).toBe(200);
+    // The week of Monday 31 December 2029 ends on Monday 7 January in India.
+    expect(await issueStatements(database.pool, new Date("2030-01-07T06:00:00.000Z"))).toBe(1);
+    const { rows: [line] } = await database.pool.query("SELECT order_total::text, commission::text, fee_share::text, booking_fees::text, owed::text FROM statement_lines WHERE order_id = $1", [order.id]);
+    const view = (await app.inject({ method: "GET", url: `/v1/orders/${order.id}`, headers: customer })).json();
+    return { world, view, line };
+  }
+
+  it("charges nothing while the rule is off: no fee in the total, none owed on the statement, and the delivery quote unchanged", async () => {
+    const off = await collected({ ...card, ...pickupRule({ enabled: false, contributionFloor: "0" }) });
+    expect(off.view).toMatchObject({ pickupFee: "0.00", total: "270.00" });
+    expect(off.line).toEqual({ order_total: "270.00", commission: "0.00", fee_share: "0.00", booking_fees: "0.00", owed: "0.00" });
+    const cart = await save(off.world.shopId, [{ listingId: off.world.dal, count: 2 }]);
+    expect(cart.quote?.total).toBe("300.00");
+    expect(cart.pickup).toMatchObject({ pickupFee: "0.00", total: "270.00", placeable: true });
+  });
+
+  it("makes the fee part of the total the shop collects and owes both fees to the platform on the statement once the rule is on", async () => {
+    const { view, line } = await collected({ ...card, ...pickupRule() });
+    expect(view).toMatchObject({ pickupFee: "5.00", total: "275.00" });
+    expect(line).toEqual({ order_total: "275.00", commission: "0.00", fee_share: "0.00", booking_fees: "7.50", owed: "7.50" });
+  });
+
+  it("offers no pickup and no fee on a rate card with no pickup rule, which is how a new card ships", async () => {
+    const world = await stocked(card);
+    const cart = await save(world.shopId, [{ listingId: world.dal, count: 2 }]);
+    expect(cart.pickup).toBeNull();
+    expect(cart.quote?.total).toBe("300.00");
+    expect((await switchMode(world.owner, "pickup", true)).statusCode).toBe(409);
   });
 });
 
