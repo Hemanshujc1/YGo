@@ -935,6 +935,7 @@ export const strings = {
     COUPON_ABOVE_MAXIMUM: "That coupon is over the largest discount allowed for this shop. Lower it.",
     COUPON_CODE_TAKEN: "That coupon code is already in use. Pick another.",
     COUPON_NOT_ELIGIBLE: "That coupon cannot be used here.",
+    COUPON_NOT_FOUND: "That coupon code is not valid.",
     CANCEL_REQUEST_CLOSED: "The ask to cancel is already closed.",
   } satisfies Record<ErrorCode, string>,
 };
