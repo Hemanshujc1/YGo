@@ -91,6 +91,8 @@ export const OrderProposal = z.strictObject({
   shopDiscount: AppliedShopDiscount,
   /** The offer of the order's rule when this proposal drops a discount the order had (a flat rule whose minimum order the revised basket no longer meets), so C10 can say why; null otherwise. */
   lostShopDiscount: ShopDiscountOffer.nullable(),
+  /** A platform-funded coupon the changed total cut back to what the platform earns on the order (ORD-4, D-5): reduced to `to`, or removed (`to` 0), from what it would have taken. So C10 can say why. */
+  couponCutback: z.strictObject({ reason: z.enum(["REDUCED", "REMOVED"]), from: Amount, to: Amount }).nullable().optional(),
   deliveryFee: Amount,
   smallCartFee: Amount.nullable(),
   /** The pickup booking fee, which stands as quoted through a changed total; null on a delivery. */

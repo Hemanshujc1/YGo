@@ -540,6 +540,13 @@
       "when": 1794561431591,
       "tag": "0076_revision_quote",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794562753473,
+      "tag": "0077_requote_platform_budget",
+      "breakpoints": true
     }
   ]
 }
