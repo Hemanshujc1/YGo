@@ -554,7 +554,7 @@ describe("sessions", () => {
     const [a, b] = [randomUUID(), randomUUID()];
     const successors = [successorToken(keys, a, 1, token), successorToken(keys, b, 1, token), successorToken(keys, a, 2, token)];
     expect(new Set(successors).size).toBe(3);
-    expect(new Set(Object.values(keys).map((key) => key.toString("hex"))).size).toBe(5);
+    expect(new Set(Object.values(keys).map((key) => key.toString("hex"))).size).toBe(Object.keys(keys).length);
     const payload = Buffer.from(JSON.stringify({ sub: a, sid: b, exp: 2_000_000_000 })).toString("base64url");
     expect(digest(keys.refreshHash, payload)).not.toBe(digest(keys.access, payload));
   });
