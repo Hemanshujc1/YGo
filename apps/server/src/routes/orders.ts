@@ -87,6 +87,7 @@ export const frozenOrder = (o: string, includeListingId = false) => `${o}.fulfil
                 (SELECT prev.shop_discount FROM order_revisions prev WHERE prev.order_id = ${o}.id AND prev.status = 'confirmed' AND prev.revision < p.revision
                  ORDER BY prev.revision DESC LIMIT 1), ${o}.shop_discount) > 0
               THEN (SELECT ${offerSql("v")} FROM shop_discount_versions v WHERE v.rule_id = p.shop_discount_rule_id AND v.version = p.shop_discount_rule_version) END,
+            'couponCutback', p.quote->'coupon'->'cutback',
             'deliveryFee', ${o}.delivery_fee::text,
             'smallCartFee', ${o}.small_cart_fee::text,
             'pickupFee', ${o}.pickup_fee::text,

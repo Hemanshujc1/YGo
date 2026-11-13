@@ -224,6 +224,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     customerTotal: string;
     platformContribution: string;
     couponReason: "BELOW_MINIMUM" | "NOTHING_ELIGIBLE" | "NO_ROOM" | null;
+    /** A platform-funded coupon cut back to what the platform earns on the order (D-5, #530); null when it was not. */
+    couponCutback: { reason: "REDUCED" | "REMOVED"; from: string; to: string } | null;
   };
 
   type PreparedRevisionLine = {
@@ -557,7 +559,6 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     // surplus above the floor, and the totals. One promotion at most (D-7): the shop-wide discount, or the coupon. The fees stand as quoted on a requote (ORD-4).
     const coupon = order.coupon;
     const couponLines = coupon ? await couponCategoryEligibility(client, coupon, activeLines.map((line) => line.categoryId)) : [];
-    const floorValue = orderCard?.values.deliveredContributionFloor?.value;
     const deliveryFee = order.quote.deliveryFee;
     const smallCartFee = order.quote.smallCartFee;
     const { rows: [quoted] } = await client.query<{ quote: RevisionMoney }>(
@@ -571,7 +572,6 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         })),
         shopDiscount: order.discountRule?.rule ?? null,
         coupon: coupon ? { ...coupon.rule, funding: coupon.funding } : null,
-        floor: typeof floorValue === "string" ? floorValue : null,
         deliveryFee: deliveryFee.amount,
         deliveryPlatformShare: deliveryFee.platformShare,
         smallCartFee: smallCartFee?.amount ?? null,
@@ -602,7 +602,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     const couponReason = money.couponReason;
     const revisionQuote = {
       ...order.quote,
-      ...(order.quote.coupon ? { coupon: { ...order.quote.coupon, applied: couponTook, reason: couponReason, shopFunded: shopCouponStr, platformFunded: platformCouponStr } } : {}),
+      ...(order.quote.coupon ? { coupon: { ...order.quote.coupon, applied: couponTook, reason: couponReason, shopFunded: shopCouponStr, platformFunded: platformCouponStr, cutback: money.couponCutback } } : {}),
       productValue: subtotalStr,
       shopDiscount: shopDiscountStr,
       shopCoupon: shopCouponStr,

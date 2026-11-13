@@ -525,7 +525,8 @@ describe("Accepting an order with a coupon in part (ORD-3, MNY-6, #70)", () => {
   it("keeps the platform-funded amount, and a coupon the revised lines no longer meet, the same in the snapshot and the columns", async () => {
     const trimmed = await accepted("platform");
     expect((await dropLine(trimmed.owner, trimmed.id, trimmed.drop)).statusCode).toBe(200);
-    expect(await revision(trimmed.id)).toMatchObject({ platformCoupon: "11.00", nested: { applied: true, reason: null, shopFunded: "0.00", platformFunded: "11.00" } });
+    // On a requote the budget is what the platform earns (20 + 6), not the surplus above the floor, so the coupon is 20 (ORD-4, D-5).
+    expect(await revision(trimmed.id)).toMatchObject({ platformCoupon: "20.00", nested: { applied: true, reason: null, shopFunded: "0.00", platformFunded: "20.00" } });
   });
 
   it("takes a coupon off when the revised lines fall under its minimum order, and says why in the snapshot", async () => {
@@ -556,16 +557,25 @@ describe("Accepting an order with a coupon in part (ORD-3, MNY-6, #70)", () => {
     const coupon = (funding: string, over: object = {}) => ({ funding, form: "percentage", percentage: "10", cap: null, amount: null, minimumOrder: null, ...over });
     const quote = async (couponTerms: object | null, over: object = {}) => (await database.pool.query<{ q: Record<string, unknown> }>(
       "SELECT pricing_revision_quote($1::jsonb) AS q", [JSON.stringify({
-        lines: [{ lineTotal: "200.00", couponEligible: true, commission: rule }], shopDiscount: null, coupon: couponTerms, floor: "15",
+        lines: [{ lineTotal: "200.00", couponEligible: true, commission: rule }], shopDiscount: null, coupon: couponTerms,
         deliveryFee: "30.00", deliveryPlatformShare: "6.00", smallCartFee: null, smallCartPlatformShare: null, pickupFee: null, pickupShopFee: null, ...over })])).rows[0]?.q;
     // Shop-funded: 20 off the line, commission on the 180 left, the platform's contribution is commission plus its delivery share.
     expect(await quote(coupon("shop"))).toMatchObject({ lines: [{ shopDiscount: "20.00", commission: "18.00" }], productValue: "200.00", shopDiscount: "0.00", shopCoupon: "20.00", platformCoupon: "0.00",
       commission: "18.00", customerTotal: "210.00", platformContribution: "24.00", couponReason: null });
-    // Platform-funded: nothing off the line, commission on the full 200, the 20 trimmed to the 11 above the floor, taken off the total and the contribution.
-    expect(await quote(coupon("platform"))).toMatchObject({ lines: [{ shopDiscount: "0.00", commission: "20.00" }], shopCoupon: "0.00", platformCoupon: "11.00",
-      commission: "20.00", customerTotal: "219.00", platformContribution: "15.00", couponReason: null });
-    // A flat platform coupon the surplus cannot pay in full takes nothing and says there is no room.
-    expect(await quote(coupon("platform", { form: "flat", percentage: null, amount: "30" }))).toMatchObject({ platformCoupon: "0.00", customerTotal: "230.00", platformContribution: "26.00", couponReason: "NO_ROOM" });
+    // Platform-funded: nothing off the line, commission on the full 200, the 20 within the 26 the platform earns, taken off the total and the contribution.
+    expect(await quote(coupon("platform"))).toMatchObject({ lines: [{ shopDiscount: "0.00", commission: "20.00" }], shopCoupon: "0.00", platformCoupon: "20.00",
+      commission: "20.00", customerTotal: "210.00", platformContribution: "6.00", couponReason: null, couponCutback: null });
+    // A requote cuts a platform-funded coupon back to what the platform earns, with no floor in it (ORD-4, D-5): a percentage one is reduced, a flat one that no longer fits is removed.
+    expect(await quote(coupon("platform", { percentage: "50" }))).toMatchObject({ platformCoupon: "26.00", customerTotal: "204.00", platformContribution: "0.00",
+      couponCutback: { reason: "REDUCED", from: "100.00", to: "26.00" } });
+    expect(await quote(coupon("platform", { form: "flat", percentage: null, amount: "30", minimumOrder: "0" }))).toMatchObject({ platformCoupon: "0.00", customerTotal: "230.00", platformContribution: "26.00",
+      couponReason: "NO_ROOM", couponCutback: { reason: "REMOVED", from: "30.00", to: "0.00" } });
+    expect(await quote(coupon("platform", { form: "flat", percentage: null, amount: "26", minimumOrder: "0" }))).toMatchObject({ platformCoupon: "26.00", platformContribution: "0.00", couponCutback: null });
+    // With the platform's own delivery share negative the order earns less than nothing even with no coupon: the coupon is removed and the contribution is negative,
+    // which the route answers by cancelling the order at no cost (reason negative_contribution, its own status row, never a timeout).
+    expect(await quote(coupon("platform"), { deliveryPlatformShare: "-50.00" })).toMatchObject({ platformCoupon: "0.00", platformContribution: "-30.00", couponCutback: { reason: "REMOVED", from: "20.00", to: "0.00" } });
+    // A shop-funded coupon is never cut back: the shop pays it.
+    expect(await quote(coupon("shop", { percentage: "50" }))).toMatchObject({ shopCoupon: "100.00", couponCutback: null });
     // Under its minimum order, or with nothing eligible, a coupon of either funding takes nothing and says why.
     for (const funding of ["shop", "platform"]) {
       expect(await quote(coupon(funding, { minimumOrder: "250" }))).toMatchObject({ shopCoupon: "0.00", platformCoupon: "0.00", customerTotal: "230.00", couponReason: "BELOW_MINIMUM" });
@@ -590,13 +600,24 @@ describe("Accepting an order with a coupon in part (ORD-3, MNY-6, #70)", () => {
     expect((await dropLine(owner, id, drop)).statusCode).toBe(200);
     expect((await database.pool.query(
       "SELECT quote->>'customerTotal' AS total, quote->>'commission' AS commission, quote->>'platformContribution' AS contribution, quote->>'productValue' AS product FROM order_revisions WHERE order_id = $1 ORDER BY revision DESC LIMIT 1", [id])).rows[0])
-      .toEqual({ total: "219.00", commission: "20.00", contribution: "15.00", product: "200.00" });
+      .toEqual({ total: "210.00", commission: "20.00", contribution: "6.00", product: "200.00" });
   });
 
-  it("re-trims a platform-funded coupon to the revised surplus", async () => {
-    const { owner, id, drop } = await accepted("platform");
-    // At 300 the order earns 30 + 6 against the 15 floor: 21 to give. At 200 it is 11.
+  it("cuts a platform-funded coupon back on a changed total to what the platform earns, records the shortfall as the floor exception, and tells the customer why (ORD-4, D-5)", async () => {
+    // 50% asks for 150 at 300: the placement trims it to the 21 above the floor. Dropping the 100 line leaves 200 and a 100 ask, against the 26 the platform earns.
+    const { owner, who, id, drop } = await accepted("platform", { percentage: "50" });
     expect((await dropLine(owner, id, drop)).statusCode).toBe(200);
-    expect(await revision(id)).toMatchObject({ shopDiscount: "0.00", shopCoupon: "0.00", platformCoupon: "11.00", total: "219.00", parts: "0.00" });
+    expect(await revision(id)).toMatchObject({ platformCoupon: "26.00", total: "204.00", nested: { applied: true, reason: null, platformFunded: "26.00", cutback: { reason: "REDUCED", from: "100.00", to: "26.00" } } });
+    expect((await database.pool.query("SELECT below_floor_exception AS e, below_floor_shortfall::text AS s, platform_contribution::text AS c FROM order_revisions WHERE order_id = $1 ORDER BY revision DESC LIMIT 1", [id])).rows[0])
+      .toEqual({ e: true, s: "15.00", c: "0.00" });
+    const seen = (await app.inject({ method: "GET", url: `/v1/orders/${id}`, headers: who.headers })).json();
+    expect(seen.proposal).toMatchObject({ total: "204.00", couponCutback: { reason: "REDUCED", from: "100.00", to: "26.00" } });
+  });
+
+  it("works a platform-funded coupon out against what the platform earns on the requote, not the floor (ORD-4, D-5)", async () => {
+    const { owner, id, drop } = await accepted("platform");
+    // At 300 the order earns 30 + 6 against the 15 floor: 21 to give. At 200 it earns 26, and the requote budget is all of it: the 20 the coupon asks for.
+    expect((await dropLine(owner, id, drop)).statusCode).toBe(200);
+    expect(await revision(id)).toMatchObject({ shopDiscount: "0.00", shopCoupon: "0.00", platformCoupon: "20.00", total: "210.00", parts: "0.00" });
   });
 });
