@@ -355,6 +355,11 @@ describe("Weekly statements (#629, MNY-8, MNY-12, Q-6)", () => {
        SELECT $5, s.id, 1, $6, false, 'delivery', 150, 13, 10, 0, 0, $7 FROM s`, [shopId, WEEK2, RUN2, total, other.id, IN_WEEK2, owed]);
     await expect(insert("99.00", "23.00")).rejects.toThrow(/does not add up/);
     await expect(insert("22.00", "22.00")).rejects.toThrow(/statement_lines_owed_reconciles/);
+    // A line added to an issued statement in a later transaction is refused: the statement's total and count would no longer match its lines.
+    const { rows: [issued] } = await database.pool.query<{ id: string }>("SELECT id FROM statements WHERE shop_id = $1", [shopId]);
+    await expect(database.pool.query(
+      `INSERT INTO statement_lines (order_id, statement_id, order_number, completed_at, late, fulfilment, order_total, commission, fee_share, booking_fees, platform_coupon, owed)
+       VALUES ($1, $2, 1, $3, false, 'delivery', 150, 13, 10, 0, 0, 23)`, [other.id, issued?.id, IN_WEEK2])).rejects.toThrow(/does not add up/);
     // An order is on one statement only.
     await expect(database.pool.query(
       `WITH s AS (INSERT INTO statements (shop_id, period_start, period_end, issued_at, grace_days, due_on, shop_name, order_count, total)

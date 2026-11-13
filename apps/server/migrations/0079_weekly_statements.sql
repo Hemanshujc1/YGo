@@ -72,19 +72,26 @@ CREATE TRIGGER statement_weeks_no_update_delete BEFORE UPDATE OR DELETE ON state
 --> statement-breakpoint
 CREATE TRIGGER statement_weeks_no_truncate BEFORE TRUNCATE ON statement_weeks FOR EACH STATEMENT EXECUTE FUNCTION reject_statement_change();
 --> statement-breakpoint
--- Q-6: at commit, a statement's total and order count are exactly those of its lines, to the paisa.
+-- Q-6: at commit, a statement's total and order count are exactly those of its lines, to the paisa. It is checked whenever a statement or
+-- one of its lines is inserted, so a line added to an issued statement in a later transaction is refused too.
 CREATE FUNCTION check_statement_total() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  sid uuid;
 BEGIN
+  IF TG_TABLE_NAME = 'statements' THEN sid := NEW.id; ELSE sid := NEW.statement_id; END IF;
   IF EXISTS (
     SELECT 1 FROM statements s
     CROSS JOIN LATERAL (SELECT COALESCE(sum(l.owed), 0) AS owed, count(*)::integer AS orders FROM statement_lines l WHERE l.statement_id = s.id) lines
-    WHERE s.id = NEW.id AND (s.total <> lines.owed OR s.order_count <> lines.orders)
+    WHERE s.id = sid AND (s.total <> lines.owed OR s.order_count <> lines.orders)
   ) THEN
-    RAISE EXCEPTION 'Statement % does not add up: its total and order count must equal its lines', NEW.id;
+    RAISE EXCEPTION 'Statement % does not add up: its total and order count must equal its lines', sid;
   END IF;
   RETURN NULL;
 END;
 $$;
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER statements_total_reconciles AFTER INSERT ON statements
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_statement_total();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER statement_lines_total_reconciles AFTER INSERT ON statement_lines
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_statement_total();
