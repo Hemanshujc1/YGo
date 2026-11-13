@@ -455,6 +455,7 @@ export const strings = {
     alreadyRated: (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`,
     done: "Done",
     failed: "Could not save rating. Please try again.",
+    notEligible: "You can rate this order once it is delivered or collected.",
   },
   // C18 Order list (#426).
   orders: {

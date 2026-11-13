@@ -23,11 +23,12 @@ export default function RateScreen() {
   const [submittedRating, setSubmittedRating] = useState<number | null>(null);
 
   const shown = view.order;
+  const isFinished = shown?.status === "delivered" || shown?.status === "picked_up";
   const rating = submittedRating ?? shown?.rating ?? null;
   const isRated = rating !== null;
 
   const submit = async () => {
-    if (!id || selectedStars === 0 || submitting) return;
+    if (!id || selectedStars === 0 || submitting || !isFinished) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -35,8 +36,24 @@ export default function RateScreen() {
       if (res.ok) {
         setSubmittedRating(selectedStars);
         void order.refresh();
+      } else if (res.code === "RATING_ALREADY_GIVEN") {
+        await order.refresh();
+        let savedRating = (order.get ? order.get().order?.rating : null) ?? shown?.rating ?? null;
+        if (savedRating === null && typeof api.order === "function") {
+          const fresh = await api.order(id).catch(() => null);
+          if (fresh && fresh.ok && fresh.data.rating !== null) {
+            savedRating = fresh.data.rating;
+          }
+        }
+        if (savedRating !== null) {
+          setSelectedStars(savedRating);
+          setSubmittedRating(savedRating);
+          setError(words.alreadyRated(savedRating));
+        } else {
+          setError(strings.errors.RATING_ALREADY_GIVEN);
+        }
       } else {
-        setError(res.code === "RATING_ALREADY_GIVEN" ? words.alreadyRated(selectedStars) : words.failed);
+        setError(words.failed);
       }
     } catch {
       setError(words.failed);
@@ -75,8 +92,16 @@ export default function RateScreen() {
             </View>
             <View className="items-center gap-2">
               <Text className="text-center text-title font-bold text-text">{words.ratedTitle}</Text>
-              <Text className="text-center text-body text-muted">{words.ratedBody}</Text>
+              <Text className="text-center text-body text-muted">{words.alreadyRated(rating)}</Text>
+              <Text className="text-center text-secondary text-muted">{words.ratedBody}</Text>
             </View>
+            <View className="w-full pt-4">
+              <Button label={words.done} onPress={() => router.back()} />
+            </View>
+          </View>
+        ) : shown && !isFinished ? (
+          <View className="gap-6 items-center py-8">
+            <Text className="text-center text-body text-muted">{words.notEligible}</Text>
             <View className="w-full pt-4">
               <Button label={words.done} onPress={() => router.back()} />
             </View>

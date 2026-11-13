@@ -10,6 +10,7 @@ const mock = vi.hoisted(() => ({
   back: vi.fn(),
   canGoBack: vi.fn(() => true),
   rateOrder: vi.fn(),
+  order: vi.fn(),
   orderResult: null as unknown,
   refresh: vi.fn(),
   retry: vi.fn(),
@@ -95,6 +96,7 @@ vi.mock("expo-router", () => ({
 vi.mock("../src/api", () => ({
   api: {
     rateOrder: mock.rateOrder,
+    order: mock.order,
   },
 }));
 
@@ -109,7 +111,11 @@ vi.mock("../src/components/icons", () => ({
 
 vi.mock("../src/lib/use-order", () => ({
   useOrder: () => ({
-    order: { refresh: mock.refresh, retry: mock.retry },
+    order: {
+      refresh: mock.refresh,
+      retry: mock.retry,
+      get: () => mock.orderResult,
+    },
     view: mock.orderResult,
   }),
 }));
@@ -214,14 +220,60 @@ describe("C20 Rate screen (TRU-1, #82)", () => {
 
     expect(queryByText("How was your order from Sai General Stores?")).toBeNull();
     expect(getByText("Thank you for rating!")).toBeDefined();
+    expect(getByText("You rated this order 5 stars")).toBeDefined();
     expect(getByRole("button", { name: "Done" })).toBeDefined();
   });
 
-  it("shows error banner when rating submission fails", async () => {
+  it("prevents the rating form from appearing for unfinished orders", () => {
+    mock.orderResult = { status: "ready", order: { ...baseOrder, status: "accepted" } };
+    const { getByText, getByRole, queryByText, queryByRole } = render(<RateScreen />);
+
+    expect(queryByText("How was your order from Sai General Stores?")).toBeNull();
+    expect(queryByRole("button", { name: "Submit rating" })).toBeNull();
+    expect(queryByRole("button", { name: "1 star" })).toBeNull();
+    expect(getByText("You can rate this order once it is delivered or collected.")).toBeDefined();
+
+    const doneBtn = getByRole("button", { name: "Done" });
+    fireEvent.click(doneBtn);
+    expect(mock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents the rating form from appearing for cancelled orders", () => {
+    mock.orderResult = { status: "ready", order: { ...baseOrder, status: "cancelled_by_customer" } };
+    const { getByText, queryByText, queryByRole } = render(<RateScreen />);
+
+    expect(queryByText("How was your order from Sai General Stores?")).toBeNull();
+    expect(queryByRole("button", { name: "Submit rating" })).toBeNull();
+    expect(getByText("You can rate this order once it is delivered or collected.")).toBeDefined();
+  });
+
+  it("handles duplicate ratings using the actual saved rating", async () => {
     mock.rateOrder.mockResolvedValueOnce({
       ok: false,
       code: "RATING_ALREADY_GIVEN",
       status: 409,
+    });
+    mock.refresh.mockImplementation(() => {
+      mock.orderResult = { status: "ready", order: { ...baseOrder, rating: 5 } };
+    });
+
+    const { getByRole, getByText, queryByText } = render(<RateScreen />);
+    fireEvent.click(getByRole("button", { name: "2 stars" }));
+    fireEvent.click(getByRole("button", { name: "Submit rating" }));
+
+    await waitFor(() => {
+      expect(mock.refresh).toHaveBeenCalled();
+      // Must use actual saved rating (5 stars), never the tapped 2 stars!
+      expect(getByText("You rated this order 5 stars")).toBeDefined();
+      expect(queryByText("You rated this order 2 stars")).toBeNull();
+    });
+  });
+
+  it("shows error banner when rating submission fails with server error", async () => {
+    mock.rateOrder.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERNAL_ERROR",
+      status: 500,
     });
 
     const { getByRole, getByText } = render(<RateScreen />);
@@ -229,7 +281,7 @@ describe("C20 Rate screen (TRU-1, #82)", () => {
     fireEvent.click(getByRole("button", { name: "Submit rating" }));
 
     await waitFor(() => {
-      expect(getByText("You rated this order 3 stars")).toBeDefined();
+      expect(getByText("Could not save rating. Please try again.")).toBeDefined();
     });
   });
 });
