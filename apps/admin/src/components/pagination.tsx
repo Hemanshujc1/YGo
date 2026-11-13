@@ -42,7 +42,7 @@ export function Pagination({ pagination, disabled = false, onChange }: {
         type="button"
         disabled={disabled || page === 1}
         onClick={() => onChange({ page: page - 1, pageSize })}
-        className="rounded-lg border border-border-strong px-3 py-2 text-primary disabled:opacity-50"
+        className="h-10 rounded-lg border border-border-strong px-3 text-primary disabled:opacity-50"
       >{strings.previous}</button>
       {shownPages(page, totalPages).map((number) => <button
         key={number}
@@ -51,13 +51,13 @@ export function Pagination({ pagination, disabled = false, onChange }: {
         aria-label={strings.goToPage(number)}
         disabled={disabled || number === page}
         onClick={() => onChange({ page: number, pageSize })}
-        className="min-w-10 rounded-lg border border-border-strong px-3 py-2 text-primary disabled:font-semibold disabled:opacity-70"
+        className="h-10 min-w-10 rounded-lg border border-border-strong px-3 text-primary disabled:font-semibold disabled:opacity-70"
       >{number}</button>)}
       <button
         type="button"
         disabled={disabled || page === totalPages}
         onClick={() => onChange({ page: page + 1, pageSize })}
-        className="rounded-lg border border-border-strong px-3 py-2 text-primary disabled:opacity-50"
+        className="h-10 rounded-lg border border-border-strong px-3 text-primary disabled:opacity-50"
       >{strings.next}</button>
     </div>
   </nav>;

@@ -19,21 +19,21 @@ export function Customers({ api }: { api: AdminApi }) {
   const [message, setMessage] = useState<string | null>(null);
   const [signupsEnabled, setSignupsEnabled] = useState(true);
   const currentView = useRef<CustomerView>({ flagged: true });
-  const latest = useRef(0);
+  const latestRequestId = useRef(0);
   useEffect(() => { void api.customerSignupSettings().then((result) => { if (result.ok) setSignupsEnabled(result.data.enabled); else setMessage(strings.customerActionFailed); }).catch(() => setMessage(strings.customerActionFailed)); }, [api]);
 
   async function load(view: CustomerView, page = 1, pageSize = listed.pagination.pageSize) {
-    const mine = ++latest.current;
+    const requestId = ++latestRequestId.current;
     setLoading(true); setMessage(null);
     try {
       const result = await api.listCustomers({ ...view, page, pageSize });
-      if (mine !== latest.current) return;
+      if (requestId !== latestRequestId.current) return;
       if (result.ok) setListed(result.data);
       else setMessage(strings.customerActionFailed);
     } catch {
-      if (mine === latest.current) setMessage(strings.customerActionFailed);
+      if (requestId === latestRequestId.current) setMessage(strings.customerActionFailed);
     } finally {
-      if (mine === latest.current) setLoading(false);
+      if (requestId === latestRequestId.current) setLoading(false);
     }
   }
 

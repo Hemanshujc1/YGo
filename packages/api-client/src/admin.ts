@@ -90,6 +90,7 @@ import {
   type SetThemeBody,
   type CustomerBlockBody,
   type CustomerSignupSettingBody,
+  type PageQuery,
   type VerifyCodeBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
@@ -104,11 +105,9 @@ export interface AdminApiClientOptions {
 }
 
 /** Page-number Customer directory options; filters are applied before the total and page. */
-export interface AdminCustomersListOptions {
+export interface AdminCustomersListOptions extends Partial<PageQuery> {
   search?: string;
   flagged?: boolean;
-  page?: number;
-  pageSize?: number;
 }
 
 interface AdminLife {
