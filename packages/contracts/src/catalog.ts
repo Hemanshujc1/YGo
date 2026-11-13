@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminActionReason, CountedPackQuantity, PackBarcode, PackQuantity, PRODUCT_IMAGE_MAX_BYTES, ProductBrand, ProductImage, ProductName, SearchWord } from "./fields";
+import { AdminActionReason, CountedPackQuantity, DenylistWord, PackBarcode, PackQuantity, PRODUCT_IMAGE_MAX_BYTES, ProductBrand, ProductImage, ProductName, SearchWord } from "./fields";
 
 /** Multipart fields; file-level VALIDATION_FAILED responses put these names in `fields`. */
 export const CATALOG_IMPORT_FILE_FIELDS = ["catalogCsv", "imagesZip"] as const;
@@ -46,6 +46,14 @@ export const SearchTermParams = z.strictObject({ id: z.uuid() });
 export type SearchTermParams = z.infer<typeof SearchTermParams>;
 export const SearchTermBody = z.strictObject({ typedWord: SearchWord, catalogWord: SearchWord });
 export type SearchTermBody = z.infer<typeof SearchTermBody>;
+
+/** A denylist word or phrase (#69, CAT-8, ADM-3). */
+export const DenylistWordBody = z.strictObject({ word: DenylistWord });
+export type DenylistWordBody = z.infer<typeof DenylistWordBody>;
+export const DenylistWordsResponse = z.strictObject({ words: z.array(z.string()) });
+export type DenylistWordsResponse = z.infer<typeof DenylistWordsResponse>;
+export const DenylistWordParams = z.strictObject({ word: DenylistWord });
+export type DenylistWordParams = z.infer<typeof DenylistWordParams>;
 
 /** The canonical unit is `each` for counted products, or kg/l for measured products. */
 export const ProductBaseUnit = z.enum(["each", "kg", "l"]);

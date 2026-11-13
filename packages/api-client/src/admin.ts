@@ -23,6 +23,8 @@ import {
   SearchTerm,
   SearchTermsResponse,
   type SearchTermBody,
+  DenylistWordBody,
+  DenylistWordsResponse,
   MasterProduct,
   MasterProductsResponse,
   Pack,
@@ -134,7 +136,7 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     return on.renewing;
   }
 
-  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | ForceFulfilmentModeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
+  async function adminRequest(method: string, path: string, json?: CreateAdminBody | CreateCategoryBody | EditCategoryBody | SearchTermBody | DenylistWordBody | CreateAreaBody | EditAreaBody | CreateMasterProductBody | EditMasterProductBody | CreatePackBody | EditPackBody | CorrectShopApplicationBody | AssignShopAreaManagerBody | SetThemeBody | PriceSimulatorBody | CreateVisitPhotoUploadBody | RecordShopVisitBody | RecordOnboardingFeeBody | ResolveCounterBillBody | MapProductRequestBody | RejectProductRequestBody | ForceFulfilmentModeBody | FormData, requestTimeoutMs?: number): Promise<Answer> {
     const on = current;
     if (on.ended) return NO_SESSION;
     const renewedFirst = !on.access || on.renewing !== null;
@@ -300,6 +302,21 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `DELETE /v1/admin/search-terms/:id`: remove a term. */
     async removeSearchTerm(id: string): Promise<ApiResult<undefined>> {
       return empty(await adminRequest("DELETE", `/v1/admin/search-terms/${encodeURIComponent(id)}`));
+    },
+
+    /** `GET /v1/admin/denylist-words`: excluded-goods words and phrases (CAT-8, ADM-3, #69). */
+    async listDenylistWords(): Promise<ApiResult<DenylistWordsResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/denylist-words"), DenylistWordsResponse);
+    },
+
+    /** `POST /v1/admin/denylist-words`: add a denylist word or phrase. */
+    async createDenylistWord(body: DenylistWordBody): Promise<ApiResult<DenylistWordBody>> {
+      return result(await adminRequest("POST", "/v1/admin/denylist-words", body), DenylistWordBody);
+    },
+
+    /** `DELETE /v1/admin/denylist-words/:word`: remove a denylist word. */
+    async removeDenylistWord(word: string): Promise<ApiResult<undefined>> {
+      return empty(await adminRequest("DELETE", `/v1/admin/denylist-words/${encodeURIComponent(word)}`));
     },
 
     /** GET /v1/admin/products: the global master-product catalog. */

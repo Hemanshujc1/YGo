@@ -11,6 +11,8 @@ export const ShopQuantityPriceOption = z.strictObject({
   name: ProductName,
   quantity: PackQuantity,
   price: ShopPrice,
+  /** True when the option name matched an excluded-goods denylist word (CAT-8, #69). */
+  flagged: z.boolean().default(false),
 });
 
 export const ShopListingSettings = z.strictObject({

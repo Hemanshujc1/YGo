@@ -37,6 +37,7 @@ import { registerFulfilmentModeRoutes } from "./routes/fulfilment-modes";
 import { registerOrderRoutes } from "./routes/orders";
 import { registerSearchRoutes } from "./routes/search";
 import { registerSearchTermRoutes } from "./routes/search-terms";
+import { registerDenylistWordRoutes } from "./routes/denylist-words";
 import { registerProfileRoutes } from "./routes/profile";
 import { registerShopRoutes } from "./routes/shops";
 import { registerShopAgreementRoutes } from "./routes/shop-agreement";
@@ -157,6 +158,7 @@ export function buildApp({
     registerCatalogImportRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
     registerPackRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerSearchTermRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    registerDenylistWordRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAreaRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerProfileRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerAddressRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });

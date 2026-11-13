@@ -1,5 +1,5 @@
 import { createAdminApiClient } from "@ygo/api-client";
-import { SearchTermBody, type SearchTerm } from "@ygo/contracts";
+import { DenylistWordBody, SearchTermBody, type SearchTerm } from "@ygo/contracts";
 import { useState, type FormEvent } from "react";
 import { useLoaderData } from "react-router";
 import { fieldMessages } from "./lib/field-messages";
@@ -8,14 +8,21 @@ import { strings } from "./strings";
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type FieldErrors = Partial<Record<keyof SearchTermBody, string>>;
 
+export type SearchTermsLoaderData = {
+  terms: SearchTerm[];
+  denylistWords: string[];
+};
+
 // Plain character order, as the server sorts (COLLATE "C"), so rows don't move after a save.
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const byWords = (a: SearchTerm, b: SearchTerm) => order(a.typedWord, b.typedWord) || order(a.catalogWord, b.catalogWord);
 
-/** A13 search terms (#397, DSC-3): the denylist joins this page with #69. */
+/** A13 search terms and denylist (#397, #69, DSC-3, CAT-8, ADM-3). */
 export function SearchTerms({ api }: { api: AdminApi }) {
-  const loaded = useLoaderData() as SearchTerm[];
-  const [terms, setTerms] = useState(loaded);
+  const loaded = useLoaderData() as SearchTerm[] | SearchTermsLoaderData;
+  const [terms, setTerms] = useState<SearchTerm[]>(Array.isArray(loaded) ? loaded : (loaded?.terms ?? []));
+  const [denylistWords, setDenylistWords] = useState<string[]>(Array.isArray(loaded) ? [] : (loaded?.denylistWords ?? []));
+
   const [editing, setEditing] = useState<SearchTerm | null>(null);
   const [form, setForm] = useState(false);
   const [typedWord, setTypedWord] = useState("");
@@ -24,6 +31,12 @@ export function SearchTerms({ api }: { api: AdminApi }) {
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const [denylistForm, setDenylistForm] = useState(false);
+  const [newWord, setNewWord] = useState("");
+  const [denylistError, setDenylistError] = useState("");
+  const [denylistFieldError, setDenylistFieldError] = useState("");
+  const [denylistDone, setDenylistDone] = useState("");
 
   function openForm(term: SearchTerm | null) {
     setEditing(term);
@@ -52,7 +65,6 @@ export function SearchTerms({ api }: { api: AdminApi }) {
         setDone(editing ? strings.searchTermSaved : strings.searchTermAdded);
         setForm(false);
       } else if (editing && result.code === "NOT_FOUND") {
-        // Removed elsewhere: drop it here too.
         setTerms((current) => current.filter((term) => term.id !== editing.id));
         setError(strings.errors.NOT_FOUND);
         setForm(false);
@@ -72,13 +84,65 @@ export function SearchTerms({ api }: { api: AdminApi }) {
     setError("");
     try {
       const result = await api.removeSearchTerm(term.id);
-      // Gone already counts as removed.
       if (result.ok || result.code === "NOT_FOUND") {
         setTerms((current) => current.filter((item) => item.id !== term.id));
         setDone(strings.searchTermRemoved);
       } else setError(strings.errors[result.code] ?? strings.failed);
     } catch {
       setError(strings.failed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openDenylistForm() {
+    setNewWord("");
+    setDenylistError("");
+    setDenylistFieldError("");
+    setDenylistDone("");
+    setDenylistForm(true);
+  }
+
+  async function saveDenylist(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsed = DenylistWordBody.safeParse({ word: newWord });
+    if (!parsed.success) {
+      setDenylistFieldError(strings.denylistWordInvalidField);
+      return;
+    }
+    setBusy(true);
+    setDenylistError("");
+    setDenylistFieldError("");
+    try {
+      const result = await api.createDenylistWord(parsed.data);
+      if (result.ok) {
+        setDenylistWords((current) => [...current.filter((w) => w !== result.data.word), result.data.word].sort(order));
+        setDenylistDone(strings.denylistWordAdded);
+        setDenylistForm(false);
+      } else if (result.code === "VALIDATION_FAILED") {
+        setDenylistFieldError(strings.denylistWordInvalidField);
+      } else {
+        setDenylistError(strings.errors[result.code] ?? strings.failed);
+      }
+    } catch {
+      setDenylistError(strings.failed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeDenylist(word: string) {
+    setBusy(true);
+    setDenylistDone("");
+    setDenylistError("");
+    try {
+      const result = await api.removeDenylistWord(word);
+      if (result.ok || result.code === "NOT_FOUND") {
+        setDenylistWords((current) => current.filter((item) => item !== word));
+        setDenylistDone(strings.denylistWordRemoved);
+      } else setDenylistError(strings.errors[result.code] ?? strings.failed);
+    } catch {
+      setDenylistError(strings.failed);
     } finally {
       setBusy(false);
     }
@@ -117,6 +181,34 @@ export function SearchTerms({ api }: { api: AdminApi }) {
         {error && <p role="alert" className="text-danger">{error}</p>}
         <div className="flex gap-3"><button disabled={busy} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{busy ? strings.saving : strings.saveSearchTerm}</button>
           <button type="button" disabled={busy} onClick={() => { setError(""); setForm(false); }} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
+      </form>
+    </section>}
+
+    <div className="mb-8 mt-12 flex items-center justify-between gap-4">
+      <div><h2 className="text-title-large font-semibold">{strings.denylistWords}</h2><p className="mt-2 text-muted">{strings.denylistIntro}</p></div>
+      {!denylistForm && <button onClick={() => openDenylistForm()} className="h-10 shrink-0 rounded-lg bg-primary px-4 font-medium text-on-primary">{strings.newDenylistWord}</button>}
+    </div>
+    {denylistDone && <p role="status" className="mb-4 rounded-lg bg-success-subtle p-3 text-on-success-subtle">{denylistDone}</p>}
+    {!denylistForm && denylistError && <p role="alert" className="mb-4 text-danger">{denylistError}</p>}
+    {!denylistForm && <section className="rounded-xl border border-border bg-surface">
+      {denylistWords.length === 0 ? <p className="p-6 text-muted">{strings.noDenylistWords}</p> : <ul>
+        {denylistWords.map((word) => <li key={word} className="flex flex-wrap items-center justify-between gap-3 border-t border-border p-4 first:border-t-0">
+          <span className="font-medium">{word}</span>
+          <button type="button" disabled={busy} aria-label={strings.removeDenylistWord(word)} onClick={() => void removeDenylist(word)}
+            className="h-10 rounded-lg border border-border-strong px-3 text-danger disabled:opacity-60">{strings.remove}</button>
+        </li>)}
+      </ul>}
+    </section>}
+    {denylistForm && <section className="max-w-xl rounded-xl border border-border bg-surface p-6">
+      <h3 className="text-body font-semibold">{strings.newDenylistWord}</h3>
+      <p className="mt-2 text-secondary text-muted">{strings.denylistWordExample}</p>
+      <form onSubmit={(event) => void saveDenylist(event)} className="mt-6 space-y-4" noValidate>
+        <div><label htmlFor="denylist-word" className="mb-2 block font-medium">{strings.denylistWord}</label>
+          <input id="denylist-word" value={newWord} onChange={(event) => setNewWord(event.target.value)} className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3" />
+          {denylistFieldError && <p role="alert" className="mt-1 text-secondary text-danger">{denylistFieldError}</p>}</div>
+        {denylistError && <p role="alert" className="text-danger">{denylistError}</p>}
+        <div className="flex gap-3"><button disabled={busy} className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">{busy ? strings.saving : strings.saveDenylistWord}</button>
+          <button type="button" disabled={busy} onClick={() => { setDenylistError(""); setDenylistForm(false); }} className="h-10 rounded-lg border border-border-strong px-4">{strings.cancel}</button></div>
       </form>
     </section>}
   </>;

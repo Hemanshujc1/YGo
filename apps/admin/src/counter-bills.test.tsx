@@ -13,7 +13,7 @@ const shopId = "00000000-0000-4000-8000-000000000501";
 const application = { id: shopId, shopName: "Fresh Mart" } as AdminShopApplication;
 const line = { packId: "00000000-0000-4000-8000-000000000701", name: "Toor Dal", packQuantity: "5.000", baseUnit: "kg", count: 2, unitPrice: "21.00" };
 const bill = (id: number, extra: Partial<AdminCounterBill> = {}): AdminCounterBill => ({
-  id: `00000000-0000-4000-8000-00000000090${id}`, reference: `0F3A-91B${id}`, number: null, heldReason: "too_old", totalMismatch: false, payment: "cash",
+  id: `00000000-0000-4000-8000-00000000090${id}`, reference: `0F3A-91B${id}`, number: null, heldReason: "too_old", totalMismatch: false, flaggedDenylist: false, payment: "cash",
   total: "42.00", checkedTotal: "42.00", clockSuspect: false, madeAt: "2030-01-01T05:00:00.000Z", receivedAt: "2030-01-02T05:00:00.000Z",
   madeBy: { name: "Asha", role: "owner" }, lines: [line], manualLines: [], discount: "0", invalidPayload: null, original: null, voided: null, resolved: false, resolutions: [], ...extra,
 });
@@ -144,5 +144,12 @@ describe("Counter bills screen (#470)", () => {
     setup([]);
     expect(await screen.findByText(strings.counterBillsNoneOpen)).toBeTruthy();
     expect(screen.queryByRole("region", { name: strings.counterBillsDone })).toBeNull();
+  });
+
+  it("shows denylist flag on a numbered bill and offers review action (#69)", async () => {
+    setup([bill(1, { number: 42, heldReason: null, flaggedDenylist: true })]);
+    const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
+    expect(within(card).getByText(strings.counterBillDenylistFlagged)).toBeTruthy();
+    expect(buttonNames(card)).toEqual([strings.counterBillActions.review, strings.counterBillActions.note]);
   });
 });

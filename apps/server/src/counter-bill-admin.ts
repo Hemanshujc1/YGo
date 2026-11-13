@@ -17,7 +17,8 @@ const closing = "r.action <> 'noted'";
 const voidOf = (bill: string) => `(SELECT json_build_object('reason', v.reason, 'note', v.note, 'stockMoved', v.stock_moved, 'actorName', va.name, 'createdAt', ${iso("v.created_at")})
   FROM counter_bill_voids v LEFT JOIN accounts va ON va.id = v.actor_id WHERE v.bill_id = ${bill})`;
 
-const billsSql = `SELECT b.id, b.reference, b.number, b.held_reason AS "heldReason", b.total_mismatch AS "totalMismatch", b.payment,
+const billsSql = `SELECT b.id, b.reference, b.number, b.held_reason AS "heldReason", b.total_mismatch AS "totalMismatch",
+  b.flagged_denylist AS "flaggedDenylist", b.payment,
   b.total::text AS total, b.checked_total::text AS "checkedTotal", b.clock_suspect AS "clockSuspect",
   ${iso("b.made_at")} AS "madeAt", ${iso("b.received_at")} AS "receivedAt", b.invalid_payload AS "invalidPayload",
   json_build_object('name', a.name, 'role', m.role) AS "madeBy", ${linesOf("b.id")} AS lines, ${manualOf("b.id")} AS "manualLines", b.discount::text AS discount,
@@ -79,11 +80,11 @@ export function readableInvalidPayload(text: string | null): string | null {
 
 /** A shop's held and flagged bills, and the ones Admin has dealt with, the open ones first. The newest 200 are enough for one shop's queue. */
 export async function listCounterBills(client: Pick<PoolClient, "query">, shopId: string): Promise<AdminCounterBill[]> {
-  const { rows } = await client.query<AdminCounterBill>(`${billsSql} AND (b.held_reason IS NOT NULL OR b.total_mismatch OR EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id)) ORDER BY resolved, b.received_at DESC, b.id LIMIT 200`, [shopId]);
+  const { rows } = await client.query<AdminCounterBill>(`${billsSql} AND (b.held_reason IS NOT NULL OR b.total_mismatch OR b.flagged_denylist OR EXISTS (SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = b.id)) ORDER BY resolved, b.received_at DESC, b.id LIMIT 200`, [shopId]);
   return rows.map((row) => ({ ...row, invalidPayload: readableInvalidPayload(row.invalidPayload) }));
 }
 
-type Row = { id: string; heldReason: string | null; number: number | null; totalMismatch: boolean; actorId: string; clientId: string };
+type Row = { id: string; heldReason: string | null; number: number | null; totalMismatch: boolean; flaggedDenylist: boolean; actorId: string; clientId: string };
 
 /**
  * Admin's decision on one held or flagged bill (#470). The caller holds the shop's row lock, the one a sync batch
@@ -93,7 +94,7 @@ type Row = { id: string; heldReason: string | null; number: number | null; total
  */
 export async function resolveCounterBill(client: PoolClient, shopId: string, billId: string, adminId: string, body: ResolveCounterBillBody, now: Date):
   Promise<{ code: "NOT_FOUND" | "COUNTER_BILL_RESOLVED" | "COUNTER_BILL_ACTION_REFUSED" } | { bill: AdminCounterBill }> {
-  const { rows: [bill] } = await client.query<Row>(`SELECT id, held_reason AS "heldReason", number, total_mismatch AS "totalMismatch", actor_id AS "actorId", client_id AS "clientId"
+  const { rows: [bill] } = await client.query<Row>(`SELECT id, held_reason AS "heldReason", number, total_mismatch AS "totalMismatch", flagged_denylist AS "flaggedDenylist", actor_id AS "actorId", client_id AS "clientId"
     FROM counter_bills WHERE id = $1 AND shop_id = $2 FOR UPDATE`, [billId, shopId]);
   if (!bill) return { code: "NOT_FOUND" };
   if ((await client.query(`SELECT 1 FROM counter_bill_resolutions r WHERE r.bill_id = $1 AND ${closing}`, [billId])).rowCount) return { code: "COUNTER_BILL_RESOLVED" };
@@ -103,8 +104,8 @@ export async function resolveCounterBill(client: PoolClient, shopId: string, bil
   const fits = {
     number: !voided && held !== null && held !== "invalid",
     duplicate: !voided && held === "reference_taken",
-    review: !voided && (held === "invalid" || (bill.number !== null && bill.totalMismatch)),
-    note: held !== null || bill.totalMismatch,
+    review: !voided && (held === "invalid" || (bill.number !== null && (bill.totalMismatch || bill.flaggedDenylist))),
+    note: held !== null || bill.totalMismatch || bill.flaggedDenylist,
   }[body.action];
   if (!fits) return { code: "COUNTER_BILL_ACTION_REFUSED" };
 

@@ -151,6 +151,29 @@ describe("counter bill sync (#51)", () => {
     expect(await count("stock_movements WHERE kind = 'sale'")).toBe(0);
   });
 
+  it("flags a bill whose manual line matches the denylist without blocking the shop (#69, CAT-8)", async () => {
+    const { pack, bill, send } = await shop();
+    await pack();
+    const manualLines = [{ name: "King cigarette", count: 1, unitPrice: "20" }];
+    const cleanLines = [{ name: "Carry bag", count: 1, unitPrice: "5" }];
+
+    const rows = await send([
+      bill([], { payload: { lines: [], manualLines, total: "20.00", payment: "cash" } }),
+      bill([], { payload: { lines: [], manualLines: cleanLines, total: "5.00", payment: "upi" } }),
+    ]);
+
+    expect(rows[0]?.result).toMatchObject({ number: 1, heldReason: null });
+    expect(rows[1]?.result).toMatchObject({ number: 2, heldReason: null });
+
+    const { rows: flagRows } = await database.pool.query<{ number: number; flaggedDenylist: boolean }>(
+      'SELECT number, flagged_denylist AS "flaggedDenylist" FROM counter_bills ORDER BY number'
+    );
+    expect(flagRows).toEqual([
+      { number: 1, flaggedDenylist: true },
+      { number: 2, flaggedDenylist: false },
+    ]);
+  });
+
   it("holds a bill with an unreadable customer or a name the database cannot keep, without stalling the batch", async () => {
     const { pack, bill, send } = await shop();
     const rice = await pack();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreateCategoryBody, CreateMasterProductBody, EditCategoryBody, EditMasterProductBody, ErrorEnvelope, invalidFields, SearchTermBody } from "../src/index";
+import { CreateCategoryBody, CreateMasterProductBody, DenylistWordBody, EditCategoryBody, EditMasterProductBody, ErrorEnvelope, invalidFields, SearchTermBody } from "../src/index";
 
 const body = {
   name: "Apples",
@@ -56,5 +56,18 @@ describe("search term contracts (#397)", () => {
     const result = SearchTermBody.safeParse({ typedWord: word, catalogWord: word });
     if (result.success) throw new Error("expected the word to be refused");
     expect(invalidFields(result.error)).toEqual(["typedWord", "catalogWord"]);
+  });
+});
+
+describe("denylist word contracts (#69)", () => {
+  it("normalizes lowercase letters, digits and single spaces", () => {
+    expect(DenylistWordBody.parse({ word: "  Cough   Syrup " })).toEqual({ word: "cough syrup" });
+    expect(DenylistWordBody.parse({ word: "2g vape" })).toEqual({ word: "2g vape" });
+  });
+
+  it.each(["a", "a".repeat(61), "cough-syrup", "daru!", "   ", "whisky_rum"])("refuses %j", (word) => {
+    const result = DenylistWordBody.safeParse({ word });
+    if (result.success) throw new Error("expected the word to be refused");
+    expect(invalidFields(result.error)).toEqual(["word"]);
   });
 });

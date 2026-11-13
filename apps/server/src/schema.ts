@@ -374,6 +374,7 @@ export const shopQuantityPriceOptions = pgTable("shop_quantity_price_options", {
   name: text("name").notNull(),
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+  flagged: boolean("flagged").notNull().default(false),
 }, (table) => [
   uniqueIndex("shop_quantity_price_options_quantity_idx").on(table.listingId, table.quantity),
   check("shop_quantity_price_options_valid", sql`${table.quantity} > 0 AND ${table.quantity} <> 'NaN'::numeric AND ${table.price} >= 0 AND ${table.price} <> 'NaN'::numeric`),
@@ -443,6 +444,8 @@ export const counterBills = pgTable("counter_bills", {
   total: numeric("total", { precision: 20, scale: 2 }),
   checkedTotal: numeric("checked_total", { precision: 20, scale: 2 }),
   totalMismatch: boolean("total_mismatch").notNull().generatedAlwaysAs(sql`COALESCE(total <> checked_total, false)`),
+  // True when a manual line matched an excluded-goods denylist word (CAT-8, #69).
+  flaggedDenylist: boolean("flagged_denylist").notNull().default(false),
   // Rupees taken off the lines' sum (#53); the checked total is that sum less this.
   discount: numeric("discount", { precision: 20, scale: 2 }).notNull().default("0"),
   // Who the bill is for, if the shop typed it (BIL-1). Never shown to Admin; the offers tick needs a phone.
@@ -1137,6 +1140,7 @@ export const pushReceipts = pgTable("push_receipts", {
 // Words that flag a product request for Admin and never block it (CAT-8, #62). Stored normalized: lowercase letters and digits, single spaces.
 export const denylistWords = pgTable("denylist_words", {
   word: text("word").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [check("denylist_words_normalized", sql`${table.word} ~ '^[a-z0-9]+( [a-z0-9]+)*$'`)]);
 
 // A shop's request for a product the catalog lacks (CAT-3, #62). It owns a temporary unpublished product, pack and listing,
