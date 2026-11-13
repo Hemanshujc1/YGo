@@ -18,7 +18,7 @@ const text = (html: string) => html.replace(/<style>[\s\S]*<\/style>/, "").repla
 describe("the statement PDF (#630, MNY-12)", () => {
   it("says on its face that it is not a tax invoice, with the number, the shop, the week, the due date and the total", () => {
     const page = text(statementHtml({ statement, fonts }));
-    for (const part of ["Statement 7", "Sai &amp; Sons", "12 &lt;MG&gt; Road", "411038", `Due ${formatDayMonthYear("2026-11-16")}`, "Total owed to YGo ₹107.50", "not a tax invoice"]) {
+    for (const part of ["Statement 7", "Sai &amp; Sons", "12 &lt;MG&gt; Road", "411038", `Due ${formatDayMonthYear("2026-11-16")}`, "Total owed to YGo ₹107.50", "This is not a tax invoice. No GST is charged.", "Delivery · ", "Pickup · "]) {
       expect(page).toContain(part);
     }
   });

@@ -18,7 +18,7 @@ const isZero = (amount: string) => toPaise(amount) === 0n;
  * only, never profit (MNY-11). Always light, in Inter with tabular figures, amounts through @ygo/format.
  */
 export function statementHtml({ statement, fonts }: { statement: Statement; fonts: BillFonts }): string {
-  const rows = statement.lines.map((line) => `<tr><td>${words.order(line.orderNumber)}${line.late ? ` <span class="late">${words.late}</span>` : ""}<br><span class="muted">${formatDateTime(line.completedAt)}</span></td>
+  const rows = statement.lines.map((line) => `<tr><td>${words.order(line.orderNumber)}${line.late ? ` <span class="late">${words.late}</span>` : ""}<br><span class="muted">${words.fulfilment[line.fulfilment]} · ${formatDateTime(line.completedAt)}</span></td>
 <td class="n">${money(line.orderTotal)}</td><td class="n">${money(line.commission)}</td><td class="n">${money(line.feeShare)}</td><td class="n">${money(line.bookingFees)}</td>
 <td class="n">${isZero(line.platformCoupon) ? "–" : `−${money(line.platformCoupon)}`}</td><td class="n owed">${money(line.owed)}</td></tr>`).join("");
   const address = [statement.shopAddress, statement.shopPincode].filter(Boolean).map((part) => escape(part ?? "")).join(", ");

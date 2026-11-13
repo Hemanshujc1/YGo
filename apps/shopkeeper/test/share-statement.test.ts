@@ -24,9 +24,9 @@ describe("sharing a statement PDF (#630)", () => {
   it("makes the PDF on the phone, names it after the statement, and opens the share sheet", async () => {
     const { shareStatement } = await import("../src/lib/share-statement");
     await shareStatement(statement);
-    expect(io.html[0]).toContain("not a tax invoice");
+    expect(io.html[0]).toContain("This is not a tax invoice. No GST is charged.");
     expect(io.shared).toHaveLength(1);
-    expect(io.shared[0]?.uri).toContain("YGo statement 7.pdf");
+    expect(io.shared[0]?.uri).toContain("YGo statement #7.pdf");
     expect(io.shared[0]?.options).toMatchObject({ mimeType: "application/pdf" });
   });
 

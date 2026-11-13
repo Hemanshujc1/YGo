@@ -108,7 +108,7 @@ describe("a statement (#630)", () => {
 
   it("shows its week, the due date, each order, the total and that it is not a tax invoice", async () => {
     const shown = texts(await open());
-    for (const part of [strings.money.notTaxInvoice, "₹107.50", "Order #1001", "Order #1002", strings.money.late]) expect(shown.join("|")).toContain(part);
+    for (const part of [strings.money.notTaxInvoice, "₹107.50", "Order #1001", "Order #1002", strings.money.late, "Delivery · ", "Pickup · "]) expect(shown.join("|")).toContain(part);
   });
 
   it("shares the statement as a PDF made on the phone", async () => {

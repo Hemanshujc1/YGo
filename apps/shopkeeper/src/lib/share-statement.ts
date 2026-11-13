@@ -9,7 +9,7 @@ import { statementHtml } from "./statement-pdf";
 
 /**
  * Makes the statement's PDF on the phone and opens the share sheet (#630), the way a counter bill's is (share-bill.ts): A4 at 72 points an inch,
- * in a share folder of its own so the file is named "YGo statement 7.pdf", and kept with the bill PDFs so the same cleanup and sign-out clear cover it.
+ * in a share folder of its own so the file is named "YGo statement #7.pdf", and kept with the bill PDFs so the same cleanup and sign-out clear cover it.
  * The caller shares one at a time (its button waits), and the server makes no PDF.
  */
 export async function shareStatement(statement: Statement): Promise<void> {

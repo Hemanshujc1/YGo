@@ -27,7 +27,7 @@ function Line({ line, open, toggle }: { line: StatementLine; open: boolean; togg
         <Text className="text-body font-semibold text-text">{line.late ? `${words.order(line.orderNumber)} · ${words.late}` : words.order(line.orderNumber)}</Text>
         <Text className="text-body font-semibold text-text">{money(line.owed)}</Text>
       </View>
-      <Text className="text-body text-muted">{formatDateTime(line.completedAt)}</Text>
+      <Text className="text-body text-muted">{`${words.fulfilment[line.fulfilment]} · ${formatDateTime(line.completedAt)}`}</Text>
       {open && <View className="gap-1 border-t border-border pt-2">
         <Part label={words.orderTotal} amount={line.orderTotal} />
         <Part label={words.commission} amount={line.commission} />
