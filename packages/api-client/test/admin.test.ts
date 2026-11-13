@@ -56,6 +56,7 @@ const answer = (status: number, body?: unknown) =>
 
 interface Call {
   path: string;
+  search: string;
   method: string;
   headers: Headers;
   credentials: RequestCredentials | undefined;
@@ -71,6 +72,7 @@ function setup(handle: (call: Call) => Response | Promise<Response>) {
     fetch: async (input, init) => {
       const call: Call = {
         path: new URL(String(input)).pathname,
+        search: new URL(String(input)).search,
         method: init?.method ?? "GET",
         headers: new Headers(init?.headers),
         credentials: init?.credentials,
@@ -203,6 +205,23 @@ describe("Admin browser API client", () => {
       [`/v1/admin/orders/${id}`, "GET", undefined],
       [`/v1/admin/orders/${id}/force-transition`, "POST", { from: "placed", to: "expired", reason: "Stuck" }],
     ]);
+  });
+
+  it("reads statements, one statement and the shop balances, with the week and page asked for (#631)", async () => {
+    const id = "00000000-0000-4000-8000-000000000a01";
+    const list = { statements: [], nextBefore: null };
+    const { client, calls } = setup(({ path }) => path.endsWith("/refresh") ? answer(200, { accessToken: "access-1", account }) : path.includes("/shop-balances") ? answer(200, { balances: [] }) : answer(200, list));
+    expect(await client.listStatements()).toEqual({ ok: true, data: list });
+    expect((await client.listStatements({ week: "2026-11-02", before: 8, limit: 10 })).ok).toBe(true);
+    expect(await client.shopBalances()).toEqual({ ok: true, data: { balances: [] } });
+    expect(calls.slice(1).map(({ path, search, method }) => [path + search, method])).toEqual([
+      ["/v1/admin/statements", "GET"],
+      ["/v1/admin/statements?week=2026-11-02&before=8&limit=10", "GET"],
+      ["/v1/admin/shop-balances", "GET"],
+    ]);
+    // A bad id never reaches the server as a path of its own.
+    await client.getStatement(`${id}/../x`);
+    expect(calls[calls.length - 1]?.path).toBe(`/v1/admin/statements/${encodeURIComponent(`${id}/../x`)}`);
   });
 
   it("reads a shop's fulfilment modes and forces one off or lifts it (#65)", async () => {

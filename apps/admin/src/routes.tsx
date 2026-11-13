@@ -34,6 +34,8 @@ import { fieldMessages } from "./lib/field-messages";
 import { strings } from "./strings";
 import { Waitlist } from "./waitlist";
 import { Customers } from "./customers";
+import { StatementDetail, StatementPrint } from "./statement-detail";
+import { Statements, type StatementsPage } from "./statements";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
 type Field = keyof CreateAdminBody;
@@ -62,6 +64,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/accounts", label: strings.accounts },
     { path: "/customers", label: strings.customers },
     { path: "/orders", label: strings.liveOrders },
+    { path: "/statements", label: strings.statements.title },
     { path: "/categories", label: strings.categories },
     { path: "/rate-cards", label: strings.rateCards },
     { path: "/price-simulator", label: strings.priceSimulator },
@@ -375,6 +378,21 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
     throw new Error(result.code);
   };
+  const failed = (code: string) => { if (code === "UNAUTHENTICATED" || code === "FORBIDDEN") return redirect("/sign-in"); throw new Error(code); };
+  const statementsLoader: LoaderFunction = async () => {
+    const [balances, list] = await Promise.all([api.shopBalances(), api.listStatements()]);
+    if (!balances.ok) return failed(balances.code);
+    if (!list.ok) return failed(list.code);
+    return { balances: balances.data.balances, ...list.data } satisfies StatementsPage;
+  };
+  const statementLoader: LoaderFunction = async ({ params }) => {
+    const id = params.id;
+    if (!id) throw new Error(strings.notFound);
+    const result = await api.getStatement(id);
+    if (result.ok) return result.data;
+    if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in");
+    throw new Error(result.code);
+  };
   const belowFloorExceptionsLoader = listLoader(() => api.listBelowFloorExceptions(), (data) => data);
   const applicationLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
@@ -581,6 +599,28 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       areaManager: orderLoader,
       element: <Page protectedArea api={api}><OrderDetail api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.orderDetailLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    // A18 Statements, Admin only: Area Managers are sent to Applications and the server refuses them too (ADM-6, #631).
+    guarded({
+      path: "/statements",
+      loader: statementsLoader,
+      element: <Page protectedArea api={api}><Statements api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.statements.loading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/statements/:id",
+      loader: statementLoader,
+      element: <Page protectedArea api={api}><StatementDetail /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.statements.detailLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/statements/:id/print",
+      loader: statementLoader,
+      element: <StatementPrint />,
+      hydrateFallbackElement: <p>{strings.statements.detailLoading}</p>,
       errorElement: <RouteError api={api} />,
     }),
     // Below contribution floor exceptions queue (A30, MNY-4, ADM-7, #529).

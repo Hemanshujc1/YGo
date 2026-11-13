@@ -57,6 +57,10 @@ import {
   BelowFloorException,
   BelowFloorExceptionsResponse,
   AdminOrderDetail,
+  AdminStatementsResponse,
+  ShopBalancesResponse,
+  Statement,
+  type AdminStatementsQuery,
   AdminOrdersResponse,
   type AdminOrderGroup,
   type ForceTransitionBody,
@@ -450,6 +454,23 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** `GET /v1/admin/orders/:id`: A15, one order with its frozen lines and money, timeline and the moves Admin may force. */
     async getAdminOrder(id: string): Promise<ApiResult<AdminOrderDetail>> {
       return result(await adminRequest("GET", `/v1/admin/orders/${encodeURIComponent(id)}`), AdminOrderDetail);
+    },
+
+    /** `GET /v1/admin/statements`: A18, a page of every shop's weekly statements, newest first; `week` is one week's Monday, `before` the last number already shown (#631). */
+    async listStatements(query: Partial<Pick<AdminStatementsQuery, "week" | "before" | "limit">> = {}): Promise<ApiResult<AdminStatementsResponse>> {
+      const text = new URLSearchParams();
+      if (query.week) text.set("week", query.week);
+      if (query.before !== undefined) text.set("before", String(query.before));
+      if (query.limit !== undefined) text.set("limit", String(query.limit));
+      return result(await adminRequest("GET", `/v1/admin/statements${text.toString() ? `?${text}` : ""}`), AdminStatementsResponse);
+    },
+    /** `GET /v1/admin/statements/:id`: one whole statement of any shop (#631). */
+    async getStatement(id: string): Promise<ApiResult<Statement>> {
+      return result(await adminRequest("GET", `/v1/admin/statements/${encodeURIComponent(id)}`), Statement);
+    },
+    /** `GET /v1/admin/shop-balances`: each shop that owes anything, most owed first (#631). */
+    async shopBalances(): Promise<ApiResult<ShopBalancesResponse>> {
+      return result(await adminRequest("GET", "/v1/admin/shop-balances"), ShopBalancesResponse);
     },
 
     /** `POST /v1/admin/orders/:id/force-transition`: Admin only; ORDER_STATUS_CHANGED when the order moved since it was shown (ADM-4, ORD-1). */
