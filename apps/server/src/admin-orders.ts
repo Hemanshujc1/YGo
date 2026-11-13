@@ -81,7 +81,7 @@ type DetailRow = AdminOrderDetail["order"] & AdminOrderDetail["money"] & { quote
 /** One order for A15, or null when it does not exist or is outside the caller's scope. Only Admin is offered a forced move (ADM-12). */
 export async function adminOrderDetail(db: Db, areaManagerId: string | null, id: string, now: Date): Promise<AdminOrderDetail | null> {
   const { rows: [row] } = await db.query<DetailRow>(
-    `SELECT ${summarySql}, ${current("product_value")} AS "productValue", ${current("shop_discount")} AS "shopDiscount", ${current("delivery_fee")} AS "deliveryFee",
+    `SELECT ${summarySql}, ${current("product_value")} AS "productValue", ${current("shop_discount")} AS "shopDiscount", ${current("shop_coupon")} AS "shopCoupon", ${current("platform_coupon")} AS "platformCoupon", ${current("delivery_fee")} AS "deliveryFee",
        ${current("small_cart_fee")} AS "smallCartFee", ${current("pickup_fee")} AS "pickupFee", ${current("quote", "jsonb")} AS quote, d.name AS "delivererName"
      ${scope} AND o.id = $4`, [areaManagerId, orderTiming.reRingSeconds, now, id]);
   if (!row) return null;
@@ -103,12 +103,12 @@ export async function adminOrderDetail(db: Db, areaManagerId: string | null, id:
   // Offline deliveries the server refused or held: Admin settles them with a forced move (#616).
   const { rows: issues } = await db.query<{ action: string; code: string; at: Date; clockSuspect: boolean }>(
     'SELECT action, code, created_at AS at, clock_suspect AS "clockSuspect" FROM offline_delivery_issues WHERE order_id = $1 ORDER BY created_at, action_id', [id]);
-  const { quote, delivererName, productValue, shopDiscount, deliveryFee, smallCartFee, pickupFee, ...order } = row;
+  const { quote, delivererName, productValue, shopDiscount, shopCoupon, platformCoupon, deliveryFee, smallCartFee, pickupFee, ...order } = row;
   const breakdown = AdminOrderBreakdown.safeParse(quote);
   return {
     order,
     lines,
-    money: { productValue, shopDiscount, deliveryFee, smallCartFee, pickupFee, total: order.total },
+    money: { productValue, shopDiscount, shopCoupon, platformCoupon, deliveryFee, smallCartFee, pickupFee, total: order.total },
     breakdown: breakdown.success ? breakdown.data : null,
     timeline,
     offlineDeliveryIssues: issues.map((issue) => ({ ...issue, at: issue.at.toISOString() })),

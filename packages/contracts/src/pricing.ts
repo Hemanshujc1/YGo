@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { RateCardKey, RateCardScope, RateCardSource, RateCardValues } from "./rate-cards";
 import { PackQuantity, RateCardVersion, ShopPrice } from "./fields";
+import { CouponCode, CouponReason } from "./coupons";
 
 export const LineCount = z.number().int().min(1).max(999);
 
@@ -19,12 +20,43 @@ export const PriceSimulatorBody = z.strictObject({
   shopId: z.uuid(),
   lines: z.array(QuoteLine).min(1).max(100),
   draft: RateCardDraft.optional(),
+  /** A saved coupon to try on this basket, by its code (ADM-5, MNY-10); the quote says whether it applied and, if not, why. */
+  couponCode: CouponCode.optional(),
 });
 export type PriceSimulatorBody = z.infer<typeof PriceSimulatorBody>;
 
 /** Rupees with exactly two decimals, as the SQL engine writes them; what the shop keeps can go below zero. */
 export const Amount = z.string().regex(/^-?\d+\.\d{2}$/);
 const SplitFee = z.strictObject({ amount: Amount, platformShare: Amount, shopShare: Amount });
+
+/** The coupon on a cart: what it took off when it applied, or why it did not. Never says who pays (MNY-11). */
+export const AppliedCoupon = z.strictObject({
+  code: z.string(),
+  applied: z.boolean(),
+  amount: Amount,
+  reason: CouponReason.nullable(),
+});
+export type AppliedCoupon = z.infer<typeof AppliedCoupon>;
+
+/** A coupon this cart could take now, with what it would take off; ones that cannot apply are left out (FR-CRT-07). */
+export const CartCouponsResponse = z.strictObject({
+  coupons: z.array(z.strictObject({ id: z.uuid(), code: z.string(), amount: Amount })),
+});
+export type CartCouponsResponse = z.infer<typeof CartCouponsResponse>;
+
+/** What the pricing engine did with the coupon, with the funding amounts kept apart (MNY-6). */
+export const QuotedCoupon = z.strictObject({
+  couponId: z.uuid(),
+  couponVersion: z.number().int().positive(),
+  code: z.string(),
+  funding: z.enum(["platform", "shop"]),
+  applied: z.boolean(),
+  /** Null when it applied; otherwise why not. */
+  reason: CouponReason.nullable(),
+  shopFunded: Amount,
+  platformFunded: Amount,
+});
+export type QuotedCoupon = z.infer<typeof QuotedCoupon>;
 
 export const QuoteReasonCode = z.enum(["BELOW_MINIMUM_CART", "BELOW_CONTRIBUTION_FLOOR"]);
 export const QuoteReason = z.strictObject({ code: QuoteReasonCode, shortfall: Amount });
@@ -48,8 +80,10 @@ export const PricedQuote = z.strictObject({
   sources: z.partialRecord(RateCardKey, RateCardSource),
   /** Before any discount, fees and taxes. */
   productValue: Amount,
-  /** The shop-funded discount and the rule it came from, or null when none applied. A platform-funded amount will be its own field (#70). */
+  /** The shop-funded discount and the rule it came from, or null when none applied. A coupon's funding amounts are in `coupon`, never added here (MNY-6). */
   shopDiscount: z.strictObject({ amount: Amount, ruleId: z.uuid(), ruleVersion: z.number().int().positive() }).nullable(),
+  /** The coupon the quote was asked to apply and what became of it; null when none was asked (#70). Never beside a shop-wide discount (D-7). */
+  coupon: QuotedCoupon.nullable().optional(),
   commission: Amount,
   deliveryFee: SplitFee,
   /** Null when the basket is not below an enabled small-cart threshold. */

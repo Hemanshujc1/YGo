@@ -213,6 +213,9 @@ export {
   PriceSimulatorBody,
   QuoteReasonCode,
   QuoteReason,
+  AppliedCoupon,
+  CartCouponsResponse,
+  QuotedCoupon,
   PricedQuote,
   IncompleteQuote,
   DeliveredQuote,
@@ -258,6 +261,18 @@ export {
   ShopDiscountRule,
   ShopDiscountStatus,
 } from "./shop-discount";
+export {
+  AdminCouponBody,
+  CartCouponBody,
+  Coupon,
+  CouponCode,
+  CouponParams,
+  CouponReason,
+  CouponResponse,
+  CouponsResponse,
+  CouponStatus,
+  OwnerCouponBody,
+} from "./coupons";
 export { ReceiptResponse } from "./receipt";
 export { FeedQuery, FeedResponse, FeedShop, PartPack, SearchProduct, SearchQuery, SearchResponse, SearchShop, ShopPagePack, ShopPageParams, ShopPageProduct, ShopPageResponse } from "./feed";
 export { CartLine, CartParams, CartQuote, CartReason, CartResponse, PickupQuote, SaveCartBody } from "./cart";

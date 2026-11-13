@@ -19,6 +19,7 @@ import { CatalogImport } from "./catalog-import";
 import { CounterBills } from "./counter-bills";
 import { FulfilmentModes } from "./fulfilment-modes";
 import { SearchTerms } from "./search-terms";
+import { Coupons } from "./coupons";
 import { PriceSimulator } from "./price-simulator";
 import { ProductRequests } from "./product-requests";
 import { ProofExceptions } from "./proof-exceptions";
@@ -62,6 +63,7 @@ function Page({ children, protectedArea = false, api }: { children: ReactNode; p
     { path: "/categories", label: strings.categories },
     { path: "/rate-cards", label: strings.rateCards },
     { path: "/price-simulator", label: strings.priceSimulator },
+    { path: "/coupons", label: strings.coupons },
     { path: "/products", label: strings.products },
     { path: "/product-requests", label: strings.productRequests },
     { path: "/search-terms", label: strings.searchTerms },
@@ -424,6 +426,22 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
       loader: rateCardLoader,
       element: <Page protectedArea api={api}><RateCards api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.rateCardsLoading}</Page>,
+      errorElement: <RouteError api={api} />,
+    }),
+    guarded({
+      path: "/coupons",
+      loader: async () => {
+        const [coupons, categories, shops, areas] = await Promise.all([api.listCoupons(), api.listCategories(), api.listShopApplications(), api.listAreas()]);
+        const failed = [coupons, categories, shops, areas].find((answer) => !answer.ok);
+        if (failed && !failed.ok) {
+          if (["UNAUTHENTICATED", "FORBIDDEN"].includes(failed.code)) return redirect("/sign-in");
+          throw new Error(strings.failed);
+        }
+        if (!coupons.ok || !categories.ok || !shops.ok || !areas.ok) throw new Error(strings.failed);
+        return { coupons: coupons.data.coupons, categories: categories.data.categories, shops: shops.data.applications, areas: areas.data.areas };
+      },
+      element: <Page protectedArea api={api}><Coupons api={api} /></Page>,
+      hydrateFallbackElement: <Page protectedArea api={api}>{strings.couponsLoading}</Page>,
       errorElement: <RouteError api={api} />,
     }),
     guarded({

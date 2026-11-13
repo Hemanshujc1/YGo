@@ -85,6 +85,8 @@ export function OrderDetail({ api }: { api: AdminApi }) {
           {([
             [strings.orderDetailProductValue, money.productValue],
             [strings.orderDetailShopDiscount, money.shopDiscount],
+            [strings.orderDetailShopCoupon, Number(money.shopCoupon) > 0 ? money.shopCoupon : null],
+            [strings.orderDetailPlatformCoupon, Number(money.platformCoupon) > 0 ? money.platformCoupon : null],
             [strings.orderDetailDeliveryFee, money.deliveryFee],
             [strings.orderDetailSmallCartFee, money.smallCartFee],
             [strings.orderDetailPickupFee, money.pickupFee],

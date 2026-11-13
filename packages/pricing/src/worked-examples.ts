@@ -2,7 +2,7 @@
  * The revenue specification's delivered-route scenarios, written once as inputs and expected amounts (Q-6).
  * The server's tests publish each example's cards, run its basket through the public price simulator
  * and compare every amount. The spec gives symbols only; these are concrete stand-ins chosen by #357.
- * The shop-wide discount scenarios (#63) set the shop's rule first; coupon scenarios join with #70.
+ * The shop-wide discount scenarios (#63) set the shop's rule first; the coupon scenarios (#70) then name a coupon to try. At most one promotion applies (D-7).
  */
 
 export type ExampleCard = {
@@ -24,6 +24,12 @@ export type ExampleShopDiscount =
   | { form: "percentage"; percentage: string; cap?: string }
   | { form: "flat"; amount: string; minimumOrder: string };
 
+/** A coupon saved before the basket is priced (CRT-3, #70). Shop-funded ones are the quoted shop's own. */
+export type ExampleCoupon = { funding: "platform" | "shop" } & (
+  | { form: "percentage"; percentage: string; cap?: string; minimumOrder?: string }
+  | { form: "flat"; amount: string; minimumOrder?: string }
+);
+
 type Fee = { amount: string; platformShare: string; shopShare: string };
 
 export type DeliveredExample = {
@@ -31,12 +37,16 @@ export type DeliveredExample = {
   cards: ExampleCard[];
   lines: ExampleLine[];
   shopDiscount?: ExampleShopDiscount;
+  /** The coupon the quote is asked to try; its `expected.coupon` says whether it applied and the two funding amounts apart (MNY-6). */
+  coupon?: ExampleCoupon;
   expected: {
     /** `shopDiscount` is each line's part in paise; the parts add up to the order's (MNY-6). */
     lines: Array<{ lineTotal: string; commission: string; shopDiscount?: string }>;
     productValue: string;
-    /** The shop-funded amount; absent where an example has no discount. */
+    /** The shop-wide discount's amount; absent where an example has none. It is 0 when a coupon applied instead (D-7). */
     shopDiscount?: string;
+    /** What became of the coupon: whether it applied, why not, and what each side pays. The parts on `lines` add up to the shop-wide amount plus `shopFunded`. */
+    coupon?: { applied: boolean; reason: string | null; shopFunded: string; platformFunded: string };
     commission: string;
     deliveryFee: Fee;
     smallCartFee: Fee | null;
@@ -260,6 +270,99 @@ export const DELIVERED_EXAMPLES: DeliveredExample[] = [
       lines: [{ lineTotal: "120.00", commission: "10.80", shopDiscount: "12.00" }, { lineTotal: "80.00", commission: "7.20", shopDiscount: "8.00" }],
       productValue: "200.00", shopDiscount: "20.00", commission: "18.00", deliveryFee: standardDelivery, smallCartFee: null,
       customerTotal: "210.00", shopKeeps: "186.00", platformContribution: "24.00", placeable: true, reasons: [],
+    },
+  },
+
+  // Coupons (#70): ₹200 earns the platform 20 commission and 6 of the delivery, 26 against the ₹15 floor, a surplus of 11 to spend.
+  {
+    name: "Shop-funded coupon: comes off the commission base and the shop alone pays it",
+    cards: [globalCard()],
+    coupon: { funding: "shop", form: "percentage", percentage: "10" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "18.00", shopDiscount: "20.00" }], productValue: "200.00", commission: "18.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "210.00", shopKeeps: "186.00", platformContribution: "24.00", placeable: true, reasons: [],
+      coupon: { applied: true, reason: null, shopFunded: "20.00", platformFunded: "0.00" },
+    },
+  },
+  {
+    name: "Platform-funded coupon within the surplus: commission stays on the full base and the platform pays it",
+    cards: [globalCard()],
+    coupon: { funding: "platform", form: "percentage", percentage: "5" },
+    lines: [{ category: "Groceries", unitPrice: "400.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "400.00", commission: "40.00", shopDiscount: "0.00" }], productValue: "400.00", commission: "40.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "410.00", shopKeeps: "384.00", platformContribution: "26.00", placeable: true, reasons: [],
+      coupon: { applied: true, reason: null, shopFunded: "0.00", platformFunded: "20.00" },
+    },
+  },
+  {
+    name: "Platform-funded percentage coupon trimmed to the surplus above the floor",
+    cards: [globalCard()],
+    coupon: { funding: "platform", form: "percentage", percentage: "10" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "20.00", shopDiscount: "0.00" }], productValue: "200.00", commission: "20.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "219.00", shopKeeps: "204.00", platformContribution: "15.00", placeable: true, reasons: [],
+      coupon: { applied: true, reason: null, shopFunded: "0.00", platformFunded: "11.00" },
+    },
+  },
+  {
+    name: "Platform-funded flat coupon the surplus cannot pay in full is not applied",
+    cards: [globalCard()],
+    coupon: { funding: "platform", form: "flat", amount: "50" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "20.00", shopDiscount: "0.00" }], productValue: "200.00", commission: "20.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "230.00", shopKeeps: "204.00", platformContribution: "26.00", placeable: true, reasons: [],
+      coupon: { applied: false, reason: "NO_ROOM", shopFunded: "0.00", platformFunded: "0.00" },
+    },
+  },
+  {
+    name: "Coupon below its minimum order takes nothing off",
+    cards: [globalCard()],
+    coupon: { funding: "shop", form: "percentage", percentage: "10", minimumOrder: "500" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "20.00", shopDiscount: "0.00" }], productValue: "200.00", commission: "20.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "230.00", shopKeeps: "204.00", platformContribution: "26.00", placeable: true, reasons: [],
+      coupon: { applied: false, reason: "BELOW_MINIMUM", shopFunded: "0.00", platformFunded: "0.00" },
+    },
+  },
+  {
+    name: "A coupon that takes more than the shop-wide discount applies alone, and the discount does not",
+    cards: [globalCard()],
+    shopDiscount: { form: "percentage", percentage: "5" },
+    coupon: { funding: "shop", form: "percentage", percentage: "10" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "18.00", shopDiscount: "20.00" }], productValue: "200.00", shopDiscount: "0.00", commission: "18.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "210.00", shopKeeps: "186.00", platformContribution: "24.00", placeable: true, reasons: [],
+      coupon: { applied: true, reason: null, shopFunded: "20.00", platformFunded: "0.00" },
+    },
+  },
+  {
+    name: "A coupon that takes less than the shop-wide discount is not applied",
+    cards: [globalCard()],
+    shopDiscount: { form: "percentage", percentage: "10" },
+    coupon: { funding: "platform", form: "percentage", percentage: "5" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "18.00", shopDiscount: "20.00" }], productValue: "200.00", shopDiscount: "20.00", commission: "18.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "210.00", shopKeeps: "186.00", platformContribution: "24.00", placeable: true, reasons: [],
+      coupon: { applied: false, reason: "BETTER_OFFER", shopFunded: "0.00", platformFunded: "0.00" },
+    },
+  },
+  {
+    name: "A coupon that ties the shop-wide discount gives way to the discount",
+    cards: [globalCard()],
+    shopDiscount: { form: "percentage", percentage: "10" },
+    coupon: { funding: "shop", form: "percentage", percentage: "10" },
+    lines: [{ category: "Groceries", unitPrice: "200.00", count: 1 }],
+    expected: {
+      lines: [{ lineTotal: "200.00", commission: "18.00", shopDiscount: "20.00" }], productValue: "200.00", shopDiscount: "20.00", commission: "18.00",
+      deliveryFee: standardDelivery, smallCartFee: null, customerTotal: "210.00", shopKeeps: "186.00", platformContribution: "24.00", placeable: true, reasons: [],
+      coupon: { applied: false, reason: "BETTER_OFFER", shopFunded: "0.00", platformFunded: "0.00" },
     },
   },
 ];

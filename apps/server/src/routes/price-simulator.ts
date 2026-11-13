@@ -1,16 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey, type RateCardResponse,
+  type CouponReason, type DeliveredQuote, ErrorEnvelope, PriceSimulatorBody, PriceSimulatorResponse, type RateCardDraft, type RateCardKey, type RateCardResponse,
   SimulatorListingsParams, SimulatorListingsResponse, type SimulatorListing,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
 import { adminSignedIn } from "../admin";
+import { couponAboveMaximum, couponByCode, couponCategoryEligibility, couponRefusal, engineCoupon, type CouponRow } from "../coupons";
 import { visibleListings } from "../listings";
 import { deriveKeys } from "../tokens";
 import { resolveRateCard } from "./rate-cards";
 
-/** `eligible: false` keeps a line out of the shop-wide discount; nothing sets it yet, a bargained line will (#63). */
+/** `eligible: false` keeps a line out of the shop-wide discount and any coupon; nothing sets it yet, a bargained line will (#63). */
 type BasketLine = { listingId: string; quantityOptionId: string | null; categoryId: string; unitPrice: string; count: number; eligible?: boolean };
 const ORDER_KEYS: RateCardKey[] = ["deliveryFee", "smallCartFee", "deliveredContributionFloor", "minimumCart"];
 
@@ -27,8 +28,19 @@ export async function latestRateCardVersion(pool: Pool | PoolClient): Promise<st
  * The delivered quote the cart will also use (MNY-10, MNY-15). TypeScript only picks the rules;
  * every amount comes from `pricing_delivered_quote` in PostgreSQL.
  */
+/** What the engine's coupon outcome means to a Customer; `applied` has none (#70). */
+const OUTCOME_REASON: Record<string, CouponReason> = {
+  nothing_eligible: "NOTHING_ELIGIBLE", below_minimum: "BELOW_MINIMUM", no_surplus: "NO_ROOM", exceeds_surplus: "NO_ROOM", beaten: "BETTER_OFFER",
+};
+
+/**
+ * `coupon` is the one coupon to try, with the reason it cannot go on this cart when it cannot (`couponRefusal`); a refused coupon takes nothing off and the quote
+ * says why. Like the shop-wide discount, a coupon applies only once customers can see it (`shopDiscounts`, #571), and a shop-funded one over the maximum of the
+ * card being quoted, a draft included, does not apply (D-12, MNY-10).
+ */
 export async function deliveredQuote(
   pool: Pool, shopId: string, lines: BasketLine[], shopDiscounts: boolean, version?: string, draft?: RateCardDraft, orderCard?: RateCardResponse,
+  coupon?: { row: CouponRow; refusal: CouponReason | null },
 ): Promise<DeliveredQuote> {
   // Order-level values resolve shop → global; resolving without a category ignores category cards (#357).
   const resolve = async (categoryId?: string) => {
@@ -50,20 +62,33 @@ export async function deliveredQuote(
     `SELECT id, version, form, trim_scale(percentage)::text AS percentage, trim_scale(cap)::text AS cap, trim_scale(flat_amount)::text AS amount,
         trim_scale(minimum_order)::text AS "minimumOrder"
       FROM shop_discounts WHERE shop_id = $1 AND status = 'active'`, [shopId]);
+  let refusal = coupon?.refusal ?? null;
+  const maximum = order.values.maximumShopDiscountPercentage?.value;
+  if (coupon && !refusal && typeof maximum === "string" && (await couponAboveMaximum(pool, coupon.row, maximum)).above) refusal = "NOT_AVAILABLE";
+  const trying = shopDiscounts && coupon && !refusal ? coupon.row : undefined;
+  const couponLines = trying ? await couponCategoryEligibility(pool, trying, lines.map((line) => line.categoryId)) : [];
   const input = {
-    lines: lines.map((line) => ({ unitPrice: line.unitPrice, count: line.count, eligible: line.eligible ?? true, commission: byCategory.get(line.categoryId)?.values.commission?.value })),
+    lines: lines.map((line, index) => ({
+      unitPrice: line.unitPrice, count: line.count, eligible: line.eligible ?? true, couponEligible: couponLines[index] ?? true, commission: byCategory.get(line.categoryId)?.values.commission?.value,
+    })),
+    coupon: trying ? engineCoupon(trying) : null,
     shopDiscount: rule ? { form: rule.form, percentage: rule.percentage, cap: rule.cap, amount: rule.amount, minimumOrder: rule.minimumOrder } : null,
     deliveryFee: order.values.deliveryFee?.value, smallCartFee: order.values.smallCartFee?.value ?? null,
     minimumCart: order.values.minimumCart?.value, deliveredContributionFloor: order.values.deliveredContributionFloor?.value,
   };
-  const { rows: [row] } = await pool.query<{ quote: Omit<Extract<DeliveredQuote, { status: "priced" }>, "status" | "rateCardVersion" | "sources" | "lines" | "shopDiscount"> & { shopDiscount: string; lines: Array<{ lineTotal: string; shopDiscount: string; commission: string }> } }>(
+  const { rows: [row] } = await pool.query<{ quote: Omit<Extract<DeliveredQuote, { status: "priced" }>, "status" | "rateCardVersion" | "sources" | "lines" | "shopDiscount" | "coupon"> & { shopDiscount: string; coupon: { applied: boolean; outcome: string; shopFunded: string; platformFunded: string } | null; lines: Array<{ lineTotal: string; shopDiscount: string; commission: string }> } }>(
     "SELECT pricing_delivered_quote($1::jsonb) AS quote", [JSON.stringify(input)]);
   if (!row) throw new Error("Pricing engine returned no quote");
   const sources: Extract<DeliveredQuote, { status: "priced" }>["sources"] = {};
   for (const key of ORDER_KEYS) { const entry = order.values[key]; if (entry) sources[key] = entry.source; }
-  const { shopDiscount, ...quote } = row.quote;
+  const { shopDiscount, coupon: engineResult, ...quote } = row.quote;
   return {
     ...quote, status: "priced", rateCardVersion: order.version, sources,
+    coupon: !coupon || !shopDiscounts ? null : {
+      couponId: coupon.row.id, couponVersion: coupon.row.version, code: coupon.row.code, funding: coupon.row.funding,
+      applied: engineResult?.applied ?? false, reason: engineResult?.applied ? null : refusal ?? OUTCOME_REASON[engineResult?.outcome ?? ""] ?? "NOT_AVAILABLE",
+      shopFunded: engineResult?.shopFunded ?? "0.00", platformFunded: engineResult?.platformFunded ?? "0.00",
+    },
     shopDiscount: rule && Number(shopDiscount) > 0 ? { amount: shopDiscount, ruleId: rule.id, ruleVersion: rule.version } : null,
     lines: lines.map((line, index) => {
       const commission = byCategory.get(line.categoryId)?.values.commission;
@@ -94,7 +119,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
 
   app.post("/v1/admin/price-simulator", { schema: { body: PriceSimulatorBody, response: { 200: PriceSimulatorResponse, ...errors } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
-    const { shopId, lines, draft } = request.body as PriceSimulatorBody;
+    const { shopId, lines, draft, couponCode } = request.body as PriceSimulatorBody;
     // Each line is a listing of this shop, or a quantity-price option of one; the unit price is read, never sent.
     const { rows } = await pool.query<Omit<BasketLine, "count">>(
       `SELECT listing.id AS "listingId", entry.line->>'quantityOptionId' AS "quantityOptionId",
@@ -114,7 +139,15 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
     const basket = rows.map((row, index) => ({ ...row, count: lines[index]?.count ?? 0 }));
     // Both quotes read the same cards.
     const pinned = await latestRateCardVersion(pool);
-    const [now, tried] = await Promise.all([deliveredQuote(pool, shopId, basket, shopDiscounts, pinned), draft && deliveredQuote(pool, shopId, basket, shopDiscounts, pinned, draft)]);
+    // A coupon to try, by its code: no Customer is on the simulator, so only the coupon's own terms, dates and total limit are tested (ADM-5, MNY-10).
+    // The maximum is tested per card in `deliveredQuote`, so a draft that raises it can let a paused coupon apply; 100 here keeps the live one from refusing first.
+    const row = couponCode ? await couponByCode(pool, couponCode) : undefined;
+    if (couponCode && !row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    const coupon = row && { row, refusal: await couponRefusal(pool, row, { accountId: null, shopId, now: clock.now(), bargained: false, maximum: "100" }) };
+    const [now, tried] = await Promise.all([
+      deliveredQuote(pool, shopId, basket, shopDiscounts, pinned, undefined, undefined, coupon),
+      draft && deliveredQuote(pool, shopId, basket, shopDiscounts, pinned, draft, undefined, coupon),
+    ]);
     return { now, draft: tried ?? null };
   });
 }

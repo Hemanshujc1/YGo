@@ -66,6 +66,9 @@ function Result({ result, labels }: { result: PriceSimulatorResponse; labels: st
   const figure = (render: (quote: Priced) => ReactNode) => columns.map(({ name, quote }) => <td key={name} className="p-3 tabular-nums">{quote.status === "priced" ? render(quote) : text.notPriced}</td>);
   const figures: Array<{ label: string; hint?: string; strong?: boolean; render: (quote: Priced) => ReactNode }> = [
     { label: text.productValue, render: (quote) => money(quote.productValue) },
+    { label: text.couponRow, render: (quote) => quote.coupon
+      ? quote.coupon.applied ? text.couponApplied(quote.coupon.code, money(quote.coupon.shopFunded), money(quote.coupon.platformFunded)) : text.couponNot(quote.coupon.code, text.couponReasons[quote.coupon.reason ?? "NOT_AVAILABLE"])
+      : text.none },
     { label: text.commission, render: (quote) => money(quote.commission) },
     { label: text.deliveryFee, render: (quote) => <Fee fee={quote.deliveryFee} source={quote.sources.deliveryFee} /> },
     { label: text.smallCartFee, render: (quote) => <Fee fee={quote.smallCartFee} source={quote.sources.smallCartFee} /> },
@@ -108,6 +111,7 @@ export function PriceSimulator({ api }: { api: Api }) {
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [badCounts, setBadCounts] = useState<string[]>([]);
   const [basketError, setBasketError] = useState("");
+  const [couponCode, setCouponCode] = useState("");
   const [draftOn, setDraftOn] = useState(false);
   const [draftType, setDraftType] = useState<RateCardScope["type"]>("global");
   const [draftCategoryId, setDraftCategoryId] = useState("");
@@ -162,6 +166,7 @@ export function PriceSimulator({ api }: { api: Api }) {
     const parsed = PriceSimulatorBody.safeParse({
       shopId, lines: basket.map((row) => ({ ...row.line, count: Number(counts[row.key]) })),
       ...(draftOn && draftScope ? { draft: { scope: draftScope, values: draftValues } } : {}),
+      ...(couponCode.trim() ? { couponCode: couponCode.trim() } : {}),
     });
     if (!parsed.success) {
       const issues = parsed.error.issues;
@@ -215,6 +220,9 @@ export function PriceSimulator({ api }: { api: Api }) {
           {hiddenBadCount && <p role="alert" className="mt-2 text-danger">{text.hiddenBadCount}</p>}
         </>}
         {basketError && <p role="alert" className="mt-4 text-danger">{basketError}</p>}
+      </div>
+      <div className="rounded-xl border border-border bg-surface p-6">
+        <label className="block max-w-md font-semibold">{text.tryCoupon}<input aria-label={text.couponCode} value={couponCode} onChange={(event) => setCouponCode(event.target.value)} className="mt-1 block h-10 w-full rounded-lg border border-border-strong bg-surface px-3 font-normal" /></label>
       </div>
       <div className="rounded-xl border border-border bg-surface p-6">
         <label className="flex min-h-10 items-center gap-2 font-semibold"><input className="h-10 w-10" type="checkbox" checked={draftOn} onChange={(event) => setDraftOn(event.target.checked)} />{text.tryDraft}</label>

@@ -195,7 +195,7 @@ export async function notifyShop(client: PoolClient, shopId: string, kind: "prod
  * Tells a shop's Owner, and only the Owner, something that belongs to no order, with its push queued, in the caller's transaction.
  * `dedupeKey` names the notice, so a retry of the step that sends it never tells the Owner twice (#63, NOT-6).
  */
-export async function notifyShopOwner(client: PoolClient, shopId: string, kind: "shop_discount_paused", title: string, body: string, at: Date, dedupeKey: string): Promise<void> {
+export async function notifyShopOwner(client: PoolClient, shopId: string, kind: "shop_discount_paused" | "coupon_paused", title: string, body: string, at: Date, dedupeKey: string): Promise<void> {
   await client.query(
     `WITH added AS (
        INSERT INTO notifications (account_id, app, kind, title, body, shop_id, dedupe_key, loud, created_at)

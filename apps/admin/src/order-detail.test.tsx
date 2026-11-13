@@ -13,7 +13,7 @@ const detail = (extra: Partial<AdminOrderDetail> = {}, order: Partial<AdminOrder
   order: { id, number: 1001, shopId: "00000000-0000-4000-8000-000000000a01", shopName: "Sai General Stores", customerName: "Meera", fulfilment: "delivery", status: "placed",
     placedAt: "2030-01-01T10:00:00.000Z", statusChangedAt: "2030-01-01T10:00:00.000Z", total: "150.00", statusAgeSeconds: 200, unanswered: true, ...order },
   lines: [{ name: "Atta", brand: "Aashirvaad", count: 2, partQuantity: null, packQuantity: "1.000", baseUnit: "kg", unitPrice: "65.00", lineTotal: "130.00" }],
-  money: { productValue: "130.00", shopDiscount: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" },
+  money: { productValue: "130.00", shopDiscount: "0.00", shopCoupon: "0.00", platformCoupon: "0.00", deliveryFee: "20.00", smallCartFee: null, pickupFee: null, total: "150.00" },
   breakdown: { rateCardVersion: "3", sources: { commission: { type: "global", id: null, version: "3" } }, commission: "13.00",
     deliveryFee: { amount: "20.00", platformShare: "10.00", shopShare: "10.00" }, smallCartFee: null, shopKeeps: "117.00", platformContribution: "23.00", reasons: [] },
   timeline: [{ at: "2030-01-01T10:00:00.000Z", from: null, to: "placed", actorRole: "customer", actorName: "Meera", reasonCode: null }],
