@@ -15,4 +15,5 @@ Closes #
 ## Reuse
 - [ ] Searched the shared packages and this app before adding any component, helper or type: <!-- what you searched for -->
 - [ ] Every changed line traces to the ticket
+- [ ] `/code-review` run before `pnpm check` and the first push; findings and answers listed above
 - [ ] New dependencies, if any, are justified above
