@@ -1922,6 +1922,124 @@
       },
       "isRLSEnabled": false
     },
+    "public.customer_blocks": {
+      "name": "customer_blocks",
+      "schema": "",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "phone_digest": {
+          "name": "phone_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_digest": {
+          "name": "email_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "blocked_at": {
+          "name": "blocked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "customer_blocks_phone_digest_idx": {
+          "name": "customer_blocks_phone_digest_idx",
+          "columns": [
+            {
+              "expression": "phone_digest",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "customer_blocks_email_digest_idx": {
+          "name": "customer_blocks_email_digest_idx",
+          "columns": [
+            {
+              "expression": "email_digest",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "customer_blocks_reason_valid": {
+          "name": "customer_blocks_reason_valid",
+          "value": "btrim(\"customer_blocks\".\"reason\") <> '' AND char_length(\"customer_blocks\".\"reason\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.customer_signup_settings": {
+      "name": "customer_signup_settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "customer_signup_settings_singleton": {
+          "name": "customer_signup_settings_singleton",
+          "value": "\"customer_signup_settings\".\"id\" = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.delivery_photo_uploads": {
       "name": "delivery_photo_uploads",
       "schema": "",
