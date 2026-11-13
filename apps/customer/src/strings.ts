@@ -559,6 +559,7 @@ export const strings = {
     COUPON_ABOVE_MAXIMUM: "This coupon is not available.",
     COUPON_CODE_TAKEN: "This coupon is not available.",
     COUPON_NOT_ELIGIBLE: "This coupon cannot be used on this order.",
+    COUPON_NOT_FOUND: "This coupon is not available.",
     CANCEL_REQUEST_CLOSED: "You already asked to cancel this order. You can call the shop.",
     DENYLIST_WORD_IN_USE: "Something changed. Try again.",
   } satisfies Record<ErrorCode, string>,

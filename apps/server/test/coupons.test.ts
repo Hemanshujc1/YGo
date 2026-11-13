@@ -483,7 +483,7 @@ describe("The price simulator tries a coupon (ADM-5, MNY-10, #70)", () => {
     const tried = await simulate({ shopId: owner.shopId, lines, couponCode: "SHOP10", draft: { scope: { type: "global" }, values: { ...card, maximumShopDiscountPercentage: "5" } } });
     expect(tried.now.coupon).toMatchObject({ applied: true });
     expect(tried.draft).toMatchObject({ customerTotal: "230.00", coupon: { applied: false, reason: "NOT_AVAILABLE" } });
-    expect((await simulate({ shopId: owner.shopId, lines, couponCode: "NOSUCH" })).error.code).toBe("NOT_FOUND");
+    expect((await simulate({ shopId: owner.shopId, lines, couponCode: "NOSUCH" })).error.code).toBe("COUPON_NOT_FOUND");
   });
 });
 

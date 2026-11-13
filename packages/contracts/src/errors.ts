@@ -184,6 +184,7 @@ export const ErrorCode = z.enum([
   "COUPON_ABOVE_MAXIMUM",
   "COUPON_CODE_TAKEN",
   "COUPON_NOT_ELIGIBLE",
+  "COUPON_NOT_FOUND",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

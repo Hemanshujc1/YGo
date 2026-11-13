@@ -1788,6 +1788,14 @@ describe("Price simulator (A05, #358)", () => {
     expect(await screen.findByText(strings.simulator.couponNot("PLAT10", strings.simulator.couponReasons.BETTER_OFFER))).toBeTruthy();
   });
 
+  it("says the code is not valid when no coupon has it", async () => {
+    await open({ simulatePrice: vi.fn().mockResolvedValue({ ok: false, status: 404, code: "COUPON_NOT_FOUND" }) });
+    count(riceLabel, "2");
+    fireEvent.change(screen.getByRole("textbox", { name: strings.simulator.couponCode }), { target: { value: "NOPE99" } });
+    calculate();
+    expect(await screen.findByText(strings.errors.COUPON_NOT_FOUND)).toBeTruthy();
+  });
+
   it("prices a basket of packs and quantity options, explaining what the shop keeps", async () => {
     const { api } = await open();
     expect(api.listSimulatorListings).toHaveBeenCalledWith(shop.id);

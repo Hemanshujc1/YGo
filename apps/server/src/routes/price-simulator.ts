@@ -142,7 +142,7 @@ export function registerPriceSimulatorRoutes(app: FastifyInstance, { pool, clock
     // A coupon to try, by its code: no Customer is on the simulator, so only the coupon's own terms, dates and total limit are tested (ADM-5, MNY-10).
     // The maximum is tested per card in `deliveredQuote`, so a draft that raises it can let a paused coupon apply; 100 here keeps the live one from refusing first.
     const row = couponCode ? await couponByCode(pool, couponCode) : undefined;
-    if (couponCode && !row) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+    if (couponCode && !row) return reply.code(404).send({ error: { code: "COUPON_NOT_FOUND" } });
     const coupon = row && { row, refusal: await couponRefusal(pool, row, { accountId: null, shopId, now: clock.now(), bargained: false, maximum: "100" }) };
     const [now, tried] = await Promise.all([
       deliveredQuote(pool, shopId, basket, shopDiscounts, pinned, undefined, undefined, coupon),
