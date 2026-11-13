@@ -44,7 +44,17 @@ export async function registerPush(device: PushDevice, projectId: string | undef
 export const ringsInFront = (data: unknown) => (data as { loud?: unknown } | null)?.loud === true;
 
 /** A tapped push: `key` is the tap's own identifier, the rest is the push's data (#505). */
-export type Tap = { key: string; notificationId: string; orderId: string | null };
+export type Tap = { key: string; notificationId: string; orderId: string | null; statementId: string | null };
+
+/**
+ * A tap from its push's data, or nothing for a push that is not YGo's. A push sent before statements (#629) has no `statementId`,
+ * and still opens as it always did: the field is read as null, never required.
+ */
+export function tapFrom(key: string, data: unknown): Tap | null {
+  const { notificationId, orderId, statementId } = (data ?? {}) as { notificationId?: unknown; orderId?: unknown; statementId?: unknown };
+  if (typeof notificationId !== "string") return null;
+  return { key, notificationId, orderId: typeof orderId === "string" ? orderId : null, statementId: typeof statementId === "string" ? statementId : null };
+}
 
 /** Whether the notification belongs to whoever is signed in, as the server answers when asked to mark it read. */
 export type Owner = "mine" | "not-mine" | "unknown";

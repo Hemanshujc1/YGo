@@ -355,6 +355,29 @@ export const strings = {
     refreshFailed: "You joined, but this phone could not open the shop yet. Check your connection and try again.",
     back: "Back",
   },
+  // S15 Money (#630): what the shop owes YGo and its weekly statements. Sales and amounts owed only, never profit (MNY-11), and never a tax invoice (MNY-12).
+  money: {
+    open: "Money", title: "Money", back: "Back", retry: "Try again", loading: "Loading your statements",
+    loadFailed: "Couldn't load your statements. Check your connection and try again.",
+    refreshFailed: "Couldn't refresh. This may be out of date.",
+    moreFailed: "Couldn't load older statements.", loadMore: "Load older statements",
+    balance: "What you owe YGo", onStatements: "On statements", thisWeek: "This week so far", total: "Total owed to YGo",
+    statements: "Weekly statements", none: "No statement for this week",
+    noneBody: "A statement is made every Monday for the orders completed before it.",
+    number: (number: number) => `Statement ${number}`,
+    week: (from: string, to: string) => `${from} – ${to}`,
+    due: (date: string) => `Due ${date}`,
+    orders: (count: number) => `${formatNumber(count)} ${count === 1 ? "order" : "orders"}`,
+    notTaxInvoice: "This is not a tax invoice.",
+    order: (number: number) => `Order #${number}`,
+    late: "Late", lateNote: "Orders completed before this week are marked late.",
+    owed: "Owed to YGo", orderTotal: "Order total", commission: "Commission", feeShare: "YGo's share of fees", bookingFees: "Booking fees", coupon: "YGo coupon",
+    share: "Share as PDF", sharing: "Making the PDF…", shareFailed: "Couldn't make the PDF. Try again.",
+    pdf: {
+      file: (number: number) => `YGo statement ${number}`, shareTitle: "Share statement",
+      issued: (date: string) => `Issued ${date}`, orders: "Orders", completed: "Completed",
+    },
+  },
   // S16 Staff and S20 Invite staff (#535): the Owner's people, their `can deliver` flag, and the one-time join code.
   staff: {
     open: "Staff", title: "Staff", back: "Back", retry: "Try again", loading: "Loading staff",

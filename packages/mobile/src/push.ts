@@ -8,7 +8,7 @@ import {
 import { Platform } from "react-native";
 import { createMMKV } from "react-native-mmkv";
 import { listeners } from "./listeners";
-import { type Ask, createPushTaps, type Owner, registerPush, ringsInFront, type Tap } from "./push-flow";
+import { type Ask, createPushTaps, type Owner, registerPush, ringsInFront, type Tap, tapFrom } from "./push-flow";
 import type { SessionState } from "./session";
 
 export type { Tap } from "./push-flow";
@@ -52,15 +52,7 @@ const device = {
 };
 
 /** The push's own data (#505), or nothing for a push that isn't YGo's. */
-function tapOf(response: NotificationResponse): Tap | null {
-  const data = response.notification.request.content.data as { notificationId?: unknown; orderId?: unknown } | null;
-  if (typeof data?.notificationId !== "string") return null;
-  return {
-    key: response.notification.request.identifier,
-    notificationId: data.notificationId,
-    orderId: typeof data.orderId === "string" ? data.orderId : null,
-  };
-}
+const tapOf = (response: NotificationResponse) => tapFrom(response.notification.request.identifier, response.notification.request.content.data);
 
 /**
  * Push for one app (#506): registers after each sign-in and each launch, opens a tapped push, and tells `onReceived`

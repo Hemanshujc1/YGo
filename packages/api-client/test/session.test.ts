@@ -518,6 +518,19 @@ describe("each call", () => {
     expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/v1/me/shop-staff/a%2Fb/deactivate" });
   });
 
+  it("reads the Owner's balance, a page of statements and one statement (#630)", async () => {
+    const page = { balance: { onStatements: "100.00", thisWeek: "7.50", total: "107.50" }, statements: [], nextBefore: null };
+    const id = "7d2e9a4c-6b1f-4c3a-8e5d-0f2a4b6c8d1e";
+    const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, page));
+    await client.verifyCode(signIn);
+    expect(await client.myStatements()).toEqual({ ok: true, data: page });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/statements" });
+    await client.myStatements({ before: 7, limit: 20 });
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: "/v1/me/statements?before=7&limit=20" });
+    await client.myStatement(id);
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: `/v1/me/statements/${id}` });
+  });
+
   it("joins a shop with the Owner's code (#536)", async () => {
     const { client, calls } = setup((call) => call.path === "/v1/auth/verify" ? answer(200, pair(1)) : answer(200, { shopName: "Sai General Stores" }));
     await client.verifyCode(signIn);

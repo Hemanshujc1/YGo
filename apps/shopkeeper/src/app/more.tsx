@@ -11,6 +11,7 @@ import { strings } from "../strings";
 const words = strings.more;
 // Owner-only, and only they get the links: the server refuses anyone else (#550, specs S36).
 const ownerLinks = [
+  { href: "/money", label: strings.money.open },
   { href: "/staff", label: strings.staff.open },
   { href: "/void-bill", label: strings.voids.open },
 ] as const;

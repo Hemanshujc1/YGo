@@ -6,10 +6,11 @@ import { useSyncExternalStore } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { inbox as list } from "../lib/inbox";
+import { openTarget } from "../lib/statements";
 import { strings } from "../strings";
 
 // S41 Shop notifications (#507): the server's newest 50, already sorted into the Owner's and the Staff's kinds; a tap
-// reads one and opens its order on S05 (owner's answers 5 and 14 on #55).
+// reads one and opens its order on S05, or its statement on S15 (#630) (owner's answers 5 and 14 on #55).
 
 const words = strings.notifications;
 
@@ -21,7 +22,8 @@ export default function NotificationsScreen() {
 
   const open = (row: Notification) => {
     if (!row.read) list.read(row.id);
-    if (row.orderId) router.push({ pathname: "/orders/[id]", params: { id: row.orderId } });
+    const target = openTarget(row);
+    if (target !== "/notifications") router.push(target);
   };
 
   return (

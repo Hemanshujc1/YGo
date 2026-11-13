@@ -1,20 +1,10 @@
-import regular from "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf";
-import medium from "@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf";
-import semibold from "@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf";
-import { Asset } from "expo-asset";
 import { File } from "expo-file-system";
 import { printToFileAsync } from "expo-print";
 import { shareAsync } from "expo-sharing";
 import { strings } from "../strings";
 import { billHtml, type BillPdf } from "./bill-pdf";
+import { pdfFonts } from "./pdf-fonts";
 import { billPdfClears, removeOldBillPdfs, retryBillPdfClear, shareFolder } from "./bill-pdf-files";
-
-// Read when a bill is shared, not kept in memory: bills are shared now and then.
-async function read(font: number): Promise<string> {
-  const [asset] = await Asset.loadAsync(font);
-  if (!asset?.localUri) throw new Error("Font file missing");
-  return new File(asset.localUri).base64();
-}
 
 let queue: Promise<void> = Promise.resolve();
 
@@ -40,8 +30,7 @@ async function share(input: Omit<BillPdf, "fonts">, clears: number): Promise<voi
   signedOut();
   retryBillPdfClear();
   removeOldBillPdfs();
-  const [r, m, s] = await Promise.all([read(regular), read(medium), read(semibold)]);
-  const { uri } = await printToFileAsync({ html: billHtml({ ...input, fonts: { regular: r, medium: m, semibold: s } }), width: 595, height: 842 });
+  const { uri } = await printToFileAsync({ html: billHtml({ ...input, fonts: await pdfFonts() }), width: 595, height: 842 });
   try {
     signedOut();
     const folder = shareFolder();
