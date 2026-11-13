@@ -92,12 +92,12 @@ export const CustomerTrust = z.strictObject({
   id: z.uuid(), email: z.string(), name: z.string().nullable(), phone: z.string().nullable(),
   phoneState: z.enum(["unverified", "visit-confirmed", "sms-verified"]),
   blocked: z.boolean(), blockReason: z.string().nullable(),
-  failedDeliveries: z.number().int().nonnegative(), refusals: z.number().int().nonnegative(),
+  failedDeliveries: z.number().int().nonnegative(), refusals: z.number().int().nonnegative(), flagged: z.boolean(),
 });
 export type CustomerTrust = z.infer<typeof CustomerTrust>;
 export const AdminCustomersResponse = z.strictObject({ customers: z.array(CustomerTrust) });
 export type AdminCustomersResponse = z.infer<typeof AdminCustomersResponse>;
-export const AdminCustomersQuery = z.strictObject({ search: z.string().trim().min(2).max(120) });
+export const AdminCustomersQuery = z.strictObject({ search: z.string().trim().min(2).max(120).optional(), flagged: z.enum(["true", "false"]).optional() });
 export type AdminCustomersQuery = z.infer<typeof AdminCustomersQuery>;
 export const CustomerBlockBody = z.strictObject({ reason: z.string().trim().min(1).max(500) });
 export type CustomerBlockBody = z.infer<typeof CustomerBlockBody>;

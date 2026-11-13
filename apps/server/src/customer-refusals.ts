@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 
 /** TRU-5 counts refusals and failed deliveries over this many days. */
 export const REFUSAL_WINDOW_DAYS = 30;
+export const CUSTOMER_TRUST_FLAG_THRESHOLD = 2;
 
 /**
  * A Customer's failed deliveries in the 30 days up to `now` (TRU-5, #60). Worked out from the orders, never stored.

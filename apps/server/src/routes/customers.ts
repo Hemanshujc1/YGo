@@ -11,7 +11,8 @@ export function registerCustomerRoutes(app: FastifyInstance, { pool, clock, secr
   const response = { 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope };
   app.get("/v1/admin/customers", { schema: { querystring: AdminCustomersQuery, response: { 200: AdminCustomersResponse, ...response } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
-    return { customers: await listCustomers(pool, (request.query as Query).search, clock.now()) };
+    const query = request.query as Query;
+    return { customers: await listCustomers(pool, query.search, clock.now(), query.flagged === "true") };
   });
   app.post("/v1/admin/customers/:id/block", { schema: { params: CustomerParams, body: CustomerBlockBody, response: { 200: CustomerTrust, ...response } } }, async (request, reply) => {
     const who = await adminSignedIn(request, reply, auth);

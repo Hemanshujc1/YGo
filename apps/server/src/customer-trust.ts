@@ -1,29 +1,31 @@
 import type { Pool, PoolClient } from "pg";
 import type { CustomerTrust } from "@ygo/contracts";
+import { customerFailedDeliveries, CUSTOMER_TRUST_FLAG_THRESHOLD } from "./customer-refusals";
 import { digest, type AuthKeys } from "./tokens";
 
 type Db = Pool | PoolClient;
 
-export async function listCustomers(db: Db, search: string, now: Date): Promise<CustomerTrust[]> {
-  const pattern = `%${search.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+export async function listCustomers(db: Db, search: string | undefined, now: Date, flaggedOnly = false): Promise<CustomerTrust[]> {
+  const pattern = search === undefined ? null : `%${search.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
   const result = await db.query<{
     id: string; email: string; name: string | null; phone: string | null; phoneState: CustomerTrust["phoneState"];
-    blocked: boolean; blockReason: string | null; failedDeliveries: number; refusals: number;
+    blocked: boolean; blockReason: string | null;
   }>(
     `SELECT a.id, a.email, a.name, a.phone,
        CASE WHEN a.phone_verified THEN 'sms-verified'
             WHEN a.phone_visit_confirmed_at IS NOT NULL THEN 'visit-confirmed'
             ELSE 'unverified' END AS "phoneState",
-       cb.account_id IS NOT NULL AS blocked, cb.reason AS "blockReason",
-       count(o.id) FILTER (WHERE o.status = 'delivery_failed' AND NOT EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id = o.id AND h.to_status = 'delivery_failed' AND h.reason_code = 'admin_forced') AND o.status_changed_at >= $2::timestamptz - interval '30 days' AND o.status_changed_at <= $2)::int AS "failedDeliveries",
-       count(o.id) FILTER (WHERE o.status = 'delivery_failed' AND o.failed_delivery_reason = 'customer_refused' AND NOT EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id = o.id AND h.to_status = 'delivery_failed' AND h.reason_code = 'admin_forced') AND o.status_changed_at >= $2::timestamptz - interval '30 days' AND o.status_changed_at <= $2)::int AS refusals
+       cb.account_id IS NOT NULL AS blocked, cb.reason AS "blockReason"
      FROM accounts a LEFT JOIN customer_blocks cb ON cb.account_id = a.id
-       LEFT JOIN orders o ON o.account_id = a.id
-     WHERE a.role = 'customer' AND (a.email ILIKE $1 ESCAPE '\\' OR a.name ILIKE $1 ESCAPE '\\' OR a.phone ILIKE $1 ESCAPE '\\')
-     GROUP BY a.id, cb.account_id, cb.reason ORDER BY lower(a.email) LIMIT 50`,
-    [pattern, now],
+     WHERE a.role = 'customer' AND ($1::text IS NULL OR a.email ILIKE $1 ESCAPE '\\' OR a.name ILIKE $1 ESCAPE '\\' OR a.phone ILIKE $1 ESCAPE '\\')
+     ORDER BY lower(a.email) LIMIT 50`,
+    [pattern],
   );
-  return result.rows;
+  const customers = await Promise.all(result.rows.map(async (row) => {
+    const counts = await customerFailedDeliveries(db, row.id, now);
+    return { ...row, failedDeliveries: counts.failed, refusals: counts.refused, flagged: counts.failed >= CUSTOMER_TRUST_FLAG_THRESHOLD || counts.refused >= CUSTOMER_TRUST_FLAG_THRESHOLD };
+  }));
+  return flaggedOnly ? customers.filter((customer) => customer.flagged) : customers;
 }
 
 export async function blockCustomer(db: Db, accountId: string, reason: string, actorId: string, keys: AuthKeys, now: Date): Promise<CustomerTrust | null> {

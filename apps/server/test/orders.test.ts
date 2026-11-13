@@ -2360,4 +2360,21 @@ describe("Order timers: unanswered orders expire (#57, ORD-2)", () => {
       setOrderTiming({ reRingSeconds: 120, expireSeconds: 600 });
     }
   });
+
+  it("refuses new placement for a blocked customer while an in-progress order remains placeable", async () => {
+    const { shopId, dal, home } = await stocked();
+    const first = await ordered(shopId, [{ listingId: dal, count: 1 }], home);
+    expect(first.statusCode).toBe(201);
+    const orderId = first.json().id as string;
+    const { rows: [account] } = await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'customer@example.com'");
+    expect((await app.inject({ method: "POST", url: `/v1/admin/customers/${account?.id}/block`, headers: admin, payload: { reason: "Trust review" } })).statusCode).toBe(200);
+
+    const cart = (await app.inject({ method: "GET", url: `/v1/carts/${shopId}?${here}`, headers: customer })).json() as { revision: number };
+    const saved = await save(shopId, cart.revision, [{ listingId: dal, count: 1 }]);
+    const quote = saved.json() as { revision: number; quote: { total: string } };
+    const refused = await place(shopId, { revision: quote.revision, total: quote.quote.total, addressId: home });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toEqual({ error: { code: "CUSTOMER_BLOCKED" } });
+    expect((await database.pool.query<{ status: string }>("SELECT status FROM orders WHERE id = $1", [orderId])).rows[0]?.status).toBe("placed");
+  });
 });

@@ -248,8 +248,11 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
       return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
     },
-    async listCustomers(search: string): Promise<ApiResult<AdminCustomersResponse>> {
-      return result(await adminRequest("GET", `/v1/admin/customers?search=${encodeURIComponent(search)}`), AdminCustomersResponse);
+    async listCustomers(search?: string, flagged = false): Promise<ApiResult<AdminCustomersResponse>> {
+      const query = new URLSearchParams();
+      if (search) query.set("search", search);
+      if (flagged) query.set("flagged", "true");
+      return result(await adminRequest("GET", `/v1/admin/customers?${query}`), AdminCustomersResponse);
     },
     async blockCustomer(id: string, body: CustomerBlockBody): Promise<ApiResult<CustomerTrust>> {
       return result(await adminRequest("POST", `/v1/admin/customers/${encodeURIComponent(id)}/block`, body), CustomerTrust);
