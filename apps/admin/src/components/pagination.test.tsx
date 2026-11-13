@@ -38,6 +38,13 @@ describe("Admin page-number pagination", () => {
     expect(screen.getByRole("button", { name: strings.previous })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: strings.next })).toHaveProperty("disabled", true);
 
+    rerender(<Pagination pagination={{ page: 1, pageSize: 50, totalRecords: 76 }} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: strings.previous })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: strings.next })).toHaveProperty("disabled", false);
+    rerender(<Pagination pagination={{ page: 2, pageSize: 50, totalRecords: 76 }} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: strings.previous })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: strings.next })).toHaveProperty("disabled", true);
+
     rerender(<Pagination pagination={{ page: 2, pageSize: 50, totalRecords: 76 }} disabled onChange={vi.fn()} />);
     expect(screen.getByRole("button", { name: strings.previous })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: strings.goToPage(1) })).toHaveProperty("disabled", true);

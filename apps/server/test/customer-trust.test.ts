@@ -136,6 +136,9 @@ describe("Customer trust controls (#72, TRU-5)", () => {
     expect(searchLast.json().pagination).toEqual({ page: 3, pageSize: 25, totalRecords: 52 });
     expect(searchLast.json().items).toHaveLength(2);
     expect(searchLast.json().items.some((row: { email: string; flagged: boolean }) => row.email === "page-052@example.com" && !row.flagged)).toBe(true);
+    const searchEmails = [...searchOne.json().items, ...searchTwo.json().items, ...searchLast.json().items].map((row: { email: string }) => row.email);
+    expect(new Set(searchEmails).size).toBe(52);
+    expect(searchEmails).toEqual([...searchEmails].sort());
 
     const flagged = await app.inject({ method: "GET", url: "/v1/admin/customers?flagged=true&page=3&pageSize=25", headers: admin });
     expect(flagged.json().pagination).toEqual({ page: 3, pageSize: 25, totalRecords: 52 });
