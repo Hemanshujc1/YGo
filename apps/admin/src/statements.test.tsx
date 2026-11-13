@@ -142,6 +142,42 @@ describe("A18 Statements (ADM-6, MNY-8, MNY-12, #631)", () => {
     expect(listStatements).toHaveBeenLastCalledWith({ week: "2026-11-02", before: 5 });
   });
 
+  it("keeps a Load more in flight when a day that is not a Monday is picked, and appends its rows", async () => {
+    const more = deferred();
+    const listStatements = vi.fn().mockResolvedValueOnce(ok({ statements: [summary(9)], nextBefore: 9 })).mockReturnValueOnce(more.promise);
+    setup("/statements", "admin", { listStatements });
+    await screen.findByRole("link", { name: "#9" });
+    fireEvent.click(screen.getByRole("button", { name: text.loadMore }));
+    await waitFor(() => expect(listStatements).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-04" } });
+    expect((await screen.findByRole("alert")).textContent).toBe(text.pickMonday);
+    await act(async () => { more.resolve(ok({ statements: [summary(8)], nextBefore: 8 })); });
+    expect(numbers()).toEqual(["#9", "#8"]);
+    expect(listStatements).toHaveBeenCalledTimes(2);
+    // Back to a Monday: Load more is offered again and continues from the page kept, #8.
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "" } });
+    await waitFor(() => expect(screen.queryByText(text.pickMonday)).toBeNull());
+    expect(numbers()).toEqual(["#9", "#8"]);
+    fireEvent.click(screen.getByRole("button", { name: text.loadMore }));
+    await waitFor(() => expect(listStatements).toHaveBeenLastCalledWith({ before: 8 }));
+  });
+
+  it("keeps the week input as typed when a Load more fails", async () => {
+    const more = deferred();
+    const listStatements = vi.fn().mockResolvedValueOnce(ok({ statements: [summary(9)], nextBefore: 9 })).mockReturnValueOnce(more.promise);
+    setup("/statements", "admin", { listStatements });
+    await screen.findByRole("link", { name: "#9" });
+    fireEvent.click(screen.getByRole("button", { name: text.loadMore }));
+    await waitFor(() => expect(listStatements).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-04" } });
+    await act(async () => { more.resolve({ ok: false, status: 500, code: "INTERNAL" }); });
+    expect((screen.getByLabelText(text.week) as HTMLInputElement).value).toBe("2026-11-04");
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain(text.pickMonday);
+    expect(numbers()).toEqual(["#9"]);
+    // Load more is hidden while the day is not a Monday.
+    expect(screen.queryByRole("button", { name: text.loadMore })).toBeNull();
+  });
+
   it("puts the week back and keeps the list when the week's statements cannot be loaded", async () => {
     const listStatements = vi.fn().mockResolvedValueOnce(ok({ statements: [summary(7)], nextBefore: null })).mockResolvedValue({ ok: false, status: 500, code: "INTERNAL" });
     setup("/statements", "admin", { listStatements });

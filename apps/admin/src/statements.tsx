@@ -38,28 +38,28 @@ export function Statements({ api }: { api: AdminApi }) {
     try {
       const answer = await api.listStatements({ ...(day ? { week: day } : {}), ...(before !== undefined ? { before } : {}) });
       if (mine !== ask.current) return;
-      if (!answer.ok) { setError(true); setWeek(shown.current); return; }
+      if (!answer.ok) { setError(true); if (before === undefined) setWeek(shown.current); return; }
       shown.current = day;
       setRows((current) => before === undefined ? answer.data.statements : [...current, ...answer.data.statements]);
       setNextBefore(answer.data.nextBefore);
-    } catch { if (mine === ask.current) { setError(true); setWeek(shown.current); } }
+    } catch { if (mine === ask.current) { setError(true); if (before === undefined) setWeek(shown.current); } }
     finally { if (mine === ask.current) { filtering.current = false; setBusy(false); } }
   }
 
-  // Drops whatever ask is in flight, so its answer cannot land.
-  function cancel() { ask.current++; filtering.current = false; setBusy(false); }
+  // Drops a week change in flight, so its answer cannot land. A Load more in flight is not a week change and is kept.
+  function cancelFilter() {
+    if (!filtering.current) return;
+    ask.current++; filtering.current = false; setBusy(false); setError(false);
+  }
 
   function pick(day: string) {
     setWeek(day);
-    // Whatever was being asked for no longer matches the input, so its answer must not land.
-    if (day && !isMonday(day)) { cancel(); setWeekError(true); return; }
+    // A week change in flight no longer matches the input, so its answer must not land.
+    if (day && !isMonday(day)) { cancelFilter(); setWeekError(true); return; }
     setWeekError(false);
     // Back on the week already shown (or a half-typed date, which the browser reports as empty): no new ask, and a week change still
     // in flight is dropped so its answer cannot replace these rows. A Load more in flight is not a week change and is kept.
-    if (day === shown.current) {
-      if (filtering.current) { cancel(); setError(false); }
-      return;
-    }
+    if (day === shown.current) { cancelFilter(); return; }
     // A new week, or none, starts the list again from the newest statement.
     void load(day);
   }
