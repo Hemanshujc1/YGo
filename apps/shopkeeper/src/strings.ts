@@ -935,6 +935,8 @@ export const strings = {
     COUPON_NOT_ELIGIBLE: "That coupon cannot be used.",
     COUPON_NOT_FOUND: "That coupon code is not valid.",
     CANCEL_REQUEST_CLOSED: "The customer's ask to cancel has already been answered.",
+    CUSTOMER_BLOCKED: "This customer's account is blocked.",
+    SIGNUPS_CLOSED: "New customer sign-ups are currently closed.",
     DENYLIST_WORD_IN_USE: "This word is already on the excluded goods list.",
   } satisfies Record<ErrorCode, string>,
 };
