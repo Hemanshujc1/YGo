@@ -181,7 +181,11 @@ export {
 } from "./shops";
 
 export {
+  AdminDismissFlaggedQuantityOptionParams,
+  AdminFlaggedQuantityOption,
+  AdminFlaggedQuantityOptionsResponse,
   BaseUnitQuantity,
+  DismissFlaggedQuantityOptionBody,
   OpeningStockBody,
   OpeningStockResponse,
   SaveShopListingBody,

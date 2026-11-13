@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PackQuantity, ProductName, ShopPrice } from "./fields";
+import { AdminActionReason, PackQuantity, ProductName, ShopPrice } from "./fields";
 
 export const BaseUnitQuantity = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
 export const SignedBaseUnitQuantity = z.string().regex(/^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
@@ -95,8 +95,38 @@ export const OpeningStockResponse = z.strictObject({
   recordedAt: z.iso.datetime(),
 });
 
+export const AdminDismissFlaggedQuantityOptionParams = z.strictObject({
+  id: z.uuid(),
+  optionId: z.uuid(),
+});
+
+export const DismissFlaggedQuantityOptionBody = z.strictObject({
+  reason: AdminActionReason,
+});
+
+export const AdminFlaggedQuantityOption = z.strictObject({
+  id: z.uuid(),
+  listingId: z.uuid(),
+  packId: z.uuid(),
+  productName: z.string(),
+  packQuantity: PackQuantity,
+  baseUnit: z.enum(["each", "kg", "l"]),
+  name: ProductName,
+  quantity: PackQuantity,
+  price: ShopPrice,
+  flagged: z.boolean(),
+});
+
+export const AdminFlaggedQuantityOptionsResponse = z.strictObject({
+  options: z.array(AdminFlaggedQuantityOption),
+});
+
 export type ShopListingCatalogItem = z.infer<typeof ShopListingCatalogItem>;
 export type ShopListingsResponse = z.infer<typeof ShopListingsResponse>;
 export type SaveShopListingBody = z.infer<typeof SaveShopListingBody>;
 export type OpeningStockBody = z.infer<typeof OpeningStockBody>;
 export type OpeningStockResponse = z.infer<typeof OpeningStockResponse>;
+export type AdminDismissFlaggedQuantityOptionParams = z.infer<typeof AdminDismissFlaggedQuantityOptionParams>;
+export type DismissFlaggedQuantityOptionBody = z.infer<typeof DismissFlaggedQuantityOptionBody>;
+export type AdminFlaggedQuantityOption = z.infer<typeof AdminFlaggedQuantityOption>;
+export type AdminFlaggedQuantityOptionsResponse = z.infer<typeof AdminFlaggedQuantityOptionsResponse>;

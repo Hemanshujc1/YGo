@@ -386,12 +386,20 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
   const counterBillsLoader: LoaderFunction = async ({ params }) => {
     const id = params.id;
     if (!id) throw new Error(strings.notFound);
-    const [application, bills] = await Promise.all([api.getShopApplication(id), api.listCounterBills(id)]);
-    for (const result of [application, bills]) {
+    const [application, bills, flaggedOptions] = await Promise.all([
+      api.getShopApplication(id),
+      api.listCounterBills(id),
+      api.listFlaggedQuantityOptions(id),
+    ]);
+    for (const result of [application, bills, flaggedOptions]) {
       if (!result.ok && (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN")) return redirect("/sign-in");
       if (!result.ok) throw new Error(result.code);
     }
-    return { application: application.ok ? application.data : null, bills: bills.ok ? bills.data.bills : [] };
+    return {
+      application: application.ok ? application.data : null,
+      bills: bills.ok ? bills.data.bills : [],
+      flaggedOptions: flaggedOptions.ok ? flaggedOptions.data.options : [],
+    };
   };
 
   // Rate cards (A03) and the price simulator (A05) both pick from every category and every shop.

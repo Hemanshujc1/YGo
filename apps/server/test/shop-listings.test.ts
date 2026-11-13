@@ -142,6 +142,127 @@ describe("Owner shop listings and opening stock", () => {
     ]);
   });
 
+  it("keeps flags by name on resave, including two options that share a name", async () => {
+    const actor = await shop("approved", "denylist-resave@example.com");
+    const save = (quantityOptions: { name: string; quantity: string; price: string }[]) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: { ...listingBody, quantityOptions } });
+
+    // Initial save: two options share the name "Filtered cigarette pack", one clean option
+    const initial = await save([
+      { name: "Clean option", quantity: "2", price: "40" },
+      { name: "Filtered cigarette pack", quantity: "3", price: "60" },
+      { name: "Filtered cigarette pack", quantity: "4", price: "75" },
+    ]);
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Filtered cigarette pack", flagged: true },
+      { name: "Filtered cigarette pack", flagged: true },
+    ]);
+
+    // Resave with changed prices: both sharing the name keep flagged: true
+    const resaved = await save([
+      { name: "Clean option", quantity: "2", price: "42" },
+      { name: "Filtered cigarette pack", quantity: "3", price: "65" },
+      { name: "Filtered cigarette pack", quantity: "4", price: "80" },
+    ]);
+    expect(resaved.statusCode).toBe(200);
+    expect(resaved.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Filtered cigarette pack", flagged: true },
+      { name: "Filtered cigarette pack", flagged: true },
+    ]);
+
+    // Now remove "cigarette" from denylist_words: unchanged options keep their open flag
+    await database.pool.query("DELETE FROM denylist_words WHERE word = 'cigarette'");
+    const afterWordRemoved = await save([
+      { name: "Clean option", quantity: "2", price: "42" },
+      { name: "Filtered cigarette pack", quantity: "3", price: "65" },
+      { name: "Filtered cigarette pack", quantity: "4", price: "80" },
+    ]);
+    expect(afterWordRemoved.statusCode).toBe(200);
+    expect(afterWordRemoved.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Filtered cigarette pack", flagged: true },
+      { name: "Filtered cigarette pack", flagged: true },
+    ]);
+
+    // Add "clean" to denylist_words: unchanged "Clean option" stays unflagged (no retroactive backfill)
+    await database.pool.query("INSERT INTO denylist_words (word) VALUES ('clean')");
+    const afterWordAdded = await save([
+      { name: "Clean option", quantity: "2", price: "45" },
+      { name: "Filtered cigarette pack", quantity: "3", price: "65" },
+      { name: "Filtered cigarette pack", quantity: "4", price: "80" },
+    ]);
+    expect(afterWordAdded.statusCode).toBe(200);
+    expect(afterWordAdded.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Filtered cigarette pack", flagged: true },
+      { name: "Filtered cigarette pack", flagged: true },
+    ]);
+
+    // Adding a brand new option matching "clean" gets flagged
+    const withNewOption = await save([
+      { name: "Clean option", quantity: "2", price: "45" },
+      { name: "Brand new clean combo", quantity: "5", price: "90" },
+    ]);
+    expect(withNewOption.statusCode).toBe(200);
+    expect(withNewOption.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Brand new clean combo", flagged: true },
+    ]);
+  });
+
+  it("prefers the same quantity, then lowest quantity, when old options share a name (#624)", async () => {
+    const actor = await shop("approved", "duplicate-names@example.com");
+    const save = (quantityOptions: { name: string; quantity: string; price: string }[]) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: { ...listingBody, quantityOptions } });
+
+    // Initial save: two options with name "Share Name" (qty 2 and qty 5).
+    await save([
+      { name: "Share Name", quantity: "2", price: "20" },
+      { name: "Share Name", quantity: "5", price: "50" },
+    ]);
+
+    // Set flagged: true on qty 5, and flagged: false on qty 2
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = true WHERE name = 'Share Name' AND quantity = '5'",
+    );
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = false WHERE name = 'Share Name' AND quantity = '2'",
+    );
+
+    // Case 1: Exact quantity match prefers the option with same quantity (qty 5 -> flagged: true)
+    const exactQtyMatch = await save([
+      { name: "Share Name", quantity: "5", price: "55" },
+    ]);
+    expect(exactQtyMatch.statusCode).toBe(200);
+    expect(exactQtyMatch.json().listing.quantityOptions).toMatchObject([
+      { name: "Share Name", quantity: "5.000", flagged: true },
+    ]);
+
+    // Reset to two options: qty 2 (flagged: false) and qty 8 (flagged: true)
+    await save([
+      { name: "Share Name", quantity: "2", price: "20" },
+      { name: "Share Name", quantity: "8", price: "80" },
+    ]);
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = false WHERE name = 'Share Name' AND quantity = '2'",
+    );
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = true WHERE name = 'Share Name' AND quantity = '8'",
+    );
+
+    // Case 2: No exact quantity match prefers lowest quantity (qty 2 -> flagged: false)
+    const lowestQtyMatch = await save([
+      { name: "Share Name", quantity: "10", price: "100" },
+    ]);
+    expect(lowestQtyMatch.statusCode).toBe(200);
+    expect(lowestQtyMatch.json().listing.quantityOptions).toMatchObject([
+      { name: "Share Name", quantity: "10.000", flagged: false },
+    ]);
+  });
+
   it("refuses fractional inventory for counted packs", async () => {
     const actor = await shop();
     const changed = await database.pool.query("UPDATE master_products SET base_unit = 'each', classification = 'counted' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);

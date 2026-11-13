@@ -1,9 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
+  AdminDismissFlaggedQuantityOptionParams,
+  AdminFlaggedQuantityOption,
+  AdminFlaggedQuantityOptionsResponse,
   AdminShopApplication,
   AssignShopAreaManagerBody,
   CorrectShopApplicationBody,
+  DismissFlaggedQuantityOptionBody,
   ErrorEnvelope,
   LiveCheck,
   MyShopApplicationResponse,
@@ -343,4 +347,85 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       });
     });
   }
+
+  // A shop's denylist-flagged quantity-price options (CAT-8, #621).
+  const flaggedOptionColumns = `o.id, o.listing_id AS "listingId", sl.pack_id AS "packId",
+    p.name AS "productName", pk.quantity::text AS "packQuantity", p.base_unit AS "baseUnit",
+    o.name, o.quantity::text AS "quantity", o.price::text AS "price", o.flagged`;
+
+  app.get("/v1/admin/shops/:id/flagged-quantity-options", {
+    schema: { params: ShopApplicationParams, response: { 200: AdminFlaggedQuantityOptionsResponse, ...response } },
+  }, async (request, reply) => {
+    const who = await adminWebSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as { id: string };
+    const scopedAreaManager = scope(who);
+
+    const shop = await pool.query(
+      "SELECT 1 FROM shops WHERE id = $1 AND ($2::uuid IS NULL OR area_manager_id = $2) AND state <> 'draft'",
+      [id, scopedAreaManager],
+    );
+    if (!shop.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+
+    const result = await pool.query<AdminFlaggedQuantityOption>(
+      `SELECT ${flaggedOptionColumns}
+      FROM shop_quantity_price_options o
+      JOIN shop_listings sl ON sl.id = o.listing_id
+      JOIN packs pk ON pk.id = sl.pack_id
+      JOIN master_products p ON p.id = pk.product_id
+      JOIN shops s ON s.id = sl.shop_id
+      WHERE s.id = $1
+        AND ($2::uuid IS NULL OR s.area_manager_id = $2)
+        AND s.state <> 'draft'
+        AND o.flagged = true
+      ORDER BY p.name, pk.quantity, o.quantity`,
+      [id, scopedAreaManager],
+    );
+
+    return { options: result.rows };
+  });
+
+  app.post("/v1/admin/shops/:id/flagged-quantity-options/:optionId/dismiss", {
+    schema: {
+      params: AdminDismissFlaggedQuantityOptionParams,
+      body: DismissFlaggedQuantityOptionBody,
+      response: { 200: AdminFlaggedQuantityOption, ...response },
+    },
+  }, async (request, reply) => {
+    const who = await adminWebSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id, optionId } = request.params as AdminDismissFlaggedQuantityOptionParams;
+    const { reason } = request.body as DismissFlaggedQuantityOptionBody;
+    const scopedAreaManager = scope(who);
+
+    return withAdminWebTransaction(pool, who, reply, async (client) => {
+      const shop = await client.query(
+        "SELECT 1 FROM shops WHERE id = $1 AND ($2::uuid IS NULL OR area_manager_id = $2) AND state <> 'draft'",
+        [id, scopedAreaManager],
+      );
+      if (!shop.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+
+      const found = await client.query<AdminFlaggedQuantityOption>(
+        `SELECT ${flaggedOptionColumns}
+        FROM shop_quantity_price_options o
+        JOIN shop_listings sl ON sl.id = o.listing_id
+        JOIN packs pk ON pk.id = sl.pack_id
+        JOIN master_products p ON p.id = pk.product_id
+        WHERE o.id = $1 AND sl.shop_id = $2 AND o.flagged = true
+        FOR UPDATE OF o`,
+        [optionId, id],
+      );
+
+      const option = found.rows[0];
+      if (!option) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+
+      await client.query("UPDATE shop_quantity_price_options SET flagged = false WHERE id = $1", [optionId]);
+      await client.query(
+        "INSERT INTO admin_actions (actor_id, action, target_id, target_type, reason) VALUES ($1, 'shop_quantity_price_option.dismiss', $2, 'shop_quantity_price_option', $3)",
+        [who.accountId, optionId, reason],
+      );
+      await client.query("COMMIT");
+      return reply.code(200).send({ ...option, flagged: false });
+    });
+  });
 }

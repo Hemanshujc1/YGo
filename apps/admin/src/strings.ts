@@ -485,6 +485,14 @@ export const strings = {
   counterBillsOpen: "Needs a decision",
   counterBillsDone: "Dealt with",
   counterBillsNoneOpen: "No bill needs a decision.",
+  // Flagged quantity-price options (CAT-8, #621).
+  flaggedQuantityOptions: "Flagged quantity options",
+  flaggedQuantityOptionsNone: "No quantity options flagged.",
+  flaggedQuantityOptionDismiss: "Dismiss flag",
+  flaggedQuantityOptionMatch: "Denylist match",
+  flaggedQuantityOptionReason: "Reason",
+  flaggedQuantityOptionReasonHint: "Say why this option is allowed. Up to 500 characters.",
+  flaggedQuantityOptionReasonRequired: "Write a reason, up to 500 characters.",
   // Fulfilment modes of one shop (FUL-1, #65).
   fulfilmentLink: "Fulfilment modes",
   fulfilmentOf: (shop: string) => `Fulfilment modes · ${shop}`,

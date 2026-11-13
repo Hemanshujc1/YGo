@@ -116,6 +116,8 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     recordOnboardingFee: vi.fn(),
     getShopOnboarding: vi.fn(),
     listCounterBills: vi.fn(),
+    listFlaggedQuantityOptions: vi.fn(),
+    dismissFlaggedQuantityOption: vi.fn(),
     shopFulfilmentModes: vi.fn(),
     forceFulfilmentMode: vi.fn(),
     resolveCounterBill: vi.fn(),
@@ -1308,7 +1310,7 @@ describe("Area Manager shell (#343)", () => {
       const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
-      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings, api.listCounterBills, api.getShopApplication, api.shopFulfilmentModes]) {
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings, api.listCounterBills, api.listFlaggedQuantityOptions, api.getShopApplication, api.shopFulfilmentModes]) {
         expect(call).not.toHaveBeenCalled();
       }
     },

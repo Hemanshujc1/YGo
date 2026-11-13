@@ -1,12 +1,12 @@
 import type { createAdminApiClient } from "@ygo/api-client";
-import { AdminActionReason, type AdminCounterBill, type AdminCounterBillVoid, type AdminShopApplication, type CounterBillResolutionAction } from "@ygo/contracts";
+import { AdminActionReason, type AdminCounterBill, type AdminCounterBillVoid, type AdminFlaggedQuantityOption, type AdminShopApplication, type CounterBillResolutionAction } from "@ygo/contracts";
 import { formatDateTime, formatMoney, trimDecimal } from "@ygo/format";
 import { useState } from "react";
 import { Link, useLoaderData } from "react-router";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
-export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[] };
+export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[]; flaggedOptions: AdminFlaggedQuantityOption[] };
 
 function Lines({ lines, manualLines, discount }: Pick<AdminCounterBill, "lines" | "manualLines" | "discount">) {
   return <ul className="mt-1 space-y-1">{lines.map((line, index) => <li key={`${line.packId}-${index}`}>
@@ -104,20 +104,74 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
   </li>;
 }
 
-/** A shop's held and flagged counter bills, for Admin to number, close or review (#470, BIL-5, BIL-9). */
+function FlaggedOptionCard({ api, shopId, option, onDismissed }: { api: AdminApi; shopId: string; option: AdminFlaggedQuantityOption; onDismissed: (optionId: string) => void }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function dismiss() {
+    setError("");
+    const parsed = AdminActionReason.safeParse(reason);
+    if (!parsed.success) { setError(strings.flaggedQuantityOptionReasonRequired); return; }
+    setBusy(true);
+    try {
+      const result = await api.dismissFlaggedQuantityOption(shopId, option.id, { reason: parsed.data });
+      if (result.ok) { onDismissed(option.id); }
+      else setError(strings.errors[result.code] ?? strings.failed);
+    } catch {
+      setError(strings.failed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <li className="rounded-xl border border-border bg-surface p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h3 className="font-semibold">{option.productName} · {trimDecimal(option.packQuantity)} {option.baseUnit}</h3>
+        <p className="mt-1 font-medium">{option.name}</p>
+        <p className="text-muted">{trimDecimal(option.quantity)} {option.baseUnit} · {formatMoney(option.price)}</p>
+      </div>
+      <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-on-danger-subtle">{strings.flaggedQuantityOptionMatch}</span>
+    </div>
+    <div className="mt-3 border-t border-border pt-3">
+      <label className="block font-medium">{strings.flaggedQuantityOptionReason}
+        <textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} rows={2} aria-describedby={`reason-hint-${option.id}`}
+          className="mt-1 w-full rounded-lg border border-border-strong bg-raised p-2 font-normal" />
+      </label>
+      <p id={`reason-hint-${option.id}`} className="text-muted">{strings.flaggedQuantityOptionReasonHint}</p>
+      {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
+      <div className="mt-3">
+        <button disabled={busy} onClick={() => void dismiss()}
+          className="h-10 rounded-lg bg-primary px-4 font-medium text-on-primary disabled:opacity-60">
+          {busy ? strings.counterBillActionBusy : strings.flaggedQuantityOptionDismiss}
+        </button>
+      </div>
+    </div>
+  </li>;
+}
+
+/** A shop's held and flagged counter bills, and flagged quantity options (#470, #621, BIL-5, BIL-9, CAT-8). */
 export function CounterBills({ api }: { api: AdminApi }) {
   const loaded = useLoaderData() as CounterBillsData;
   const [bills, setBills] = useState(loaded.bills);
+  const [flaggedOptions, setFlaggedOptions] = useState(loaded.flaggedOptions);
   const { application } = loaded;
   const replace = (saved: AdminCounterBill) => setBills((current) => current.map((bill) => bill.id === saved.id ? saved : bill)
     .sort((a, b) => Number(a.resolved) - Number(b.resolved)));
+  const removeOption = (optionId: string) => setFlaggedOptions((current) => current.filter((opt) => opt.id !== optionId));
   const open = bills.filter((bill) => !bill.resolved);
   const done = bills.filter((bill) => bill.resolved);
 
   return <>
     <Link to={`/applications/${application.id}`} className="text-primary underline">{strings.backToShop}</Link>
     <h1 className="mt-3 text-title-large font-semibold">{strings.counterBillsOf(application.shopName ?? strings.applicationReview)}</h1>
-    <section aria-labelledby="bills-open" className="mt-6">
+    <section aria-labelledby="flagged-options" className="mt-6">
+      <h2 id="flagged-options" className="mb-3 font-semibold">{strings.flaggedQuantityOptions}</h2>
+      {flaggedOptions.length === 0 ? <p className="text-muted">{strings.flaggedQuantityOptionsNone}</p>
+        : <ul className="space-y-3">{flaggedOptions.map((opt) => <FlaggedOptionCard key={opt.id} api={api} shopId={application.id} option={opt} onDismissed={removeOption} />)}</ul>}
+    </section>
+    <section aria-labelledby="bills-open" className="mt-8">
       <h2 id="bills-open" className="mb-3 font-semibold">{strings.counterBillsOpen}</h2>
       {open.length === 0 ? <p className="text-muted">{strings.counterBillsNoneOpen}</p>
         : <ul className="space-y-3">{open.map((bill) => <Bill key={bill.id} api={api} shopId={application.id} bill={bill} onSaved={replace} />)}</ul>}

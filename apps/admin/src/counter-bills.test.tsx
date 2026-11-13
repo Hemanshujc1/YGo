@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import type { AdminCounterBill, AdminShopApplication } from "@ygo/contracts";
+import type { AdminCounterBill, AdminFlaggedQuantityOption, AdminShopApplication } from "@ygo/contracts";
 import { formatDateTime } from "@ygo/format";
 import { CounterBills } from "./counter-bills";
 import { strings } from "./strings";
@@ -18,11 +18,11 @@ const bill = (id: number, extra: Partial<AdminCounterBill> = {}): AdminCounterBi
   madeBy: { name: "Asha", role: "owner" }, lines: [line], manualLines: [], discount: "0", invalidPayload: null, original: null, voided: null, resolved: false, resolutions: [], ...extra,
 });
 
-function setup(bills: AdminCounterBill[], resolveCounterBill = vi.fn()) {
-  const api = { resolveCounterBill } as unknown as Parameters<typeof CounterBills>[0]["api"];
-  const router = createMemoryRouter([{ path: "/", loader: () => ({ application, bills }), element: <CounterBills api={api} /> }]);
+function setup(bills: AdminCounterBill[], resolveCounterBill = vi.fn(), flaggedOptions: AdminFlaggedQuantityOption[] = [], dismissFlaggedQuantityOption = vi.fn()) {
+  const api = { resolveCounterBill, dismissFlaggedQuantityOption } as unknown as Parameters<typeof CounterBills>[0]["api"];
+  const router = createMemoryRouter([{ path: "/", loader: () => ({ application, bills, flaggedOptions }), element: <CounterBills api={api} /> }]);
   render(<RouterProvider router={router} />);
-  return { resolveCounterBill };
+  return { resolveCounterBill, dismissFlaggedQuantityOption };
 }
 const buttonNames = (card: HTMLElement) => within(card).getAllByRole("button").map((button) => button.textContent);
 
@@ -151,5 +151,49 @@ describe("Counter bills screen (#470)", () => {
     const card = (await screen.findByRole("heading", { name: "0F3A-91B1" })).closest("li") as HTMLElement;
     expect(within(card).getByText(strings.counterBillDenylistFlagged)).toBeTruthy();
     expect(buttonNames(card)).toEqual([strings.counterBillActions.review, strings.counterBillActions.note]);
+  });
+
+  it("shows flagged quantity options, asks for reason, and dismisses flag (#621)", async () => {
+    const flaggedOption: AdminFlaggedQuantityOption = {
+      id: "00000000-0000-4000-8000-000000000801",
+      listingId: "00000000-0000-4000-8000-000000000802",
+      packId: "00000000-0000-4000-8000-000000000803",
+      productName: "Basmati Rice",
+      packQuantity: "1.000",
+      baseUnit: "kg",
+      name: "Special cigarette pack",
+      quantity: "2.000",
+      price: "50.00",
+      flagged: true,
+    };
+    const dismissFlagged = vi.fn().mockResolvedValue({ ok: true, data: { ...flaggedOption, flagged: false } });
+    setup([], vi.fn(), [flaggedOption], dismissFlagged);
+
+    const section = await screen.findByRole("region", { name: strings.flaggedQuantityOptions });
+    expect(section.textContent).toContain("Basmati Rice · 1 kg");
+    expect(section.textContent).toContain("Special cigarette pack");
+    expect(section.textContent).toContain("2 kg · ₹50");
+    expect(within(section).getByText(strings.flaggedQuantityOptionMatch)).toBeTruthy();
+
+    // Dismiss without note fails
+    fireEvent.click(within(section).getByRole("button", { name: strings.flaggedQuantityOptionDismiss }));
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.flaggedQuantityOptionReasonRequired);
+    expect(dismissFlagged).not.toHaveBeenCalled();
+
+    // Fill note and dismiss
+    fireEvent.change(within(section).getByRole("textbox", { name: strings.flaggedQuantityOptionReason }), {
+      target: { value: " Legitimate promotional deal " },
+    });
+    fireEvent.click(within(section).getByRole("button", { name: strings.flaggedQuantityOptionDismiss }));
+
+    await waitFor(() => {
+      expect(dismissFlagged).toHaveBeenCalledWith(shopId, flaggedOption.id, { reason: "Legitimate promotional deal" });
+    });
+
+    // Option is removed from flagged options section
+    await waitFor(() => {
+      expect(within(section).queryByText("Special cigarette pack")).toBeNull();
+      expect(section.textContent).toContain(strings.flaggedQuantityOptionsNone);
+    });
   });
 });

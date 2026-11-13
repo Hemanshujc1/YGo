@@ -539,4 +539,40 @@ describe("Admin browser API client", () => {
     expect(calls).toHaveLength(1);
     expect(onSignedOut).not.toHaveBeenCalled();
   });
+
+  it("lists flagged quantity options and dismisses a flagged option", async () => {
+    const shopId = "00000000-0000-4000-8000-000000000501";
+    const optionId = "00000000-0000-4000-8000-000000000502";
+    const option = {
+      id: optionId,
+      listingId: "00000000-0000-4000-8000-000000000503",
+      packId: "00000000-0000-4000-8000-000000000504",
+      productName: "Basmati Rice",
+      packQuantity: "1",
+      baseUnit: "kg",
+      name: "Family pack",
+      quantity: "5",
+      price: "250",
+      flagged: true,
+    };
+    const { client, calls } = setup(({ path, method }) => {
+      if (path.endsWith("/flagged-quantity-options") && method === "GET") {
+        return answer(200, { options: [option] });
+      }
+      if (path.endsWith(`/flagged-quantity-options/${optionId}/dismiss`) && method === "POST") {
+        return answer(200, { ...option, flagged: false });
+      }
+      return answer(200, { accessToken: "access-1", account });
+    });
+    await client.verifyCode(code);
+    const listed = await client.listFlaggedQuantityOptions(shopId);
+    expect(listed).toEqual({ ok: true, data: { options: [option] } });
+    expect(calls[1]?.path).toBe(`/v1/admin/shops/${shopId}/flagged-quantity-options`);
+    expect(calls[1]?.method).toBe("GET");
+
+    const dismissed = await client.dismissFlaggedQuantityOption(shopId, optionId, { reason: "Legitimate deal" });
+    expect(dismissed).toEqual({ ok: true, data: { ...option, flagged: false } });
+    expect(calls[2]?.path).toBe(`/v1/admin/shops/${shopId}/flagged-quantity-options/${optionId}/dismiss`);
+    expect(calls[2]?.method).toBe("POST");
+  });
 });
