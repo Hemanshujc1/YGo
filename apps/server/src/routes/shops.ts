@@ -349,6 +349,10 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
   }
 
   // A shop's denylist-flagged quantity-price options (CAT-8, #621).
+  const flaggedOptionColumns = `o.id, o.listing_id AS "listingId", sl.pack_id AS "packId",
+    p.name AS "productName", pk.quantity::text AS "packQuantity", p.base_unit AS "baseUnit",
+    o.name, o.quantity::text AS "quantity", o.price::text AS "price", o.flagged`;
+
   app.get("/v1/admin/shops/:id/flagged-quantity-options", {
     schema: { params: ShopApplicationParams, response: { 200: AdminFlaggedQuantityOptionsResponse, ...response } },
   }, async (request, reply) => {
@@ -364,17 +368,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
     if (!shop.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
 
     const result = await pool.query<AdminFlaggedQuantityOption>(
-      `SELECT
-        o.id,
-        o.listing_id AS "listingId",
-        sl.pack_id AS "packId",
-        p.name AS "productName",
-        pk.quantity::text AS "packQuantity",
-        p.base_unit AS "baseUnit",
-        o.name,
-        o.quantity::text AS "quantity",
-        o.price::text AS "price",
-        o.flagged
+      `SELECT ${flaggedOptionColumns}
       FROM shop_quantity_price_options o
       JOIN shop_listings sl ON sl.id = o.listing_id
       JOIN packs pk ON pk.id = sl.pack_id
@@ -412,17 +406,7 @@ export function registerShopRoutes(app: FastifyInstance, { pool, clock, secret }
       if (!shop.rowCount) return reply.code(404).send({ error: { code: "NOT_FOUND" } });
 
       const found = await client.query<AdminFlaggedQuantityOption>(
-        `SELECT
-          o.id,
-          o.listing_id AS "listingId",
-          sl.pack_id AS "packId",
-          p.name AS "productName",
-          pk.quantity::text AS "packQuantity",
-          p.base_unit AS "baseUnit",
-          o.name,
-          o.quantity::text AS "quantity",
-          o.price::text AS "price",
-          o.flagged
+        `SELECT ${flaggedOptionColumns}
         FROM shop_quantity_price_options o
         JOIN shop_listings sl ON sl.id = o.listing_id
         JOIN packs pk ON pk.id = sl.pack_id

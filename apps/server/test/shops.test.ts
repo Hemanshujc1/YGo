@@ -714,9 +714,13 @@ describe("flagged quantity-price options (CAT-8, #621)", () => {
     });
     expect(dismissOutOfScope.statusCode).toBe(404);
 
-    // Verify no admin_actions row was written so far for quantity option
-    const actionsBefore = await database.pool.query("SELECT * FROM admin_actions WHERE target_type = 'shop_quantity_price_option'");
-    expect(actionsBefore.rowCount).toBe(0);
+    const actionFor = (targetId: string) =>
+      database.pool.query("SELECT * FROM admin_actions WHERE target_type = 'shop_quantity_price_option' AND target_id = $1", [targetId]);
+
+    // Verify no admin_actions row was written for any option from failed attempts
+    expect((await actionFor(opt1Id)).rowCount).toBe(0);
+    expect((await actionFor(opt2Id)).rowCount).toBe(0);
+    expect((await actionFor(opt3Id)).rowCount).toBe(0);
 
     // 4. AM1 dismisses opt1 on shop 1 (valid!)
     const dismissValid = await app.inject({
@@ -730,18 +734,16 @@ describe("flagged quantity-price options (CAT-8, #621)", () => {
     const opt1Db = await database.pool.query("SELECT flagged FROM shop_quantity_price_options WHERE id = $1", [opt1Id]);
     expect(opt1Db.rows[0]?.flagged).toBe(false);
 
-    // Verify admin_actions row written
-    const actionsAfter = await database.pool.query<{ actor_id: string; action: string; target_id: string; target_type: string; reason: string }>(
-      "SELECT actor_id, action, target_id, target_type, reason FROM admin_actions WHERE target_type = 'shop_quantity_price_option'",
-    );
-    expect(actionsAfter.rows).toEqual([
-      {
+    // Verify admin_actions row written for opt1Id
+    const actionsOpt1 = await actionFor(opt1Id);
+    expect(actionsOpt1.rows).toEqual([
+      expect.objectContaining({
         actor_id: am1.id,
         action: "shop_quantity_price_option.dismiss",
         target_id: opt1Id,
         target_type: "shop_quantity_price_option",
         reason: "Promotional deal approved",
-      },
+      }),
     ]);
 
     // 5. Dismissing opt1 AGAIN now that it's unflagged returns 404 and writes NO extra admin_actions row
@@ -750,8 +752,7 @@ describe("flagged quantity-price options (CAT-8, #621)", () => {
       headers: admin, payload: { reason: "Try again" },
     });
     expect(dismissAgain.statusCode).toBe(404);
-    const actionsFinal = await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type = 'shop_quantity_price_option'");
-    expect(actionsFinal.rows[0]?.n).toBe(1);
+    expect((await actionFor(opt1Id)).rowCount).toBe(1);
 
     // 6. Listing now returns empty for Shop 1
     const emptyGet = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options`, headers: admin });

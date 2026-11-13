@@ -6,7 +6,7 @@ import { Link, useLoaderData } from "react-router";
 import { strings } from "./strings";
 
 type AdminApi = ReturnType<typeof createAdminApiClient>;
-export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[]; flaggedOptions?: AdminFlaggedQuantityOption[] };
+export type CounterBillsData = { application: AdminShopApplication; bills: AdminCounterBill[]; flaggedOptions: AdminFlaggedQuantityOption[] };
 
 function Lines({ lines, manualLines, discount }: Pick<AdminCounterBill, "lines" | "manualLines" | "discount">) {
   return <ul className="mt-1 space-y-1">{lines.map((line, index) => <li key={`${line.packId}-${index}`}>
@@ -155,7 +155,7 @@ function FlaggedOptionCard({ api, shopId, option, onDismissed }: { api: AdminApi
 export function CounterBills({ api }: { api: AdminApi }) {
   const loaded = useLoaderData() as CounterBillsData;
   const [bills, setBills] = useState(loaded.bills);
-  const [flaggedOptions, setFlaggedOptions] = useState(loaded.flaggedOptions ?? []);
+  const [flaggedOptions, setFlaggedOptions] = useState(loaded.flaggedOptions);
   const { application } = loaded;
   const replace = (saved: AdminCounterBill) => setBills((current) => current.map((bill) => bill.id === saved.id ? saved : bill)
     .sort((a, b) => Number(a.resolved) - Number(b.resolved)));

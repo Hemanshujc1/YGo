@@ -254,30 +254,28 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       );
       const listingId = saved.rows[0]?.id;
       if (!listingId) throw new Error("Shop listing save returned no ID");
-      const existing = await client.query<{ name: string; flagged: boolean }>(
-        "SELECT name, flagged FROM shop_quantity_price_options WHERE listing_id = $1",
+      const deleted = await client.query<{ name: string; quantity: string; flagged: boolean }>(
+        "DELETE FROM shop_quantity_price_options WHERE listing_id = $1 RETURNING name, quantity, flagged",
         [listingId],
       );
-      const remainingExisting = [...existing.rows];
-      await client.query("DELETE FROM shop_quantity_price_options WHERE listing_id = $1", [listingId]);
+      const remainingExisting = [...deleted.rows];
       for (const option of body.quantityOptions) {
-        const matchIndex = remainingExisting.findIndex((e) => e.name === option.name);
-        let flagged: boolean;
-        if (matchIndex !== -1) {
-          flagged = remainingExisting[matchIndex]?.flagged ?? false;
-          remainingExisting.splice(matchIndex, 1);
-        } else {
-          const match = await client.query<{ matched: boolean }>(
-            `SELECT EXISTS (SELECT 1 FROM denylist_words d
-               WHERE ' ' || trim(regexp_replace(lower($1::text), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %') AS matched`,
-            [option.name],
-          );
-          flagged = match.rows[0]?.matched ?? false;
+        const candidates = remainingExisting.filter((e) => e.name === option.name);
+        let preservedFlag: boolean | null = null;
+        if (candidates.length > 0) {
+          const exact = candidates.find((c) => Number(c.quantity) === Number(option.quantity));
+          const chosen = exact ?? candidates.sort((a, b) => Number(a.quantity) - Number(b.quantity))[0];
+          if (chosen) {
+            preservedFlag = chosen.flagged;
+            const removeIdx = remainingExisting.indexOf(chosen);
+            if (removeIdx !== -1) remainingExisting.splice(removeIdx, 1);
+          }
         }
         await client.query(
           `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [listingId, option.name, option.quantity, option.price, flagged],
+           VALUES ($1, $2, $3, $4, COALESCE($5::boolean, EXISTS (SELECT 1 FROM denylist_words d
+             WHERE ' ' || trim(regexp_replace(lower($2::text), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %')))`,
+          [listingId, option.name, option.quantity, option.price, preservedFlag],
         );
       }
       const response = await client.query(`${catalogSql} AND pk.id = $2`, [shop.id, packId]);

@@ -489,7 +489,6 @@ export const strings = {
   flaggedQuantityOptions: "Flagged quantity options",
   flaggedQuantityOptionsNone: "No quantity options flagged.",
   flaggedQuantityOptionDismiss: "Dismiss flag",
-  flaggedQuantityOptionDismissed: "Flag dismissed.",
   flaggedQuantityOptionMatch: "Denylist match",
   flaggedQuantityOptionReason: "Reason",
   flaggedQuantityOptionReasonHint: "Say why this option is allowed. Up to 500 characters.",

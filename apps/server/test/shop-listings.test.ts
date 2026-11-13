@@ -213,6 +213,56 @@ describe("Owner shop listings and opening stock", () => {
     ]);
   });
 
+  it("prefers the same quantity, then lowest quantity, when old options share a name (#624)", async () => {
+    const actor = await shop("approved", "duplicate-names@example.com");
+    const save = (quantityOptions: { name: string; quantity: string; price: string }[]) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: { ...listingBody, quantityOptions } });
+
+    // Initial save: two options with name "Share Name" (qty 2 and qty 5).
+    await save([
+      { name: "Share Name", quantity: "2", price: "20" },
+      { name: "Share Name", quantity: "5", price: "50" },
+    ]);
+
+    // Set flagged: true on qty 5, and flagged: false on qty 2
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = true WHERE name = 'Share Name' AND quantity = '5'",
+    );
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = false WHERE name = 'Share Name' AND quantity = '2'",
+    );
+
+    // Case 1: Exact quantity match prefers the option with same quantity (qty 5 -> flagged: true)
+    const exactQtyMatch = await save([
+      { name: "Share Name", quantity: "5", price: "55" },
+    ]);
+    expect(exactQtyMatch.statusCode).toBe(200);
+    expect(exactQtyMatch.json().listing.quantityOptions).toMatchObject([
+      { name: "Share Name", quantity: "5.000", flagged: true },
+    ]);
+
+    // Reset to two options: qty 2 (flagged: false) and qty 8 (flagged: true)
+    await save([
+      { name: "Share Name", quantity: "2", price: "20" },
+      { name: "Share Name", quantity: "8", price: "80" },
+    ]);
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = false WHERE name = 'Share Name' AND quantity = '2'",
+    );
+    await database.pool.query(
+      "UPDATE shop_quantity_price_options SET flagged = true WHERE name = 'Share Name' AND quantity = '8'",
+    );
+
+    // Case 2: No exact quantity match prefers lowest quantity (qty 2 -> flagged: false)
+    const lowestQtyMatch = await save([
+      { name: "Share Name", quantity: "10", price: "100" },
+    ]);
+    expect(lowestQtyMatch.statusCode).toBe(200);
+    expect(lowestQtyMatch.json().listing.quantityOptions).toMatchObject([
+      { name: "Share Name", quantity: "10.000", flagged: false },
+    ]);
+  });
+
   it("refuses fractional inventory for counted packs", async () => {
     const actor = await shop();
     const changed = await database.pool.query("UPDATE master_products SET base_unit = 'each', classification = 'counted' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);
