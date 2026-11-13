@@ -200,8 +200,8 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       const rows = await client.query<CatalogRow>(`${catalogSql} ORDER BY lower(p.name), pk.quantity`, [shop.id]);
       const items = await Promise.all(rows.rows.map(async (row) => {
         if (!row.listingId) return projectCatalogItem(row);
-        const options = await client.query<{ id: string; name: string; quantity: string; price: string }>(
-          `SELECT id, name, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity`,
+        const options = await client.query<{ id: string; name: string; quantity: string; price: string; flagged: boolean }>(
+          `SELECT id, name, quantity, price, flagged FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity`,
           [row.listingId],
         );
         return projectCatalogItem(row, options.rows);
@@ -256,12 +256,20 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       if (!listingId) throw new Error("Shop listing save returned no ID");
       await client.query("DELETE FROM shop_quantity_price_options WHERE listing_id = $1", [listingId]);
       for (const option of body.quantityOptions) {
-        await client.query("INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price) VALUES ($1, $2, $3, $4)", [listingId, option.name, option.quantity, option.price]);
+        await client.query(
+          `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
+           VALUES ($1, $2, $3, $4, EXISTS (SELECT 1 FROM denylist_words d
+             WHERE ' ' || trim(regexp_replace(lower($2::text), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %'))`,
+          [listingId, option.name, option.quantity, option.price],
+        );
       }
       const response = await client.query(`${catalogSql} AND pk.id = $2`, [shop.id, packId]);
       const row = response.rows[0] as CatalogRow | undefined;
       if (!row) throw new Error("Saved shop listing disappeared");
-      const options = await client.query("SELECT id, name, quantity, price FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity", [listingId]);
+      const options = await client.query<{ id: string; name: string; quantity: string; price: string; flagged: boolean }>(
+        "SELECT id, name, quantity, price, flagged FROM shop_quantity_price_options WHERE listing_id = $1 ORDER BY quantity",
+        [listingId],
+      );
       await client.query("COMMIT");
       return reply.send(projectCatalogItem(row, options.rows));
     });

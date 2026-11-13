@@ -557,5 +557,6 @@ export const strings = {
     DISCOUNT_ABOVE_MAXIMUM: "This discount is above the maximum.",
     DISCOUNT_NOT_AVAILABLE: "Shop discounts are not available yet.",
     CANCEL_REQUEST_CLOSED: "You already asked to cancel this order. You can call the shop.",
+    DENYLIST_WORD_IN_USE: "Something changed. Try again.",
   } satisfies Record<ErrorCode, string>,
 };

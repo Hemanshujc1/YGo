@@ -287,6 +287,16 @@ describe("Admin resolves held and flagged counter bills (#470)", () => {
     expect(await movements()).toBe(1);
   });
 
+  it("reviews a denylist-flagged numbered bill (#69, CAT-8)", async () => {
+    const { shopId, bill, send, idOf } = await shop();
+    await database.pool.query("UPDATE shops SET state = 'live' WHERE id = $1", [shopId]);
+    const denylistBill = bill([], { payload: { lines: [], manualLines: [{ name: "King cigarette", count: 1, unitPrice: "20" }], total: "20", payment: "cash" } });
+    await send([denylistBill]);
+    const billId = await idOf(denylistBill.id);
+    const resolved = await resolve(shopId, billId, "review", "Reviewed excluded item flag with shop");
+    expect(resolved.json()).toMatchObject({ number: 1, flaggedDenylist: true, resolved: true });
+  });
+
   it("shows the Owner's void, files a voided flagged bill as dealt with, and takes a note but no review on it (#495)", async () => {
     const { owner, shopId, pack, bill, send, idOf } = await shop();
     const rice = await pack("5", "50");

@@ -931,5 +931,6 @@ export const strings = {
     DISCOUNT_ABOVE_MAXIMUM: "This discount is above the largest your shop can give.",
     DISCOUNT_NOT_AVAILABLE: "You can't turn a discount on yet. Save it off for now.",
     CANCEL_REQUEST_CLOSED: "The customer's ask to cancel has already been answered.",
+    DENYLIST_WORD_IN_USE: "This word is already on the excluded goods list.",
   } satisfies Record<ErrorCode, string>,
 };

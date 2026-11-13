@@ -56,16 +56,22 @@ export async function applyCounterBill(client: PoolClient, bill: Bill, payload: 
       JOIN shop_listings sl ON sl.shop_id = $1 AND sl.pack_id = line."packId" JOIN packs pk ON pk.id = sl.pack_id
     WHERE line.count * pk.quantity > ${largestQuantity} OR ${stockOf("sl")} - line.count * pk.quantity < -${largestQuantity}`, [bill.shopId, lines])).rowCount);
   const held = !data ? "invalid" : bill.tooOld ? "too_old" : !listed ? "not_listed" : tooLarge ? "too_large" : null;
+  const flaggedDenylist = Boolean(data?.manualLines && data.manualLines.length > 0 && (await client.query(
+    `SELECT 1 FROM denylist_words d WHERE EXISTS (
+       SELECT 1 FROM jsonb_array_elements($1::jsonb) line
+       WHERE ' ' || trim(regexp_replace(lower(line.value->>'name'), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %'
+     )`, [manual])).rowCount);
 
   const insert = (heldReason: string | null, number: number | null, clash: boolean) => client.query<Row>(`INSERT INTO counter_bills (shop_id, actor_id, client_id,
       reference, reference_clash, number, held_reason, invalid_payload, payment, total, checked_total, clock_suspect, made_at, received_at,
-      discount, customer_name, customer_phone, customer_offers, numbered_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      discount, customer_name, customer_phone, customer_offers, numbered_at, flagged_denylist)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
     ON CONFLICT (shop_id, reference) WHERE NOT reference_clash DO NOTHING RETURNING ${billColumns}`,
   [bill.shopId, bill.accountId, bill.actionId, counterBillReference(bill.actionId), clash, number, heldReason,
     data ? null : JSON.stringify(payload ?? null), data?.payment ?? null, data?.total ?? null, data ? sum?.total ?? null : null,
     bill.clockSuspect, bill.madeAt, bill.receivedAt,
-    data?.discount ?? "0", data?.customer?.name ?? null, data?.customer?.phone ?? null, data?.customer?.offers ?? false, number === null ? null : bill.receivedAt]);
+    data?.discount ?? "0", data?.customer?.name ?? null, data?.customer?.phone ?? null, data?.customer?.offers ?? false, number === null ? null : bill.receivedAt,
+    flaggedDenylist]);
   // A refused insert rolls its number back too, so the shop's numbers keep no gap (BIL-5).
   await client.query("SAVEPOINT counter_bill");
   const number = held ? null : (await client.query<{ number: number }>(`INSERT INTO counter_bill_numbers (shop_id, last_number) VALUES ($1, 1)

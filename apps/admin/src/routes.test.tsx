@@ -80,6 +80,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     createSearchTerm: vi.fn(),
     editSearchTerm: vi.fn(),
     removeSearchTerm: vi.fn(),
+    listDenylistWords: vi.fn().mockResolvedValue({ ok: true, data: { words: [] } }),
+    createDenylistWord: vi.fn(),
+    removeDenylistWord: vi.fn(),
     listAreas: vi.fn(),
     listWaitlist: vi.fn().mockResolvedValue({ ok: true, data: { entries: [] } }),
     createArea: vi.fn(),
@@ -546,6 +549,7 @@ describe("Admin web", () => {
     const aata = { id: "00000000-0000-4000-8000-000000000398", typedWord: "aata", catalogWord: "atta" };
     const api = {
       listSearchTerms: vi.fn().mockResolvedValue({ ok: true, data: { terms: [] } }),
+      listDenylistWords: vi.fn().mockResolvedValue({ ok: true, data: { words: [] } }),
       createSearchTerm: vi.fn().mockResolvedValueOnce({ ok: false, status: 409, code: "SEARCH_TERM_IN_USE" })
         .mockResolvedValueOnce({ ok: true, data: kanda }).mockResolvedValue({ ok: true, data: aata }),
       editSearchTerm: vi.fn().mockResolvedValue({ ok: true, data: { ...kanda, typedWord: "kaanda" } }),
@@ -600,6 +604,41 @@ describe("Admin web", () => {
     await screen.findByText(strings.errors.SEARCH_TERM_IN_USE);
     fireEvent.click(screen.getByRole("button", { name: strings.cancel }));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("adds and removes denylist words (#69)", async () => {
+    const api = {
+      listSearchTerms: vi.fn().mockResolvedValue({ ok: true, data: { terms: [] } }),
+      listDenylistWords: vi.fn().mockResolvedValue({ ok: true, data: { words: ["alcohol", "tobacco"] } }),
+      createDenylistWord: vi.fn().mockResolvedValueOnce({ ok: false, status: 409, code: "DENYLIST_WORD_IN_USE" })
+        .mockResolvedValueOnce({ ok: true, data: { word: "cough syrup" } }),
+      removeDenylistWord: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+    };
+    setup("/search-terms", api);
+    await screen.findByRole("heading", { name: strings.denylistWords });
+    expect(screen.getByText("alcohol")).toBeTruthy();
+    expect(screen.getByText("tobacco")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: strings.newDenylistWord }));
+    fireEvent.change(screen.getByRole("textbox", { name: strings.denylistWord }), { target: { value: "a" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveDenylistWord }));
+    expect(await screen.findByText(strings.denylistWordInvalidField)).toBeTruthy();
+    expect(api.createDenylistWord).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: strings.denylistWord }), { target: { value: "alcohol" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveDenylistWord }));
+    expect(await screen.findByText(strings.errors.DENYLIST_WORD_IN_USE)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: strings.denylistWord }), { target: { value: " Cough   Syrup " } });
+    fireEvent.click(screen.getByRole("button", { name: strings.saveDenylistWord }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.denylistWordAdded);
+    expect(api.createDenylistWord).toHaveBeenLastCalledWith({ word: "cough syrup" });
+    expect(screen.getByText("cough syrup")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: strings.removeDenylistWord("tobacco") }));
+    expect((await screen.findByRole("status")).textContent).toBe(strings.denylistWordRemoved);
+    expect(api.removeDenylistWord).toHaveBeenCalledWith("tobacco");
+    expect(screen.queryByText("tobacco")).toBeNull();
   });
 
   it("requires a reason to deactivate and updates child availability when the parent changes", async () => {

@@ -31,7 +31,7 @@ function actionsFor(bill: AdminCounterBill): CounterBillResolutionAction[] {
   const actions: CounterBillResolutionAction[] = [];
   if (bill.heldReason && bill.heldReason !== "invalid") actions.push("number");
   if (bill.heldReason === "reference_taken") actions.push("duplicate");
-  if (bill.heldReason === "invalid" || (bill.number !== null && bill.totalMismatch)) actions.push("review");
+  if (bill.heldReason === "invalid" || (bill.number !== null && (bill.totalMismatch || bill.flaggedDenylist))) actions.push("review");
   actions.push("note");
   return actions;
 }
@@ -62,6 +62,7 @@ function Bill({ api, shopId, bill, onSaved }: { api: AdminApi; shopId: string; b
       <span className="text-muted">{bill.number === null ? strings.counterBillNoNumber : strings.counterBillNumbered(bill.number)}</span>
       {bill.heldReason && <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-on-warning-subtle">{strings.counterBillHeld[bill.heldReason]}</span>}
       {bill.totalMismatch && <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-on-danger-subtle">{strings.counterBillFlagged}</span>}
+      {bill.flaggedDenylist && <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-on-danger-subtle">{strings.counterBillDenylistFlagged}</span>}
       {bill.clockSuspect && <span className="rounded-full bg-info-subtle px-2 py-0.5 text-on-info-subtle">{strings.counterBillClock}</span>}
     </div>
     <p className="mt-2 text-muted">{strings.counterBillMadeBy(person, bill.madeBy.role ? strings.counterBillRole[bill.madeBy.role] : "—")}</p>

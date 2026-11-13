@@ -372,6 +372,35 @@ describe("Admin routes and browser sessions", () => {
     expect(audit.rows).toHaveLength(5);
   });
 
+  it("lists, adds and removes denylist words with an audit log (ADM-3, #69)", async () => {
+    const signed = await signIn("/v1/admin/auth");
+    const token = signed.json().accessToken as string;
+    const headers = { authorization: `Bearer ${token}` };
+    const list = async () => (await app.inject({ method: "GET", url: "/v1/admin/denylist-words", headers })).json().words;
+    const add = (payload: object) => app.inject({ method: "POST", url: "/v1/admin/denylist-words", headers, payload });
+    const remove = (word: string) => app.inject({ method: "DELETE", url: `/v1/admin/denylist-words/${encodeURIComponent(word)}`, headers });
+
+    const initialWords = await list();
+    expect(initialWords).toContain("tobacco");
+    expect(initialWords).toContain("daru");
+
+    const added = await add({ word: "  Test   Drug " });
+    expect(added.statusCode).toBe(201);
+    expect(added.json()).toEqual({ word: "test drug" });
+
+    expect((await add({ word: "test drug" })).json()).toEqual({ error: { code: "DENYLIST_WORD_IN_USE" } });
+    expect((await add({ word: "bad_word!" })).json()).toEqual({ error: { code: "VALIDATION_FAILED", fields: ["word"] } });
+
+    expect((await remove("test drug")).statusCode).toBe(204);
+    expect((await remove("test drug")).statusCode).toBe(404);
+
+    const audit = await database.pool.query("SELECT action, reason FROM admin_actions WHERE target_type = 'denylist_word' ORDER BY created_at, action");
+    expect(audit.rows).toEqual(expect.arrayContaining([
+      { action: "denylist_word.create", reason: "Denylist word added: test drug" },
+      { action: "denylist_word.delete", reason: "Denylist word removed: test drug" },
+    ]));
+  });
+
   it("lists and creates only for Admin web sessions, with an atomic action", async () => {
     const signed = await signIn("/v1/admin/auth");
     const token = signed.json().accessToken as string;
@@ -446,6 +475,9 @@ describe("Admin routes and browser sessions", () => {
       { method: "POST", url: "/v1/admin/search-terms", payload: { typedWord: "kanda", catalogWord: "onion" } },
       { method: "PUT", url: `/v1/admin/search-terms/${id}`, payload: { typedWord: "kanda", catalogWord: "onion" } },
       { method: "DELETE", url: `/v1/admin/search-terms/${id}` },
+      { method: "GET", url: "/v1/admin/denylist-words" },
+      { method: "POST", url: "/v1/admin/denylist-words", payload: { word: "tobacco" } },
+      { method: "DELETE", url: "/v1/admin/denylist-words/tobacco" },
       { method: "GET", url: `/v1/admin/rate-cards/effective?shopId=${id}` },
       { method: "POST", url: "/v1/admin/rate-cards/publish", payload: { scope: { type: "global" }, values: {}, reason: "No access" } },
       { method: "POST", url: "/v1/admin/price-simulator", payload: { shopId: id, lines: [{ listingId: id, count: 1 }] } },

@@ -40,6 +40,7 @@ export {
   Pincode,
   PlaceSearchText,
   SearchWord,
+  DenylistWord,
   PackBarcode,
   PackQuantity,
   CountedPackQuantity,
@@ -119,6 +120,9 @@ export {
   SearchTermsResponse,
   SearchTermParams,
   SearchTermBody,
+  DenylistWordBody,
+  DenylistWordsResponse,
+  DenylistWordParams,
 } from "./catalog";
 export {
   Area,

@@ -107,6 +107,17 @@ export const SearchWord = z
   .overwrite((value) => value.trim().replace(/\s+/g, " ").toLowerCase())
   .regex(/^[a-z ]{2,40}$/);
 
+/**
+ * A word or phrase on the excluded-goods denylist (CAT-8, ADM-3, #69): lowercase letters and digits, single spaces,
+ * 2 to 60 characters once trimmed and inner spaces are collapsed.
+ */
+export const DenylistWord = z
+  .string()
+  .overwrite((value) => value.trim().replace(/\s+/g, " ").toLowerCase())
+  .min(2)
+  .max(60)
+  .regex(/^[a-z0-9]+( [a-z0-9]+)*$/);
+
 /** Master product name, trimmed, 1 to 200 characters (#203); no PostgreSQL-unrepresentable NUL (#269). */
 export const ProductName = z.string().trim().min(1).max(200).refine((value) => !value.includes("\0"));
 

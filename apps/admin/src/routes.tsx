@@ -456,7 +456,18 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     }),
     guarded({
       path: "/search-terms",
-      loader: listLoader(() => api.listSearchTerms(), (data) => data.terms),
+      loader: async () => {
+        const [terms, denylist] = await Promise.all([api.listSearchTerms(), api.listDenylistWords()]);
+        if (!terms.ok) {
+          if (terms.code === "UNAUTHENTICATED" || terms.code === "FORBIDDEN") return redirect("/sign-in");
+          throw new Error(terms.code);
+        }
+        if (!denylist.ok) {
+          if (denylist.code === "UNAUTHENTICATED" || denylist.code === "FORBIDDEN") return redirect("/sign-in");
+          throw new Error(denylist.code);
+        }
+        return { terms: terms.data.terms, denylistWords: denylist.data.words };
+      },
       element: <Page protectedArea api={api}><SearchTerms api={api} /></Page>,
       hydrateFallbackElement: <Page protectedArea api={api}>{strings.searchTermsLoading}</Page>,
       errorElement: <RouteError api={api} />,

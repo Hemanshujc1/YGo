@@ -126,6 +126,22 @@ describe("Owner shop listings and opening stock", () => {
     await expect(database.pool.query("TRUNCATE stock_movements")).rejects.toThrow("append-only");
   });
 
+  it("flags quantity-price options matching the denylist without blocking the shop save (#69, CAT-8)", async () => {
+    const actor = await shop("approved", "denylist-options@example.com");
+    const save = (quantityOptions: { name: string; quantity: string; price: string }[]) =>
+      app.inject({ method: "PUT", url: `/v1/me/shop-listings/${actor.packId}`, headers: actor.headers, payload: { ...listingBody, quantityOptions } });
+
+    const saved = await save([
+      { name: "Clean option", quantity: "2", price: "40" },
+      { name: "Filtered cigarette pack", quantity: "3", price: "60" },
+    ]);
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().listing.quantityOptions).toMatchObject([
+      { name: "Clean option", flagged: false },
+      { name: "Filtered cigarette pack", flagged: true },
+    ]);
+  });
+
   it("refuses fractional inventory for counted packs", async () => {
     const actor = await shop();
     const changed = await database.pool.query("UPDATE master_products SET base_unit = 'each', classification = 'counted' WHERE id = (SELECT product_id FROM packs WHERE id = $1)", [actor.packId]);

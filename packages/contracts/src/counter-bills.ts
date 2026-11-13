@@ -76,6 +76,8 @@ export const AdminCounterBill = z.strictObject({
   number: z.number().int().nullable(),
   heldReason: CounterBillHeldReason.nullable(),
   totalMismatch: z.boolean(),
+  /** True when a manual line's name matched an excluded-goods denylist word (CAT-8, #69). */
+  flaggedDenylist: z.boolean(),
   payment: z.enum(["cash", "upi"]).nullable(),
   /** The phone's total, which is the total on record. */
   total: z.string().nullable(),
