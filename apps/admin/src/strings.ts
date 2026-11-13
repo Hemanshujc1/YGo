@@ -32,6 +32,7 @@ export const strings = {
   customerSearch: "Search by name, email, or phone",
   customerFlags: "Failed deliveries / refusals",
   customerFlagged: "Flagged",
+  customerSearchShort: "Enter at least 2 characters to search.",
   customerAction: "Action",
   customerBlock: "Block",
   customerUnblock: "Unblock",

@@ -75,21 +75,40 @@ describe("Customer trust controls (#72, TRU-5)", () => {
     await database.pool.query(
       `INSERT INTO shops (id, state, shop_name, address, pincode, location, owner_name, entity_type, pan, fssai_number, fssai_expiry, upi_id, submitted_at, created_at)
        VALUES ($1, 'live', 'Test Shop', 'Main Road', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 'Owner', 'proprietorship', 'ABCDE1234F', '11223344556677', '2031-03-31', 'test@upi', now(), now())`, [shopId]);
+    await database.pool.query("INSERT INTO accounts (email) SELECT 'aa' || n || '@example.com' FROM generate_series(1, 51) n");
     for (let index = 0; index < 2; index++) {
       await database.pool.query(
         `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat, address_pincode, address_point, product_value, delivery_fee, total, rate_card_version, quote, failed_delivery_reason)
-         VALUES ($1, $2, 'delivery_failed', $3, $3, 'Test Shop', 'Main Road', '411038', 'home', 'Flat 1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 100, 0, 100, $4, '{}', 'customer_refused')`, [id, shopId, clock.now(), card?.version]);
+         VALUES ($1, $2, 'delivery_failed', $3, $3, 'Test Shop', 'Main Road', '411038', 'home', 'Flat 1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 100, 0, 100, $4, '{}', $5)`, [id, shopId, clock.now(), card?.version, index === 0 ? 'customer_refused' : 'unreachable']);
+      if (index === 0) {
+        const one = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
+        expect(one.json().customers[0]).toMatchObject({ failedDeliveries: 1, refusals: 1, flagged: false });
+      }
     }
     const lookup = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
-    expect(lookup.json().customers[0]).toMatchObject({ id, phone: "+919876543211", phoneState: "sms-verified", failedDeliveries: 2, refusals: 2, flagged: true });
+    expect(lookup.json().customers[0]).toMatchObject({ id, phone: "+919876543211", phoneState: "sms-verified", failedDeliveries: 2, refusals: 1, flagged: true });
     const flagged = await app.inject({ method: "GET", url: "/v1/admin/customers?flagged=true", headers: admin });
     expect(flagged.json().customers).toEqual([expect.objectContaining({ id, flagged: true })]);
+    clock.advance(31 * 24 * 60 * 60_000);
+    admin = await signIn("/v1/admin/auth", "admin@example.com");
+    const old = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
+    expect(old.json().customers[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
+    clock.set(new Date("2030-01-01T00:00:00.000Z"));
+    await database.pool.query("INSERT INTO order_status_history (order_id, to_status, actor_id, actor_role, at, reason_code) SELECT id, 'delivery_failed', $2, 'admin', $3, 'admin_forced' FROM orders WHERE account_id = $1", [id, await customerId("admin@example.com"), clock.now()]);
+    const forced = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
+    expect(forced.json().customers[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
   });
 
   it("refuses a blocked sign-up with 403", async () => {
     const id = await customerId();
     expect((await app.inject({ method: "POST", url: `/v1/admin/customers/${id}/block`, headers: admin, payload: { reason: "Trust review" } })).statusCode).toBe(200);
-    const refused = await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email: "customer@example.com" } });
+    clock.advance(30_000);
+    await signIn("/v1/auth", "customer@example.com");
+    await database.pool.query("DELETE FROM sessions WHERE account_id = $1", [id]);
+    await database.pool.query("DELETE FROM accounts WHERE id = $1", [id]);
+    clock.advance(30_000);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email: "customer@example.com" } })).statusCode).toBe(204);
+    const refused = await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email: "customer@example.com", code: codeFor("customer@example.com") } });
     expect(refused.statusCode).toBe(403);
     expect(refused.json()).toEqual({ error: { code: "CUSTOMER_BLOCKED" } });
   });
@@ -97,7 +116,11 @@ describe("Customer trust controls (#72, TRU-5)", () => {
   it("closes new sign-ups but keeps existing accounts able to sign in", async () => {
     const changed = await app.inject({ method: "PUT", url: "/v1/admin/customer-signups", headers: admin, payload: { enabled: false, reason: "Pilot closed" } });
     expect(changed.statusCode).toBe(200);
-    expect((await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email: "new@example.com" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email: "new@example.com" } })).statusCode).toBe(204);
+    const refused = await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email: "new@example.com", code: codeFor("new@example.com") } });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: { code: "SIGNUPS_CLOSED" } });
+    clock.advance(30_000);
     const existing = await app.inject({ method: "POST", url: "/v1/auth/code", payload: { email: "customer@example.com" } });
     expect(existing.statusCode).toBe(204);
     expect((await app.inject({ method: "POST", url: "/v1/auth/verify", payload: { email: "customer@example.com", code: codeFor("customer@example.com") } })).statusCode).toBe(200);

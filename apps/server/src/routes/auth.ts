@@ -156,9 +156,9 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
       await client.query("BEGIN");
       await lockKey(client, email.data, 1);
       const result = await client.query<Account>(
-        `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR (SELECT enabled FROM customer_signup_settings WHERE id = 1)
+        `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR ((SELECT enabled FROM customer_signup_settings WHERE id = 1) AND NOT EXISTS (SELECT 1 FROM customer_blocks WHERE email_digest = $2))
          ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-         RETURNING id, email, name, phone, theme`, [email.data],
+         RETURNING id, email, name, phone, theme`, [email.data, digest(keys.blockDigest, email.data)],
       );
       const account = result.rows[0];
       if (!account) {
@@ -365,10 +365,10 @@ export function registerAuthRoutes(app: AuthApp, { pool, mailer, clock, secret, 
               [email],
             )
           : await client.query<Account>(
-              `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR (SELECT enabled FROM customer_signup_settings WHERE id = 1)
+              `INSERT INTO accounts (email) SELECT $1 WHERE EXISTS (SELECT 1 FROM accounts WHERE email = $1) OR ((SELECT enabled FROM customer_signup_settings WHERE id = 1) AND NOT EXISTS (SELECT 1 FROM customer_blocks WHERE email_digest = $2))
                ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
                RETURNING id, email, name, phone, theme`,
-              [email],
+              [email, digest(keys.blockDigest, email)],
             );
         const account = accountResult.rows[0];
         if (browser && !account) {

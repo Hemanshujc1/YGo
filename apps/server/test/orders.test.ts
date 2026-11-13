@@ -678,6 +678,10 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     const { shopId, dal, owner, home } = await stocked();
     const before = await shopSees(dal, owner);
     const orderId = await readyAtDoor(shopId, dal, home, owner, true);
+    const accountId = (await database.pool.query<{ id: string }>("SELECT id FROM accounts WHERE email = 'customer@example.com'")).rows[0]?.id;
+    expect((await app.inject({ method: "POST", url: `/v1/admin/customers/${accountId}/block`, headers: admin, payload: { reason: "Trust review" } })).statusCode).toBe(200);
+    clock.advance(30_000);
+    customer = await signIn("/v1/auth", "customer@example.com");
     expect((await app.inject({ method: "GET", url: `/v1/orders/${orderId}`, headers: customer })).json().handoverCode).toBeNull();
     const checked = await app.inject({ method: "POST", url: `/v1/orders/${orderId}/items-ok`, headers: customer });
     const handoverCode = checked.json().handoverCode as string;
@@ -689,7 +693,7 @@ describe("Shop delivery (#56, DLV-1 to DLV-7)", () => {
     expect(complete.json()).toMatchObject({ status: "delivered", deliveryPhotoAvailable: true, deliveryFailureReadyAt: null });
     expect(deletedUploads).toContain(upload.id);
     expect((await database.pool.query("SELECT delivery_photo_expires_at FROM orders WHERE id = $1", [orderId])).rows[0]?.delivery_photo_expires_at)
-      .toEqual(new Date("2030-01-31T00:00:00.000Z"));
+      .toEqual(new Date(clock.now().getTime() + 30 * 24 * 60 * 60_000));
     expect(await shopSees(dal, owner, before.cursor)).toMatchObject({
       listings: { stock: "9.000", held: "0" }, stock: { quantity: "9.000", held: "0" }, sync: [{ quantity: "9.000", held: "0" }],
     });

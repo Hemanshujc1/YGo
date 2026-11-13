@@ -1,31 +1,28 @@
 import type { Pool, PoolClient } from "pg";
 import type { CustomerTrust } from "@ygo/contracts";
-import { customerFailedDeliveries, CUSTOMER_TRUST_FLAG_THRESHOLD } from "./customer-refusals";
+import { customerFailureCountsSql } from "./customer-refusals";
 import { digest, type AuthKeys } from "./tokens";
 
 type Db = Pool | PoolClient;
 
 export async function listCustomers(db: Db, search: string | undefined, now: Date, flaggedOnly = false): Promise<CustomerTrust[]> {
   const pattern = search === undefined ? null : `%${search.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-  const result = await db.query<{
-    id: string; email: string; name: string | null; phone: string | null; phoneState: CustomerTrust["phoneState"];
-    blocked: boolean; blockReason: string | null;
-  }>(
+  const result = await db.query<CustomerTrust>(
     `SELECT a.id, a.email, a.name, a.phone,
        CASE WHEN a.phone_verified THEN 'sms-verified'
             WHEN a.phone_visit_confirmed_at IS NOT NULL THEN 'visit-confirmed'
             ELSE 'unverified' END AS "phoneState",
-       cb.account_id IS NOT NULL AS blocked, cb.reason AS "blockReason"
+       cb.account_id IS NOT NULL AS blocked, cb.reason AS "blockReason",
+       COALESCE(counts.failed, 0) AS "failedDeliveries", COALESCE(counts.refused, 0) AS refusals,
+       COALESCE(counts.flagged, false) AS flagged
      FROM accounts a LEFT JOIN customer_blocks cb ON cb.account_id = a.id
-     WHERE a.role = 'customer' AND ($1::text IS NULL OR a.email ILIKE $1 ESCAPE '\\' OR a.name ILIKE $1 ESCAPE '\\' OR a.phone ILIKE $1 ESCAPE '\\')
+     LEFT JOIN (${customerFailureCountsSql}) counts ON counts.account_id = a.id
+     WHERE a.role = 'customer' AND ($2::text IS NULL OR a.email ILIKE $2 ESCAPE '\\' OR a.name ILIKE $2 ESCAPE '\\' OR a.phone ILIKE $2 ESCAPE '\\')
+       AND (NOT $3::boolean OR COALESCE(counts.flagged, false))
      ORDER BY lower(a.email) LIMIT 50`,
-    [pattern],
+    [now, pattern, flaggedOnly],
   );
-  const customers = await Promise.all(result.rows.map(async (row) => {
-    const counts = await customerFailedDeliveries(db, row.id, now);
-    return { ...row, failedDeliveries: counts.failed, refusals: counts.refused, flagged: counts.failed >= CUSTOMER_TRUST_FLAG_THRESHOLD || counts.refused >= CUSTOMER_TRUST_FLAG_THRESHOLD };
-  }));
-  return flaggedOnly ? customers.filter((customer) => customer.flagged) : customers;
+  return result.rows;
 }
 
 export async function blockCustomer(db: Db, accountId: string, reason: string, actorId: string, keys: AuthKeys, now: Date): Promise<CustomerTrust | null> {

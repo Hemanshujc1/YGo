@@ -40,7 +40,7 @@ vi.mock("@ygo/mobile", async () => {
     Text: ({ children }: { children?: ReactNode }) => createElement("span", null, children),
   };
 });
-vi.mock("../src/api", () => ({ api: { placeOrder: mock.placeOrder } }));
+vi.mock("../src/api", () => ({ api: { placeOrder: mock.placeOrder }, supportEmail: "support@example.com" }));
 vi.mock("../src/components/stepper", () => ({ Stepper: () => null }));
 vi.mock("../src/components/top-bar", () => ({ TopBar: () => null }));
 vi.mock("../src/lib/go-home", () => ({ goHome: vi.fn() }));
@@ -86,6 +86,12 @@ afterEach(() => {
 });
 
 describe("C07 choosing delivery or pickup (FUL-7, #65)", () => {
+  it("shows the support email when a blocked account attempts an order", async () => {
+    mock.placeOrder.mockResolvedValue({ ok: false, status: 403, code: "CUSTOMER_BLOCKED" });
+    const { getByText, findByText } = render(<CartScreen />);
+    fireEvent.click(getByText(words.place("₹300")));
+    expect(await findByText(`${strings.errors.CUSTOMER_BLOCKED} support@example.com.`)).toBeDefined();
+  });
   it("offers both when the shop has pickup open, starting on delivery with its quote, address and total", () => {
     const { getAllByText, getByRole, getByText, queryByText } = render(<CartScreen />);
     expect(getByRole("radio", { name: words.fulfilment.delivery }).getAttribute("aria-checked")).toBe("true");

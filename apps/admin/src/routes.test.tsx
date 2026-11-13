@@ -14,6 +14,37 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
 });
 
+describe("Customers feedback", () => {
+  it("returns to Flagged after searching and explains a short search", async () => {
+    const { api } = setup("/customers");
+    await screen.findByText(strings.customerIntro);
+    fireEvent.change(screen.getByLabelText(strings.customerSearch), { target: { value: "a" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.search }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", strings.customerSearchShort);
+    fireEvent.change(screen.getByLabelText(strings.customerSearch), { target: { value: "customer" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.search }));
+    await waitFor(() => expect(api.listCustomers).toHaveBeenCalledWith("customer"));
+    fireEvent.click(screen.getByLabelText(strings.customerFlagged));
+    await waitFor(() => expect(api.listCustomers).toHaveBeenLastCalledWith(undefined, true));
+  });
+
+  it("shows an error when signup settings cannot load", async () => {
+    setup("/customers", { customerSignupSettings: vi.fn().mockResolvedValue({ ok: false, code: "UNAVAILABLE" }) });
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.customerActionFailed);
+  });
+
+  it("requires a reason and reports a failed signup change", async () => {
+    const change = vi.fn().mockResolvedValue({ ok: false, code: "UNAVAILABLE" });
+    setup("/customers", { setCustomerSignupSettings: change });
+    const control = await screen.findByLabelText(strings.customerSignups);
+    fireEvent.click(control);
+    expect(change).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(strings.reason), { target: { value: "Pilot paused" } });
+    fireEvent.click(control);
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.customerActionFailed);
+  });
+});
+
 const founder = { id: "00000000-0000-4000-8000-000000000001", email: "founder@example.com", name: "Founder", phone: "+919876543210", theme: "system", role: "admin" };
 const created = { id: "00000000-0000-4000-8000-000000000002", email: "new@example.com", name: "New Manager", phone: "+919876543211", theme: "system", role: "area_manager" };
 const groceries = { id: "00000000-0000-4000-8000-000000000101", parentId: null, name: "Groceries", active: false, effectiveActive: false };
