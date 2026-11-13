@@ -1,4 +1,4 @@
-import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult } from "@ygo/contracts";
+import { ErrorEnvelope, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, type ShopStockResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsBody, SyncActionsResponse, type SyncActionResult, type SyncLimits } from "@ygo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "../adapters/clock";
@@ -13,9 +13,9 @@ import { applyOpeningStock, applyOpeningStockCorrection, counterCatalogSql } fro
 
 const openingTypes = new Set(["opening_stock", "opening_stock_correction"]);
 
-type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number };
+type Options = { pool: Pool; clock: Clock; secret: string; maxAgeSeconds: number; clockSkewSeconds: number; limits: SyncLimits; photos?: DeliveryPhotoStorage; failureWaitSeconds: number; photoSaveTimeoutMs?: number };
 
-export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: Options) {
+export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, maxAgeSeconds, clockSkewSeconds, limits, photos, failureWaitSeconds, photoSaveTimeoutMs = 60_000 }: Options) {
   const auth = { pool, clock, keys: deriveKeys(secret) };
   const deliveries = deliveryActions({ secret, photos, failureWaitSeconds, photoSaveTimeoutMs });
   app.get("/v1/sync/access", { schema: { response: { 200: SyncAccessResponse, 401: ErrorEnvelope } } }, async (request, reply) => {
@@ -27,7 +27,7 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
       const { rows: [shop] } = await client.query(`SELECT s.id, s.state, s.shop_name, s.gstin, m.role, (m.role = 'owner' OR m.can_deliver) AS can_deliver FROM shops s JOIN shop_members m ON m.shop_id = s.id
         WHERE m.account_id = $1 AND m.role IN ('owner', 'staff') FOR SHARE OF s, m`, [who.accountId]);
       await client.query("COMMIT");
-      return reply.send({ shopId: shop?.id ?? null, state: shop?.state ?? null, shopName: shop?.shop_name ?? null, shopGstin: shop?.gstin ?? null, role: shop?.role ?? null, canDeliver: shop?.can_deliver ?? false });
+      return reply.send({ limits, shopId: shop?.id ?? null, state: shop?.state ?? null, shopName: shop?.shop_name ?? null, shopGstin: shop?.gstin ?? null, role: shop?.role ?? null, canDeliver: shop?.can_deliver ?? false });
     });
   });
 
@@ -80,6 +80,8 @@ export function registerSyncRoutes(app: FastifyInstance, { pool, clock, secret, 
     const who = await mobileSignedIn(request, reply, auth);
     if (!who) return reply;
     const body = request.body as SyncActionsBody;
+    // The phone stops at the same limit (BIL-3); more than this in one batch is not a queue the phone could have kept.
+    if (body.actions.length > limits.maxActions) return reply.code(400).send({ error: { code: "VALIDATION_FAILED" } });
     // Proof photos are saved first, outside the transaction, so slow storage cannot hold the locks taken below (#616).
     const prepared = photos ? await preparePhotos(pool, deliveries, body.actions.filter((a) => a.type.startsWith("delivery_")), { accountId: who.accountId, now: clock.now(), maxAgeSeconds }) : new Map();
     return withTransaction(pool, async (client) => {

@@ -306,7 +306,7 @@ export {
 
 export {
   counterBillReference, CounterBillHeldReason, CounterBillLine, CounterBillManualLine, CounterBillPayload, CounterBillResponse,
-  ShopStockResponse, StockCursor, SyncAccessResponse, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, STOCK_CHANGE_REASONS, StockChangePayload, StockChangeReason, StockChangeResponse, OpeningStockPayload, SyncAction, SyncActionCode, DELIVERY_ACTION_TYPES, DeliveryActionResponse, DeliveryCallAttemptPayload, DeliveryCompletePayload, DeliveryFailedPayload, DeliveryProofExceptionPayload, SyncActionResult, SyncActionsBody, SyncActionsResponse,
+  DEFAULT_SYNC_LIMITS, ShopStockResponse, StockCursor, SyncAccessResponse, SyncLimits, SyncChangesQuery, SyncChangesResponse, StockFlagPayload, StockFlagResponse, STOCK_CHANGE_REASONS, StockChangePayload, StockChangeReason, StockChangeResponse, OpeningStockPayload, SyncAction, SyncActionCode, DELIVERY_ACTION_TYPES, DeliveryActionResponse, DeliveryCallAttemptPayload, DeliveryCompletePayload, DeliveryFailedPayload, DeliveryProofExceptionPayload, SyncActionResult, SyncActionsBody, SyncActionsResponse,
 } from "./sync";
 
 export { Notification, NotificationKind, NotificationParams, NotificationsResponse, PushTokenBody, RingAttemptParams } from "./notifications";

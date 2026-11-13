@@ -1,12 +1,12 @@
 import type { ApiResult } from "@ygo/api-client";
-import { Account, ShopStockResponse, type SyncAccessResponse } from "@ygo/contracts";
-import { OFFLINE_WINDOW_MS } from "./offline-limits";
+import { Account, ShopStockResponse, SyncLimits, type SyncAccessResponse } from "@ygo/contracts";
+import { offlineLimits, offlineWindowMs } from "./offline-limits";
 
 /**
  * `shopName` is what a bill PDF prints offline (#53); a record saved before it, or a Draft without a name, has null.
  * `role` and `canDeliver` only decide what the phone shows (#494, #550); a record with no role, or one this phone does not know, reads as Staff who cannot deliver, so Owner-only screens stay hidden until the next check says otherwise.
  */
-export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null; shopGstin: string | null; role: "owner" | "staff"; canDeliver: boolean };
+export type SavedAccess = { account: Account; shopId: string; verifiedAt: number; stockAllowed: boolean; shopName: string | null; shopGstin: string | null; role: "owner" | "staff"; canDeliver: boolean; limits?: SyncLimits };
 export type AccessView = { mode: "online" | "offline" | "expired" | "erasing" | "ended" | "signing-out"; accountId?: string; shopId?: string; expiresAt?: number };
 export interface AccessStorage {
   active(): string | undefined;
@@ -29,17 +29,18 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
   const erasing = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
   function show(next: AccessView) { view = next; for (const notify of listeners) notify(); }
-  function usable(record: SavedAccess) { const age = now() - record.verifiedAt; return record.stockAllowed && age >= 0 && age < OFFLINE_WINDOW_MS; }
+  function usable(record: SavedAccess) { const age = now() - record.verifiedAt; return record.stockAllowed && age >= 0 && age < offlineWindowMs(); }
   function cached(record: SavedAccess) {
     saved = record;
-    show({ mode: storage.blocked(record.account.id) ? "erasing" : usable(record) ? "offline" : "expired", accountId: record.account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
+    offlineLimits.set(record.limits ?? null);
+    show({ mode: storage.blocked(record.account.id) ? "erasing" : usable(record) ? "offline" : "expired", accountId: record.account.id, shopId: record.shopId, expiresAt: record.verifiedAt + offlineWindowMs() });
   }
   async function erase(accountId: string, shopId: string, mine: number) {
     show({ mode: "erasing", accountId, shopId });
     let work = erasing.get(accountId);
     if (!work) { work = storage.erase(accountId, shopId).finally(() => erasing.delete(accountId)); erasing.set(accountId, work); }
     await work;
-    if (mine === turn) { saved = null; last = null; show({ mode: "ended", accountId }); }
+    if (mine === turn) { saved = null; last = null; offlineLimits.set(null); show({ mode: "ended", accountId }); }
   }
   return {
     get: () => view,
@@ -56,8 +57,8 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
     /** The last answer the server gave this account, so a sync pass need not ask again. */
     answer: (accountId: string) => last?.accountId === accountId ? last.data : null,
     subscribe(notify: () => void) { listeners.add(notify); return () => { listeners.delete(notify); }; },
-    pause() { turn++; saved = null; last = null; storage.forget(); show({ mode: "signing-out" }); },
-    reset() { turn++; saved = null; last = null; storage.forget(); show({ mode: "online" }); },
+    pause() { turn++; saved = null; last = null; offlineLimits.set(null); storage.forget(); show({ mode: "signing-out" }); },
+    reset() { turn++; saved = null; last = null; offlineLimits.set(null); storage.forget(); show({ mode: "online" }); },
     async restore() {
       const mine = turn, id = storage.active();
       if (!id) return null;
@@ -82,7 +83,7 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
       }
       if (mine !== turn) return null;
       if (!answer.ok) { if (record) cached(record); return null; }
-      const { shopId, state, shopName, shopGstin, role, canDeliver } = answer.data;
+      const { shopId, state, shopName, shopGstin, role, canDeliver, limits } = answer.data;
       if (state === "closed" || (record && shopId !== record.shopId) || (!record && storage.hasData(account.id) && !shopId)) {
         await erase(account.id, record?.shopId ?? shopId ?? "unlinked", mine).catch(() => undefined);
         return null;
@@ -96,18 +97,20 @@ export function offlineAccess(storage: AccessStorage, fetchAccess: () => Promise
           // The lease keeps its deadline, but a changed role, deliver flag, name or GSTIN is kept so it survives a restart.
           const gstin = shopGstin ?? null;
           const name = shopName ?? null;
-          const kept = (role && role !== record.role) || canDeliver !== record.canDeliver || gstin !== (record.shopGstin ?? null) || name !== (record.shopName ?? null) ? { ...record, role: role ?? record.role, canDeliver, shopName: name, shopGstin: gstin } : record;
+          const kept = (role && role !== record.role) || canDeliver !== record.canDeliver || JSON.stringify(limits) !== JSON.stringify(record.limits) || gstin !== (record.shopGstin ?? null) || name !== (record.shopName ?? null) ? { ...record, role: role ?? record.role, canDeliver, limits, shopName: name, shopGstin: gstin } : record;
           if (kept !== record) { await storage.save(kept); if (mine !== turn) return null; }
           saved = kept;
-          show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + OFFLINE_WINDOW_MS });
+          offlineLimits.set(limits);
+          show({ mode: "offline", accountId: account.id, shopId: record.shopId, expiresAt: record.verifiedAt + offlineWindowMs() });
           return answered(account.id, answer.data);
         }
-        const next = { account, shopId, verifiedAt: now(), stockAllowed, shopName, shopGstin, role: role ?? "owner", canDeliver };
+        const next = { account, shopId, verifiedAt: now(), stockAllowed, shopName, shopGstin, role: role ?? "owner", canDeliver, limits };
         await storage.save(next);
         if (mine !== turn) return null;
         storage.select(account.id);
         saved = next;
-        show({ mode: "online", accountId: account.id, ...(stockAllowed ? { shopId, expiresAt: next.verifiedAt + OFFLINE_WINDOW_MS } : {}) });
+        offlineLimits.set(limits);
+        show({ mode: "online", accountId: account.id, ...(stockAllowed ? { shopId, expiresAt: next.verifiedAt + offlineWindowMs() } : {}) });
         return answered(account.id, answer.data);
       } else {
         if (mine === turn) show({ mode: "online", accountId: account.id });
@@ -132,6 +135,6 @@ export function readSavedAccess(raw: string | null): SavedAccess | null {
     const value = JSON.parse(raw) as SavedAccess;
     const account = Account.safeParse(value.account);
     return account.success && ShopStockResponse.shape.shopId.safeParse(value.shopId).success && typeof value.stockAllowed === "boolean" && Number.isFinite(value.verifiedAt)
-      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, shopGstin: typeof value.shopGstin === "string" ? value.shopGstin : null, role: value.role === "owner" ? "owner" : "staff", canDeliver: typeof value.canDeliver === "boolean" ? value.canDeliver : value.role === "owner" } : null;
+      ? { ...value, account: account.data, shopName: typeof value.shopName === "string" ? value.shopName : null, shopGstin: typeof value.shopGstin === "string" ? value.shopGstin : null, role: value.role === "owner" ? "owner" : "staff", canDeliver: typeof value.canDeliver === "boolean" ? value.canDeliver : value.role === "owner", limits: SyncLimits.safeParse(value.limits).data } : null;
   } catch { return null; }
 }

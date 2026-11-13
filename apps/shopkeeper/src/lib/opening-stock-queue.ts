@@ -1,6 +1,6 @@
 import { stockCache } from "./stock-cache";
 import { createDeliveryTables, deliveryStore } from "./delivery-store";
-import { OFFLINE_LIMITS } from "./offline-limits";
+import { offlineLimits, type OfflineLimits } from "./offline-limits";
 import { counterBillReference, CounterBillPayload, DeliveryCallAttemptPayload, DeliveryCompletePayload, DeliveryFailedPayload, DeliveryProofExceptionPayload, DELIVERY_ACTION_TYPES, type CounterBillVoidReason, type ShopCounterBill, type CounterBillResponse, OpeningStockPayload, StockChangePayload, StockFlagPayload, SyncActionsResponse, type SyncAction, type SyncActionsBody, type SyncActionResult, OpeningStockBody, type OpeningStockBody as OpeningStockEntry, type ShopListingCatalogItem, type ShopListingsResponse } from "@ygo/contracts";
 import type { ApiResult } from "@ygo/api-client";
 import type { SQLiteDatabase } from "expo-sqlite";
@@ -16,7 +16,8 @@ function parse(raw: string): OpeningStockEntry | null {
 }
 
 /** One account's encrypted database; shop and pack remain part of each key. */
-export function openingStockQueue(db: Database, newId: () => string, now = () => new Date(), limits: { maxActions: number; maxAgeHours: number } = OFFLINE_LIMITS) {
+export function openingStockQueue(db: Database, newId: () => string, now = () => new Date(), limitsOf: OfflineLimits | (() => OfflineLimits) = offlineLimits.get) {
+  const limits = () => typeof limitsOf === "function" ? limitsOf() : limitsOf;
   const schema = db.getFirstSync<{ user_version: number }>("PRAGMA user_version");
   if (!schema) throw new Error("Could not read opening stock schema");
   const version = schema.user_version;
@@ -92,9 +93,9 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
 
   /** The one BIL-3 check for every new piece of offline work. */
   function blocked(used: number, adding: boolean): "queueFull" | "queueExpired" | null {
-    if (adding && used >= limits.maxActions) return "queueFull";
+    if (adding && used >= limits().maxActions) return "queueFull";
     const oldest = oldestWaiting();
-    return oldest && now().getTime() - Date.parse(oldest) >= limits.maxAgeHours * 3600_000 ? "queueExpired" : null;
+    return oldest && now().getTime() - Date.parse(oldest) >= limits().maxAgeHours * 3600_000 ? "queueExpired" : null;
   }
 
   /** Give a new change the next place in the ordered queue. */
@@ -284,7 +285,7 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
           db.runSync("INSERT INTO opening_stock_actions (id, sequence, shop_id, pack_id, action) VALUES (?, ?, ?, ?, ?)", action.id, action.sequence, shopId, row.pack_id, JSON.stringify(action));
         }
         db.runSync("UPDATE sync_device SET sequence = ?", device.sequence);
-        for (const row of db.getAllSync<{ action: string; pack_id: string }>("SELECT action, pack_id FROM opening_stock_actions WHERE status = 'pending' ORDER BY sequence LIMIT 500")) {
+        for (const row of db.getAllSync<{ action: string; pack_id: string }>("SELECT action, pack_id FROM opening_stock_actions WHERE status = 'pending' ORDER BY sequence LIMIT ?", limits().maxActions)) {
           const action = JSON.parse(row.action) as SyncAction;
           if (action.shopId !== shopId || (action.type === "opening_stock" && db.getFirstSync("SELECT 1 FROM opening_stock_held WHERE source_key = ?", `opening:${shopId}:${row.pack_id}`))) break;
           actions.push(action);
@@ -397,8 +398,8 @@ export function openingStockQueue(db: Database, newId: () => string, now = () =>
     /** The S08 meter: work counted against the allowance, and hours left before the oldest waiting change reaches the limit. */
     allowance(): { used: number; max: number; hoursLeft: number } {
       const oldest = oldestWaiting();
-      const left = limits.maxAgeHours * 3600_000 - (oldest ? now().getTime() - Date.parse(oldest) : 0);
-      return { used: this.count(), max: limits.maxActions, hoursLeft: Math.max(0, Math.ceil(left / 3600_000)) };
+      const left = limits().maxAgeHours * 3600_000 - (oldest ? now().getTime() - Date.parse(oldest) : 0);
+      return { used: this.count(), max: limits().maxActions, hoursLeft: Math.max(0, Math.ceil(left / 3600_000)) };
     },
     /** S08's three sections; `since` is the start of today on this phone. */
     overview(since: Date): Record<"attention" | "waiting" | "synced", QueueRow[]> {

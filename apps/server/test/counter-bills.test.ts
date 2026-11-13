@@ -259,6 +259,46 @@ describe("counter bill sync (#51)", () => {
     expect(await count("counter_bills")).toBe(1);
   });
 
+  it.each([["Owner phone first", true], ["Staff phone first", false]])("leaves the same stock and an unbroken numbering when two phones send in either order: %s (#642, BIL-5)", async (_label, ownerFirst) => {
+    const { shopId, pack, bill, send, stock, count } = await shop();
+    const staff = await account("staff@example.com");
+    await database.pool.query("INSERT INTO shop_members (account_id, shop_id, role) VALUES ($1, $2, 'staff')", [staff.id, shopId]);
+    const rice = await pack("1", "50");
+    const sale = (counted: number) => { const line = [{ packId: rice, count: counted, unitPrice: "21" }]; return bill(line, { payload: { lines: line, total: String(21 * counted), payment: "cash" } }); };
+    const owners = () => send([sale(1), sale(2), sale(3)]);
+    const staffs = () => send([sale(4), sale(5)], "tablet", staff.headers);
+    const answers = ownerFirst ? [...await owners(), ...await staffs()] : [...await staffs(), ...await owners()];
+    const numbers = answers.map((row) => row.result && "number" in row.result ? row.result.number : null).sort();
+    expect(numbers).toEqual([1, 2, 3, 4, 5]);
+    expect(await stock(rice)).toBe("35.000");
+    expect(await count("counter_bills")).toBe(5);
+    expect((await database.pool.query("SELECT last_number FROM counter_bill_numbers")).rows).toEqual([{ last_number: 5 }]);
+  });
+
+  it("tells the phone the offline limits it enforces and refuses a batch over them, applying nothing (#642, BIL-3)", async () => {
+    await app.close();
+    app = buildApp({ checkDatabase: database.ping, database, mailer, clock, authTokenSecret: secret, syncMaxActions: 2, syncMaxOfflineHours: 24 });
+    const { owner, pack, bill, send, count } = await shop();
+    const access = await app.inject({ method: "GET", url: "/v1/sync/access", headers: owner.headers });
+    expect(access.json()).toMatchObject({ limits: { maxActions: 2, maxOfflineHours: 24 } });
+    const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
+    const sale = () => bill(line, { payload: { lines: line, total: "21", payment: "cash" } });
+    const over = await app.inject({ method: "POST", url: "/v1/sync/actions", headers: owner.headers,
+      payload: { deviceId: "00000000-0000-4000-8000-000000000001", sentAt: clock.now().toISOString(), actions: [sale(), sale(), sale()].map((action, index) => ({ ...action, sequence: index + 1 })) } });
+    expect(over.statusCode).toBe(400);
+    expect(await count("counter_bills")).toBe(0);
+    expect(await send([sale(), sale()])).toHaveLength(2);
+  });
+
+  it("numbers a bill from a phone whose clock is days ahead and dates its sale no later than the server got it (#642)", async () => {
+    const { pack, bill, send } = await shop();
+    const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];
+    const ahead = "2030-01-09T00:00:00.000Z";
+    const [result] = await send([bill(line, { createdAt: ahead, payload: { lines: line, total: "21", payment: "cash" } })], "phone", undefined, ahead);
+    expect(result).toMatchObject({ clockSuspect: true, result: { number: 1, heldReason: null } });
+    expect((await database.pool.query("SELECT made_at, received_at FROM counter_bills")).rows).toEqual([{ made_at: new Date("2030-01-01T00:00:00.000Z"), received_at: new Date("2030-01-01T00:00:00.000Z") }]);
+  });
+
   it("numbers a bill from a phone whose clock is days behind, flagging the clock only", async () => {
     const { pack, bill, send } = await shop();
     const line = [{ packId: await pack(), count: 1, unitPrice: "21" }];

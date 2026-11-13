@@ -27,6 +27,9 @@ const BaseEnv = z.object({
   GOOGLE_CLIENT_IDS: z.string().default(""),
   APPLE_CLIENT_IDS: z.string().default(""),
   SYNC_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(7 * 86400),
+  // BIL-3: how much offline work a phone may queue, and for how long. The phone is told these and the server refuses a batch over them (#642).
+  SYNC_MAX_ACTIONS: z.coerce.number().int().min(1).max(500).default(500),
+  SYNC_MAX_OFFLINE_HOURS: z.coerce.number().int().min(1).max(720).default(72),
   SYNC_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().default(300),
   // How long after the server receives a counter bill the Owner may void it (BIL-6, #54).
   COUNTER_BILL_VOID_SECONDS: z.coerce.number().int().positive().default(86400),

@@ -8,9 +8,14 @@ import { CompleteDeliveryBody, FailDeliveryBody, OrderStatus, ProofExceptionBody
  * Explicit access result: only an authenticated absence/closure ends cached access.
  * `shopName` is kept with the phone's access record so a bill PDF can name the shop offline (#53); a Draft may have none yet.
  * `shopGstin` is the shop's GSTIN for the counter bill, kept the same way (#543); null when the shop has none, and when a reply or saved record predates it.
+ * `limits` are the offline limits the server enforces (BIL-3, #642); a reply from before them reads as 500 actions and 72 hours.
  * `role` is the account's role in that shop, so the phone can hide what only the Owner does (#494); the server still enforces it.
  */
-export const SyncAccessResponse = z.strictObject({ shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable(), shopGstin: z.string().nullable().default(null), role: z.enum(["owner", "staff"]).nullable(), canDeliver: z.boolean().default(false) })
+export const SyncLimits = z.strictObject({ maxActions: z.number().int().min(1).max(500), maxOfflineHours: z.number().int().min(1).max(24 * 30) });
+export type SyncLimits = z.infer<typeof SyncLimits>;
+/** The phone's fallback until the server has told it (BIL-3, #642). */
+export const DEFAULT_SYNC_LIMITS: SyncLimits = { maxActions: 500, maxOfflineHours: 72 };
+export const SyncAccessResponse = z.strictObject({ limits: SyncLimits.default(DEFAULT_SYNC_LIMITS), shopId: z.uuid().nullable(), state: ShopState.nullable(), shopName: z.string().nullable(), shopGstin: z.string().nullable().default(null), role: z.enum(["owner", "staff"]).nullable(), canDeliver: z.boolean().default(false) })
   .refine((value) => (value.shopId === null) === (value.state === null) && (value.shopId === null) === (value.role === null) && (value.shopId !== null || (value.shopName === null && value.shopGstin === null)));
 export type SyncAccessResponse = z.infer<typeof SyncAccessResponse>;
 
