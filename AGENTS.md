@@ -21,6 +21,10 @@ Before starting a ticket, read `docs/agents/workflow.md`: how work is claimed, b
   - Follow the pattern of the nearest existing screen, route or test.
   - A small fix in code the ticket already edits goes in the same PR and is named in it. A bigger or unrelated problem becomes a follow-up issue named in the PR.
   - A flaky test gets one rerun, and an issue only when it fails again.
+- Run `/code-review` on the local changes when the work is done, before `pnpm check` and the first push, on every PR. Fix or answer each finding and list them in the PR (`docs/agents/workflow.md`, section 6). An agent without the skill reviews the diff by hand the same way.
+- Never merge a PR until the owner says "merge" for that PR; a green gate or an earlier approval is not that word (`.agents/skills/merge/SKILL.md`).
+- Do not test on an emulator or simulator while the owner has not asked. The owner checks screens on the OPPO after merge, in a batch (`docs/agents/workflow.md`, section 7).
+- The server computes all money (MNY-15). A phone or web app never recalculates a price, fee, commission or total, apart from a counter bill's total (BIL-9); it shows what the server sent.
 
 ## Where to look first
 
