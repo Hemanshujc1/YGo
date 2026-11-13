@@ -583,3 +583,178 @@ describe("shop application, Area Manager (#299)", () => {
     expect((await app.inject({ method: "GET", url: `${url}/${shop.id}`, headers: admin })).json().shopName).toBe(complete.shopName);
   });
 });
+
+describe("flagged quantity-price options (CAT-8, #621)", () => {
+  async function signInAdminWeb(email: string) {
+    await app.inject({ method: "POST", url: "/v1/admin/auth/code", payload: { email } });
+    const signed = (await app.inject({ method: "POST", url: "/v1/admin/auth/verify", payload: { email, code: codeFor(email) } })).json();
+    clock.advance(1_000);
+    return { authorization: `Bearer ${signed.accessToken as string}` };
+  }
+
+  it("lists flagged options, enforces scoping, and dismisses flags with admin_actions audit", async () => {
+    await area("411038");
+    const admin = await signInAdminWeb("admin@example.com");
+
+    const am1 = (await app.inject({
+      method: "POST", url: "/v1/admin/accounts", headers: admin,
+      payload: { email: "am1@example.com", name: "AM One", phone: "+919812345671", role: "area_manager", reason: "Area manager 1" },
+    })).json();
+    const am1Headers = await signInAdminWeb("am1@example.com");
+
+    const am2 = (await app.inject({
+      method: "POST", url: "/v1/admin/accounts", headers: admin,
+      payload: { email: "am2@example.com", name: "AM Two", phone: "+919812345672", role: "area_manager", reason: "Area manager 2" },
+    })).json();
+    const am2Headers = await signInAdminWeb("am2@example.com");
+
+    // Shop 1 assigned to AM 1
+    const { headers: owner1Headers } = await owner("owner1@example.com", true, "+919876543211");
+    await app.inject({ method: "POST", url: "/v1/me/shop-application", headers: owner1Headers });
+    const shop1Id = (await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers: owner1Headers, payload: complete })).json().id as string;
+    await app.inject({ method: "PUT", url: `/v1/admin/shop-applications/${shop1Id}/area-manager`, headers: admin, payload: { areaManagerId: am1.id, reason: "Assign to AM1" } });
+
+    // Shop 2 assigned to AM 2
+    const { headers: owner2Headers } = await owner("owner2@example.com", true, "+919876543212");
+    await app.inject({ method: "POST", url: "/v1/me/shop-application", headers: owner2Headers });
+    const shop2Id = (await app.inject({ method: "POST", url: "/v1/me/shop-application/send", headers: owner2Headers, payload: complete })).json().id as string;
+    await app.inject({ method: "PUT", url: `/v1/admin/shop-applications/${shop2Id}/area-manager`, headers: admin, payload: { areaManagerId: am2.id, reason: "Assign to AM2" } });
+
+    // Create category, product, pack
+    const categoryId = (await database.pool.query("SELECT id FROM categories LIMIT 1")).rows[0]?.id as string
+      ?? (await database.pool.query("INSERT INTO categories (name) VALUES ('Test Category') RETURNING id")).rows[0]?.id as string;
+    const productId = (await database.pool.query(
+      `INSERT INTO master_products (name, category_id, base_unit, classification, image_256_key, image_512_key, image_1024_key, published)
+       VALUES ('Rice', $1, 'kg', 'measured', 'img256', 'img512', 'img1024', true) RETURNING id`, [categoryId],
+    )).rows[0]?.id as string;
+    const packId = (await database.pool.query("INSERT INTO packs (product_id, quantity) VALUES ($1, '1') RETURNING id", [productId])).rows[0]?.id as string;
+
+    // Create listing for shop 1
+    const listing1Id = (await database.pool.query(
+      `INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, low_stock_level, available)
+       VALUES ($1, $2, '10', '10', '12', '0', true) RETURNING id`, [shop1Id, packId],
+    )).rows[0]?.id as string;
+
+    // Create listing for shop 2
+    const listing2Id = (await database.pool.query(
+      `INSERT INTO shop_listings (shop_id, pack_id, online_price, counter_price, mrp, low_stock_level, available)
+       VALUES ($1, $2, '10', '10', '12', '0', true) RETURNING id`, [shop2Id, packId],
+    )).rows[0]?.id as string;
+
+    // Insert options:
+    // Shop 1: option 1 (flagged), option 2 (unflagged)
+    const opt1Id = (await database.pool.query(
+      `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
+       VALUES ($1, 'Special cigarette pack', '2', '50', true) RETURNING id`, [listing1Id],
+    )).rows[0]?.id as string;
+    const opt2Id = (await database.pool.query(
+      `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
+       VALUES ($1, 'Regular clean pack', '3', '70', false) RETURNING id`, [listing1Id],
+    )).rows[0]?.id as string;
+
+    // Shop 2: option 3 (flagged)
+    const opt3Id = (await database.pool.query(
+      `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
+       VALUES ($1, 'Beer deal', '4', '120', true) RETURNING id`, [listing2Id],
+    )).rows[0]?.id as string;
+
+    // GET /v1/admin/shops/:id/flagged-quantity-options
+    // Admin sees only flagged options for Shop 1 (opt 1, not opt 2)
+    const adminGet = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options`, headers: admin });
+    expect(adminGet.statusCode).toBe(200);
+    expect(adminGet.json()).toEqual({
+      options: [
+        {
+          id: opt1Id,
+          listingId: listing1Id,
+          packId,
+          productName: "Rice",
+          packQuantity: "1.000",
+          baseUnit: "kg",
+          name: "Special cigarette pack",
+          quantity: "2.000",
+          price: "50.00",
+          flagged: true,
+        },
+      ],
+    });
+
+    // AM1 sees Shop 1
+    const am1Get = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options`, headers: am1Headers });
+    expect(am1Get.statusCode).toBe(200);
+    expect(am1Get.json().options).toHaveLength(1);
+
+    // AM2 cannot see Shop 1 (404)
+    const am2Get = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options`, headers: am2Headers });
+    expect(am2Get.statusCode).toBe(404);
+
+    // Unauthenticated GET (401)
+    const unauthGet = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options` });
+    expect(unauthGet.statusCode).toBe(401);
+
+    // Dismiss tests:
+    // 1. Dismissing an already unflagged option (opt2) returns 404 and writes NO admin_actions row
+    const dismissUnflagged = await app.inject({
+      method: "POST", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options/${opt2Id}/dismiss`,
+      headers: admin, payload: { reason: "Already unflagged" },
+    });
+    expect(dismissUnflagged.statusCode).toBe(404);
+
+    // 2. Dismissing an option that belongs to another shop (opt3 belongs to shop 2) returns 404 and writes NO admin_actions row
+    const dismissOtherShop = await app.inject({
+      method: "POST", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options/${opt3Id}/dismiss`,
+      headers: admin, payload: { reason: "Wrong shop" },
+    });
+    expect(dismissOtherShop.statusCode).toBe(404);
+
+    // 3. AM2 cannot dismiss opt 1 on shop 1 (out of scope -> 404)
+    const dismissOutOfScope = await app.inject({
+      method: "POST", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options/${opt1Id}/dismiss`,
+      headers: am2Headers, payload: { reason: "AM2 attempt" },
+    });
+    expect(dismissOutOfScope.statusCode).toBe(404);
+
+    // Verify no admin_actions row was written so far for quantity option
+    const actionsBefore = await database.pool.query("SELECT * FROM admin_actions WHERE target_type = 'shop_quantity_price_option'");
+    expect(actionsBefore.rowCount).toBe(0);
+
+    // 4. AM1 dismisses opt1 on shop 1 (valid!)
+    const dismissValid = await app.inject({
+      method: "POST", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options/${opt1Id}/dismiss`,
+      headers: am1Headers, payload: { reason: "Promotional deal approved" },
+    });
+    expect(dismissValid.statusCode).toBe(200);
+    expect(dismissValid.json()).toMatchObject({ id: opt1Id, flagged: false });
+
+    // Verify shop_quantity_price_options row updated in database
+    const opt1Db = await database.pool.query("SELECT flagged FROM shop_quantity_price_options WHERE id = $1", [opt1Id]);
+    expect(opt1Db.rows[0]?.flagged).toBe(false);
+
+    // Verify admin_actions row written
+    const actionsAfter = await database.pool.query<{ actor_id: string; action: string; target_id: string; target_type: string; reason: string }>(
+      "SELECT actor_id, action, target_id, target_type, reason FROM admin_actions WHERE target_type = 'shop_quantity_price_option'",
+    );
+    expect(actionsAfter.rows).toEqual([
+      {
+        actor_id: am1.id,
+        action: "shop_quantity_price_option.dismiss",
+        target_id: opt1Id,
+        target_type: "shop_quantity_price_option",
+        reason: "Promotional deal approved",
+      },
+    ]);
+
+    // 5. Dismissing opt1 AGAIN now that it's unflagged returns 404 and writes NO extra admin_actions row
+    const dismissAgain = await app.inject({
+      method: "POST", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options/${opt1Id}/dismiss`,
+      headers: admin, payload: { reason: "Try again" },
+    });
+    expect(dismissAgain.statusCode).toBe(404);
+    const actionsFinal = await database.pool.query("SELECT count(*)::int AS n FROM admin_actions WHERE target_type = 'shop_quantity_price_option'");
+    expect(actionsFinal.rows[0]?.n).toBe(1);
+
+    // 6. Listing now returns empty for Shop 1
+    const emptyGet = await app.inject({ method: "GET", url: `/v1/admin/shops/${shop1Id}/flagged-quantity-options`, headers: admin });
+    expect(emptyGet.json()).toEqual({ options: [] });
+  });
+});

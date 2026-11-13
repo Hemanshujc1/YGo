@@ -47,6 +47,9 @@ import {
   AdminCounterBill,
   AdminCounterBillsResponse,
   type ResolveCounterBillBody,
+  AdminFlaggedQuantityOption,
+  AdminFlaggedQuantityOptionsResponse,
+  type DismissFlaggedQuantityOptionBody,
   OnboardingFee,
   BelowFloorException,
   BelowFloorExceptionsResponse,
@@ -521,6 +524,16 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     /** Number, close, review or add a note to one held or flagged bill; the bill comes back as it now stands (#470). */
     async resolveCounterBill(shopId: string, billId: string, body: ResolveCounterBillBody): Promise<ApiResult<AdminCounterBill>> {
       return result(await adminRequest("POST", `/v1/admin/shops/${encodeURIComponent(shopId)}/counter-bills/${encodeURIComponent(billId)}/resolutions`, body), AdminCounterBill);
+    },
+
+    /** A shop's denylist-flagged quantity-price options (CAT-8, #621). */
+    async listFlaggedQuantityOptions(shopId: string): Promise<ApiResult<AdminFlaggedQuantityOptionsResponse>> {
+      return result(await adminRequest("GET", `/v1/admin/shops/${encodeURIComponent(shopId)}/flagged-quantity-options`), AdminFlaggedQuantityOptionsResponse);
+    },
+
+    /** Dismiss the denylist flag on a quantity-price option (CAT-8, #621). */
+    async dismissFlaggedQuantityOption(shopId: string, optionId: string, body: DismissFlaggedQuantityOptionBody): Promise<ApiResult<AdminFlaggedQuantityOption>> {
+      return result(await adminRequest("POST", `/v1/admin/shops/${encodeURIComponent(shopId)}/flagged-quantity-options/${encodeURIComponent(optionId)}/dismiss`, body), AdminFlaggedQuantityOption);
     },
 
     /** Read visit and fee histories, newest first, with the owner's contact confirmation state. */

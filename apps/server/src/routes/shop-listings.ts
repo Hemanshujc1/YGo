@@ -254,13 +254,30 @@ export function registerShopListingRoutes(app: FastifyInstance, { pool, clock, s
       );
       const listingId = saved.rows[0]?.id;
       if (!listingId) throw new Error("Shop listing save returned no ID");
+      const existing = await client.query<{ name: string; flagged: boolean }>(
+        "SELECT name, flagged FROM shop_quantity_price_options WHERE listing_id = $1",
+        [listingId],
+      );
+      const remainingExisting = [...existing.rows];
       await client.query("DELETE FROM shop_quantity_price_options WHERE listing_id = $1", [listingId]);
       for (const option of body.quantityOptions) {
+        const matchIndex = remainingExisting.findIndex((e) => e.name === option.name);
+        let flagged: boolean;
+        if (matchIndex !== -1) {
+          flagged = remainingExisting[matchIndex]?.flagged ?? false;
+          remainingExisting.splice(matchIndex, 1);
+        } else {
+          const match = await client.query<{ matched: boolean }>(
+            `SELECT EXISTS (SELECT 1 FROM denylist_words d
+               WHERE ' ' || trim(regexp_replace(lower($1::text), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %') AS matched`,
+            [option.name],
+          );
+          flagged = match.rows[0]?.matched ?? false;
+        }
         await client.query(
           `INSERT INTO shop_quantity_price_options (listing_id, name, quantity, price, flagged)
-           VALUES ($1, $2, $3, $4, EXISTS (SELECT 1 FROM denylist_words d
-             WHERE ' ' || trim(regexp_replace(lower($2::text), '[^a-z0-9]+', ' ', 'g')) || ' ' LIKE '% ' || d.word || ' %'))`,
-          [listingId, option.name, option.quantity, option.price],
+           VALUES ($1, $2, $3, $4, $5)`,
+          [listingId, option.name, option.quantity, option.price, flagged],
         );
       }
       const response = await client.query(`${catalogSql} AND pk.id = $2`, [shop.id, packId]);

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { OpeningStockBody, SaveShopListingBody, ShopListingsResponse, invalidFields } from "../src/index";
+import {
+  AdminDismissFlaggedQuantityOptionParams,
+  AdminFlaggedQuantityOption,
+  AdminFlaggedQuantityOptionsResponse,
+  DismissFlaggedQuantityOptionBody,
+  OpeningStockBody,
+  SaveShopListingBody,
+  ShopListingsResponse,
+  invalidFields,
+} from "../src/index";
 
 const id = "00000000-0000-4000-8000-000000000001";
 
@@ -45,5 +54,29 @@ describe("shop listing contracts", () => {
     expect(ShopListingsResponse.parse({ items: [{ ...response.items[0], stock: "-0.250" }] }).items[0]?.stock).toBe("-0.250");
     // What accepted orders hold is never negative (#436).
     expect(ShopListingsResponse.safeParse({ items: [{ ...response.items[0], held: "-1" }] }).success).toBe(false);
+  });
+
+  it("validates flagged quantity option contracts and dismiss body", () => {
+    const validOption = {
+      id,
+      listingId: id,
+      packId: id,
+      productName: "Basmati Rice",
+      packQuantity: "1",
+      baseUnit: "kg" as const,
+      name: "Family pack",
+      quantity: "5",
+      price: "250",
+      flagged: true,
+    };
+    expect(AdminFlaggedQuantityOption.parse(validOption)).toEqual(validOption);
+    expect(AdminFlaggedQuantityOptionsResponse.parse({ options: [validOption] })).toEqual({ options: [validOption] });
+    expect(AdminFlaggedQuantityOption.safeParse({ ...validOption, baseUnit: "litres" }).success).toBe(false);
+
+    expect(AdminDismissFlaggedQuantityOptionParams.parse({ id, optionId: id })).toEqual({ id, optionId: id });
+    expect(AdminDismissFlaggedQuantityOptionParams.safeParse({ id: "invalid", optionId: id }).success).toBe(false);
+
+    expect(DismissFlaggedQuantityOptionBody.parse({ reason: "Legitimate deal" })).toEqual({ reason: "Legitimate deal" });
+    expect(DismissFlaggedQuantityOptionBody.safeParse({ reason: "   " }).success).toBe(false);
   });
 });
