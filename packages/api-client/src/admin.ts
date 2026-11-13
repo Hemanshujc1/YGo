@@ -90,6 +90,7 @@ import {
   type SetThemeBody,
   type CustomerBlockBody,
   type CustomerSignupSettingBody,
+  type PageQuery,
   type VerifyCodeBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
@@ -101,6 +102,12 @@ export interface AdminApiClientOptions {
   timeoutMs?: number;
   /** Called when the server refuses refresh or an Admin request ends the session. */
   onSignedOut?: () => void;
+}
+
+/** Page-number Customer directory options; filters are applied before the total and page. */
+export interface AdminCustomersListOptions extends Partial<PageQuery> {
+  search?: string;
+  flagged?: boolean;
 }
 
 interface AdminLife {
@@ -252,11 +259,14 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
       return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
     },
-    async listCustomers(search?: string, flagged = false): Promise<ApiResult<AdminCustomersResponse>> {
+    async listCustomers(options: AdminCustomersListOptions = {}): Promise<ApiResult<AdminCustomersResponse>> {
       const query = new URLSearchParams();
-      if (search) query.set("search", search);
-      if (flagged) query.set("flagged", "true");
-      return result(await adminRequest("GET", `/v1/admin/customers?${query}`), AdminCustomersResponse);
+      if (options.search) query.set("search", options.search);
+      if (options.flagged) query.set("flagged", "true");
+      if (options.page !== undefined) query.set("page", String(options.page));
+      if (options.pageSize !== undefined) query.set("pageSize", String(options.pageSize));
+      const suffix = query.size ? `?${query}` : "";
+      return result(await adminRequest("GET", `/v1/admin/customers${suffix}`), AdminCustomersResponse);
     },
     async blockCustomer(id: string, body: CustomerBlockBody): Promise<ApiResult<CustomerTrust>> {
       return result(await adminRequest("POST", `/v1/admin/customers/${encodeURIComponent(id)}/block`, body), CustomerTrust);

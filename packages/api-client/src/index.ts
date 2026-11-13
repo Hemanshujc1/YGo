@@ -94,7 +94,7 @@ import {
   type WaitlistBody,
 } from "@ygo/contracts";
 import { createTransport, NO_SESSION, type Answer, type ApiResult } from "./transport";
-export { createAdminApiClient, type AdminApiClientOptions } from "./admin";
+export { createAdminApiClient, type AdminApiClientOptions, type AdminCustomersListOptions } from "./admin";
 
 /**
  * What a call returns once the server has answered. With VALIDATION_FAILED,

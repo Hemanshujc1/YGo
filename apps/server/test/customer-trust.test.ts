@@ -82,21 +82,74 @@ describe("Customer trust controls (#72, TRU-5)", () => {
          VALUES ($1, $2, 'delivery_failed', $3, $3, 'Test Shop', 'Main Road', '411038', 'home', 'Flat 1', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 100, 0, 100, $4, '{}', $5)`, [id, shopId, clock.now(), card?.version, index === 0 ? 'customer_refused' : 'unreachable']);
       if (index === 0) {
         const one = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
-        expect(one.json().customers[0]).toMatchObject({ failedDeliveries: 1, refusals: 1, flagged: false });
+        expect(one.json().items[0]).toMatchObject({ failedDeliveries: 1, refusals: 1, flagged: false });
       }
     }
     const lookup = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
-    expect(lookup.json().customers[0]).toMatchObject({ id, phone: "+919876543211", phoneState: "sms-verified", failedDeliveries: 2, refusals: 1, flagged: true });
+    expect(lookup.json().items[0]).toMatchObject({ id, phone: "+919876543211", phoneState: "sms-verified", failedDeliveries: 2, refusals: 1, flagged: true });
     const flagged = await app.inject({ method: "GET", url: "/v1/admin/customers?flagged=true", headers: admin });
-    expect(flagged.json().customers).toEqual([expect.objectContaining({ id, flagged: true })]);
+    expect(flagged.json().items).toEqual([expect.objectContaining({ id, flagged: true })]);
     clock.advance(31 * 24 * 60 * 60_000);
     admin = await signIn("/v1/admin/auth", "admin@example.com");
     const old = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
-    expect(old.json().customers[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
+    expect(old.json().items[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
     clock.set(new Date("2030-01-01T00:00:00.000Z"));
     await database.pool.query("INSERT INTO order_status_history (order_id, to_status, actor_id, actor_role, at, reason_code) SELECT id, 'delivery_failed', $2, 'admin', $3, 'admin_forced' FROM orders WHERE account_id = $1", [id, await customerId("admin@example.com"), clock.now()]);
     const forced = await app.inject({ method: "GET", url: "/v1/admin/customers?search=customer@example.com", headers: admin });
-    expect(forced.json().customers[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
+    expect(forced.json().items[0]).toMatchObject({ failedDeliveries: 0, flagged: false });
+  });
+
+  it("filters and counts before paging Search and Flagged Customers", async () => {
+    const actorId = await customerId("admin@example.com");
+    const { rows: [card] } = await database.pool.query<{ version: string }>(
+      "INSERT INTO rate_card_versions (actor_id, scope_type, reason, published_at) VALUES ($1, 'global', 'pagination test', $2) RETURNING version", [actorId, clock.now()]);
+    const shopId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO shops (id, state, shop_name, address, pincode, location, owner_name, entity_type, pan, fssai_number, fssai_expiry, upi_id, submitted_at, created_at)
+       VALUES ($1, 'live', 'Page Shop', 'Main Road', '411038', ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 'Owner', 'proprietorship', 'ABCDE1234F', '11223344556678', '2031-03-31', 'page@upi', now(), now())`, [shopId]);
+    await database.pool.query("INSERT INTO accounts (email) SELECT 'page-' || lpad(n::text, 3, '0') || '@example.com' FROM generate_series(1, 52) n");
+    await database.pool.query("INSERT INTO accounts (email) VALUES ('other-flagged@example.com')");
+    await database.pool.query(
+      `INSERT INTO orders (account_id, shop_id, status, placed_at, status_changed_at, shop_name, shop_address, shop_pincode, address_label, address_flat, address_pincode, address_point, product_value, delivery_fee, total, rate_card_version, quote, failed_delivery_reason)
+       SELECT a.id, $1, 'delivery_failed', $2, $2, 'Page Shop', 'Main Road', '411038', 'home', 'Flat 1', '411038',
+         ST_SetSRID(ST_MakePoint(73.8, 18.5), 4326)::geography, 100, 0, 100, $3, '{}',
+         CASE failure.n WHEN 1 THEN 'customer_refused' ELSE 'unreachable' END
+       FROM accounts a CROSS JOIN generate_series(1, 2) failure(n)
+       WHERE (a.email LIKE 'page-%' AND a.email <> 'page-052@example.com') OR a.email = 'other-flagged@example.com'`,
+      [shopId, clock.now(), card?.version],
+    );
+
+    const searchOne = await app.inject({ method: "GET", url: "/v1/admin/customers?search=page-&page=1&pageSize=25", headers: admin });
+    expect(searchOne.statusCode).toBe(200);
+    expect(searchOne.json().pagination).toEqual({ page: 1, pageSize: 25, totalRecords: 52 });
+    expect(searchOne.json().items).toHaveLength(25);
+    expect(searchOne.json().items.map((row: { email: string }) => row.email)).toEqual(
+      [...searchOne.json().items.map((row: { email: string }) => row.email)].sort(),
+    );
+
+    const searchTwo = await app.inject({ method: "GET", url: "/v1/admin/customers?search=page-&page=2&pageSize=25", headers: admin });
+    expect(searchTwo.json().pagination).toEqual({ page: 2, pageSize: 25, totalRecords: 52 });
+    expect(searchTwo.json().items).toHaveLength(25);
+    expect(new Set([...searchOne.json().items, ...searchTwo.json().items].map((row: { id: string }) => row.id)).size).toBe(50);
+
+    const searchLast = await app.inject({ method: "GET", url: "/v1/admin/customers?search=page-&page=99&pageSize=25", headers: admin });
+    expect(searchLast.json().pagination).toEqual({ page: 3, pageSize: 25, totalRecords: 52 });
+    expect(searchLast.json().items).toHaveLength(2);
+    expect(searchLast.json().items.some((row: { email: string; flagged: boolean }) => row.email === "page-052@example.com" && !row.flagged)).toBe(true);
+    const searchEmails = [...searchOne.json().items, ...searchTwo.json().items, ...searchLast.json().items].map((row: { email: string }) => row.email);
+    expect(new Set(searchEmails).size).toBe(52);
+    expect(searchEmails).toEqual([...searchEmails].sort());
+
+    const flagged = await app.inject({ method: "GET", url: "/v1/admin/customers?flagged=true&page=3&pageSize=25", headers: admin });
+    expect(flagged.json().pagination).toEqual({ page: 3, pageSize: 25, totalRecords: 52 });
+    expect(flagged.json().items).toHaveLength(2);
+    expect(flagged.json().items.every((row: { flagged: boolean }) => row.flagged)).toBe(true);
+    expect(flagged.json().items.some((row: { email: string }) => row.email === "page-052@example.com")).toBe(false);
+
+    const empty = await app.inject({ method: "GET", url: "/v1/admin/customers?search=missing&page=8&pageSize=25", headers: admin });
+    expect(empty.json()).toEqual({ items: [], pagination: { page: 1, pageSize: 25, totalRecords: 0 } });
+    expect((await app.inject({ method: "GET", url: "/v1/admin/customers?page=0", headers: admin })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/v1/admin/customers?pageSize=101", headers: admin })).statusCode).toBe(400);
   });
 
   it("refuses a blocked sign-up with 403", async () => {

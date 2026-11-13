@@ -170,6 +170,32 @@ describe("Admin browser API client", () => {
     ]);
   });
 
+  it("serializes Customer filters and page options and validates page metadata", async () => {
+    const customer = {
+      id: "00000000-0000-4000-8000-000000000601",
+      email: "customer@example.com",
+      name: "Customer",
+      phone: "+919876543211",
+      phoneState: "sms-verified",
+      blocked: false,
+      blockReason: null,
+      failedDeliveries: 2,
+      refusals: 1,
+      flagged: true,
+    };
+    const page = { items: [customer], pagination: { page: 2, pageSize: 25, totalRecords: 26 } };
+    const { client, calls } = setup(({ path }) => path.endsWith("/refresh")
+      ? answer(200, { accessToken: "access-1", account })
+      : answer(200, page));
+    expect(await client.listCustomers({ search: "asha + sons", flagged: true, page: 2, pageSize: 25 })).toEqual({ ok: true, data: page });
+    expect(calls[1]?.search).toBe("?search=asha+%2B+sons&flagged=true&page=2&pageSize=25");
+
+    const malformed = setup(({ path }) => path.endsWith("/refresh")
+      ? answer(200, { accessToken: "access-1", account })
+      : answer(200, { ...page, pagination: { ...page.pagination, totalRecords: -1 } }));
+    expect(await malformed.client.listCustomers()).toEqual({ ok: false, status: 200, code: "INTERNAL" });
+  });
+
   it("reads the signed-in account with its role and saves its theme (#263, #343)", async () => {
     const dark = { ...account, theme: "dark" };
     const { client, calls } = setup(({ path, method }) => {
