@@ -106,7 +106,7 @@ describe("visit photo configuration", () => {
 it("configures the sync age and clock-skew bounds", () => {
   const env = { ...database, MAILER: "mailpit", MAIL_FROM: "test@example.com", MAILPIT_URL: "http://localhost:8025" };
   expect(loadConfig(env)).toMatchObject({ SYNC_MAX_AGE_SECONDS: 604800, SYNC_CLOCK_SKEW_SECONDS: 300 });
-  expect(loadConfig({ ...env, SYNC_MAX_AGE_SECONDS: "60", SYNC_CLOCK_SKEW_SECONDS: "30" })).toMatchObject({ SYNC_MAX_AGE_SECONDS: 60, SYNC_CLOCK_SKEW_SECONDS: 30 });
+  expect(loadConfig({ ...env, SYNC_MAX_OFFLINE_HOURS: "1", SYNC_MAX_AGE_SECONDS: "3600", SYNC_CLOCK_SKEW_SECONDS: "30" })).toMatchObject({ SYNC_MAX_AGE_SECONDS: 3600, SYNC_CLOCK_SKEW_SECONDS: 30 });
   expect(loadConfig(env)).toMatchObject({ COUNTER_BILL_VOID_SECONDS: 86400 });
   expect(loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "3600" })).toMatchObject({ COUNTER_BILL_VOID_SECONDS: 3600 });
   expect(() => loadConfig({ ...env, COUNTER_BILL_VOID_SECONDS: "0" })).toThrow();
@@ -127,5 +127,17 @@ describe("order timers (#57, ORD-2)", () => {
       expect(() => loadConfig({ ...mail, ...bad })).toThrow();
       expect(() => loadOrderTiming(bad)).toThrow();
     }
+  });
+});
+
+describe("offline sync limits (#642)", () => {
+  const mail = { ...database, MAILER: "mailpit", MAIL_FROM: "hello@example.com", MAILPIT_URL: "http://localhost:8025" };
+  it("defaults to 72 hours inside the 7-day server bound", () => {
+    expect(loadConfig(mail)).toMatchObject({ SYNC_MAX_OFFLINE_HOURS: 72, SYNC_MAX_AGE_SECONDS: 7 * 86400 });
+  });
+  it("accepts offline hours equal to the server's age bound and refuses more", () => {
+    expect(loadConfig({ ...mail, SYNC_MAX_OFFLINE_HOURS: "24", SYNC_MAX_AGE_SECONDS: "86400" }).SYNC_MAX_OFFLINE_HOURS).toBe(24);
+    expect(() => loadConfig({ ...mail, SYNC_MAX_OFFLINE_HOURS: "25", SYNC_MAX_AGE_SECONDS: "86400" })).toThrow(/SYNC_MAX_OFFLINE_HOURS/);
+    expect(() => loadConfig({ ...mail, SYNC_MAX_OFFLINE_HOURS: "720" })).toThrow(/SYNC_MAX_AGE_SECONDS/);
   });
 });

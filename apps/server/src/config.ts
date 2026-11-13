@@ -72,6 +72,9 @@ const Env = z.discriminatedUnion("MAILER", [
   if (env.VISIT_PHOTO_BUCKET && env.VISIT_PHOTO_BUCKET === env.PRODUCT_IMAGE_BUCKET) {
     context.addIssue({ code: "custom", message: "VISIT_PHOTO_BUCKET must be separate from public product images" });
   }
+  if (env.SYNC_MAX_OFFLINE_HOURS * 3600 > env.SYNC_MAX_AGE_SECONDS) {
+    context.addIssue({ code: "custom", path: ["SYNC_MAX_OFFLINE_HOURS"], message: "SYNC_MAX_OFFLINE_HOURS * 3600 must not exceed SYNC_MAX_AGE_SECONDS, or a phone could bill offline longer than the server accepts the actions (#642)" });
+  }
   const hasCloudFront = Boolean(env.PRODUCT_IMAGE_CLOUDFRONT_DOMAIN);
   const hasLocalBase = Boolean(env.PRODUCT_IMAGE_LOCAL_BASE_URL);
   if (Boolean(env.PRODUCT_IMAGE_BUCKET) !== (hasCloudFront || hasLocalBase)) {
