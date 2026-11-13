@@ -109,7 +109,7 @@ function Terms({ shop }: { shop: ShopPageResponse["shop"] }) {
         <Text className="flex-1 text-body tabular-nums text-text">{termsLine(shop)}</Text>
         {shop.rating !== null && (
           <View accessibilityLabel={strings.rating.starAriaLabel(shop.rating)} className="flex-row items-center gap-1">
-            <Star size={16} color="#F59E0B" fill="#F59E0B" />
+            <Star size={16} className="text-accent" fill="currentColor" />
             <Text className="text-body font-semibold tabular-nums text-text">{formatRating(shop.rating)}</Text>
           </View>
         )}

@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../../api";
 import { Star } from "../../../components/icons";
+import { StarRating } from "../../../components/star-rating";
 import { TopBar } from "../../../components/top-bar";
 import { useOrder } from "../../../lib/use-order";
 import { strings } from "../../../strings";
@@ -38,17 +39,10 @@ export default function RateScreen() {
         void order.refresh();
       } else if (res.code === "RATING_ALREADY_GIVEN") {
         await order.refresh();
-        let savedRating = (order.get ? order.get().order?.rating : null) ?? shown?.rating ?? null;
-        if (savedRating === null && typeof api.order === "function") {
-          const fresh = await api.order(id).catch(() => null);
-          if (fresh && fresh.ok && fresh.data.rating !== null) {
-            savedRating = fresh.data.rating;
-          }
-        }
+        const savedRating = (order.get ? order.get().order?.rating : null) ?? view.order?.rating ?? shown?.rating ?? null;
         if (savedRating !== null) {
           setSelectedStars(savedRating);
           setSubmittedRating(savedRating);
-          setError(words.alreadyRated(savedRating));
         } else {
           setError(strings.errors.RATING_ALREADY_GIVEN);
         }
@@ -80,16 +74,7 @@ export default function RateScreen() {
           </View>
         ) : isRated ? (
           <View className="gap-6 items-center py-8">
-            <View className="flex-row items-center gap-1">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Star
-                  key={star}
-                  size={32}
-                  color={star <= (rating ?? 0) ? "#F59E0B" : "#D1D5DB"}
-                  fill={star <= (rating ?? 0) ? "#F59E0B" : "transparent"}
-                />
-              ))}
-            </View>
+            <StarRating rating={rating} size={32} />
             <View className="items-center gap-2">
               <Text className="text-center text-title font-bold text-text">{words.ratedTitle}</Text>
               <Text className="text-center text-body text-muted">{words.alreadyRated(rating)}</Text>
@@ -123,8 +108,8 @@ export default function RateScreen() {
                 >
                   <Star
                     size={32}
-                    color={star <= selectedStars ? "#F59E0B" : "#D1D5DB"}
-                    fill={star <= selectedStars ? "#F59E0B" : "transparent"}
+                    className={star <= selectedStars ? "text-accent" : "text-border"}
+                    fill={star <= selectedStars ? "currentColor" : "transparent"}
                   />
                 </Pressable>
               ))}

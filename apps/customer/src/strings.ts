@@ -3,6 +3,8 @@ import type { ProfileWords, SignInWords } from "@ygo/mobile";
 
 // Every string the app shows lives here, so translation is a later pass over
 // one file (CONTEXT.md: every string externalised from day one).
+const alreadyRated = (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`;
+
 export const strings = {
   title: "YGo",
   back: "Back",
@@ -440,7 +442,7 @@ export const strings = {
       delivery_failed: "Delivery failed",
     } satisfies Record<OrderStatus, string>,
     rateShop: "Rate shop",
-    alreadyRated: (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`,
+    alreadyRated,
   },
   // C20 Rate screen (TRU-1, #82)
   rating: {
@@ -452,7 +454,7 @@ export const strings = {
     skip: "Not now",
     ratedTitle: "Thank you for rating!",
     ratedBody: "Your rating helps others discover good local shops.",
-    alreadyRated: (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`,
+    alreadyRated,
     done: "Done",
     failed: "Could not save rating. Please try again.",
     notEligible: "You can rate this order once it is delivered or collected.",

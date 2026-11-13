@@ -8,7 +8,8 @@ import Animated, { Easing, useAnimatedProps, useReducedMotion, useSharedValue, w
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import { Countdown, useSecondsLeft } from "../../../components/countdown";
-import { Phone, Star } from "../../../components/icons";
+import { Phone } from "../../../components/icons";
+import { StarRating } from "../../../components/star-rating";
 import { QuoteRows } from "../../../components/quote-rows";
 import { TopBar } from "../../../components/top-bar";
 import { api } from "../../../api";
@@ -337,16 +338,7 @@ export default function OrderScreen() {
           <View className="gap-3 rounded-card border border-border bg-surface p-4">
             {shown.rating !== null ? (
               <View className="flex-row items-center gap-2" accessibilityLabel={words.alreadyRated(shown.rating)}>
-                <View className="flex-row items-center gap-1">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Star
-                      key={star}
-                      size={18}
-                      color={star <= (shown.rating ?? 0) ? "#F59E0B" : "#D1D5DB"}
-                      fill={star <= (shown.rating ?? 0) ? "#F59E0B" : "transparent"}
-                    />
-                  ))}
-                </View>
+                <StarRating rating={shown.rating} size={18} />
                 <Text className="text-secondary text-muted">{words.alreadyRated(shown.rating)}</Text>
               </View>
             ) : (

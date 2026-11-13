@@ -20,7 +20,7 @@ export function ShopCard({ shop, query, now, children }: { shop: FeedShop; query
         <Text className="flex-1 text-headline font-semibold text-text">{shop.name}</Text>
         {shop.rating !== null && (
           <View accessibilityLabel={strings.rating.starAriaLabel(shop.rating)} className="flex-row items-center gap-1">
-            <Star size={14} color="#F59E0B" fill="#F59E0B" />
+            <Star size={14} className="text-accent" fill="currentColor" />
             <Text className="text-secondary font-medium tabular-nums text-text">{formatRating(shop.rating)}</Text>
           </View>
         )}
