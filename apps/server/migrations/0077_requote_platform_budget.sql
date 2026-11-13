@@ -1,6 +1,6 @@
 -- ORD-4, D-5 (#530): on a requote the platform-funded promotion budget is max(0, contribution before the promotion), not the surplus above the floor, so a
 -- platform-funded coupon never exceeds what the platform earns on the order: a flat one that no longer fits is removed, a percentage one is reduced, and either is
--- reported under "couponCutback" for the customer's changed total. No floor is passed: whatever the order earns below its floor is the recorded exception of D-5.
+-- reported under "couponCutback" for the customer's changed total when it takes less than the customer already had ("priorPlatformCoupon"). No floor is passed: whatever the order earns below its floor is the recorded exception of D-5.
 -- MNY-15: the money of a partial acceptance is worked out here, not in TypeScript (#70). It takes the revised line totals and what the order was priced with
 -- (its frozen shop-wide discount or coupon, its fees as quoted) and gives back each line's discount share and commission, the shop-wide discount,
 -- the shop-funded and platform-funded coupon, the commission, the customer's total and the platform's contribution.
@@ -56,9 +56,10 @@ BEGIN
   -- A platform-funded coupon takes at most what the order earns on the commission before any coupon (D-5), a floor of 0 in the engine's own function.
   IF coupon->>'funding' = 'platform' AND NOT pickup THEN
     platform_coupon := pricing_platform_coupon(coupon->>'form', nominal, contribution, 0);
-    IF platform_coupon < nominal THEN
+    -- Cut back only when the budget held it under its ask AND under what the customer had: a coupon that grows to the budget, or shrinks only because lines went, is not.
+    IF platform_coupon < nominal AND platform_coupon < COALESCE((input->>'priorPlatformCoupon')::numeric, 0) THEN
       cutback := jsonb_build_object('reason', CASE WHEN platform_coupon = 0 THEN 'REMOVED' ELSE 'REDUCED' END,
-        'from', round(nominal, 2)::text, 'to', round(platform_coupon, 2)::text);
+        'from', round((input->>'priorPlatformCoupon')::numeric, 2)::text, 'to', round(platform_coupon, 2)::text);
     END IF;
   END IF;
 

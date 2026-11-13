@@ -349,6 +349,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
       };
       pickupFee: string | null;
       originalTotal: string;
+      /** What the platform's coupon took off the total the customer last confirmed, so a requote can tell a cutback from a coupon that merely changed (#530). */
+      priorPlatformCoupon: string;
       discountRule: FrozenDiscountRule;
       coupon: FrozenCoupon;
     }>(
@@ -358,6 +360,10 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
                 (SELECT r.total::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
                 o.total::text
               ) AS "originalTotal",
+              COALESCE(
+                (SELECT r.platform_coupon::text FROM order_revisions r WHERE r.order_id = o.id AND r.status = 'confirmed' ORDER BY r.revision DESC LIMIT 1),
+                o.platform_coupon::text
+              ) AS "priorPlatformCoupon",
               (SELECT json_build_object('ruleId', v.rule_id, 'version', v.version,
                   'rule', json_build_object('form', v.form, 'percentage', v.percentage::text, 'cap', v.cap::text, 'amount', v.flat_amount::text, 'minimumOrder', v.minimum_order::text),
                   'offer', ${offerSql("v")})
@@ -555,8 +561,8 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
     if (shortLines.length > 0) return { ok: false, code: "NOT_ENOUGH_STOCK", status: 409, shortLines };
 
     // The money is the pricing engine's, in one call (MNY-15): the discount or coupon the order was priced with, on the revised lines under its frozen terms
-    // (its categories, its minimum order, its shares in whole paise), each line's commission on the order's own rate card, a platform-funded coupon trimmed to the
-    // surplus above the floor, and the totals. One promotion at most (D-7): the shop-wide discount, or the coupon. The fees stand as quoted on a requote (ORD-4).
+    // (its categories, its minimum order, its shares in whole paise), each line's commission on the order's own rate card, a platform-funded coupon cut back to
+    // what the platform earns on the order, not the floor (D-5), and the totals. One promotion at most (D-7): the shop-wide discount, or the coupon. The fees stand as quoted on a requote (ORD-4).
     const coupon = order.coupon;
     const couponLines = coupon ? await couponCategoryEligibility(client, coupon, activeLines.map((line) => line.categoryId)) : [];
     const deliveryFee = order.quote.deliveryFee;
@@ -576,6 +582,7 @@ export function registerShopOrderRoutes(app: FastifyInstance, { pool, clock, sec
         deliveryPlatformShare: deliveryFee.platformShare,
         smallCartFee: smallCartFee?.amount ?? null,
         smallCartPlatformShare: smallCartFee?.platformShare ?? null,
+        priorPlatformCoupon: order.priorPlatformCoupon,
         pickupFee: order.pickupFee,
         pickupShopFee: order.quote.pickup?.shopFee ?? null,
       })]);
