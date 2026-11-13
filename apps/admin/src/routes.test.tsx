@@ -135,6 +135,9 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     listAdminOrders: vi.fn(),
     getAdminOrder: vi.fn(),
     forceOrderTransition: vi.fn(),
+    listStatements: vi.fn(),
+    getStatement: vi.fn(),
+    shopBalances: vi.fn(),
     listProductRequests: vi.fn().mockResolvedValue({ ok: true, data: { requests: [] } }),
     approveProductRequest: vi.fn(),
     mapProductRequest: vi.fn(),
@@ -1340,13 +1343,13 @@ describe("Area Manager shell (#343)", () => {
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
-  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", "/price-simulator", "/applications/00000000-0000-4000-8000-000000000501/counter-bills", "/applications/00000000-0000-4000-8000-000000000501/fulfilment"])(
+  it.each(["/accounts", "/categories", "/products", "/products/import", "/areas", "/waitlist", "/price-simulator", "/statements", "/statements/00000000-0000-4000-8000-000000000a01", "/statements/00000000-0000-4000-8000-000000000a01/print", "/applications/00000000-0000-4000-8000-000000000501/counter-bills", "/applications/00000000-0000-4000-8000-000000000501/fulfilment"])(
     "sends an Area Manager from %s to Applications without asking the server",
     async (path) => {
       const { api, router } = setup(path, asRole("area_manager"));
       expect(await screen.findByText(strings.noAssignedShops)).toBeTruthy();
       expect(router.state.location.pathname).toBe("/applications");
-      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listSimulatorListings, api.listCounterBills, api.listFlaggedQuantityOptions, api.getShopApplication, api.shopFulfilmentModes]) {
+      for (const call of [api.listAccounts, api.listCategories, api.listMasterProducts, api.listAreas, api.listWaitlist, api.listStatements, api.getStatement, api.shopBalances, api.listSimulatorListings, api.listCounterBills, api.listFlaggedQuantityOptions, api.getShopApplication, api.shopFulfilmentModes]) {
         expect(call).not.toHaveBeenCalled();
       }
     },
@@ -1408,7 +1411,7 @@ describe("Area Manager shell (#343)", () => {
     setup("/accounts");
     await screen.findByText(founder.email);
     expect(screen.getByRole("link", { name: strings.title })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(15);
+    expect(within(screen.getByRole("navigation", { name: strings.navigation })).getAllByRole("link")).toHaveLength(16);
     expect(screen.queryByText(strings.areaManagerScope)).toBeNull();
   });
 });
