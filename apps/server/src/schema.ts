@@ -905,6 +905,20 @@ export const couponUses = pgTable("coupon_uses", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => [index("coupon_uses_coupon_id_idx").on(table.couponId), index("coupon_uses_account_id_idx").on(table.accountId)]);
 
+// 1 to 5 star ratings given by customers after delivery or pickup (TRU-1, #82). Append-only, one per order.
+export const ratings = pgTable("ratings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  shopId: uuid("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
+  accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  stars: integer("stars").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("ratings_order_id_idx").on(table.orderId),
+  index("ratings_shop_id_created_at_idx").on(table.shopId, table.createdAt),
+  check("ratings_stars_valid", sql`${table.stars} >= 1 AND ${table.stars} <= 5`),
+]);
+
 // A line as it was priced at placement. `stock_quantity` is what it takes from the listing's stock,
 // in the stock's unit: count × pack size, or the part bought (#377). Never changed or deleted.
 export const orderLines = pgTable("order_lines", {

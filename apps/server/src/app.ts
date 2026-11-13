@@ -79,6 +79,10 @@ export interface AppOptions {
   counterBillVoidSeconds?: number;
   deliveryFailureWaitSeconds?: number;
   deliveryPhotoSaveTimeoutMs?: number;
+  /** Days of history covered by a shop's average star rating (TRU-1, DSC-2, #82). */
+  ratingsWindowDays?: number;
+  /** Minimum number of ratings before a shop's average star rating is shown (TRU-1, DSC-2, #82). */
+  ratingsMinCount?: number;
   /**
    * Whether an Owner may turn a shop-wide discount on, and whether quotes apply one (#63). It must stay OFF until all three are merged and verified:
    * customers see the discount in their cart, order and receipt (#571); partial acceptance re-applies it (#572); and a bargained line is passed to
@@ -120,6 +124,8 @@ export function buildApp({
   counterBillVoidSeconds = 86400,
   deliveryFailureWaitSeconds = 120,
   deliveryPhotoSaveTimeoutMs,
+  ratingsWindowDays = 90,
+  ratingsMinCount = 3,
   shopDiscountsAvailable = false,
   logger = false,
 }: AppOptions) {
@@ -182,8 +188,9 @@ export function buildApp({
     registerCounterBillRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerShopCounterBillRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, voidSeconds: counterBillVoidSeconds });
     registerShopVisitRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, photos: visitPhotos });
-    registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages });
-    registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
+    const ratingsSettings = { windowDays: ratingsWindowDays, minCount: ratingsMinCount };
+    registerFeedRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, images: productImages, ratingsSettings });
+    registerSearchRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, ratingsSettings });
     registerFulfilmentModeRoutes(app, { pool: database.pool, clock, secret: authTokenSecret });
     registerCartRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });
     registerOrderRoutes(app, { pool: database.pool, clock, secret: authTokenSecret, shopDiscounts: shopDiscountsAvailable });

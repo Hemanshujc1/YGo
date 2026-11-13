@@ -439,6 +439,22 @@ export const strings = {
       cancelled_by_shop: "Cancelled by shop",
       delivery_failed: "Delivery failed",
     } satisfies Record<OrderStatus, string>,
+    rateShop: "Rate shop",
+    alreadyRated: (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`,
+  },
+  // C20 Rate screen (TRU-1, #82)
+  rating: {
+    title: "Rate your order",
+    prompt: (shop: string) => `How was your order from ${shop}?`,
+    starAriaLabel: (stars: number) => `${stars} ${stars === 1 ? "star" : "stars"}`,
+    submit: "Submit rating",
+    submitting: "Submitting…",
+    skip: "Not now",
+    ratedTitle: "Thank you for rating!",
+    ratedBody: "Your rating helps others discover good local shops.",
+    alreadyRated: (stars: number) => `You rated this order ${stars} ${stars === 1 ? "star" : "stars"}`,
+    done: "Done",
+    failed: "Could not save rating. Please try again.",
   },
   // C18 Order list (#426).
   orders: {
@@ -564,5 +580,6 @@ export const strings = {
     COUPON_NOT_FOUND: "This coupon is not available.",
     CANCEL_REQUEST_CLOSED: "You already asked to cancel this order. You can call the shop.",
     DENYLIST_WORD_IN_USE: "Something changed. Try again.",
+    RATING_ALREADY_GIVEN: "You already rated this order.",
   } satisfies Record<ErrorCode, string>,
 };

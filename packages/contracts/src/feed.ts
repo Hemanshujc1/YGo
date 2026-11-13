@@ -30,6 +30,8 @@ export const FeedShop = z.strictObject({
   opensAt: z.iso.datetime().nullable(),
   /** Closed because today in India is one of the shop's holidays (#382). */
   holiday: z.boolean(),
+  /** 90-day average rating once the shop has at least 3 ratings (DSC-2, TRU-1, #82); null otherwise. */
+  rating: z.number().nullable(),
 });
 export type FeedShop = z.infer<typeof FeedShop>;
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, trimDecimal, formatPhone, formatTime, formatWeekday } from "../src/index";
+import { formatDate, formatDateTime, formatDayMonth, formatDayMonthYear, formatDayTime, formatMinuteOfDay, formatMoney, formatNumber, formatRating, trimDecimal, formatPhone, formatTime, formatWeekday } from "../src/index";
 
 function expectIndianFormats() {
   it("groups numbers the Indian way", () => {
@@ -155,5 +155,11 @@ describe("phone numbers", () => {
 describe("trimDecimal", () => {
   it("cuts trailing zeros without rounding (#413)", () => {
     expect(["10.00", "12.50", "12.3456", "10.0004", "100", "0.00", "7.69"].map(trimDecimal)).toEqual(["10", "12.5", "12.3456", "10.0004", "100", "0", "7.69"]);
+  });
+});
+
+describe("formatRating", () => {
+  it("formats ratings to 1 decimal place with trailing zeros cut (#82)", () => {
+    expect([5, 4.333, 4.67, 4.0, 3.5, 1].map(formatRating)).toEqual(["5", "4.3", "4.7", "4", "3.5", "1"]);
   });
 });

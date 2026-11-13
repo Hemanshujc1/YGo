@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { productLine, searchAnswer, searchText } from "../src/lib/search";
 
-const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, products: [], moreProducts: 0 };
+const shop = { id: "8f7c3a52-2a3e-4e0b-9f1d-3c5b7a6e4d21", name: "Sai General Stores", estimatedMinutes: 15, deliveryFee: "30", delivers: true, pickup: false, open: true, opensAt: null, holiday: false, rating: null, products: [], moreProducts: 0 };
 
 describe("C16 search (#398)", () => {
   it("searches from 2 characters, trimmed", () => {

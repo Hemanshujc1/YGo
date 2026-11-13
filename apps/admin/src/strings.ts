@@ -997,5 +997,6 @@ export const strings = {
     CANCEL_REQUEST_CLOSED: "The ask to cancel is already closed.",
     CUSTOMER_BLOCKED: "This customer is blocked.",
     SIGNUPS_CLOSED: "New customer sign-ups are currently closed.",
+    RATING_ALREADY_GIVEN: "This order has already been rated.",
   } satisfies Record<ErrorCode, string>,
 };

@@ -44,6 +44,9 @@ export const formatNumber = (value: number | bigint) =>
 // so a rate such as "12.3456" is never rounded (ADR-0004), unlike formatNumber, which keeps three digits.
 export const trimDecimal = (text: string) => (text.includes(".") ? text.replace(/\.?0+$/, "") : text);
 
+// Star rating on shop cards and pages (DSC-2, TRU-1, #82): 1 decimal place with no trailing zero ("4.3", "5").
+export const formatRating = (rating: number) => trimDecimal(rating.toFixed(1));
+
 // Only format() is used: Hermes on iOS has no NumberFormat.formatToParts.
 
 // The only hyphen in a rupee amount is its sign, shown as a true minus.

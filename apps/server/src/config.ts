@@ -32,6 +32,9 @@ const BaseEnv = z.object({
   COUNTER_BILL_VOID_SECONDS: z.coerce.number().int().positive().default(86400),
   ...OrderTimingShape,
   DELIVERY_FAILURE_WAIT_SECONDS: z.coerce.number().int().positive().default(120),
+  // A shop's rating is the average over a rolling 90 days, shown only once it has three ratings (TRU-1, DSC-2, #82).
+  RATINGS_WINDOW_DAYS: z.coerce.number().int().positive().default(90),
+  RATINGS_MIN_COUNT: z.coerce.number().int().positive().default(3),
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

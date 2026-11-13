@@ -58,6 +58,8 @@ const app = buildApp({
   syncClockSkewSeconds: config.SYNC_CLOCK_SKEW_SECONDS,
   counterBillVoidSeconds: config.COUNTER_BILL_VOID_SECONDS,
   deliveryFailureWaitSeconds: config.DELIVERY_FAILURE_WAIT_SECONDS,
+  ratingsWindowDays: config.RATINGS_WINDOW_DAYS,
+  ratingsMinCount: config.RATINGS_MIN_COUNT,
   logger: { level: config.LOG_LEVEL },
 });
 

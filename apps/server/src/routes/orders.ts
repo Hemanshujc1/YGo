@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import {
-  CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody, ReceiptResponse,
+  CartParams, ErrorEnvelope, OrderParams, OrderResponse, type OrderStatus, OrdersResponse, type OrderSummary, PlaceOrderBody, RateOrderBody, RateOrderResponse, ReceiptResponse,
   TERMINAL_ORDER_STATUSES,
 } from "@ygo/contracts";
 import type { Clock } from "../adapters/clock";
@@ -139,10 +139,11 @@ export const answerExpired = (o: string, now: string) =>
 
 /** C09 and C19: one of the Customer's orders as it was frozen. */
 async function orderView(client: Pool | PoolClient, orderId: string, accountId: string, now: Date, secret: string): Promise<OrderResponse | undefined> {
-  const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null }>(
+  const { rows: [row] } = await client.query<Omit<OrderResponse, "placedAt" | "itemsCheckedAt" | "handoverCode" | "rating"> & { placedAt: Date; itemsCheckedAt: Date | null; statusChangedAt: Date; handoverCodeCiphertext: string | null; rating: number | null }>(
     `SELECT o.id, o.number, o.status, o.placed_at AS "placedAt", o.status_changed_at AS "statusChangedAt", o.items_checked_at AS "itemsCheckedAt",
         o.handover_code_ciphertext AS "handoverCodeCiphertext", o.handover_code_attempts >= ${HANDOVER_CODE_MAX_ATTEMPTS} AS "handoverLocked", ${shopOf("s")} AS shop, ${frozenOrder("o")},
-        ${currentDiscount("o")} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired"
+        ${currentDiscount("o")} AS "shopDiscount", ${answerExpired("o", "$3")} AS "answerExpired",
+        (SELECT r.stars FROM ratings r WHERE r.order_id = o.id) AS rating
       FROM orders o JOIN shops s ON s.id = o.shop_id
       WHERE o.id = $1 AND o.account_id = $2`, [orderId, accountId, now]);
   if (!row) return undefined;
@@ -168,6 +169,7 @@ async function orderView(client: Pool | PoolClient, orderId: string, accountId: 
   return {
     ...response, placedAt: row.placedAt.toISOString(), itemsCheckedAt: row.itemsCheckedAt?.toISOString() ?? null,
     handoverCode: mayReveal && handoverCodeCiphertext ? revealHandoverCode(secret, handoverCodeCiphertext) : null,
+    rating: row.rating ?? null,
   };
 }
 
@@ -502,5 +504,30 @@ export function registerOrderRoutes(app: FastifyInstance, { pool, clock, secret,
     });
     if (result !== "OK") return reply.code(result === "NOT_FOUND" ? 404 : 409).send({ error: { code: result } });
     return orderView(pool, id, who.accountId, clock.now(), secret);
+  });
+
+  // C20 Customer rates a delivered or picked-up order (TRU-1, #82).
+  app.post("/v1/orders/:id/rating", { schema: { params: OrderParams, body: RateOrderBody, response: { 200: RateOrderResponse, ...errors } } }, async (request, reply) => {
+    const who = await mobileSignedIn(request, reply, auth);
+    if (!who) return reply;
+    const { id } = request.params as OrderParams;
+    const { stars } = request.body as RateOrderBody;
+    const result = await withTransaction(pool, async (client) => {
+      const { rows: [order] } = await client.query<{ id: string; shopId: string; status: OrderStatus }>(
+        `SELECT id, shop_id AS "shopId", status FROM orders WHERE id = $1 AND account_id = $2 FOR UPDATE`, [id, who.accountId]);
+      if (!order) return "NOT_FOUND";
+      if (order.status !== "delivered" && order.status !== "picked_up") return "ORDER_STATUS_CHANGED";
+      const { rows } = await client.query(
+        "INSERT INTO ratings (order_id, shop_id, account_id, stars, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (order_id) DO NOTHING RETURNING stars",
+        [id, order.shopId, who.accountId, stars, clock.now()]);
+      if (rows.length === 0) return "RATING_ALREADY_GIVEN";
+      await client.query("COMMIT");
+      return "OK";
+    });
+    if (result !== "OK") {
+      if (result === "NOT_FOUND") return reply.code(404).send({ error: { code: "NOT_FOUND" } });
+      return reply.code(409).send({ error: { code: result } });
+    }
+    return { stars };
   });
 }

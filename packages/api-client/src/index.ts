@@ -23,6 +23,8 @@ import {
   OrderResponse,
   OrdersResponse,
   ReceiptResponse,
+  RateOrderResponse,
+  type RateOrderBody,
   NotificationsResponse,
   type PushTokenBody,
   type PlaceOrderBody,
@@ -436,6 +438,11 @@ export function createApiClient({
     /** `GET /v1/orders/:id/receipt`: the shop's receipt for a delivered or picked-up order (#61); ORDER_STATUS_CHANGED for any other. */
     async receipt(id: string): Promise<ApiResult<ReceiptResponse>> {
       return result(await signedIn("GET", `/v1/orders/${encodeURIComponent(id)}/receipt`), ReceiptResponse);
+    },
+
+    /** `POST /v1/orders/:id/rating`: 1 to 5 stars given by the customer after delivery or pickup (TRU-1, #82). */
+    async rateOrder(id: string, body: RateOrderBody): Promise<ApiResult<RateOrderResponse>> {
+      return result(await signedIn("POST", `/v1/orders/${encodeURIComponent(id)}/rating`, body), RateOrderResponse);
     },
 
     async confirmOrderItems(id: string): Promise<ApiResult<OrderResponse>> {
