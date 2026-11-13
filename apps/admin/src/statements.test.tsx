@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import type { Statement, StatementSummary } from "@ygo/contracts";
@@ -96,6 +96,50 @@ describe("A18 Statements (ADM-6, MNY-8, MNY-12, #631)", () => {
     fireEvent.click(screen.getByRole("button", { name: text.clearWeek }));
     await waitFor(() => expect(listStatements).toHaveBeenCalledTimes(3));
     expect(listStatements).toHaveBeenLastCalledWith({});
+  });
+
+  // A week-filter answer that arrives after the input has gone back to the week shown must not replace the rows or the paging.
+  function deferred() {
+    let resolve!: (value: unknown) => void;
+    const promise = new Promise((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+  const numbers = () => screen.getAllByRole("link", { name: /^#\d+$/ }).map((link) => link.textContent);
+
+  it("ignores a week's late answer after the week is cleared before it arrives", async () => {
+    const late = deferred();
+    const listStatements = vi.fn().mockResolvedValueOnce(ok({ statements: [summary(9), summary(8)], nextBefore: 8 })).mockReturnValueOnce(late.promise);
+    setup("/statements", "admin", { listStatements });
+    await screen.findByRole("link", { name: "#9" });
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-02" } });
+    await waitFor(() => expect(listStatements).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "" } });
+    await act(async () => { late.resolve(ok({ statements: [summary(1)], nextBefore: null })); });
+    expect(numbers()).toEqual(["#9", "#8"]);
+    expect(listStatements).toHaveBeenCalledTimes(2);
+    expect((screen.getByRole("button", { name: text.loadMore }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("ignores a week's late answer after the input goes back to the week shown before it arrives", async () => {
+    const late = deferred();
+    const listStatements = vi.fn()
+      .mockResolvedValueOnce(ok({ statements: [summary(9)], nextBefore: 9 }))
+      .mockResolvedValueOnce(ok({ statements: [summary(5)], nextBefore: 5 }))
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValueOnce(ok({ statements: [summary(4)], nextBefore: null }));
+    setup("/statements", "admin", { listStatements });
+    await screen.findByRole("link", { name: "#9" });
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-02" } });
+    await waitFor(() => expect(numbers()).toEqual(["#5"]));
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-09" } });
+    await waitFor(() => expect(listStatements).toHaveBeenCalledTimes(3));
+    fireEvent.change(screen.getByLabelText(text.week), { target: { value: "2026-11-02" } });
+    await act(async () => { late.resolve(ok({ statements: [summary(1)], nextBefore: null })); });
+    expect(numbers()).toEqual(["#5"]);
+    // The paging is still the shown week's: Load more continues from #5.
+    fireEvent.click(screen.getByRole("button", { name: text.loadMore }));
+    await waitFor(() => expect(numbers()).toEqual(["#5", "#4"]));
+    expect(listStatements).toHaveBeenLastCalledWith({ week: "2026-11-02", before: 5 });
   });
 
   it("puts the week back and keeps the list when the week's statements cannot be loaded", async () => {
