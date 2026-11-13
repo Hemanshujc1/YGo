@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AdminActionReason, Email, LoginOtp, PersonName, Phone } from "./fields";
+import { PageQuery, paginatedResponse } from "./pagination";
 
 /** An access or refresh token. Capped so a huge body is refused before it is hashed. */
 const Token = z.string().min(1).max(512);
@@ -95,9 +96,9 @@ export const CustomerTrust = z.strictObject({
   failedDeliveries: z.number().int().nonnegative(), refusals: z.number().int().nonnegative(), flagged: z.boolean(),
 });
 export type CustomerTrust = z.infer<typeof CustomerTrust>;
-export const AdminCustomersResponse = z.strictObject({ customers: z.array(CustomerTrust) });
+export const AdminCustomersResponse = paginatedResponse(CustomerTrust);
 export type AdminCustomersResponse = z.infer<typeof AdminCustomersResponse>;
-export const AdminCustomersQuery = z.strictObject({ search: z.string().trim().min(2).max(120).optional(), flagged: z.enum(["true", "false"]).optional() });
+export const AdminCustomersQuery = PageQuery.extend({ search: z.string().trim().min(2).max(120).optional(), flagged: z.enum(["true", "false"]).optional() });
 export type AdminCustomersQuery = z.infer<typeof AdminCustomersQuery>;
 export const CustomerBlockBody = z.strictObject({ reason: z.string().trim().min(1).max(500) });
 export type CustomerBlockBody = z.infer<typeof CustomerBlockBody>;

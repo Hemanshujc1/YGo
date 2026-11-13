@@ -12,7 +12,7 @@ export function registerCustomerRoutes(app: FastifyInstance, { pool, clock, secr
   app.get("/v1/admin/customers", { schema: { querystring: AdminCustomersQuery, response: { 200: AdminCustomersResponse, ...response } } }, async (request, reply) => {
     if (!await adminSignedIn(request, reply, auth)) return reply;
     const query = request.query as Query;
-    return { customers: await listCustomers(pool, query.search, clock.now(), query.flagged === "true") };
+    return listCustomers(pool, { search: query.search, flaggedOnly: query.flagged === "true", page: query.page, pageSize: query.pageSize }, clock.now());
   });
   app.post("/v1/admin/customers/:id/block", { schema: { params: CustomerParams, body: CustomerBlockBody, response: { 200: CustomerTrust, ...response } } }, async (request, reply) => {
     const who = await adminSignedIn(request, reply, auth);

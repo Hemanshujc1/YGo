@@ -103,6 +103,14 @@ export interface AdminApiClientOptions {
   onSignedOut?: () => void;
 }
 
+/** Page-number Customer directory options; filters are applied before the total and page. */
+export interface AdminCustomersListOptions {
+  search?: string;
+  flagged?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
 interface AdminLife {
   access: string | null;
   renewing: Promise<Answer | null> | null;
@@ -252,11 +260,14 @@ export function createAdminApiClient({ baseUrl, fetch, timeoutMs, onSignedOut }:
     async createAccount(body: CreateAdminBody): Promise<ApiResult<AdminAccount>> {
       return result(await adminRequest("POST", "/v1/admin/accounts", body), AdminAccount);
     },
-    async listCustomers(search?: string, flagged = false): Promise<ApiResult<AdminCustomersResponse>> {
+    async listCustomers(options: AdminCustomersListOptions = {}): Promise<ApiResult<AdminCustomersResponse>> {
       const query = new URLSearchParams();
-      if (search) query.set("search", search);
-      if (flagged) query.set("flagged", "true");
-      return result(await adminRequest("GET", `/v1/admin/customers?${query}`), AdminCustomersResponse);
+      if (options.search) query.set("search", options.search);
+      if (options.flagged) query.set("flagged", "true");
+      if (options.page !== undefined) query.set("page", String(options.page));
+      if (options.pageSize !== undefined) query.set("pageSize", String(options.pageSize));
+      const suffix = query.size ? `?${query}` : "";
+      return result(await adminRequest("GET", `/v1/admin/customers${suffix}`), AdminCustomersResponse);
     },
     async blockCustomer(id: string, body: CustomerBlockBody): Promise<ApiResult<CustomerTrust>> {
       return result(await adminRequest("POST", `/v1/admin/customers/${encodeURIComponent(id)}/block`, body), CustomerTrust);

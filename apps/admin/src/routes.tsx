@@ -445,7 +445,7 @@ export function adminRoutes(api: AdminApi): RouteObject[] {
     guarded({
       path: "/customers",
       loader: async () => {
-        const result = await api.listCustomers(undefined, true);
+        const result = await api.listCustomers({ flagged: true, page: 1, pageSize: 50 });
         if (!result.ok) { if (result.code === "UNAUTHENTICATED" || result.code === "FORBIDDEN") return redirect("/sign-in"); throw new Error(result.code); }
         return result.data;
       },

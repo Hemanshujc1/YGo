@@ -23,9 +23,49 @@ describe("Customers feedback", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", strings.customerSearchShort);
     fireEvent.change(screen.getByLabelText(strings.customerSearch), { target: { value: "customer" } });
     fireEvent.click(screen.getByRole("button", { name: strings.search }));
-    await waitFor(() => expect(api.listCustomers).toHaveBeenCalledWith("customer"));
+    await waitFor(() => expect(api.listCustomers).toHaveBeenCalledWith({ search: "customer", flagged: false, page: 1, pageSize: 50 }));
     fireEvent.click(screen.getByLabelText(strings.customerFlagged));
-    await waitFor(() => expect(api.listCustomers).toHaveBeenLastCalledWith(undefined, true));
+    await waitFor(() => expect(api.listCustomers).toHaveBeenLastCalledWith({ flagged: true, page: 1, pageSize: 50 }));
+  });
+
+  it("pages Search and Flagged Customers and changes the reusable page size", async () => {
+    const customer = (page: number, search?: string) => ({
+      id: `00000000-0000-4000-8000-${String(page).padStart(12, "0")}`,
+      email: `${search ?? "flagged"}-${page}@example.com`, name: `Customer ${page}`, phone: null,
+      phoneState: "unverified" as const, blocked: false, blockReason: null,
+      failedDeliveries: 2, refusals: 1, flagged: true,
+    });
+    const listCustomers = vi.fn(async (options: { search?: string; flagged?: boolean; page?: number; pageSize?: number }) => {
+      const page = options.page ?? 1;
+      const pageSize = options.pageSize ?? 50;
+      return { ok: true as const, data: { items: [customer(page, options.search)], pagination: { page, pageSize, totalRecords: 76 } } };
+    });
+    setup("/customers", { listCustomers });
+    expect(await screen.findByText("flagged-1@example.com")).toBeTruthy();
+    expect(listCustomers).toHaveBeenCalledWith({ flagged: true, page: 1, pageSize: 50 });
+    expect(screen.getByText(strings.paginationRange(1, 50, 76))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: strings.next }));
+    expect(await screen.findByText("flagged-2@example.com")).toBeTruthy();
+    expect(listCustomers).toHaveBeenLastCalledWith({ flagged: true, page: 2, pageSize: 50 });
+    fireEvent.click(screen.getByRole("button", { name: strings.previous }));
+    expect(await screen.findByText("flagged-1@example.com")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: strings.rowsPerPage }), { target: { value: "25" } });
+    await waitFor(() => expect(listCustomers).toHaveBeenLastCalledWith({ flagged: true, page: 1, pageSize: 25 }));
+    fireEvent.change(screen.getByLabelText(strings.customerSearch), { target: { value: "asha" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.search }));
+    expect(await screen.findByText("asha-1@example.com")).toBeTruthy();
+    expect(listCustomers).toHaveBeenLastCalledWith({ search: "asha", flagged: false, page: 1, pageSize: 25 });
+    fireEvent.click(screen.getByRole("button", { name: strings.next }));
+    expect(await screen.findByText("asha-2@example.com")).toBeTruthy();
+    expect(listCustomers).toHaveBeenLastCalledWith({ search: "asha", flagged: false, page: 2, pageSize: 25 });
+  });
+
+  it("shows an empty Customer page with its exact total", async () => {
+    setup("/customers", { listCustomers: vi.fn().mockResolvedValue({ ok: true, data: { items: [], pagination: { page: 1, pageSize: 50, totalRecords: 0 } } }) });
+    expect(await screen.findByText(strings.customerEmpty)).toBeTruthy();
+    expect(screen.getByText(strings.paginationRange(0, 0, 0))).toBeTruthy();
   });
 
   it("shows an error when signup settings cannot load", async () => {
@@ -90,7 +130,7 @@ function setup(path: string, overrides: Record<string, unknown> = {}) {
     requestCode: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
     verifyCode: vi.fn().mockResolvedValue({ ok: true, data: founder }),
     listAccounts: vi.fn().mockResolvedValue({ ok: true, data: { accounts: [founder] } }),
-    listCustomers: vi.fn().mockResolvedValue({ ok: true, data: { customers: [] } }),
+    listCustomers: vi.fn().mockResolvedValue({ ok: true, data: { items: [], pagination: { page: 1, pageSize: 50, totalRecords: 0 } } }),
     blockCustomer: vi.fn(),
     unblockCustomer: vi.fn(),
     customerSignupSettings: vi.fn().mockResolvedValue({ ok: true, data: { enabled: true } }),
